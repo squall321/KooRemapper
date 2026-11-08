@@ -251,6 +251,9 @@ struct BatteryConfig {
     // ── Output ──────────────────────────────────────────────
     std::string output     = "battery";   // output prefix
     std::string modelType  = "stacked";   // stacked | wound
+    // batch 에 모델 종류가 둘 이상이면 종류를 덱 이름에 넣는다 — <output>_<model_type><tier>_phase{1|2}.k(2026-11-07 · 사용자 결정).
+    // 하나뿐이면(배치가 아니어도) 예전 이름 <output><tier>_phase{1|2}.k 그대로다
+    bool        nameWithModelType = false;
     double      tier       = 0.0;         // -1, 0, 0.5, 1, 2
     int         phase      = 1;           // 1 | 2
     std::string mode       = "dent";      // dent | side | bare | swell

@@ -4,7 +4,7 @@ static const std::vector<OpHelp> kOpHelps = {
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper map demo_bent.k demo_flat_fine.k mapped.k"},
      {},
-     {"bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.", "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면", "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다"}},
+     {"bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.", "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면", "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다.", "  재료가 없으면(E · nu 없음 · 기준에 K-파일 재료 없음) 고리는 prestress.output 자리에 CSV 만 쓴다 — 그것이 map 산출과", "  겹치는 것도 map 이 쓰기 전에 거절한다(2026-11-07)", "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.__preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리", "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다", "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일", "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)"}},
     {"shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개", "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper extract-surface demo_bent.k bent_top.k --face top", "KooRemapper shellmap bent_top.k demo_flat_fine.k shellmapped.k"},
@@ -67,7 +67,7 @@ variable_density:
      {},
      {"KooRemapper battery examples/battery/swell/stacked/stacked_swell.yaml"},
      {"examples/battery/swell/stacked/stacked_swell.yaml"},
-     {"설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.", "output 경로의 폴더가 있어야 한다.", "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것"}},
+     {"설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.", "output 경로의 폴더가 있어야 한다.", "assemble 의 - type: battery 도 같은 규칙 — 이 설정의 output 은 이 설정 폴더, 항목에 준 output 은 assemble YAML 폴더 기준이고", "  주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름으로 적는다(2026-11-07 전엔 둘 다 작업 폴더 기준)", "dynain_file 은 경로가 아니라 *INCLUDE_DYNAIN 에 그대로 찍히는 문자열이다 — 산출 덱 옆에서 솔버가 찾을 이름으로 적을 것", "덱 이름은 <output><tier>_phase{1|2}.k — batch.model_types 에 종류가 둘 이상이면 <output>_<model_type><tier>_phase{1|2}.k", "  (자동 dynain_file 도 같은 규칙 — 폴더 없는 덱 옆 이름, batch.phases 에 1 · 2 가 다 있을 때만. 2026-11-07 전엔 다른 폴더의", "  YAML 이면 그 폴더가 붙었다). 그래도 두 조합이 같은 이름이면(tiers: [0, 0.2] · phases: [1, 3]) 아무 덱도 쓰지 않고 rc 1 로", "  겹친 조합을 짚는다(2026-11-07 전엔 종류도 이름에 없어 뒤 조합이 덮고 rc 0)", "batch 의 조합 하나라도 못 만들면(쓸 수 없는 경로 · 모르는 model_type) 나머지는 끝까지 만들고 rc 1 · 못 만든 조합과 덱 이름을", "  끝에 모아 적는다(2026-11-07 전엔 실패를 버리고 rc 0)"}},
     {"cclip", "메시 생성", "육면체 파트를 힘-변위로 보정한 C형 스프링 클립(눌린 상태 초기응력)으로 치환", "클립 spring 스프링 접점", "KooRemapper cclip <config.yaml>",
      {{"board.yaml", R"KRH(output: clip_board.k
 lx: 3.0
@@ -360,7 +360,7 @@ warn_min_jac: 0.15
 )KRH"}},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper meshfix meshfix.yaml"},
      {},
-     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)", "★지울 절점을 세트·SPC·이력 등이 가리키면 **같은 자리(snap_tolerance)의 새 절점으로 바꿔 쓴다**(재결속) —", "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)", "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다", "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다", "output · 임시 파일(<줄기>__mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —", "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)"}},
+     {"gmsh 탐색: KOOREMAPPER_GMSH 환경변수 → 실행 파일 옆 gmsh/·gmsh-<ver>/[bin/] → PATH → /opt/gmsh-*/bin/gmsh (SIF 는 그대로 동작)", "★지울 절점을 세트·SPC·이력 등이 가리키면 **같은 자리(snap_tolerance)의 새 절점으로 바꿔 쓴다**(재결속) —", "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)", "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다", "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다", "output · 임시 파일(<줄기>__mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —", "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)", "  polish: true 면 polish 임시 파일(<줄기>__pol<회차>_<덩어리>.stl/.geo/.msh/.log) 꼴의 입력이 산출 폴더에 있어도 rc 1"}},
     {"cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통", "KooRemapper cnrb2solid <config.yaml>",
      {{"cnrb.yaml", R"KRH(model: examples/cnrb2solid/bolt_simple.k
 output: bolt_simple_solid.k
@@ -422,7 +422,7 @@ keywords:
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper prestress --E 210000 --nu 0.3 demo_flat.k demo_bent.k demo_pre"},
      {},
-     {"쓰는 파일 — <output>(dynain · `.k` 로 끝나면 <줄기>.dynain) · <줄기>.k(변형 메시 사본) · --csv 면 <줄기>.csv", "  (재료가 없으면 <output> 에 CSV 만). 이 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 rc 1", "  — 예전엔 `prestress ref def.key def.key` 가 변형 메시를 다시 읽기 전에 dynain 으로 덮었다(2026-11-07)"}},
+     {"쓰는 파일 — <output>(dynain · `.k` 로 끝나면 <줄기>.dynain) · <줄기>.k(변형 메시 사본) · --csv 면 <줄기>.csv", "  <줄기> 는 output 에서 **파일 이름의 확장자**만 뗀 것이다 — ./pre → ./pre.k · a.d/pre → a.d/pre.k(예전엔 .k · a.k)", "  (재료가 없으면 <output> 에 CSV 만). 이 가운데 하나가 기준 · 변형 메시(그 인클루드까지)와 같거나 서로 같으면 rc 1", "  — 예전엔 `prestress ref def.key def.key` 가 변형 메시를 다시 읽기 전에 dynain 으로 덮었다(2026-11-07)"}},
     {"squeeze", "변형·초기응력", "파트를 지정 변형률로 압축하고 역방향 초기응력 출력 (억지 끼움)", "압축 억지끼움 interference swelling", "KooRemapper squeeze <mesh.k> <config.yaml> <output_prefix>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -494,7 +494,7 @@ operations:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper warpage warpage.yaml"},
      {},
-     {"dat 파일은 처짐값 행렬(행×열, 공백 구분). 파트 평면 bbox(또는 data_bbox)에 펼치며 열 0 = 평면 1축 최소, 행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)", "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate"}},
+     {"dat 파일은 처짐값 행렬(행×열, 공백 구분). 파트 평면 bbox(또는 data_bbox)에 펼치며 열 0 = 평면 1축 최소, 행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)", "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate", "debug: true 면 <debug_prefix>_raw.dat · _curvature.dat · _warpage.vtk 를 쓴다 — debug_prefix(기본 debug/warp)는 YAML 폴더", "  기준이고 그 폴더는 미리 있어야 한다(2026-11-07 전엔 작업 폴더 기준)"}},
     {"bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula", "KooRemapper bend <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -629,7 +629,7 @@ material:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper assemble asm.yaml"},
      {},
-     {"operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)", "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge", "output == base_model(in-place)은 assemble 만 받는다 — 다 읽은 뒤 덱만 그 자리에 쓴다. 인클루드 · 설정 · 처리의 입력", "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)"}},
+     {"operations[].type 는 각 op 이름(replace squeeze restack offset disconnect update generate ...)", "restack·merge 항목은 operations[] 안에 pid_refs: strict(기본) | warn 을 받는다 — 비운 PID 를 가리키던 자리를 못 옮기면 strict 는 rc=1(덱은 쓴다), warn 은 같은 보고에 rc=0. 자세한 것은 help restack·help merge", "output == base_model(in-place)은 assemble 만 받는다 — 다 읽은 뒤 덱만 그 자리에 쓴다. 인클루드 · 설정 · 처리의 입력", "  (detail_flat · dat_file · bundle · dynain …) · .dynain/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고 rc 1(2026-11-07)", "루프 안에서 덱보다 먼저 쓰는 곁 파일(warpage debug 진단 · battery 덱)은 처리 전에 **모든** 처리의 입력과 견준다 —", "  예전엔 그때까지 읽은 입력과만 견줘 뒤 처리의 입력(update 의 dynain 등)을 덮을 수 있었다", "그 곁 파일의 자리도 YAML 폴더 기준이다 — warpage 의 debug_prefix 는 이 YAML 폴더, battery 덱은 battery 설정의 output(그 설정", "  폴더 · 항목에 준 output 은 이 YAML 폴더). 주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름(2026-11-07 전엔 작업 폴더 기준)"}},
     {"load", "하중·경계·접촉", "파트 면(방향/tied/세그먼트셋 선택)에 압력·힘 하중 + 곡선", "하중 pressure 압력 force", "KooRemapper load <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

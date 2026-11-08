@@ -11,6 +11,8 @@
 #include "cli/ConsoleOutput.h"
 #include "util/YamlComment.h"
 
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <fstream>
@@ -341,7 +343,8 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
 // 덱 이름 규칙 하나 — 쓰기 관문(assemble 의 battery 처리)이 쓰기 전에 같은 이름으로 견준다(2026-11-07)
 std::string batteryKFilePath(const BatteryConfig& cfg) {
     const std::string phaseSuffix = (cfg.phase == 2) ? "_phase2" : "_phase1";
-    return cfg.output + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
+    const std::string typePart = cfg.nameWithModelType ? "_" + cfg.modelType : std::string();
+    return cfg.output + typePart + batteryTierSuffix(cfg.tier) + phaseSuffix + ".k";
 }
 
 std::string generateBatteryKFile(const BatteryConfig& cfg,
@@ -538,8 +541,11 @@ std::string generateBatteryKFile(const BatteryConfig& cfg,
 // ─────────────────────────────────────────────────────────────
 // Batch generation
 // ─────────────────────────────────────────────────────────────
-static void generateBatch(const BatteryConfig& baseCfg,
-                           ConsoleOutput& console) {
+// ★두 조합이 같은 파일 이름이면 쓰기 전에 거절한다(2026-11-07) — 이름(`<output><tier>_phase{1|2}.k`)에 모델 종류가 없고 tier 는
+//   다섯 칸으로 묶이고 phase 2 가 아니면 모두 _phase1 이라, 예전엔 [stacked, wound] · tiers [0, 0.2] · phases [1, 3] 이 앞 조합의
+//   덱을 조용히 덮고 rc 0 이었다. 이름 규칙(문서에 적힌 것)은 바꾸지 않는다.
+static int generateBatch(const BatteryConfig& baseCfg,
+                         ConsoleOutput& console) {
     const auto& batch = baseCfg.batch;
 
     std::vector<double> tiers    = batch.tiers.empty()
@@ -557,7 +563,11 @@ static void generateBatch(const BatteryConfig& baseCfg,
     bool autoChain = baseCfg.useDynain
                      && (std::find(phases.begin(), phases.end(), 1) != phases.end())
                      && (std::find(phases.begin(), phases.end(), 2) != phases.end());
+    // ★모델 종류가 둘 이상이면 종류를 이름에 넣는다(2026-11-07 · 사용자 결정) — 예전엔 이름에 종류가 없어 [stacked, wound] 가
+    //   같은 덱에 차례로 썼다(앞 커밋부터는 거절). 하나뿐이면 문서의 예전 이름 그대로
+    const bool typeInName = std::set<std::string>(mts.begin(), mts.end()).size() >= 2;
 
+    std::vector<BatteryConfig> combos;
     for (const auto& mt : mts) {
         for (double tier : tiers) {
             for (size_t pi = 0; pi < phases.size(); ++pi) {
@@ -566,6 +576,7 @@ static void generateBatch(const BatteryConfig& baseCfg,
                 cur.modelType = mt;
                 cur.tier      = tier;
                 cur.phase     = ph;
+                cur.nameWithModelType = typeInName;
 
                 // Per-phase mode override (phase_modes: [swell, dent])
                 if (pi < batch.phaseModes.size()) {
@@ -578,16 +589,56 @@ static void generateBatch(const BatteryConfig& baseCfg,
                 // Auto-chain: later phases get *INCLUDE_DYNAIN from the previous phase output
                 if (autoChain && pi > 0 && cur.dynainFile.empty()) {
                     int prevPhase = phases[pi - 1];
-                    cur.dynainFile = cur.output
+                    // ★*INCLUDE_DYNAIN 은 산출 덱 옆에서 솔버가 찾을 이름이다(§43.1 · 2026-11-07) — 앞 phase 덱과 같은 폴더라 접두사의
+                    //   파일 이름 부분만 쓴다. 예전엔 YAML 폴더로 푼 접두사를 통째로 붙여 `battery cfg/b.yaml` 의 phase 2 덱이
+                    //   cfg/bt_tier0_phase1.dynain(덱 폴더 기준이면 cfg/cfg/…)을, 절대 경로 설정이면 그 절대 경로를 적었다
+                    const size_t cut = cur.output.find_last_of("/\\");
+                    cur.dynainFile = (cut == std::string::npos ? cur.output : cur.output.substr(cut + 1))
+                                   + (typeInName ? "_" + mt : std::string())   // 앞 phase 덱 이름과 같은 규칙
                                    + batteryTierSuffix(tier)
                                    + "_phase" + std::to_string(prevPhase)
                                    + ".dynain";
                 }
 
-                generateBatteryKFile(cur, console);
+                combos.push_back(cur);
             }
         }
     }
+
+    auto label = [](const BatteryConfig& c) {
+        char tierBuf[32];
+        snprintf(tierBuf, sizeof(tierBuf), "%g", c.tier);
+        return "model_type " + c.modelType + " · tier " + tierBuf + " · phase " + std::to_string(c.phase);
+    };
+    std::map<std::string, std::vector<std::string>> byName;   // 파일 이름 → 그 이름을 쓸 조합
+    for (const auto& c : combos) byName[batteryKFilePath(c)].push_back(label(c));
+    bool clash = false;
+    for (const auto& [name, who] : byName) {
+        if (who.size() < 2) continue;
+        if (!clash) console.error("[battery] batch 의 두 조합이 같은 파일 이름에 쓴다 — 하나가 다른 하나를 덮는다(아무 파일도 쓰지 않았다)");
+        clash = true;
+        std::string list;
+        for (const auto& w : who) list += (list.empty() ? "" : " / ") + w;
+        console.error("[battery]   " + name + " ← " + list);
+    }
+    if (clash) {
+        console.info("[battery] 이름은 <output><tier>_phase{1|2}.k 다(모델 종류가 둘 이상이면 <output>_<model_type><tier>_phase{1|2}.k · "
+                     "tier 는 _tier-1 · _tier0 · _tier0_5 · _tier1 · _tier2 · phase 2 가 아니면 _phase1) — 겹치는 조합은 output 을 달리 해 "
+                     "따로 돌려라");
+        return 1;
+    }
+    // ★조합 하나라도 못 만들면 rc 1 과 못 만든 조합의 요약(2026-11-07) — 예전엔 실패를 버리고 rc 0 이었다(자동화는 rc 만 본다).
+    //   나머지 조합은 끝까지 만든다
+    std::vector<std::string> failed;
+    for (const auto& c : combos)
+        if (generateBatteryKFile(c, console).empty()) failed.push_back(label(c) + " → " + batteryKFilePath(c));
+    if (!failed.empty()) {
+        console.error("[battery] batch 의 조합 " + std::to_string(combos.size()) + "개 가운데 " + std::to_string(failed.size()) +
+                      "개를 만들지 못했다(까닭은 위 [ERROR] 다)");
+        for (const auto& f : failed) console.error("[battery]   " + f);
+        return 1;
+    }
+    return 0;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -628,7 +679,7 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
                    !cfg.batch.modelTypes.empty();
 
     if (isBatch) {
-        generateBatch(cfg, console);
+        if (generateBatch(cfg, console) != 0) return 1;
     } else {
         std::string out = generateBatteryKFile(cfg, console);
         if (out.empty()) return 1;

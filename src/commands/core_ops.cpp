@@ -33,6 +33,7 @@
 #include "util/Timer.h"
 #include "util/Validator.h"
 #include <iostream>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -278,6 +279,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     // bbox-align preprocessor (optional)
     // -----------------------------------------------------------------
     std::string scaledFlatTmpPath;
+    bool flatScaled = false;   // source 모드가 평판의 크기를 실제로 바꿨다 — 아래에서 임시 파일로 남긴다(고리 prestress 의 기준)
     {
         std::string mode = bboxAlignMode;
         for (auto& c : mode) c = (char)std::tolower((unsigned char)c);
@@ -334,6 +336,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
                 if (mode == "source") {
                     applyAffineScaleAboutCenter(flatMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
+                    flatScaled = true;
                 } else {  // target
                     applyAffineScaleAboutCenter(bentMesh,
                                                 ba.scale[0], ba.scale[1], ba.scale[2]);
@@ -415,20 +418,26 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     // the SAME pre-processed mesh as F's reference. Otherwise F would
     // compute against the un-pre-processed flat and reintroduce the
     // injected stretch / mirror as spurious residual strain.
-    bool flatWasPreprocessed = (!scaledFlatTmpPath.empty()) ||
-                                flipInputX || flipInputY || flipInputZ;
+    // ★예전엔 이 판정이 `scaledFlatTmpPath` 가 이미 찼는지를 보았는데 위 source 갈래가 그것을 한 번도 채우지 않아, source 만 주면
+    //   임시 파일을 쓰지 않았고 고리 prestress 가 크기를 맞추기 **전** 평판을 기준으로 썼다(2026-11-07 — 카탈로그 · 코드 머리말은
+    //   「source 는 임시 파일을 쓴다」). 이제 크기를 실제로 바꿨으면 쓴다.
+    bool flatWasPreprocessed = flatScaled || flipInputX || flipInputY || flipInputZ;
     if (flatWasPreprocessed) {
-        // Use the existing path slot regardless of which preprocessor(s)
-        // ran -- bbox_align=source may have written it already, but we
-        // need to re-write to capture the additional flip_input state.
         if (scaledFlatTmpPath.empty()) {
             scaledFlatTmpPath = outputFile + ".__preproc_flat.k";
         }
         KFileWriter w;
-        if (!w.writeFile(scaledFlatTmpPath, flatMesh, false)) {
+        // 앞처리한 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 고리가 원래 평판과 같은 K-파일 재료를 본다.
+        // ★뒤집어도(flip_input) 싣는다(2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」) — 예전엔 메시만 써서 E · nu 를 주지 않은
+        //   고리가 조용히 변형률만 냈다. 절점 · 솔리드 요소는 뒤집은 메시에서(HEX8 차례 바꿈 포함), 나머지 카드는 평판 그대로다
+        std::error_code tec;
+        const bool tempExisted = std::filesystem::exists(scaledFlatTmpPath, tec);
+        const bool wrote = w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
+        if (!wrote) {
             console.warning("Failed to write pre-processed flat temp: "
                             + w.getErrorMessage()
                             + " (chain prestress may report residual strain)");
+            if (!tempExisted) std::remove(scaledFlatTmpPath.c_str());   // 이번에 쓰다 만 것만 지운다(2026-11-07)
             scaledFlatTmpPath.clear();
         } else if (outScaledFlatPath) {
             *outScaledFlatPath = scaledFlatTmpPath;
@@ -1075,24 +1084,17 @@ PrestressOutputs prestressOutputs(const std::string& outputFile, bool hasMateria
     o.dynain = outputFile;
     if (o.dynain.size() >= 2 && o.dynain.substr(o.dynain.size() - 2) == ".k")
         o.dynain = o.dynain.substr(0, o.dynain.size() - 2) + ".dynain";
-    // Output filename: same as dynain but with .k extension
-    o.mesh = outputFile;
-    size_t dotPos = o.mesh.rfind('.');
-    if (dotPos != std::string::npos) {
-        o.mesh = o.mesh.substr(0, dotPos) + ".k";
-    } else {
-        o.mesh += ".k";
-    }
-    o.csv = outputFile;
-    if (hasMaterial) {
-        // Change extension to .csv
-        size_t csvDot = o.csv.rfind('.');
-        if (csvDot != std::string::npos) {
-            o.csv = o.csv.substr(0, csvDot) + ".csv";
-        } else {
-            o.csv += ".csv";
-        }
-    }
+    // ★메시 사본 · CSV 는 **파일 이름의 확장자**만 바꾼다(2026-11-07). 예전엔 경로 전체의 마지막 `.` 을 보아 `./pre` 가 `.k`,
+    //   `../pre` 가 `..k`, `a.d/pre` 가 `a.k` 를 썼다. 이름 첫 글자의 점(`.pre`)은 확장자가 아니다(std::filesystem 과 같다)
+    auto swapExt = [&](const std::string& ext) {
+        const size_t slash = outputFile.find_last_of("/\\");
+        const size_t base = (slash == std::string::npos) ? 0 : slash + 1;
+        const size_t dot = outputFile.rfind('.');
+        if (dot == std::string::npos || dot <= base) return outputFile + ext;
+        return outputFile.substr(0, dot) + ext;
+    };
+    o.mesh = swapExt(".k");
+    o.csv = hasMaterial ? swapExt(".csv") : outputFile;
     return o;
 }
 

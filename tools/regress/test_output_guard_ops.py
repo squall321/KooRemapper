@@ -383,6 +383,34 @@ def special_yaml(st, binary):
     write(os.path.join(d, "upd.yaml"), "base_model: box.k\noutput: dyn\noperations:\n  - type: update\n    dynain: dyn.k\n")
     write(os.path.join(d, "dyn.k"), "*KEYWORD\n*NODE\n       1             0.0             0.0             0.0\n*END\n")
     expect_refused("assemble update 의 dynain == output(dyn.k)", binary, d, ["assemble", "upd.yaml"])
+    # assemble — 루프 안에서 덱보다 먼저 쓰는 곁 파일이 **뒤 처리**의 입력이면 무엇이든 쓰기 전에 막는다(예전엔 그때까지 읽은 것만 보았다)
+    d, argv = st.case("warpage", "asm_mid")
+    nodes = "*KEYWORD\n*NODE\n       1             0.0             0.0             0.0\n*END\n"
+    write(os.path.join(d, "dbg_raw.dat"), nodes)
+    write(os.path.join(d, "mid.yaml"),
+          "base_model: box.k\noutput: wv\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n"
+          "  - type: warpage\n    target_pid: 1\n    dat_file: warp.dat\n    plane: xy\n    deflection_axis: +z\n"
+          "    unit: um\n    mode: deform\n    debug: true\n    debug_prefix: dbg\n"
+          "  - type: update\n    dynain: dbg_raw.dat\n")
+    expect_refused("assemble warpage 진단(dbg_raw.dat)이 뒤 update 의 dynain — 쓰기 전에", binary, d, ["assemble", "mid.yaml"])
+    d, argv = st.case("assemble", "asm_battery")
+    bat = os.path.join(REPO, "examples", "battery", "swell", "stacked", "stacked_swell.yaml")
+    shutil.copyfile(bat, os.path.join(d, "bat.yaml"))   # tier 0 · phase 1 → <output>_tier0_phase1.k
+    write(os.path.join(d, "bx_tier0_phase1.k"), nodes)
+    write(os.path.join(d, "bat_asm.yaml"),
+          "base_model: box.k\noutput: ba\noperations:\n  - type: battery\n    config: bat.yaml\n    output: bx\n"
+          "  - type: update\n    dynain: bx_tier0_phase1.k\n")
+    expect_refused("assemble battery 덱(bx_tier0_phase1.k)이 뒤 update 의 dynain — 쓰기 전에", binary, d,
+                   ["assemble", "bat_asm.yaml"])
+    # meshfix polish — 임시 파일 `<줄기>__pol<회차>_<덩어리>.*` 은 gmsh 를 돌려 봐야 정해지니 그 꼴의 입력이 있으면 gmsh 전에 막는다
+    d, argv = st.case("meshfix", "polish")
+    cfg = read(os.path.join(d, argv[1]))
+    write(os.path.join(d, argv[1]), cfg + "polish: true\n")
+    add_include(os.path.join(d, yget(cfg, "model")), "remeshed__pol0_0.stl")
+    before = snapshot(d)
+    rc, text = run(binary, d, argv)
+    check("★meshfix polish 의 임시 파일 꼴(remeshed__pol0_0.stl)인 인클루드 → gmsh 전에 rc 1 · 폴더 바이트 그대로",
+          rc == 1 and "polish 의 임시 파일" in text and not diff(before, snapshot(d)), (rc, text[-300:]))
 
 
 def main():

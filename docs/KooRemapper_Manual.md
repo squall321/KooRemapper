@@ -279,7 +279,7 @@ Commands:
 - **YAML 안에 적은 상대 경로**는 폴더가 붙어 있든 없든 **그 YAML 파일이 있는 폴더** 기준으로 풀리고, 작업 폴더로 되돌아가지 않습니다.
   `cfg/strip.yaml` 의 `output: ../data/box.k` → `cfg/../data/box.k`.
 - 절대 경로(`/`·`\` 로 시작, 또는 `X:` 드라이브)는 그대로 씁니다.
-- 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·`material_db`·`database`·재료 번들 경로 등
+- 대상 키: `model`·`base_model`·`output`·`dat_file`·`dynain`·`bundle`·`material_db`·`database`·`debug_prefix`·재료 번들 경로 등
   **YAML 로 주는 모든 파일 경로**. `battery`·`tetremesh`·`meshfix`·`modelmeta`·`matdb` 도 이 규칙을 씁니다
   (2026-09-18 실행 확인 — `cfg/b.yaml` 의 `output: bat_out` 은 `cfg/bat_out_tier0_phase1.k` 로 나갑니다).
 
@@ -301,6 +301,11 @@ Commands:
 > 이 규칙은 예전에 op 마다 달랐습니다. `load`·`boundary`·`rbe`·`contact`·`relax`·`explicit`·`implicit`·`modal`·`ale`·`database`·`cclip`·`matdb`·`generate box` 는
 > "폴더 없는 이름(`box.k`)만 YAML 폴더 기준, 폴더가 붙은 상대 경로(`../data/box.k`)는 작업 폴더 기준" 이었고,
 > `battery`·`tetremesh`·`meshfix` 는 통째로 작업 폴더 기준이었으나 이제 위 한 가지 규칙으로 통일됐습니다.
+> 2026-11-07 까지는 `foldsurface`·`refshell`·`stackwrap`·`linkage-fit`·`applyfold`·`section`·`surfview`·`stackdiagram` 도 YAML 값을
+> 그대로 열어 **통째로 작업 폴더 기준**이었습니다(이 절이 「남은 예외는 map 하나」라고 적은 것과 달랐다) — 이제 같은 규칙입니다.
+> 같은 날까지 `assemble` 안 battery 의 산출 접두사와 warpage 의 `debug_prefix`(단독 `warpage` 도)도 작업 폴더 기준이었습니다 —
+> 이제 값을 적은 YAML 의 폴더 기준이고, battery 덱을 끌어오는 주 덱의 `*INCLUDE` 는 주 덱 폴더 기준 이름입니다([§43.1](#431-battery--배터리-셀-생성)).
+> 플랫폼은 설정을 세션 폴더(= 작업 폴더)에 두므로 바뀌는 것이 없습니다.
 > 예전 동작에 기대어 `../` 경로를 적어 둔 기존 YAML 은 경로를 다시 확인해야 합니다.
 > `extract-surface` 는 YAML 설정이 없는 위치인자 op 이라 애초에 이 규칙의 대상이 아닙니다([§43.7](#437-extract-surface--표면-셸-추출)).
 
@@ -425,7 +430,7 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   단독 op 은 `output == model` 도 거절합니다 — 고친 덱을 다른 이름으로 받으세요.
 - **`map` 의 prestress 고리** — 메시 사본이 map 산출 그 자리인 것(`output: foo.k` + `prestress.output: foo.dynain`)은
   [§6](#6-prestress--초기-응력변형률-계산)의 쓰임이라 막지 않습니다. dynain · CSV 가 map 산출을 덮는 것과 사본이 `bent` ·
-  `flat` 을 덮는 것은 막습니다.
+  `flat` 을 덮는 것은 막습니다 — 재료가 없어 CSV 가 `prestress.output` 자리에 갈 때도 map 이 쓰기 전에 봅니다.
 - **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
   (`flatten_includes` 의 `.<이름>.kr_flat_….k` 등).
 - 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
@@ -509,8 +514,17 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - 상세 메시 노드가 참조 요소 외부에 있으면 경고 출력
 - `info` 명령으로 Jacobian 통계 확인 가능
 - `output` 과 YAML 의 `prestress.output` 이 낼 파일(dynain · 메시 사본 · CSV)이 `bent` · `flat`(그 인클루드까지) · 설정과 같은
-  파일이면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `prestress.output` 이
+  파일이거나 서로 겹치면 아무것도 쓰지 않고 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 고리가 무엇을 쓸지는
+  재료에 달렸다 — `prestress.E`·`nu` 가 있거나 평판에 K-파일 재료가 있으면(앞처리 · 뒤집은 기준도 평판의 카드를 싣는다) dynain · 메시 사본, 없으면
+  `prestress.output` 자리에 CSV 만 — 이 판정을 map 이 **쓰기 전에** 한다(2026-11-07 전엔 재료가 없을 때 CSV 가 map 산출을 덮는
+  것을 map 이 산출을 쓴 뒤에야 보았다). 예전에는 `prestress.output` 이
   flat 이면 메시 사본이 기준 메시를 덮었고, `output` 이 flat 이면 고리가 덮인 flat 을 기준으로 **0 응력**을 종료 코드 0 으로 냈습니다.
+- prestress 고리의 기준 — 앞처리한 평판(`bbox_align: source` · `flip_input_*`)과 뒤집은 기준(`flip_x/y/z`)도 평판의 `*PART` ·
+  `*SECTION` · `*MAT` 카드를 그대로 싣습니다. 그래서 `prestress.E`·`nu` 없이도 뒤집든 말든 평판의 K-파일 재료로 응력을 냅니다
+  (2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」 — 예전엔 뒤집은 기준이 메시만 실어 고리가 조용히 변형률만 냈습니다).
+- 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.__preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
+  뒤집은 기준(`<output>.__flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
+  평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다).
 
 ---
 
@@ -617,6 +631,8 @@ $$\sigma_{ij} = \lambda \varepsilon_{kk} \delta_{ij} + 2\mu \varepsilon_{ij}$$
 - `<output>`: `*INITIAL_STRESS_SOLID` 카드(dynain). `pre.k` 처럼 `.k` 로 끝나면 아래 메시 사본과 겹치지 않게 `pre.dynain` 으로 씁니다.
 - `<output 에서 확장자를 뗀 이름>.k`: 변형 메시 사본 + 위 dynain `*INCLUDE`
 - `<output 에서 확장자를 뗀 이름>.csv` (`--csv`): 요소별 변형률/응력 CSV. 재료(E·ν)를 찾지 못하면 dynain 대신 `<output>` 에 CSV 만 씁니다.
+- 확장자는 **파일 이름의 것만** 뗍니다 — `./pre` → `./pre.k`, `a.d/pre` → `a.d/pre.k`, `.pre` → `.pre.k`(이름 첫 글자의 점은 확장자가
+  아닙니다). 2026-11-07 전에는 경로 전체의 마지막 점을 잘라 `./pre` 가 `.k`, `a.d/pre` 가 `a.k` 를 썼습니다.
 
 예: `KooRemapper prestress --E 210000 --nu 0.3 flat.k bent.k pre.dynain` → `pre.dynain` + `pre.k`
 
@@ -1909,7 +1925,7 @@ operations:
 | `finite_strain` | von Kármán 대변형(true) / Kirchhoff 소변형(false) | `true` |
 | `outside_behavior` | 격자 범위 밖 노드 처리 (zero/clamp/extrapolate) | `zero` |
 | `data_bbox` | 격자가 덮는 평면 범위 (`x_min`·`x_max`·`y_min`·`y_max`) | 파트 bbox |
-| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 | `false` / `debug/warp` |
+| `debug` / `debug_prefix` | 격자·곡률 VTK 등 디버그 출력 — `<debug_prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사는 YAML 폴더 기준(2026-11-07 전엔 작업 폴더)이고 그 폴더는 미리 있어야 합니다 | `false` / `debug/warp` |
 
 ### dat 파일 형식
 
@@ -3339,6 +3355,10 @@ operations:
 - **in-place 는 `assemble` 만(2026-11-07)**: 덱 산출만 `base_model` 그 자리에 씁니다. 인클루드 · 설정 · 처리의 입력
   (`detail_flat` · `dat_file` · `bundle` · `dynain` · `database` …) · `.dynain`/IGA 곁 파일이 읽는 파일과 같으면 아무것도 쓰지 않고
   종료 코드 1 입니다. 단독 명령은 `output == model` 도 거절합니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)).
+- **루프 안 쓰기(2026-11-07)**: 처리 루프가 덱보다 먼저 쓰는 곁 파일 — warpage 의 `debug: true` 진단 셋(`<debug_prefix>_raw.dat` ·
+  `_curvature.dat` · `_warpage.vtk`)과 battery 덱(`<output><tier>_phase{1|2}.k`) — 은 처리를 **하나도 하기 전에** 이 실행의 모든
+  입력(뒤 처리의 입력까지)과 견줍니다. 예전에는 쓰는 자리에서 그때까지 읽은 입력과만 견줘, 앞 처리의 진단 파일이 뒤 update 의
+  `dynain` 을 덮거나 battery 덱이 뒤 처리의 입력을 덮고 종료 코드 0 이었습니다.
 
 > **참고**: 아래 각 오퍼레이션은 동일 이름의 독립 명령어(12~22장)와 동일한 알고리즘을 사용합니다.
 > assemble 내에서는 `- type: <이름>` 으로 지정하며, 여러 오퍼레이션을 순차 결합할 수 있습니다.
@@ -3714,6 +3734,8 @@ KooRemapper.exe meshfix <config.yaml>
 > **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>__mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
 > 파일이면 gmsh 를 돌리기 전에 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `output == model` 이면
 > 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠습니다**. `preview: true` 는 아무것도 쓰지 않아 보지 않습니다.
+> `polish: true` 면 polish 의 임시 파일(`<줄기>__pol<회차>_<덩어리>.stl`·`.geo`·`.msh`·`.log` — 회차 · 덩어리 수는 gmsh 를 돌려 봐야
+> 정해진다) 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있어도 gmsh 전에 거절합니다(polish 가 그 파일을 덮고 지운다).
 
 ```yaml
 model:   input.k      # 입력 K파일
@@ -4077,10 +4099,31 @@ KooRemapper battery <config.yaml>
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
 > `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.
 >
+> **`assemble` 안의 `- type: battery`(2026-11-07)**: 같은 규칙입니다 — battery 설정의 `output` 은 **그 설정 파일의 폴더**, 항목에 준
+> `output` 은 **assemble YAML 의 폴더** 기준이고, 주 덱이 battery 덱을 끌어오는 `*INCLUDE` 는 **주 덱 폴더 기준 이름**으로 적힙니다
+> (`config: sub/bat.yaml` → `sub/bt_tier0_phase1.k`, `output: out/model` 이면 `../bt_tier0_phase1.k` — 절대 경로로 적은 battery
+> `output` 만 적은 그대로). 예전에는 둘 다 작업 폴더 기준이라 `KooRemapper assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고
+> cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다.
+>
+> **배치의 덱 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — tier 는 다섯 칸(`_tier-1` · `_tier0` ·
+> `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. `batch.model_types` 에 종류가 **둘 이상**이면
+> 종류를 이름에 넣습니다 — `<output>_<model_type><tier>_phase{1|2}.k`(`bt_stacked_tier0_phase1.k` · `bt_wound_tier0_phase1.k`), 자동으로
+> 잇는 phase 2 의 `dynain_file` 도 같은 규칙(`bt_stacked_tier0_phase1.dynain`)입니다. 종류가 하나면 예전 이름 그대로입니다. 그래도
+> 두 조합이 같은 이름이면(`tiers: [0, 0.2]` · `phases: [1, 3]`) **아무 덱도 쓰지 않고 종료 코드 1** 이고 겹친 이름과 조합을 다
+> 적습니다. 예전에는 종류도 이름에 없어 뒤 조합이 앞 덱을 조용히 덮고 종료 코드 0 이었습니다(사용자 결정 「종류가 둘 이상이면
+> 이름에 넣는다」).
+>
+> **배치의 종료 코드(2026-11-07)**: 조합 하나라도 덱을 만들지 못하면(쓸 수 없는 경로 · 모르는 `model_type`) 나머지 조합은 끝까지
+> 만들고 **종료 코드 1** 이며, 끝에 못 만든 조합과 그 덱 이름(`model_type stacked · tier 1 · phase 1 → bt_tier1_phase1.k`)을 모아
+> 적습니다. 예전에는 실패한 조합을 버리고 종료 코드 0 이었습니다.
+>
 > **`dynain_file` 만은 경로로 풀지 않습니다.** `*INCLUDE_DYNAIN` 다음 줄에 **적힌 문자열 그대로** 찍히고
 > KooRemapper 는 그 파일을 열지 않습니다(솔버가 산출 덱 기준으로 읽습니다).
 > `use_dynain: true` + `dynain_file: ../state/my.dynain` 을 주면 덱에도 `../state/my.dynain` 이 그대로 들어갑니다.
-> **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙입니다.)
+> **산출 덱 옆에서 솔버가 찾을 이름**으로 적으세요. (배치 체이닝에서 자동 계산되는 값도 같은 규칙 — 폴더 없는 덱 옆 이름입니다.
+> 2026-11-07 까지는 YAML 이 다른 폴더에 있으면 그 폴더가 붙어 `battery cfg/b.yaml` 의 phase 2 덱에 `cfg/bt_tier0_phase1.dynain`
+> (절대 경로로 주면 그 절대 경로)이 적혀 솔버가 찾지 못했습니다.) 자동 계산은 `batch.phases` 에 1 과 2 가 다 있을 때만입니다 —
+> 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않습니다.
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 

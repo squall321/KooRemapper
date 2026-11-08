@@ -165,8 +165,10 @@ static int applyMeshFlipFile(const std::string& inFile,
             e.nodeIds[6] = orig[2]; e.nodeIds[7] = orig[3];
         }
     }
+    // ★뒤집은 기준도 입력 덱의 카드(*PART · *SECTION · *MAT …)를 그대로 싣는다(2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」) —
+    //   예전엔 메시만 써서 E · nu 를 주지 않은 고리가 K-파일 재료를 잃고 변형률만 냈다. 절점 · 솔리드 요소는 뒤집은 메시에서 쓴다
     KFileWriter writer;
-    if (!writer.writeFile(outFile, mesh, /*useMappedPositions=*/false)) {
+    if (!writer.writeFileWithSource(outFile, mesh, inFile, /*useMappedPositions=*/false)) {
         console.error(std::string("flip-helper: cannot write ") + outFile +
                       ": " + writer.getErrorMessage());
         return 1;
@@ -1708,7 +1710,7 @@ static int runMain(int argc, char* argv[]) {
             //     enabled: true             generates a dynain from the mapped
             //     output: detail_stress.dynain
             //     strain_type: green       # green | engineering
-            //     E:  210000.0             # MPa, optional (omit -> strain only)
+            //     E:  210000.0             # MPa, optional (omit -> K-file *MAT of the reference; strain only if none)
             //     nu: 0.3                  # optional
             //     csv: false               # optional, write CSV instead of dynain
             //   )
@@ -1877,7 +1879,7 @@ static int runMain(int argc, char* argv[]) {
                 console.println("    enabled: true");
                 console.println("    output: detail_stress.dynain");
                 console.println("    strain_type: green      # green | engineering");
-                console.println("    E:  210000.0            # MPa, optional (omit = strain only)");
+                console.println("    E:  210000.0            # MPa, optional (omit = K-file *MAT of the reference; strain only if none)");
                 console.println("    nu: 0.3                 # optional");
                 console.println("    csv: false              # optional");
                 console.println("Diagnostics:");
@@ -1896,27 +1898,67 @@ static int runMain(int argc, char* argv[]) {
         for (auto& r : KooRemapper::output_guard::modelInputs(flatPath, "flat")) mapReads.push_back(std::move(r));
         {
             std::vector<std::string> writes{outputPath};
-            if (flipInX || flipInY || flipInZ) writes.push_back(outputPath + ".__preproc_flat.k");
+            std::string alignLow = bboxAlignMode;
+            for (auto& c : alignLow) c = (char)std::tolower((unsigned char)c);
+            // 앞처리 평판 임시 파일 — flip_input 이나 bbox_align: source 가 평판을 바꾸면 runMapping 이 쓴다
+            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".__preproc_flat.k");
             const bool chain = yamlMode && pre_enabled && !pre_output.empty();
             if (chain) {
                 if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");
-                // 재료가 있을 때의 이름(보통) — 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain).
-                // 재료가 없을 때 CSV 가 쓸 prestress.output 은 읽는 파일과만 견주고, 정확한 판정은 runPrestress 가 다시 한다
-                const PrestressOutputs po = prestressOutputs(pre_output, true);
-                writes.push_back(po.dynain);
-                if (!KooRemapper::include_closure::sameFile(po.mesh, outputPath)) writes.push_back(po.mesh);
-                if (pre_csv) writes.push_back(po.csv);
+                // ★고리 prestress 가 쓸 이름은 재료가 있는지에 달렸다 — runPrestress 와 같은 판정을 map 이 쓰기 **전에** 한다(2026-11-07).
+                //   예전엔 재료가 없을 때 CSV(prestress.output 그 자리)가 map 산출을 덮는 것을 map 이 산출을 쓴 뒤에야 보았다.
+                //   재료가 있으면 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain)
+                auto chainWrites = [&](bool hasMaterial) {
+                    const PrestressOutputs po = prestressOutputs(pre_output, hasMaterial);
+                    std::vector<std::string> w;
+                    if (hasMaterial) {
+                        w.push_back(po.dynain);
+                        if (!KooRemapper::include_closure::sameFile(po.mesh, outputPath)) w.push_back(po.mesh);
+                    }
+                    if (pre_csv || !hasMaterial) w.push_back(po.csv);
+                    return w;
+                };
+                auto withChain = [&](bool hasMaterial) {
+                    auto w = writes;
+                    const auto c = chainWrites(hasMaterial);
+                    w.insert(w.end(), c.begin(), c.end());
+                    return w;
+                };
+                // 재료 — E · nu 를 주면 있다. 아니면 평판의 K-파일 재료다(앞처리 · 뒤집은 기준도 평판의 카드를 싣는다 — 2026-11-07).
+                // 두 경우의 판정이 갈릴 때만 평판을 읽어 정한다(큰 평판을 한 번 더 읽지 않게)
+                bool hasMaterial = true;
+                if (!(pre_E > 0 && pre_nu > 0 && pre_nu < 0.5)) {
+                    std::string why;
+                    const bool clashWith = KooRemapper::output_guard::findClash(withChain(true), mapReads, why);
+                    const bool clashWithout = KooRemapper::output_guard::findClash(withChain(false), mapReads, why);
+                    if (clashWith != clashWithout) {
+                        try {
+                            KFileReader probe;
+                            hasMaterial = probe.readFile(flatPath).getMaterialCount() > 0;
+                        } catch (...) {
+                            // 못 읽으면 runMapping 이 같은 평판을 읽다가 아무것도 쓰기 전에 멈춘다
+                        }
+                    }
+                }
+                writes = withChain(hasMaterial);
             }
             if (KooRemapper::output_guard::refuse("map", writes, mapReads, console)) return 1;
-            if (chain && KooRemapper::output_guard::refuse("map", {pre_output}, mapReads, console)) return 1;
         }
 
         printBanner(console);
+        // ★이 실행이 만든 임시 파일(앞처리 평판 · 뒤집은 기준)은 성공이든 실패든 이 블록을 나갈 때 지운다(2026-11-07) — 예전엔
+        //   runMapping 이 앞처리 평판을 쓴 뒤 실패하거나 고리가 앞에서 멈추면(strain_type · 뒤집기 실패) 남았다. 이 실행이 쓴 것만 —
+        //   쓰기 관문이 이 이름들을 입력과 견줬으니 입력은 아니다
+        struct RunTemps {
+            std::vector<std::string> paths;
+            ~RunTemps() { for (const auto& p : paths) std::remove(p.c_str()); }
+        } runTemps;
         std::string scaledFlatPath;  // populated by runMapping when flat is preprocessed
         int mapRc = runMapping(bentPath, flatPath, outputPath,
                                console, useParallel, forcePositive, flipX, flipY, flipZ,
                                bboxAlignMode, bboxAlignMaxDrift, &scaledFlatPath,
                                flipInX, flipInY, flipInZ, targetPids);
+        if (!scaledFlatPath.empty()) runTemps.paths.push_back(scaledFlatPath);
         if (mapRc != 0) return mapRc;
 
         // Optional prestress chaining: configured only via YAML (CLI form
@@ -1954,8 +1996,7 @@ static int runMain(int argc, char* argv[]) {
             //   3. Otherwise: use the original flat as-is.
             std::string refFileForPrestress = flatPath;
             std::string tempRefPath;
-            bool ownsScaledFlat = !scaledFlatPath.empty();   // we own its lifetime
-            if (ownsScaledFlat) {
+            if (!scaledFlatPath.empty()) {
                 refFileForPrestress = scaledFlatPath;
             }
             bool needFlipRef = (flipX || flipY || flipZ);
@@ -1964,8 +2005,11 @@ static int runMain(int argc, char* argv[]) {
                 std::cout << "\n";
                 console.info("Generating flip-aligned reference for prestress: "
                              + tempRefPath);
+                std::error_code tec;
+                const bool tempExisted = std::filesystem::exists(tempRefPath, tec);
                 int frc = applyMeshFlipFile(refFileForPrestress, tempRefPath,
                                              flipX, flipY, flipZ, console);
+                if (frc == 0 || !tempExisted) runTemps.paths.push_back(tempRefPath);   // 썼거나 쓰다 만 이번 실행의 것
                 if (frc != 0) return frc;
                 refFileForPrestress = tempRefPath;
             }
@@ -1977,15 +2021,9 @@ static int runMain(int argc, char* argv[]) {
             console.info("Output: " + pre_output);
             int prc = runPrestress(refFileForPrestress, outputPath, pre_output,
                                     pre_E, pre_nu, strainType, pre_csv, console, &mapReads);
-
-            // Clean up temp ref(s) regardless of prestress success.
-            if (!tempRefPath.empty()) std::remove(tempRefPath.c_str());
-            if (ownsScaledFlat)      std::remove(scaledFlatPath.c_str());
-            return prc;
+            return prc;   // 임시 파일은 runTemps 가 지운다(성공 · 실패 모두)
         }
-        // No prestress chain — scaled flat tmp (if any) is no longer needed.
-        if (!scaledFlatPath.empty()) std::remove(scaledFlatPath.c_str());
-        return 0;
+        return 0;   // 고리가 없으면 앞처리 평판은 더 쓸 데가 없다 — runTemps 가 지운다
     }
 
     // Shell-based mapping command
