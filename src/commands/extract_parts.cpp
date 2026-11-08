@@ -328,21 +328,15 @@ std::vector<int> auxPidCandidates(const KooRemapper::AuxElementCard& a, const Ko
     return out;
 }
 
-// 칸으로 읽지 못한 보 족 줄(`auxLineUnreadable`)이 고른 파트에 있을 수 있나 — 있으면 까닭(비었으면 없다). 그 줄의 정수(`auxLineInts` ·
-// PID 칸의 값도) 가운데 고른 PID 가 있으면 있을 수 있다 — 넘치게 센다. PID 칸이 깨끗해도 그것만 믿지 않는다: 짧은 공백 줄은 PID 칸에
+// 칸으로 읽지 못한 보 족 줄(`auxLineUnreadable`)이 고른 파트에 있을 수 있나 — 있으면 까닭(비었으면 없다). 그 줄의 정수(`auxLineInts` —
+// PID 칸 안의 토큰도) 가운데 고른 PID 가 있으면 있을 수 있다 — 넘치게 센다. PID 칸이 깨끗해도 그것만 믿지 않는다: 짧은 공백 줄은 PID 칸에
 // 다른 번호의 조각이 든다(`45 2 103 105` 의 9-16열 「105」 · 2026-11-08 여섯째 검토 S1 · 「지키는 쪽은 잃지 않는다」)
-std::string unreadablePickedWhy(const KooRemapper::AuxElementCard& a, const std::vector<std::string>& card1, const std::string& line,
-                                const std::vector<int>& sel) {
-    std::vector<int> cand = KooRemapper::auxLineInts(line);
-    const std::string pf =
-        a.partField >= 0 && static_cast<size_t>(a.partField) < card1.size() ? card1[static_cast<size_t>(a.partField)] : std::string();
-    int p = 0;
-    if (!pf.empty() && pf.find_first_of(" \t") == std::string::npos && toInt(pf, p) && p > 0) cand.push_back(p);
-    sortUnique(cand);
+std::string unreadablePickedWhy(const KooRemapper::AuxCardReadings& rd, const std::string& line, const std::vector<int>& sel) {
+    const std::vector<int> cand = KooRemapper::auxLineInts(rd, line);
     std::string hit;
     for (int v : cand)
         if (inSorted(sel, v)) hit += (hit.empty() ? "" : ", ") + std::to_string(v);
-    return hit.empty() ? std::string() : "그 줄의 PID 를 칸으로 단정하지 못했고(쓰는 칸에 빈칸) 그 줄의 정수 가운데 고른 PID " + hit + " 가 있다";
+    return hit.empty() ? std::string() : "쓰는 칸에 빈칸이 끼어 그 줄을 칸으로 읽지 못했고 그 줄의 정수 가운데 고른 PID " + hit + " 가 있다(고른 파트의 요소일 수 있다)";
 }
 
 // `*ELEMENT_MASS_PART_SET` 의 파트 세트를 고른 파트와 견준다 — 0 = 세트에 고른 파트가 없다(버린다) · 1 = 세트가 다 고른 파트다
@@ -447,7 +441,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 // ★칸으로 읽지 못한 줄이 고른 파트에 있을 수 있으면 거절한다 — 실으면 절점이, 버리면 요소가 빠진다(2026-11-08 여섯째 검토 S1 —
                 //   예전엔 조용히 버렸다 · rc 0). 질량 얹기 세트(`_PART_SET`)는 세트를 못 풀어 아래 massSetVerdict 가 따로 거절한다
                 if (KooRemapper::auxLineUnreadable(rd) && aux.hasPart && !aux.partIsSet) {
-                    const std::string why = unreadablePickedWhy(aux, auxCard1, line, sel);
+                    const std::string why = unreadablePickedWhy(rd, line, sel);
                     if (!why.empty()) pk.unreadablePicked.push_back(where + " — " + why);
                 }
                 std::vector<int> pids;

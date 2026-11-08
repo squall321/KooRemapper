@@ -474,10 +474,23 @@ TEST(auxCardReadings_안전띠_N3_N4_는_57_72열이다) {
     ASSERT_TRUE(auxPrimaryFields(r) == r.manual.f);
     ASSERT_FALSE(r.plainAlt);
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
-    ASSERT_TRUE(auxLineInts(sp) == std::vector<int>({9, 13, 101, 102, 103, 104, 888}));      // 실수(0.0)는 버린다
+    ASSERT_TRUE(auxLineInts(r, sp) == std::vector<int>({9, 13, 101, 102, 103, 104, 888}));   // 실수(0.0)는 버린다
     ASSERT_TRUE(auxNodesSure(a, r).empty());                                                  // 열 자리의 104 는 조각일 수 있다 —
     ASSERT_TRUE(auxNodesUnsure(a, r) == std::vector<int>({104}));                              //   한 읽기만(덱에 있을 때만 잰다)
-    ASSERT_TRUE(auxLineInts(sp + "   $ 77 belt") == auxLineInts(sp));                          // 주석 뒤 정수는 세지 않는다
+    ASSERT_TRUE(auxLineInts(auxCardReadings(a, sp + "   $ 77 belt", 8), sp + "   $ 77 belt") == auxLineInts(r, sp));   // 주석 뒤는 세지 않는다
+    // 칸 안 토큰 — 오른쪽 맞춤 N3 과 왼쪽 맞춤 N4 가 붙은 「103104」 뒤 글자가 N4 칸에 섞였다: 줄 토큰은 103104 뿐이지만 칸이 103 · 104 를 가른다
+    {
+        const std::string tl = "      13       9     101     102       0             0.0     103104 LH belt";
+        const auto rt = auxCardReadings(a, tl, 8);
+        ASSERT_TRUE(auxLineUnreadable(rt));
+        const auto ti = auxLineInts(rt, tl);
+        ASSERT_TRUE(std::find(ti.begin(), ti.end(), 103) != ti.end());
+        ASSERT_TRUE(std::find(ti.begin(), ti.end(), 104) != ti.end());
+        const auto m = auxElementCard("*ELEMENT_MASS");
+        const std::string ml = "      13     101             1.09 lid";   // PID 칸(33-40열) 「9 lid」
+        const auto mi = auxLineInts(auxCardReadings(m, ml, 8), ml);
+        ASSERT_TRUE(std::find(mi.begin(), mi.end(), 9) != mi.end());
+    }
     // 정수 폭으로 쓴 i10 줄의 긴 번호가 설명서 칸 경계를 걸친다(설명서 N3 칸 「7083 56977」 에 빈칸) — 정수 폭 읽기가 들어 읽은 줄이다
     {
         char b2[200];
@@ -516,7 +529,7 @@ TEST(auxCardReadings_안전띠_N3_N4_는_57_72열이다) {
     ASSERT_EQ(cs.size(), (size_t)1);
     ASSERT_TRUE(cs[0].unreadable);
     ASSERT_TRUE(cs[0].pids.empty());
-    ASSERT_TRUE(cs[0].nodes == std::vector<int>({2, 7, 101, 102}));
+    ASSERT_TRUE(cs[0].nodes == std::vector<int>({2, 7, 10, 101, 102}));   // 칸 안 조각 「10」(1-8열 「7 101 10」)도
 }
 
 TEST(auxCardReadings_정수_폭으로_쓴_안전띠_줄은_두_읽기를_다_낸다) {

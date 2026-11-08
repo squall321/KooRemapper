@@ -202,8 +202,11 @@ const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r);
 // aux_in_part)은 절점 · PID 후보로 · 번호 바닥은 그 최대까지 · extract-parts 는 고른 파트에 있을 수 있으면 거절한다(여섯째 검토 S1 —
 // 그 전엔 걸음 · 바닥 · 뽑기가 그 줄의 EID · PID · 절점을 잃었다). 번호 매기기에는 쓰지 않는다(그 줄은 거절한다)
 inline bool auxLineUnreadable(const AuxCardReadings& r) { return !r.manualClean && !r.plainAlt; }
-// 그 줄의 정수 전부 — `$` 주석 앞 · 8칸 · 10칸 · 공백(콤마) 토큰의 합집합 · 실수 표기는 버린다 · 양수만(정렬 · 유일 — `deckscan::harvestInts`)
-std::vector<int> auxLineInts(const std::string& line);
+// 그 줄의 정수 전부 — `$` 주석 앞 · 8칸 · 10칸 · 공백(콤마) 토큰(`deckscan::harvestInts`)에 더해 **읽기마다 칸 안의 토큰**(설명서 칸 ·
+// 정수 폭 칸을 공백으로 가른 것)까지 · 실수 표기는 버린다 · 양수만(정렬 · 유일). 칸 안 토큰은 칸 경계에 붙은 번호(오른쪽 맞춤 N3 103 과
+// 왼쪽 맞춤 N4 104 가 붙은 「103104」)와 글자가 섞인 칸(「104 LH b」 · 질량 PID 칸 「9 lid」)의 번호를 칸이 가른다 — 줄 토큰만 보면 그
+// 번호를 잃었다(여섯째 검토 t_tailtext — cleanup-nodes safe 가 104 · 103 을 지웠다 · rc 0)
+std::vector<int> auxLineInts(const AuxCardReadings& r, const std::string& line);
 // 칸 차례로 나눈 줄 하나가 말하는 절점(`nodeSkip` · `nodeSkip2` 구간의 양수, 칸 차례대로)
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f);
 // 지키는 쪽 — primary 와 든 다른 읽기의 절점 합집합(정렬 · 유일)

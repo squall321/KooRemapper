@@ -3394,7 +3394,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                         // 칸으로 읽지 못한 줄(쓰는 칸에 빈칸) — 칸으로는 절점을 모른다. 줄의 정수 가운데 지운 절점 번호가 있으면 사람이 볼
                         // 줄로 올린다(지키는 쪽과 같은 넘치게 세기 · 2026-11-08)
                         if (!any && auxLineUnreadable(rd))
-                            for (int v : auxLineInts(ln)) if (dead(v)) any = true;
+                            for (int v : auxLineInts(rd, ln)) if (dead(v)) any = true;
                     }
                 } else {
                     if (g == std::string::npos) continue;

@@ -48,7 +48,8 @@
     줄의 정수가 지운 절점이면 사람이 볼 줄(manual)로 올린다 · 설명서대로 쓴 줄은 경고가 없다. 여섯째 검토 S1(그 전엔 아래가 다 rc 0 으로
     잃었다): extract-parts 는 그 줄이 고른 파트에 있을 수 있으면(PID 칸 · 그 줄의 정수) 「파일:줄」 을 대고 거절한다(아니면 싣지 않는다) ·
     id_floor 의 elem_start 는 그 줄의 정수 최대 위 · 이월 적용은 그 줄의 정수를 나눠 쓴 절점으로 본다 · 재결속은 그 질량 줄의 PID 를
-    「단정하지 못한 자리」 로 센다
+    「단정하지 못한 자리」 로 센다. 그 줄의 정수는 칸 안 토큰까지 — 칸 경계에 붙은 번호(「103104」)와 글자가 섞인 칸(「104 LH b」 ·
+    질량 PID 칸 「9 lid」)의 번호를 지키고 PID 후보로 본다(J-10 · J-11)
 
 usage: test_seatbelt_card_layout.py <KooRemapper 바이너리>
 """
@@ -782,6 +783,33 @@ def main():
                 rows = section_lines(os.path.join(d, tag + "y_out.k"), "*ELEMENT_SHELL") if rc == 0 else []
                 check("%s parts [1] — 그 줄은 고른 파트에 있을 수 없다 → 거절하지 않는다 · 셸만 싣는다 · 줄은 [WARN]" % tag,
                       rc == 0 and len(rows) == 1 and ("%s.k:%d %s" % (tag, bline, kw)) in out and "[WARN" in out, (rc, rows, out[-400:]))
+
+        # 칸 경계에 붙은 번호 · 글자가 섞인 칸 — 줄 토큰은 「103104」 · 「102103」 뿐이라 예전엔 cleanup-nodes safe 가 104 · 103 을 지웠다(rc 0 ·
+        # 여섯째 검토 t_tailtext). 칸 안 토큰이 그 번호를 가른다(`auxLineInts`)
+        for tag, kw, ln, gone in (("J-10a", "*ELEMENT_SEATBELT", "%8d%8d%8d%8d%8d%16s%8d" % (13, 9, 101, 102, 0, "0.0", 103) + "104 LH belt", 104),
+                                  ("J-10b", "*ELEMENT_BEAM", "%8d%8d%8d%8d" % (13, 9, 101, 102) + "103 left", 103)):
+            nodes = (101, 102, 103, 104, 105)
+            if kw == "*ELEMENT_SEATBELT":
+                text = belt_deck(8, ln, nodes=nodes)
+            else:
+                text = belt_deck(8, "%8d%8d%8d%8d%8s%16s%8d%8d" % (14, 9, 101, 102, "", "0.0", 0, 0), nodes=nodes).replace(
+                    "*PART\nbelt", kw + "\n" + ln + "\n*PART\nbelt")
+            write(os.path.join(d, tag + ".k"), text)
+            write(os.path.join(d, tag + "c.yaml"), "model: %s.k\noutput: %sc_out.k\nmode: safe\n" % (tag, tag))
+            rc, out = run(binary, d, "cleanup-nodes", tag + "c.yaml")
+            kept = sorted(node_ids(os.path.join(d, tag + "c_out.k"), 8).values()) if rc == 0 else None
+            check("%s ★cleanup-nodes safe — %s 줄 %r 의 %d(칸 경계에 붙고 뒤에 글자) 를 지우지 않는다" % (tag, kw, ln, gone),
+                  rc == 0 and kept is not None and gone in kept and 105 not in kept, (rc, kept, out[-300:]))
+        # 질량 PID 칸에 글자가 섞였다(「9 lid」) — 그 줄의 정수에 고른 PID 9 가 있다 → 거절(예전엔 PID 를 몰라 멀쩡한 질량만 싣고 그 줄을 버렸다)
+        ml = "%8d%8d%16s" % (13, 105, "1.0") + "9 lid"
+        mdeck = mass_deck(8, "%8d%8d%16s%8d" % (14, 1, "1.0", 7), (1, 2, 3, 4, 105, 99)).replace("*ELEMENT_MASS\n", "*ELEMENT_MASS\n" + ml + "\n")
+        mdeck = mdeck.replace("*PART\np7", "*PART\np9\n%10d%10d%10d\n*PART\np7" % (9, 1, 1))
+        write(os.path.join(d, "J-11.k"), mdeck)
+        mline = mdeck.split("\n").index(ml) + 1
+        write(os.path.join(d, "J-11x.yaml"), "model: J-11.k\noutput: J-11x_out.k\nparts: [7, 9]\n")
+        rc, out = run(binary, d, "extract-parts", "J-11x.yaml")
+        check("J-11 ★extract-parts parts [7, 9] — 질량 PID 칸 「9 lid」 의 9 를 PID 후보로 본다 → 「J-11.k:%d」 를 대고 거절" % mline,
+              rc == 1 and ("J-11.k:%d *ELEMENT_MASS" % mline) in out and not os.path.exists(os.path.join(d, "J-11x_out.k")), (rc, out[-400:]))
 
         # id_floor — 칸으로 읽지 못한 보 줄의 EID 를 모른다 → 그 줄의 정수 최대(900) 위. 예전엔 elem_start 2(셸 1 위)였다 — 조각의 요소 번호가
         # 그 보와 겹칠 수 있었다

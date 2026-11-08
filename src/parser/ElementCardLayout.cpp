@@ -7,6 +7,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <vector>
 
 namespace KooRemapper {
@@ -545,12 +546,24 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
 
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) { return r.manual.f; }
 
-std::vector<int> auxLineInts(const std::string& line) {
+std::vector<int> auxLineInts(const AuxCardReadings& r, const std::string& line) {
     std::string body = line;
     const size_t cm = body.find('$');
     if (cm != std::string::npos) body.erase(cm);
     std::vector<int> out;
     deckscan::harvestInts(body, out);
+    auto inFields = [&](const std::vector<std::string>& f) {
+        for (const auto& s : f) {
+            std::istringstream is(s);
+            std::string t;
+            while (is >> t) {
+                int v = 0;
+                if (!deckscan::looksReal(t) && deckscan::toInt(t, v) && v > 0) out.push_back(v);
+            }
+        }
+    };
+    inFields(r.manual.f);
+    inFields(r.plain.f);
     deckscan::sortUnique(out);
     return out;
 }
@@ -804,7 +817,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
                 // 이월 적용이 지운 절점을 무는 띠를 rc 0 으로 냈고 바닥이 그 EID 를 몰랐다(2026-11-08 여섯째 검토 S1)
                 if (auxLineUnreadable(rd)) {
                     c.unreadable = true;
-                    c.ints = auxLineInts(l);
+                    c.ints = auxLineInts(rd, l);
                     c.nodes.insert(c.nodes.end(), c.ints.begin(), c.ints.end());
                     deckscan::sortUnique(c.nodes);
                     if (aux.hasPart)   // PID 칸이 없는 족(플롯)은 PID 후보가 없다
