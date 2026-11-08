@@ -152,7 +152,9 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   StepForge `secid_bound`). 커서 · 이월 적용의 차례(`sectionIdTop`) · 겹침(`sectionIdsInUse`)이 이 셈 하나를 쓴다. 겹침도 넉넉한 셈을 거두었다 —
   ICOMP 1 덱에서 StepForge 가 새 SECID 를 각도 숫자(90)와 같게 매길 수 있어 그것을 겹침으로 거절하면 같은 거짓 거절이다(모르는 꼴만
   넉넉히). 커서가 옛 첫 카드 셈(공백 토큰 — `2.0` → 2) 밑으로 내려가지 않게 둘의 큰 쪽을 쓴다. 검토자의 21 회귀 산출 모으기(752fa2b 와
-  견줌)를 다시 돌렸다 — 아래 결과.
+  견줌)를 다시 돌렸다 — 산출 256 개 중 SECID 가 752fa2b 와 다른 것은 둘이다: `test_section_cursor_stacked`(쌓인 카드 — 새 SECID 가 2 → 3,
+  뜻한 것)와 `test_end_insert_once` 의 cnrb2solid PID 200(넷째 묶음의 `*END` 고침 — 35a35bb 에도 있다). 35a35bb 와는 SECID 가 다 같고
+  바이트 차이는 `$ Date:` 줄뿐이다.
 
 - **빈 `_TITLE` 제목 줄(#4)** — `cur_scanSectionDefs`(첫 카드 · 있나 · 종류 · 커서의 바닥)가 빈 줄을 제목보다 먼저 건너뛰어 SECID 카드를 제목으로
   버리고 두께 줄(`3.0`)을 SECID 3 으로 읽었다 — CAN 섹션의 제목을 비우면 BRACKET(SECID 3)의 옮기기가 `part_duplicate` 로 거짓 거절됐다.
@@ -182,6 +184,11 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   나중에 BOM 을 받게 되어도 동반 파일을 덮지 않게(그때 거절 까닭은 `output_clobber` 이고 그 까닭에 「계획을 읽지 못해 동반 파일을 모른다」
   가 붙는다). 쓰기 · 바꿔 넣기(`CarryStagedFiles`)는 손대지 않았다(공용 도우미로 갈 몫). 회귀 v2 R-3e~i(35a35bb 에서 R-3e~h 실패).
 
+- **조각 바닥은 절점 · 요소만(#6 · 문서)** — 이 문서(아래 「11-07 밤」 의 권고 ③ · 셋째 묶음 커서)와 그 커밋 글이 이월 적용의 조각 이동량
+  바닥을 SECID · MID 커서의 소비자로 적었는데, 그 바닥(CarryoverApply ⑨)은 `idMaxima()` 의 절점 · 요소 최대값만 본다 — 줄을 고쳤다(커밋 글은
+  그대로 남는다). 이월 적용이 SECID 셈을 쓰는 곳은 새 섹션의 차례 · 겹침, MID 셈은 「조각 MID 가 덱에 있나」 다. 도움말 · 카탈로그의 「조각
+  번호는 덱 바닥 위」 도 절점 · 요소 번호라고 적었다(PID · SECID · MID 는 옮기지 않는다).
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).
@@ -201,8 +208,9 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 - **열 재질 번호 이름(권고 ③ · 공용 훑기)** — `cur_scanMaterialIds` 가 `*MAT_T01`~`*MAT_T18`(뒤가 끝 · `_`)도 뺀다(`cur_isThermalMaterial` —
   `*MAT_TABULATED_*` 같은 구조 재질은 센다). 부르는 곳 — ① `cur_scanMaxMaterialId` → `maxMaterialId_`(loadBaseModel · 인클루드 위로) →
   새 MID 를 내는 op: restack · disconnect(CZM) · IGA · offset · connection CZM · 다재료 offset · dual offset(prestress · CZM) · cnrb2solid ·
-  merge, 그리고 `idMaxima().material` → `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck` 의 PID·SECID·MID 바닥 · 이월 적용의 조각
-  이동량 바닥 ② `definedMaterialIds` → 이월 적용의 「조각 MID 가 덱에 있나」 ③ `materialsReachable` → matswap · matdb 의 「MID 가
+  merge, 그리고 `idMaxima().material` → `id_floor` 의 `pid_start` · `cad_solid_merge_to_deck` 의 PID·SECID·MID 바닥(~~이월 적용의 조각
+  이동량 바닥~~ — 11-08 정정: 그 바닥은 `idMaxima()` 의 절점 · 요소만 본다 · CarryoverApply ⑨) ② `definedMaterialIds` → 이월 적용의
+  「조각 MID 가 덱에 있나」 ③ `materialsReachable` → matswap · matdb 의 「MID 가
   인클루드에만 있나」. **번호가 바뀌는 덱** — `*MAT_T01`~`T18` 의 TMID 가 구조 MID(바닥이면 PID · SECID 도)의 최대값보다 큰 덱뿐이다 —
   그 op 들의 새 MID(· 바닥)가 TMID 위가 아니라 구조 번호 위로 내려온다(같은 수의 TMID 와 MID 는 Vol II 가 허락한다). 리포의 픽스처 ·
   회귀 덱에는 `*MAT_T01`~`T18` 이 없다(전수 grep) — 기존 회귀 산출은 그대로다.
@@ -217,7 +225,8 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   정수 · 블록 키워드 폭)로 센다 → `maxSectionId_`(loadBaseModel · 인클루드 위로) · `idMaxima().section`. 이월 적용의 `sectionIdsAnyCard` 를
   옮겨 둘이 하나의 규칙을 쓴다(둘째 소비자). 있나 · 종류(`cur_scanSectionIds` · `definedSectionIds`)는 첫 카드 그대로. **새 SECID 가 바뀔 수
   있는 op** — restack · disconnect(CZM 섹션 둘) · offset · 다재료 offset · dual offset prestress · merge · cnrb2solid(시작 번호) · IGA(커서를
-  올리기만), 바닥 — `id_floor`(pid_start) · `cad_solid_merge_to_deck` · `apply_carryover_plan`(조각 이동량 바닥). 바뀌는 덱은 섹션 블록에
+  올리기만), 바닥 — `id_floor`(pid_start) · `cad_solid_merge_to_deck`(~~`apply_carryover_plan`(조각 이동량 바닥)~~ — 11-08 정정: 그 바닥은
+  절점 · 요소 최대값만 본다. 이월 적용이 이 셈을 쓰는 곳은 새 섹션의 차례 · 겹침(`sectionIdTop` · `sectionIdsInUse`)이다). 바뀌는 덱은 섹션 블록에
   첫 카드보다 큰 정수가 첫 칸인 줄(쌓인 카드 · 정수 두께 · 숫자 제목)이 있는 덱뿐 — 커서는 오르기만 한다. **기존 회귀 산출** — 커서가
   옛 셈과 다를 때 적는 탐침 바이너리로 회귀 전체(111)를 돌렸다: 갈린 곳은 셋 — ① `examples/wrap/cylinder_2layer.k`(진짜 쌓인 카드 —
   `*SECTION_SOLID` 밑 SECID 1 · 2 · 1 → 2)를 쓰는 wrap 실행 스물여덟(wrap 은 절점만 옮기고 SECID 를 내지 않는다 — 산출 그대로) ② 이월 적용 R-1
