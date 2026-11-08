@@ -60,7 +60,8 @@ DECLARED = {
     "src/commands/cclip.cpp": (2, "덱(신규) — F-δ 검증용 독립 압축 덱 1곳 + 리포트 1곳. "
                                   "본 덱·dynain·_free.k 는 DeckWriter 로 쓴다"),
     # ── 덱(보존) — 개행을 스스로 되붙이는 자리 ───────────────────────────────
-    "src/assembly/ModelAssembler.cpp": (4, "덱(보존) — deckNewline_ 을 붙여 쓴다(본 덱·dynain·IGA) + CSV 1곳"),
+    "src/assembly/ModelAssembler.cpp": (5, "덱(보존) — deckNewline_ 을 붙여 쓴다(본 덱·dynain·IGA) + CSV 1곳 + 쓰기 결과를 보는 "
+                                           "finishDeckFile 의 매개변수 1곳(새 쓰기가 아니다 — 여섯째 검토 S2)"),
     "src/parser/DynainWriter.cpp": (2, "덱(보존) — refFile 에서 deck_newline::detect 한 값을 쓴다"),
     # ── 계층 자신 ───────────────────────────────────────────────────────────
     "include/parser/DeckWriter.h": (1, "계층 자신 — 모든 덱 쓰기의 단일 진입점"),

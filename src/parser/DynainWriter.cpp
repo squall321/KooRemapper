@@ -1,5 +1,6 @@
 #include "parser/DynainWriter.h"
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
+#include "parser/DeckWriter.h"         // deck_write — 쓰기 실패를 공용 기록에(잘린 dynain 을 rc 0 으로 내지 않는다)
 #include <iomanip>
 #include <sstream>
 #include <ctime>
@@ -108,7 +109,21 @@ bool DynainWriter::writeFile(
     }
 
     file << deck_newline::apply(buffer.str(), newline_);
+    // ★쓰기 · 비우기 · 닫기 실패(디스크 참 · 파일 크기 상한)를 본다 — 예전엔 잘린 dynain 을 true 로 돌려줬다(여섯째 검토 S2)
+    file.flush();
+    bool bad = file.fail();
+    int err = bad ? errno : 0;
+    errno = 0;
     file.close();
+    if (file.fail()) {
+        bad = true;
+        if (!err) err = errno;
+    }
+    if (bad) {
+        errorMessage_ = "dynain 을 쓰다 멈췄다: " + deck_write::describe(filename, err);
+        deck_write::note(deck_write::describe(filename, err));
+        return false;
+    }
     return true;
 }
 

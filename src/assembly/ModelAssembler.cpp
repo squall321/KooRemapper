@@ -16,6 +16,7 @@
 #include "parser/IdAllocator.h"   // 번호를 한 길로 — 인클루드 닫힘까지 본 최대값 위로
 #include "parser/MaterialIds.h"   // 재질 번호 공용 훑기 — 쌓인 재질 묶음 · 열 재질 · 덧붙임 카드(2026-11-08)
 #include "parser/DeckScan.h"      // keywordToken — `*INCLUDE ±` 를 알아보려고
+#include "parser/DeckWriter.h"    // deck_write — 덱 쓰기 실패를 공용 기록에(잘린 덱을 rc 0 으로 내지 않는다)
 #include "parser/CardCut.h"       // isKeywordLine · isCommentLine — 절점 · 요소 번호 겹침 판정(info)
 #include "parser/ElementCardLayout.h"   // 요소 카드 줄 수 판정 — 리더와 쓰기가 같은 표를 쓴다
 #include "parser/ShellReader.h"
@@ -5464,6 +5465,25 @@ static bool ma_resultsHaveNonFinite(const std::vector<ElementResult>& results) {
     return false;
 }
 
+// 덱 파일을 다 썼나 — 쓰기 · 비우기 · 닫기 어디서든 실패하면(디스크 참 · 파일 크기 상한 · EIO) 「경로 (strerror)」 를 돌려주고 공용
+// 기록에 남긴다(여섯째 검토 S2 — `outFile << …; close()` 를 보지 않아 잘린 덱을 rc 0 으로 냈다)
+static bool finishDeckFile(std::ofstream& f, const std::string& path, std::string& why) {
+    f.flush();
+    bool bad = f.fail();
+    int err = bad ? errno : 0;
+    errno = 0;
+    f.close();
+    if (f.fail()) {
+        bad = true;
+        if (!err) err = errno;
+    }
+    if (bad) {
+        why = deck_write::describe(path, err);
+        deck_write::note(why);
+    }
+    return !bad;
+}
+
 bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     std::string outputFile = outputPrefix + ".k";
     std::string dynainFile = outputPrefix + ".dynain";
@@ -6393,7 +6413,13 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     std::string outBody = output.str();
     if (!deckFinalNewline_ && !outBody.empty() && outBody.back() == '\n') outBody.pop_back();
     outFile << deck_newline::apply(outBody, deckNewline_);
-    outFile.close();
+    {
+        std::string why;
+        if (!finishDeckFile(outFile, outputFile, why)) {
+            errorMessage_ = "출력 덱을 쓰다 멈췄다: " + why + " — 덱이 잘렸을 수 있다 / write error, the deck may be truncated";
+            return false;
+        }
+    }
 
     // Write accumulated dynain (separate file only if not embedded)
     if (!accumulatedResults_.empty() && !dynainEmbed_) {
@@ -6486,7 +6512,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
             // 덱과 같은 개행으로 낸다 — dynain 은 덱이 `*INCLUDE` 로 물고 가므로 갈리면 안 된다.
             dynFile << deck_newline::apply(dynBuf.str(), deckNewline_);
-            dynFile.close();
+            std::string why;
+            if (!finishDeckFile(dynFile, dynainFile, why)) {
+                errorMessage_ = "dynain 을 쓰다 멈췄다: " + why + " / write error in dynain";
+                return false;
+            }
         } else {
             // Solid-only: use existing DynainWriter
             MeshAnalysisResult finalResult;
@@ -6512,7 +6542,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             return false;
         }
         igaOut << deck_newline::apply(igaf.content, deckNewline_);   // 덱과 같은 개행으로
-        igaOut.close();
+        std::string why;
+        if (!finishDeckFile(igaOut, igaf.fullpath, why)) {
+            errorMessage_ = "IGA 파일을 쓰다 멈췄다: " + why + " / write error in IGA file";
+            return false;
+        }
     }
 
     // pid_refs: strict — 옮기지 못한 참조가 하나라도 남으면 rc=1 로 끝낸다.

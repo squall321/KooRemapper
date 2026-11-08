@@ -26,6 +26,9 @@
     (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
   U 보고 글자 — extract-parts 보고는 덱 · 경로의 깨진 바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모르는 키워드 · 모델 경로)를 그대로 실어
     엄격한 UTF-8 리더에서 읽히지 않았다(3차 검토 TJ_euckr). 이월 적용 보고(54ac559)와 같은 함수로 U+FFFD 를 싣는다.
+  W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
+    대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
+    새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
@@ -712,6 +715,81 @@ def sec_u(binary):
           rc == 0 and rep is not None and "�" in rep.get("model", "") and rep.get("ok") is True, (rc, (rep or {}).get("model")))
 
 
+# ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
+def run_fsize(binary, d, args, limit):
+    """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
+    import resource
+
+    def pre():
+        signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+    p = subprocess.run([binary, *args], cwd=d, capture_output=True, text=True, timeout=600, encoding="utf-8", errors="replace",
+                       preexec_fn=pre)
+    return p.returncode, p.stdout + p.stderr
+
+
+def parts_first_deck(nx, ny):
+    """*PART · *SECTION · *MAT 를 앞에, 요소를 끝에 — 잘려도 미정의 참조가 없어 되읽기가 못 잡는 꼴."""
+    full = shell_deck(nx, ny).splitlines()
+    i_el, i_part = full.index("*ELEMENT_SHELL"), full.index("*PART")
+    return "\n".join(full[:1] + full[i_part:-1] + full[1:i_el] + full[i_el:i_part] + ["*END"]) + "\n"
+
+
+def sec_w(binary):
+    print("[W] 쓰기 오류 — 잘린 덱을 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다(바로 쓰는 op 도 rc 1)")
+    # W-1 extract-parts — 앞 실행의 산출 · 보고가 있는 자리에 크기 상한(산출 반)으로
+    for tag, deck, verify in (("표준 덱 · verify true", shell_deck(40, 20), "true"), ("파트 먼저 덱 · verify false", parts_first_deck(40, 20), "false")):
+        d = ep_dir("W1_" + verify, deck=deck)
+        write(os.path.join(d, "e.yaml"), "model: in.k\noutput: out.k\nparts: [1]\nreport: r.json\nverify: %s\n" % verify)
+        rc0, _ = run(binary, d, "extract-parts", "e.yaml")
+        before = sha(os.path.join(d, "out.k"))
+        rc, out = run_fsize(binary, d, ("extract-parts", "e.yaml"), os.path.getsize(os.path.join(d, "out.k")) // 2)
+        rep = load(os.path.join(d, "r.json"))
+        said = " ".join(r.get("message", "") for r in rep.get("refusals", [])) if isinstance(rep, dict) else ""
+        check("W-1 extract-parts %s · 산출 반 크기 상한 — rc 1 · 앞 산출 그대로 · 보고 ok false 가 그 오류(File too large)를 말한다" % tag,
+              rc0 == 0 and rc == 1 and sha(os.path.join(d, "out.k")) == before and isinstance(rep, dict) and rep.get("ok") is False and
+              rep.get("output_written") is False and "File too large" in said and not tmp_left(d), (rc0, rc, said[:200], out[-300:]))
+    # W-2 extract-parts output: /dev/full — 바로 쓰는 자리의 쓰기 오류(verify false — 끝없이 읽히는 장치를 되읽지 않게)
+    d = ep_dir("W2")
+    rc, out, rep = ep(binary, d, output="/dev/full", extra="verify: false\n")
+    check("W-2 extract-parts output: /dev/full — rc 1 · 보고 ok false 가 그 오류(No space left)를 말한다",
+          rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and
+          "No space left" in " ".join(r.get("message", "") for r in rep.get("refusals", [])), (rc, out[-300:]))
+    # W-3 이월 적용 — 마지막 *SECTION 블록 앞까지만 쓰이게(되읽기 대조가 못 잡던 꼴 — 검토 t_efbig_sec)
+    d = co_ready("W3")
+    rc0, _ = run(binary, d, *CO_ARGS)
+    full = open(os.path.join(d, "deck_applied.k"), "rb").read()
+    lines = full.split(b"\n")
+    last = max(i for i, l in enumerate(lines) if l.startswith(b"*SECTION"))
+    cut = len(b"\n".join(lines[:last]) + b"\n")
+    before = sha(os.path.join(d, "deck_applied.k"))
+    rc, out = run_fsize(binary, d, CO_ARGS, cut)
+    rep = load(os.path.join(d, "deck_applied_carryover.json"))
+    said = " ".join(p.get("detail", "") for p in rep.get("problems", [])) if isinstance(rep, dict) else ""
+    check("W-3 apply_carryover_plan 마지막 *SECTION 앞까지만 쓰이는 상한 — rc 1 · 앞 덱 그대로 · 보고 ok false · write(File too large)",
+          rc0 == 0 and rc == 1 and sha(os.path.join(d, "deck_applied.k")) == before and isinstance(rep, dict) and rep.get("ok") is False and
+          "File too large" in said and not tmp_left(d), (rc0, rc, said[:200], out[-300:]))
+    # W-4 · W-5 바로 쓰는 op — writeOutput(elform) · DeckWriter(database)
+    for k, opname, body, outname in ((4, "elform", "base_model: box.k\noutput: box_el\noperations:\n  - type: elform\n    target_elform: 2\n",
+                                      "box_el.k"),
+                                     (5, "database", "model: box.k\noutput: box_db.k\npreset: drop\ndt: 0.0001\ndt_plot: 0.005\n",
+                                      "box_db.k")):
+        d = os.path.join(TMP, "W%d_%s" % (k, opname))
+        os.makedirs(d)
+        write(os.path.join(d, "box.yaml"), "output: box.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 10\nny: 5\nnz: 2\nrho: 7.85e-9\nE: 210000.0\n"
+                                           "nu: 0.3\nmid: 1\nsecid: 1\npid: 1\npart_title: PLATE\n")
+        run(binary, d, "generate", "box", "box.yaml")
+        write(os.path.join(d, "c.yaml"), body)
+        rc0, _ = run(binary, d, opname, "c.yaml")
+        size = os.path.getsize(os.path.join(d, outname)) if os.path.exists(os.path.join(d, outname)) else 0
+        if size:
+            os.remove(os.path.join(d, outname))
+        rc, out = run_fsize(binary, d, (opname, "c.yaml"), max(size // 2, 1))
+        check("W-%d %s(%s) 산출 반 크기 상한 — rc 1 · [ERROR] 가 쓰다 멈춘 파일과 까닭(File too large)을 말한다" %
+              (k, opname, "writeOutput" if k == 4 else "DeckWriter"),
+              rc0 == 0 and size > 0 and rc == 1 and "File too large" in out and "[ERROR]" in out, (rc0, size, rc, out[-300:]))
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -726,6 +804,7 @@ def main():
         sec_c(binary)
         sec_m(binary)
         sec_u(binary)
+        sec_w(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

@@ -1922,7 +1922,14 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         Writer wr{o, im, idx, sel, pidNodes, pk, nd, rm, console, st};
         wr.out = &w.stream();
         wr.processFile(o.model, 0);
-        w.close();
+        // ★쓰기 · 닫기 실패(디스크 참 · 파일 크기 상한 · EIO)면 잘린 덱이다 — 바꿔 넣지 않고 rc 1 · 보고(여섯째 검토 S2 — 예전엔
+        //   `*NODE` 가운데서 끊긴 덱을 rc 0 · ok 로 바꿔 넣었다)
+        if (!w.close()) {
+            if (staged.mode(o.output) == KooRemapper::staged_write::Mode::Direct)
+                return fail("write", "산출 덱을 쓰다 멈췄다: " + w.error() + " — 그 자리(장치 · FIFO)에 바로 쓰던 덱이 잘렸다");
+            return fail("write", "산출 덱을 쓰다 멈췄다: " + w.error() + " — 바꿔 넣지 않았다(이번 실행의 임시 파일만 지웠다 · "
+                                  "같은 이름의 앞 파일은 그대로다)");
+        }
         if (!wr.commaLines.empty()) {
             std::vector<std::string> lines = wr.commaLines;
             if (wr.commaCount > (long long)wr.commaLines.size())

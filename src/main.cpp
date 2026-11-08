@@ -19,6 +19,7 @@
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
+#include "parser/DeckWriter.h"   // deck_write::failures — 잘린 덱을 rc 0 으로 내지 않는다
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
 #include "mapper/MeshRemapper.h"
@@ -3165,11 +3166,21 @@ static int runMain(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     // 명령이 던진 예외를 잡지 않아 terminate → abort(rc 134)로 죽던 것(예: indent 의 points 누락)을
     // 오류 메시지 + rc 1 로 바꾼다
+    int rc = 1;
     try {
-        return runMain(argc, argv);
+        rc = runMain(argc, argv);
     } catch (const std::exception& e) {
         ConsoleOutput console;
         console.error(std::string("Unhandled error: ") + e.what());
         return 1;
     }
+    // ★덱 쓰기가 실패했는데(디스크 참 · 파일 크기 상한 · EIO — 잘린 덱) op 이 rc 0 을 돌려준 길 — 찍고 rc 1(여섯째 검토 S2).
+    //   op 이 스스로 다뤘으면(rc≠0) 이미 말했다
+    if (rc == 0 && !KooRemapper::deck_write::failures().empty()) {
+        ConsoleOutput console;
+        for (const auto& f : KooRemapper::deck_write::failures())
+            console.error("덱을 쓰다 멈췄다 — " + f + " — 그 파일은 잘렸을 수 있다(rc 1)");
+        rc = 1;
+    }
+    return rc;
 }

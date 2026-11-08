@@ -431,7 +431,12 @@ bool FlatDeck::make(const std::string& mainPath, std::string& why) {
         DeckWriter w(tmp.string(), deck_newline::detect(mainPath));
         if (!w.ok()) { why = "펼친 덱을 쓸 수 없다: " + tmp.string(); return false; }
         for (const auto& l : flat) w.stream() << l << "\n";
-        w.close();
+        if (!w.close()) {   // 잘린 펼친 덱을 읽게 두지 않는다(여섯째 검토 S2)
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            why = "펼친 덱을 쓰다 멈췄다: " + w.error();
+            return false;
+        }
     }
     tmp_ = tmp.string();
     files_ = c.files.size();

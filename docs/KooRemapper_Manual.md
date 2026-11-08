@@ -482,6 +482,16 @@ LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄�
   `tools/regress/test_column1_keywords.py` — 위 표의 걸음마다 대표 op(20 가지)를 맨 앞에 들여쓴 키워드 줄만 든 `*COMMENT` 를 끼운 덱으로 돌려, 산출에서 그
   블록을 빼면 그대로 덱의 산출과 바이트까지 같은지 봅니다(보통 덱은 고치기 전 바이너리와 바이트까지 같다 — 쓴 시각 머리줄만 다르다).
 
+#### (l) 덱 쓰기가 실패하면 rc 1 (2026-11-08)
+
+덱 · dynain · IGA 파일을 쓰다 실패하면(디스크 참 ENOSPC · 할당량 EDQUOT · 파일 크기 상한 EFBIG · EIO) `[ERROR]` 가 그 파일과 까닭을
+말하고 **종료 코드 1** 입니다. 공용 쓰기 계층(`DeckWriter` — 짧은 쓰기 · 스트림 상태 · 닫기)과 `writeOutput`(assemble · 단독 op 의 덱 ·
+dynain · IGA) · `DynainWriter` · 메시 쓰기(`KFileWriter`) · 펼친 덱(`flatten_includes`)이 결과를 보고, 부르는 op 이 그 결과를 보지
+않아도 `main` 이 rc 0 을 rc 1 로 바꿉니다. `extract-parts` · `apply_carryover_plan` 은 바꿔 넣지 않고(앞 파일 그대로 · 임시 파일만
+지운다) 보고에 그 오류를 적습니다. 바로 쓰는 op(그 밖의 op)의 그 파일은 **잘렸을 수 있습니다** — 지우지 않으니 쓰지 말고 다시
+돌리세요. 예전엔 결과를 보지 않아 잘린 덱(`*NODE` 가운데서 끊긴 덱 · 마지막 섹션을 잃은 덱)을 rc 0 · ok 보고로 냈습니다(여섯째 검토
+S2 · 회귀 `tools/regress/test_staged_write.py` W).
+
 ---
 
 ## 4. map — HEX8 구조화 메시 매핑
@@ -5486,6 +5496,8 @@ PID 나 **제목 와일드카드**로 고른 파트만 담은 덱을 쓴다. ID�
 때 그 파일에 제자리로 쓰고 [WARN] 를 낸다 — **원자적이 아니다**(옮겨 쓰는 사이에 멈추면 반쯤 쓴 파일이 남는다 · 거절 · 실패면 그 파일은
 그대로). 이름 바꾸기를 폴더 권한이 막을 때(끈적 폴더의 남의 파일 등)도 같다. 예전(a33af2f)엔 링크가 일반 파일로 바뀌고 모드가 0644 로
 돌아갔으며 `/dev/null` · FIFO(일반 파일로 바뀌었다) · 읽기 전용 폴더의 쓸 수 있는 파일을 거절했다.
+**쓰기 오류** — 산출 · 번호 지도 · 보고를 쓰다 실패하면(디스크 참 · 할당량 · 파일 크기 상한 · EIO) 바꿔 넣지 않고 rc 1 이며 보고가 그
+오류를 말한다([§3.1(l)](#31-yaml-공통-규칙-모든-op)) — 예전엔 `*NODE` 가운데서 끊긴 산출을 rc 0 · ok 로 바꿔 넣었다(회귀 W).
 **바꿔 넣기 차례 — 지키는 것 · 지키지 않는 것.** 보고를 임시로 먼저 써 두고(못 쓰면 아무것도 바꾸지 않는다) 잠금을 쥐고 산출 → 번호
 지도 → 보고 차례로 바꿔 넣는다. 보고는 **늘 마지막**이고 실제로 바꿔 넣은 것을 말한다 — 산출을 바꿔 넣은 뒤 번호 지도가 실패하면 보고를
 그 상태(`ok` false · `output_written` true · `renumber.map` null · 거절 `commit`)로 다시 쓰고 앞 실행의 번호 지도는(이 op 의 지도면)
@@ -6184,7 +6196,7 @@ output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 - 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
   진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
-- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
+- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자 · W 쓰기 오류) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 
