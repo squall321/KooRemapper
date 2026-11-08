@@ -93,3 +93,14 @@ TEST(MaterialIds_구조_재질만_베낀다_칸_폭_그대로) {
     ASSERT_TRUE(c.find("*MAT_T01") == std::string::npos);
     ASSERT_TRUE(matids::copyDefinition(L, 7, 8).empty());
 }
+
+TEST(MaterialIds_지울_줄_표시는_묶음이_다_들면_블록째) {
+    auto L = matDeckLines(std::string("*KEYWORD\n*MAT_ELASTIC\n") + kMatEl2 + "\n" + kMatEl3 + "\n*END\n");
+    const auto one = matids::definitionMask(L, {2});
+    ASSERT_TRUE(one[2]);
+    ASSERT_FALSE(one[1]);    // 키워드 줄은 남는다(MID 3 이 남는다)
+    ASSERT_FALSE(one[3]);
+    const auto both = matids::definitionMask(L, {2, 3});
+    ASSERT_TRUE(both[1] && both[2] && both[3]);
+    ASSERT_FALSE(both[4]);   // *END
+}

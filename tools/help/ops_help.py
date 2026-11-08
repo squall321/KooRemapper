@@ -554,7 +554,9 @@ materials:
           "덱의 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18)은 재질 블록이 아니다(첫 칸이 TMID · 2026-11-08) — 맞춘 MID 와 같은 번호의",
           "  열 카드는 둘 다 지운다. 예전엔 번호 이름을 그 MID 의 재질로 바꿔 써 같은 MID 가 둘이 되고 thermal: true 면 열 카드가 두 벌이었다",
           "thermal 이 꺼진 재질은 같은 번호 열 카드를 *PART TMID 가 가리키면 남긴다(2026-11-08 — 예전엔 지워 TMID 가 없는 열 재질을 가리켰다) ·",
-          "  [matdb] kept thermal card TMID=n 으로 알린다(바꾸기 전 재질의 열 물성 — DB 것으로 바꾸려면 thermal: true)"])
+          "  [matdb] kept thermal card TMID=n 으로 알린다(바꾸기 전 재질의 열 물성 — DB 것으로 바꾸려면 thermal: true)",
+          "맞춘 재질은 그 MID 의 구조 재질 정의만 지우고 새 카드를 넣는다(2026-11-08) — 한 키워드 아래 쌓인 다른 재질은 둔다(예전엔 블록째 지워",
+          "  쌓인 둘째 재질이 사라졌다). 매칭은 지금도 블록의 첫 카드 재질만 본다"])
 op("matswap", "재료·어셈블리", "MAT+HOURGLASS+CURVE+SECTION 번들을 파트에 통째로 교체", "재질교체 bundle rubber",
    "KooRemapper matswap <config.yaml>\nKooRemapper matswap <model.k> <bundle.k> <pid> <output.k>",
    needs=["examples/matswap/two_cubes.k", "examples/matswap/rubber.k"],

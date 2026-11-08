@@ -73,6 +73,8 @@ struct Removed {
     bool stillUsed = false;
 };
 Removed removeDefinition(std::vector<std::string>& lines, int mid);
+// 같은 규칙으로 지울 줄만 표시한다(줄 차례를 바꾸지 않는 op — matdb 의 지움 표지). 여러 MID 를 한 번에 — 한 블록의 묶음이 다 들면 블록째
+std::vector<bool> definitionMask(const std::vector<std::string>& lines, const std::set<int>& mids);
 
 // 그 MID 의 첫 구조 재질 정의를 newMid 로 — 키워드 줄 · 그 묶음 줄(앞의 주석 포함 · 길이를 모르면 블록 끝까지). MID 칸만 바꾼다(칸 폭 그대로).
 // 없으면 빈 글자.

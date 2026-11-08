@@ -227,6 +227,10 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   를 요구한다 — Vol I *PART), 새 TMID 로 돌리기는 넣을 열 카드가 없다. 아무 파트도 가리키지 않는 열 카드는 예전처럼 지운다(해가 없다).
   `thermal: true` 는 그대로 — 그 번호의 열 카드를 DB 열 카드(TMID = MID)로 바꿔 넣고 그 MID 를 쓰는 파트의 TMID 를 잇는다(남은 틈 — 다른
   MID 의 파트가 같은 TMID 를 가리키면 그 파트도 새 열 물성을 받는다). 회귀 E 4항(4dfe039 에서 E-1 · E-1t 실패 · E-2 · E-3 은 지키는 항).
+- **matdb 의 쌓인 재질(이번에 찾음 · (g) 의 같은 뿌리)** — matdb 는 맞춘 재질 블록을 `[startLine, endLine)` 째 지워, 블록의 첫 카드 MID 가 맞으면
+  같은 키워드 아래 쌓인 둘째 재질까지 지웠다(그 재질을 쓰던 파트가 미정의 재질 · rc 0 · 실측). `matids::definitionMask`(removeDefinition 과
+  같은 규칙 · 줄 차례를 바꾸지 않는 표시 — matdb 의 DEL 표지)로 맞춘 MID 의 묶음만 지운다. 묶음이 하나인 블록은 예전과 같은 줄을 지운다(산출
+  같음). 매칭(`md_scanMatBlocks`)은 지금도 블록의 첫 카드만 본다 — 쌓인 둘째 재질은 `mid:` 규칙으로 고를 수 없다(남은 틈). 회귀 E-4(4dfe039 에서 실패).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

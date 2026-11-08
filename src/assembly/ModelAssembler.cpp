@@ -13664,11 +13664,12 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     // 6. Remove old MAT blocks (mark with sentinel, reverse order)
     // Also remove existing thermal blocks for matched MIDs
     const std::string DEL = "\x01""DEL";
-    for (int bi = (int)matBlocks.size() - 1; bi >= 0; --bi) {
-        auto& blk = matBlocks[bi];
-        if (matchedMids.find(blk.mid) == matchedMids.end()) continue;
-        for (int li = blk.startLine; li < blk.endLine && li < (int)rawLines_.size(); ++li)
-            rawLines_[li] = DEL;
+    // 맞춘 MID 의 구조 재질 정의만 지운다 — 한 키워드 아래 쌓인 다른 재질은 둔다(공용 재질 훑기 `matids` · 11-08 (g)). 예전엔 블록의 첫 카드
+    // MID 가 맞으면 블록째 지워 쌓인 둘째 재질이 사라졌다(그 재질을 쓰던 파트가 미정의 재질 · rc 0). 블록의 묶음이 다 맞으면 블록째다
+    {
+        const auto cut = matids::definitionMask(rawLines_, matchedMids);
+        for (size_t li = 0; li < cut.size(); ++li)
+            if (cut[li]) rawLines_[li] = DEL;
     }
 
     // 6b. Strip pre-existing damping cards when any damping rescale option is

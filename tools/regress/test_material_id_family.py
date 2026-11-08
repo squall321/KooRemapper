@@ -18,7 +18,8 @@
     MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
   B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
   C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
-  E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다)
+  E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다) ·
+    E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -439,6 +440,21 @@ def part_e(binary, tmp):
         else:
             ok = rc == 0 and cards == want_cards and (tm == 1 if want_cards else True)
         check("E-%s matdb %s — %s" % (tag, kw, why), ok, (rc, cards, tm, out[-300:]))
+
+    # 쌓인 재질 묶음 — MID 1 만 바꾸면 같은 블록의 MID 9(PID 2 가 쓴다)는 남는다(예전 블록째 지워 재질 9 가 미정의 · rc 0)
+    d = fresh(tmp, "e4")
+    box(binary, d, "*PART\nSECOND\n         2         1         9\n")
+    p = os.path.join(d, "box.k")
+    body = open(p, encoding="utf-8").read()
+    open(p, "w", encoding="utf-8").write(re.sub(r"(\*MAT_ELASTIC\n(?:\$.*\n)*)(\s+1\s+\S+.*\n)",
+                                                lambda m: m.group(1) + m.group(2) + EL % 9, body, count=1))
+    os.makedirs(os.path.join(d, "materials"))
+    shutil.copy(os.path.join(REPO, "materials", "material_db.json"), os.path.join(d, "materials"))
+    open(os.path.join(d, "m.yaml"), "w").write("model: box.k\noutput: o.k\nmat_type: MAT_ELASTIC\nmaterials:\n  - mid: 1\n    match: \"SUS304\"\n")
+    rc, out = run(binary, d, "matdb", "m.yaml")
+    rc2, out2 = run(binary, d, "info", "--strict", "o.k") if rc == 0 else (None, "")
+    check("E-4 matdb 쌓인 재질 묶음(MID 1 · 9) — MID 1 만 바꾸고 MID 9 는 남긴다 · --strict rc 0(예전 블록째 지워 재질 9 미정의)",
+          rc == 0 and elastic_rows(os.path.join(d, "o.k")).count(9) == 1 and rc2 == 0, (rc, elastic_rows(os.path.join(d, "o.k")), rc2, out2[-200:]))
 
 
 def main():

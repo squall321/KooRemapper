@@ -174,29 +174,46 @@ std::map<int, std::vector<size_t>> definitionLines(const std::vector<std::string
     return out;
 }
 
+namespace {
+
+// 그 MID 들의 구조 재질 정의를 지울 줄 표시 — 길이를 아는 묶음은 그 묶음 줄만, 블록의 묶음이 다 지워지면(못 가른 자리 없이) 키워드 줄째
+// (빈 재질 키워드를 남기지 않는다), 길이를 모르는 첫 묶음은 블록째(예전 그대로 — 뒤에 쌓인 재질이 있는지 모른다), 길이를 모르는 쌓인
+// 묶음은 그 자리부터 블록 끝까지. `sets` 에 지운 묶음 수를 더한다
+std::vector<bool> maskFor(const Scan& s, size_t n, const std::set<int>& mids, int* sets) {
+    std::vector<bool> cut(n, false);
+    std::map<size_t, std::set<size_t>> hits;   // 블록 → 지울 묶음
+    for (int mid : mids) {
+        const auto it = s.defs.find(mid);
+        if (it == s.defs.end()) continue;
+        for (const auto& [b, k] : it->second) hits[b].insert(k);
+    }
+    for (const auto& [b, ks] : hits) {
+        const Block& blk = s.blocks[b];
+        bool whole = !blk.remainder && ks.size() == blk.sets.size();
+        if (ks.count(0) && !blk.sets[0].exact) whole = true;
+        if (whole) {
+            for (size_t l = blk.keyword; l < blk.end && l < n; ++l) cut[l] = true;
+        } else {
+            for (size_t k : ks) {
+                const size_t to = blk.sets[k].exact ? blk.sets[k].last + 1 : blk.end;
+                for (size_t l = blk.sets[k].first; l < to && l < n; ++l) cut[l] = true;
+            }
+        }
+        if (sets) *sets += static_cast<int>(ks.size());
+    }
+    return cut;
+}
+
+}  // namespace
+
+std::vector<bool> definitionMask(const std::vector<std::string>& lines, const std::set<int>& mids) {
+    return maskFor(scan(lines), lines.size(), mids, nullptr);
+}
+
 Removed removeDefinition(std::vector<std::string>& lines, int mid) {
     Removed r;
-    const Scan s = scan(lines);
-    const auto it = s.defs.find(mid);
-    if (it != s.defs.end()) {
-        std::vector<bool> cut(lines.size(), false);
-        std::map<size_t, size_t> hits;   // 블록 → 지울 묶음 수
-        for (const auto& [b, k] : it->second) ++hits[b];
-        for (const auto& [b, n] : hits) {
-            const Block& blk = s.blocks[b];
-            // 블록의 묶음이 다 지워지면(못 가른 자리 없이) 키워드 줄째 — 빈 재질 키워드를 남기지 않는다. 길이를 모르는 첫 묶음도 블록째다
-            // (예전 그대로 — 그 뒤에 쌓인 재질이 있는지 모른다)
-            bool whole = !blk.remainder && n == blk.sets.size();
-            for (const auto& [b2, k] : it->second)
-                if (b2 == b && k == 0 && !blk.sets[k].exact) whole = true;
-            for (const auto& [b2, k] : it->second) {
-                if (b2 != b) continue;
-                // 길이를 모르는 쌓인 묶음(앞 묶음은 갈랐다)은 그 자리부터 블록 끝까지 — 그 묶음의 끝을 모른다
-                const size_t to = blk.sets[k].exact ? blk.sets[k].last + 1 : blk.end;
-                for (size_t l = whole ? blk.keyword : blk.sets[k].first; l < (whole ? blk.end : to); ++l) cut[l] = true;
-            }
-            r.sets += static_cast<int>(n);
-        }
+    const auto cut = maskFor(scan(lines), lines.size(), {mid}, &r.sets);
+    if (r.sets > 0) {
         std::vector<std::string> keep;
         keep.reserve(lines.size());
         for (size_t l = 0; l < lines.size(); ++l)
