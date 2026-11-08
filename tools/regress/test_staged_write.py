@@ -691,7 +691,9 @@ def sec_u(binary):
     # U-2 깨진 바이트의 모르는 키워드(버리고 dropped_keywords 에 센다) · U-3 CP949 이름의 모델
     d = ep_dir("U2", deck=shell_deck().replace("*END\n", ""))
     with open(os.path.join(d, "in.k"), "ab") as f:
-        f.write(b"*" + cp949 + b"_CARD\n        1\n*END\n")
+        # 키워드 줄은 1열 `*` 다음이 글자다(리더 `KFileReader::isKeywordLine` 규칙 · 01ef094) — `*` 바로 뒤가 깨진 바이트면 키워드가 아니라
+        # 앞 블록의 데이터다. 깨진 바이트는 이름 가운데에 둔다
+        f.write(b"*K" + cp949 + b"_CARD\n        1\n*END\n")
     rc, out, _ = ep(binary, d)
     rep = strict_report(os.path.join(d, "r.json"))
     keys = list((rep or {}).get("dropped_keywords", {}))
