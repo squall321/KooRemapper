@@ -12,6 +12,7 @@
 #include "parser/IncludeClosure.h"
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
+#include "util/RelPath.h"   // relpathOf — 주 덱 폴더 기준 상대 경로(assemble battery 의 *INCLUDE 이름과 같은 셈)
 #include "util/Sha256.h"
 #include "util/Validator.h"
 #include "validation/ElementQualityChecker.h"
@@ -437,16 +438,6 @@ long long perElementThickness(const std::vector<std::string>& L, const Mesh& m, 
     return n;
 }
 
-// 주 덱 폴더 기준 상대 경로 — `/` · `.` · `..` 를 정규화한다(StepForge `os.path.relpath(p, main_dir)` 와 같은 꼴 · 링크는 풀지 않는다)
-std::string relpathOf(const std::string& path, const std::string& mainDir) {
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path a = fs::absolute(path, ec).lexically_normal();
-    const fs::path b = fs::absolute(mainDir.empty() ? std::string(".") : mainDir, ec).lexically_normal();
-    const fs::path r = a.lexically_relative(b);
-    return r.empty() ? a.generic_string() : r.generic_string();
-}
-
 // 덱의 인클루드 닫힘 — LS-DYNA 가 읽는 차례로 파일마다 {주 덱 폴더 기준 상대 경로, 바이트 전부의 sha256}(판 2 `deck.includes` 와 같은 꼴).
 // changed 를 주면 잰 바이트가 닫힘이 담은 줄(`files[].lines`)을 내지 않는 파일(닫힘을 읽은 뒤 바뀌었다)의 상대 경로를 담는다
 std::vector<carryover::IncludeEntry> closureEntries(const include_closure::Closure& c, const std::string& mainPath,
@@ -455,7 +446,7 @@ std::vector<carryover::IncludeEntry> closureEntries(const include_closure::Closu
     const std::string dir = deckscan::dirOf(mainPath);
     for (const auto& f : c.files) {
         carryover::IncludeEntry e;
-        e.relpath = relpathOf(f.path, dir);
+        e.relpath = util::relpathOf(f.path, dir);   // 주 덱 폴더 기준(StepForge os.path.relpath 와 같은 꼴 · util/RelPath.h)
         std::string bytes;
         if (!readBytes(f.path, bytes)) {
             e.sha256 = "(읽지 못했다)";
@@ -657,7 +648,7 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         if (o.file == include_closure::LineOrigin::kMain || o.file >= entries.size()) return "줄 " + std::to_string(o.line + 1);
         return entries[o.file].relpath + " 줄 " + std::to_string(o.line + 1);
     };
-    auto relOfPath = [&](const std::string& path) { return relpathOf(path, deckscan::dirOf(baseModelPath_)); };
+    auto relOfPath = [&](const std::string& path) { return util::relpathOf(path, deckscan::dirOf(baseModelPath_)); };
     for (const auto& a : plan.added) {
         carryover::AddedResult ar;
         ar.name = a.name;

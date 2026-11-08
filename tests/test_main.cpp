@@ -20,6 +20,8 @@
 #include "test_StressTensor.cpp"
 // StepForge 이월 계획 리더(계획 · 변위장 · 조각 · 보고) — 2026-11-07
 #include "test_CarryoverPlan.cpp"
+// 주 덱 폴더 기준 상대 경로 공용 함수 — 2026-11-08(이월 적용 · assemble battery 가 같이 쓴다)
+#include "test_RelPath.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;

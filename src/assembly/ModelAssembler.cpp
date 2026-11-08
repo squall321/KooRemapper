@@ -28,6 +28,7 @@
 #include "util/Validator.h"
 #include "util/ContactKeywords.h"
 #include "util/YamlComment.h"          // yamlResolvePath — YAML 안 상대 경로 공통 규칙
+#include "util/RelPath.h"              // relpathOf — 주 덱 폴더 기준 상대 경로(이월 적용과 같은 셈)
 #include "commands/contact_helpers.h"   // ct_getPreset — 단독 contact 와 같은 짧은 이름 표
 #include <filesystem>
 #include <fstream>
@@ -409,13 +410,7 @@ static std::string ma_includeName(const std::string& path, const std::string& de
     const bool writtenAbs = !written.empty() && (written[0] == '/' || written[0] == '\\' ||
                                                  (written.size() >= 2 && written[1] == ':'));
     if (path.empty() || writtenAbs) return path;
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path a = fs::absolute(path, ec).lexically_normal();
-    fs::path b = fs::absolute(deckDir.empty() ? std::string(".") : deckDir, ec).lexically_normal();
-    if (!b.has_filename()) b = b.parent_path();   // `.` 이 남긴 끝 `/`
-    const fs::path r = a.lexically_relative(b);
-    return r.empty() ? path : r.generic_string();
+    return util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
 }
 
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
