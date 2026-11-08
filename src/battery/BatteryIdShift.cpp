@@ -241,7 +241,7 @@ struct Walker {
         }
         if (k == "*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID" || k == "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID" ||
             k == "*CONTACT_TIED_SURFACE_TO_SURFACE_ID") {
-            if (!count(kwLine, c, 4, 6)) return false;   // ID · Card 1 · 2 · 3 (+ A · B)
+            if (!count(kwLine, c, 4, 7)) return false;   // ID · Card 1 · 2 · 3 (+ 선택 Card A · B · C)
             if (!shift(c[0], 0, 10, FAM_CONTACT, true, "CID") || !contactSide(c[1], 0, 20, "SSID") ||
                 !contactSide(c[1], 10, 30, "MSID") || !zero(c[1], 40, 10, "SBOXID") || !zero(c[1], 50, 10, "MBOXID"))
                 return false;
@@ -252,7 +252,19 @@ struct Walker {
                     return false;
                 if (depth < 0 || bsort < 0) return fail(c[4], "DEPTH · BSORT 가 음수(곡선 번호) — 옮기는 규칙을 모른다");
             }
-            if (c.size() > 5 && !shift(c[5], 20, 10, FAM_CURVE, false, "LCBCKT")) return false;   // Card B
+            // Card B(PENMAX THKOPT SHLTHK SNLOG ISYM I2D3D SLDTHK SLDSTF)에는 번호 칸이 없다. ★예전엔 그 21~30열을 LCBCKT(MPP Card 1
+            //   의 칸)로 보고 곡선처럼 옮겼다 — 매뉴얼의 Card B 에서 그 칸은 SHLTHK 다(2026-11-08 · 6차 검토 P2)
+            if (c.size() > 6) {   // Card C — IGAP IGNORE DPRFAC DTSTIF EDGEK (빈 칸) FLANGL CID_RCF
+                const std::string t = trimmed(cell(c[6], 20, 10));
+                if (!t.empty()) {
+                    char* end = nullptr;
+                    const double v = std::strtod(t.c_str(), &end);
+                    if (end == t.c_str() || *end != '\0') return fail(c[6], "DPRFAC 칸 「" + t + "」 을 수로 읽지 못했다");
+                    if (v >= 1.0 || v <= -1.0)
+                        return fail(c[6], "DPRFAC " + t + " 은 세트 · 곡선 번호다(|값| ≥ 1) — 옮기는 규칙을 모른다");
+                }
+                if (!zero(c[6], 70, 10, "CID_RCF(좌표계)")) return false;
+            }
             return true;
         }
         if (k == "*BOUNDARY_SPC_NODE") {

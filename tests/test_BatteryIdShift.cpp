@@ -173,3 +173,41 @@ TEST(BatteryIdShift_준_오프셋은_실제로_겹치거나_상한을_넘을_때
     ASSERT_FALSE(bat::placeBatteryIds(bat::FAM_ELEM, {1, 8282}, {}, 99999990, "elem_id_offset", by, why));
     ASSERT_TRUE(why.find("상한") != std::string::npos);
 }
+
+// ── 접촉 선택 카드(2026-11-08 · 6차 검토 P2) — Card B 에 번호 칸이 없고 Card C 는 DPRFAC · CID_RCF 만 본다 ─────────────────────
+TEST(BatteryIdShift_접촉_Card_B_의_21_30열은_SHLTHK_라_옮기지_않는다) {
+    const std::string deck =
+        "*KEYWORD\n*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n         2\n"
+        "       102         0         2         0         0         0         0         0\n"
+        "         0         0         0         0        20         0         0     1e+20\n"
+        "     1.000     1.000    0.0100    0.0100     1.000     1.000     1.000     1.000\n"
+        "         2    0.0040         0    1.3750     3.000         5         0         1\n"
+        "    0.0000         0         1         0         0         0    0.0000    0.0000\n"
+        "         1         1    0.0000    0.0000    0.0000              0.0000         0\n*END\n";
+    std::string out, err;
+    bat::ShiftResult res;
+    // 곡선을 옮겨도 Card B 의 SHLTHK(1)는 그대로다 — 예전엔 그 칸을 LCBCKT 로 보아 1 → 9001 로 바꿨다
+    ASSERT_TRUE(bat::shiftBatteryIds(deck, shiftOf(0, 0, 0, 0, 0, 100, 0, 9000), out, res, err));
+    ASSERT_TRUE(out.find("    0.0000         0         1         0") != std::string::npos);
+    ASSERT_TRUE(out.find("         1         1    0.0000") != std::string::npos);   // Card C 그대로
+}
+
+TEST(BatteryIdShift_접촉_Card_C_의_DPRFAC_번호_좌표계는_거절한다) {
+    const std::string head =
+        "*KEYWORD\n*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n         2\n"
+        "       102         0         2         0         0         0         0         0\n"
+        "         0         0         0         0        20         0         0     1e+20\n"
+        "     1.000     1.000    0.0100    0.0100     1.000     1.000     1.000     1.000\n"
+        "         2    0.0040         0    1.3750     3.000         5         0         1\n"
+        "    0.0000         0         0         0         0         0    0.0000    0.0000\n";
+    std::string out, err;
+    bat::ShiftResult res;
+    ASSERT_TRUE(bat::shiftBatteryIds(head + "         1         1    0.5000    0.0000    0.0000              0.0000         0\n*END\n",
+                                     bat::IdShift{}, out, res, err));   // 0 < DPRFAC < 1 은 계수다
+    ASSERT_FALSE(bat::shiftBatteryIds(head + "         1         1    2.0000    0.0000    0.0000              0.0000         0\n*END\n",
+                                      bat::IdShift{}, out, res, err));   // ≥ 1 은 세트 번호
+    ASSERT_TRUE(err.find("DPRFAC") != std::string::npos);
+    ASSERT_FALSE(bat::shiftBatteryIds(head + "         1         1    0.0000    0.0000    0.0000              0.0000         5\n*END\n",
+                                      bat::IdShift{}, out, res, err));   // CID_RCF — 좌표계는 옮기는 규칙을 모른다
+    ASSERT_TRUE(err.find("CID_RCF") != std::string::npos);
+}

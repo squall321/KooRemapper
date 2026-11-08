@@ -4279,6 +4279,16 @@ KooRemapper battery <config.yaml>
 > (절대 경로로 주면 그 절대 경로)이 적혀 솔버가 찾지 못했습니다.) 자동 계산은 `batch.phases` 에 1 과 2 가 다 있을 때만입니다 —
 > 홑 실행에서 `dynain_file` 을 비우면 `use_dynain: true` 여도 `*INCLUDE_DYNAIN` 을 쓰지 않고, 그 덱 이름을 적은 **[WARN]** 으로
 > 알립니다(assemble 의 battery · 자동 이름이 없는 batch 조합도 같다 — 2026-11-08 전엔 말이 없었습니다). 이름을 지어내지는 않습니다.
+>
+> **접촉의 선택 카드(2026-11-08 · 물성이 바뀐다)**: 자동 접촉(셀 자기 접촉 `SOFT=2` · 적층 압입자 접촉 `SOFT=1`)은 매뉴얼 차례
+> (Vol_I `*CONTACT` — ID · Card 1~3 · 선택 Card A · B · C)대로 Card A(SOFT SOFSCL … — 그대로) 다음에 **Card B 를 기본값**(PENMAX 0.0 ·
+> 나머지 0)으로, **Card C 의 IGNORE = 1**(처음 겹침을 따라간다 · IGAP 1 · 나머지 0)을 씁니다. 2026-11-08 전엔 MPP Card 1 꼴의 줄
+> (`IGNORE BCKT LCBCKT NS2TRK INITITR …` = `1 0 0 0 0 0 0`)을 Card A 바로 뒤 — Card B 자리 — 에 써서 LS-DYNA 가 그 줄을 **PENMAX = 1** 로
+> 읽고 IGNORE 는 어디에도 없었습니다(LS-PrePost 4.12 로 다시 써 보면 `penmax 1.0` 으로 나옵니다). PENMAX 는 자동 접촉의 최대 관통
+> 깊이 계수라(기본 0.4 — 셸 · 솔리드, SMP) 접촉이 놓아 주는 깊이가 바뀌었습니다. 셀 자기 접촉(`SOFT=2`)은 IGNORE 와 상관없이 처음
+> 겹침을 무시하므로(Vol_I Card C Remark 3) IGNORE 가 새로 먹는 곳은 적층 압입자 접촉입니다. 권취 압입자 접촉은 Card A 만 씁니다(그대로).
+> assemble 이 번호를 옮길 때도 그 줄의 21~30열을 LCBCKT(곡선)로 보아 옮기던 것을 그만둡니다(Card B 의 그 칸은 SHLTHK) — Card C 의
+> DPRFAC 가 번호(|값| ≥ 1)이거나 CID_RCF 가 0 이 아니면 옮기지 않고 거절합니다. 회귀 `tools/regress/test_battery_contact_optional_cards.py`.
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 

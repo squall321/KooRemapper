@@ -257,10 +257,8 @@ def facts(blocks):
                 t = num(c1, tc, tc + 10)
                 if t != 5:
                     r(STYP[t], num(c1, idc, idc + 10))
-            if len(ls) > c0 + 3:
+            if len(ls) > c0 + 3:   # Card A 의 LCIDAB — Card B(PENMAX …)에는 번호 칸이 없다(2026-11-08 · P2 — 예전엔 그 21~30열을 곡선으로 셌다)
                 r("curve", num(ls[c0 + 3], 20, 30))
-            if len(ls) > c0 + 4:
-                r("curve", num(ls[c0 + 4], 20, 30))
         elif kw == "*BOUNDARY_SPC_NODE":
             for l in ls:
                 r("node", num(l, 0, 10))

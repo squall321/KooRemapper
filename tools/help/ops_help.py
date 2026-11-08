@@ -139,6 +139,8 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
           "  (자동 dynain_file 도 같은 규칙 — 폴더 없는 덱 옆 이름, batch.phases 에 1 · 2 가 다 있을 때만. 2026-11-07 전엔 다른 폴더의",
           "  YAML 이면 그 폴더가 붙었다). 그래도 두 조합이 같은 이름이면(tiers: [0, 0.2] · phases: [1, 3]) 아무 덱도 쓰지 않고 rc 1 로",
           "  겹친 조합을 짚는다(2026-11-07 전엔 종류도 이름에 없어 뒤 조합이 덮고 rc 0)",
+          "자동 접촉은 Card A 뒤에 Card B(기본값 — PENMAX 0.0)와 Card C(IGNORE 1)를 매뉴얼 차례로 쓴다(2026-11-08 — 예전엔 MPP Card 1",
+          "  꼴의 줄을 Card B 자리에 써서 LS-DYNA 가 PENMAX = 1 로 읽고 IGNORE 는 먹지 않았다 · 물성이 바뀐다)",
           "use_dynain: true 인데 dynain_file 이 비었고 자동 이름도 없으면(홑 실행 · assemble · phases 에 1 · 2 가 다 있지 않은 batch)",
           "  *INCLUDE_DYNAIN 을 쓰지 않고 그 덱 이름을 [WARN] 으로 알린다(2026-11-08 전엔 말없이 빠졌다)",
           "batch 의 조합 하나라도 못 만들면(쓸 수 없는 경로 · 모르는 model_type) 나머지는 끝까지 만들고 rc 1 · 못 만든 조합과 덱 이름을",

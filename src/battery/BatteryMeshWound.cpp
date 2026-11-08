@@ -1686,10 +1686,15 @@ void WoundMeshGen::flushContacts() {
     snprintf(buf, sizeof(buf), "%10d%10.4f%10d%10.4f%10.3f%10d%10d%10d\n",
              2, sofscl, 0, 1.375, 3.0, 5, 0, 1);
     out_ << buf;
-    // Card C: IGNORE=1
-    out_ << "$#  ignore      bckt    lcbckt   ns2trk    initrk   partefx    cparm8\n";
-    snprintf(buf, sizeof(buf), "%10d%10d%10d%10d%10d%10d%10d\n",
-             1, 0, 0, 0, 0, 0, 0);
+    // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
+    //   Card C 를 쓰려면 Card B 가 와야 한다 — Card B 는 기본값(PENMAX 0.0 = 형의 기본 · 나머지 0). Card C 의 IGNORE=1 은 처음 겹침을
+    //   따라간다(automatic 접촉). ★예전엔 MPP Card 1 꼴(IGNORE BCKT LCBCKT NS2TRK INITITR …)을 Card B 자리에 써서 LS-DYNA 가
+    //   PENMAX=1 로 읽고 IGNORE 는 먹지 않았다
+    out_ << "$#  penmax    thkopt    shlthk     snlog      isym     i2d3d    sldthk    sldstf\n";
+    snprintf(buf, sizeof(buf), "%10.4f%10d%10d%10d%10d%10d%10.4f%10.4f\n", 0.0, 0, 0, 0, 0, 0, 0.0, 0.0);
+    out_ << buf;
+    out_ << "$#    igap    ignore    dprfac    dtstif     edgek              flangl   cid_rcf\n";
+    snprintf(buf, sizeof(buf), "%10d%10d%10.4f%10.4f%10.4f%10s%10.4f%10d\n", 1, 1, 0.0, 0.0, 0.0, "", 0.0, 0);
     out_ << buf;
 }
 
