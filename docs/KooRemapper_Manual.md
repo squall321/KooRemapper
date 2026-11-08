@@ -2233,6 +2233,10 @@ materials:                # 개별 규칙 (선택)
 - 덱에 이미 있는 열 재질(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`*MAT_T18`)은 **재질 블록이 아니다** — 첫 칸이 TMID 다(§11 · 2026-11-08).
   맞춘 MID 와 같은 번호의 열 카드는 이름 꼴이든 번호 이름이든 지운다. 예전엔 번호 이름을 그 MID 의 재질로 읽어 구조 재질 카드로 바꿔
   쓰고(같은 MID 가 둘) `thermal: true` 면 열 카드를 두 벌 넣었다
+- `thermal` 이 꺼진 재질은 같은 번호의 열 카드를 **`*PART` TMID 가 가리키면 남긴다**(2026-11-08) — 새 열 카드를 넣지 않으니 지우면 `*PART` TMID 가
+  없는 열 재질을 가리킨다(예전 동작). 남긴 열 물성은 바꾸기 전 재질의 것이라 `[matdb] kept thermal card TMID=n` 으로 알린다 — DB 열 물성으로
+  바꾸려면 `thermal: true`. 아무 파트도 가리키지 않는 열 카드는 예전처럼 지운다. `thermal: true` 면 그 번호의 열 카드를 DB 열 카드(TMID = MID)로
+  바꿔 넣고 그 MID 를 쓰는 파트의 TMID 를 잇는다(회귀 `test_material_id_family.py` E)
 
 ---
 

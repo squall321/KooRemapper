@@ -18,6 +18,7 @@
     MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
   B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
   C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
+  E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -389,6 +390,57 @@ def part_c(binary, tmp):
           rc == 0 and midf == "        10" and ro.strip().lower().startswith("7.85"), (rc, kw, repr(midf), repr(ro), out[-300:]))
 
 
+def part_tmids(path):
+    """`*PART` 데이터 줄의 TMID(여덟째 칸) — PID → TMID."""
+    L = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) else []
+    out, on, title = {}, False, False
+    for l in L:
+        if l.startswith("*"):
+            on = l.strip().upper() in ("*PART", "*PART_TITLE")
+            title = on
+            continue
+        if not on or l.startswith("$") or not l.strip():
+            continue
+        if title:
+            title = False
+            continue
+        f = [l[k:k + 10].strip() for k in range(0, 80, 10)]
+        if f[0].isdigit():
+            out[int(f[0])] = int(f[7]) if f[7].isdigit() else 0
+        title = True
+    return out
+
+
+def part_e(binary, tmp):
+    print("[E matdb thermal: false — *PART TMID 가 가리키는 열 카드는 지우지 않는다]")
+    th = "*MAT_THERMAL_ISOTROPIC\n         1       0.0       0.0       0.0\n       1.0       1.0\n"
+    tmid1 = lambda b: b.replace("         1         1         1\n", "         1         1         1         0         0         0         0         1\n", 1)
+    for tag, kw, edit, extra, want_cards, why in (
+            ("1", "*MAT_THERMAL_ISOTROPIC", tmid1, "", [1], "PART TMID 1 이 가리킨다 — 남긴다(예전 지워 TMID 가 없는 열 재질을 가리켰다)"),
+            ("1t", "*MAT_T01", tmid1, "", [1], "번호 이름 *MAT_T01 도 같다"),
+            ("2", "*MAT_THERMAL_ISOTROPIC", lambda b: b, "", [], "아무 파트도 안 가리킨다 — 예전처럼 지운다"),
+            ("3", "*MAT_THERMAL_ISOTROPIC", tmid1, "thermal: true\n", None, "thermal: true — DB 열 카드로 바꿔 넣는다(한 벌 · TMID 1)")):
+        d = fresh(tmp, "e" + tag)
+        card = th if kw == "*MAT_THERMAL_ISOTROPIC" else th.replace("*MAT_THERMAL_ISOTROPIC", "*MAT_T01")
+        box(binary, d, card)
+        p = os.path.join(d, "box.k")
+        body = open(p, encoding="utf-8").read()
+        open(p, "w", encoding="utf-8").write(edit(body))
+        os.makedirs(os.path.join(d, "materials"))
+        shutil.copy(os.path.join(REPO, "materials", "material_db.json"), os.path.join(d, "materials"))
+        open(os.path.join(d, "m.yaml"), "w").write("model: box.k\noutput: o.k\nmat_type: MAT_ELASTIC\n" + extra +
+                                                   "materials:\n  - mid: 1\n    match: \"SUS304\"\n")
+        rc, out = run(binary, d, "matdb", "m.yaml")
+        o = os.path.join(d, "o.k")
+        cards = first_ids(o, kw) if tag != "3" else first_ids(o, "*MAT_THERMAL_ISOTROPIC")
+        tm = part_tmids(o).get(1)
+        if tag == "3":
+            ok = rc == 0 and cards == [1] and tm == 1
+        else:
+            ok = rc == 0 and cards == want_cards and (tm == 1 if want_cards else True)
+        check("E-%s matdb %s — %s" % (tag, kw, why), ok, (rc, cards, tm, out[-300:]))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -401,6 +453,7 @@ def main():
         part_a(binary, tmp)
         part_b(binary, tmp)
         part_c(binary, tmp)
+        part_e(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()
