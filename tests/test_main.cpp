@@ -20,6 +20,8 @@
 #include "test_StressTensor.cpp"
 // StepForge 이월 계획 리더(계획 · 변위장 · 조각 · 보고) — 2026-11-07
 #include "test_CarryoverPlan.cpp"
+// 임시 파일 + 바꿔 넣기 공용 도우미(extract-parts · apply_carryover_plan) — 2026-11-08
+#include "test_StagedWrite.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;
