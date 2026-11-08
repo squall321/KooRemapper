@@ -107,7 +107,7 @@ std::map<int, std::string> cur_scanSectionIds(const std::vector<std::string>& li
 // 한 키워드 아래 묶음 한 벌의 데이터 줄 수(묶음마다 오는 `_TITLE` 제목 줄은 뺀다)를 매뉴얼이 Card 1 칸으로 정하는 꼴만 다 읽는다 —
 //   `*SECTION_SOLID` 1(ELFORM 101~105 는 모름) · `*SECTION_SHELL` 2 + ICOMP 1 이면 각도 카드 ceil(NIP/8)(NIP 0 = 2 점 · ELFORM 101~105 는
 //   모름) · `*SECTION_TSHELL` 1 + 같은 각도 카드. ICOMP 가 0 · 1 밖이거나 칸이 정수가 아니면 모름. 정수 칸은 10진 실수 꼴의 정수도 받는다
-//   (`carryover::integralField` — NIP `5.000e+00`). 빈 줄도 카드다(끝의 빈 줄만 여백) · `$` 주석은 건너뛴다.
+//   (`carryover::integralField` — NIP `5.000e+00`). 빈 줄도 카드다(끝의 빈 줄만 여백) · 1열의 `$` 주석은 건너뛴다(들여쓴 `$` 줄은 데이터 · 11-08).
 // 그 밖의 꼴(보 · 이산 · SPH · EFG · SPG · PERI · IGA …)과 묶음을 못 가른 자리(행 수를 모름 · 묶음의 SECID 칸이 숫자가 아님)부터는 행마다 첫
 // 칸의 숫자를 넉넉히 센다(`loose` — 그 블록의 SECID 는 그 안 어느 행의 첫 칸이다 · StepForge `secid_bound`). 예전엔 모든 블록의 모든 행을
 // 넉넉히 세어 제목(`2024` · `12 mm plate`) · 정수 두께(`12`) · 정수 각도(`90`)가 「가장 큰 SECID」 가 되었다 — 정상 계획의 새 섹션을
@@ -135,9 +135,21 @@ int cur_sectionSetRows(const std::string& base, const std::string& card1, int w)
     return (base == "*SECTION_SHELL" ? 2 : 1) + static_cast<int>(angles);
 }
 
-// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 숫자만이면 그 값 — StepForge 의 `raw[:10].strip().isdigit()`(공용 `deckscan::digitsField` —
-// 재질 MID 훑기 `matids` 가 둘째 소비자다)
+// 줄의 첫 칸(고정폭 w · 콤마 줄은 첫 콤마 앞)이 정수 글자면 그 값 — 부호 `+` · 앞의 0 · 칸 폭을 다 채운 수도 받는다(공용 `deckscan::digitsField` —
+// 재질 MID 훑기 `matids` 가 둘째 소비자다). 못 가른 자리의 넉넉한 셈이 쓴다 — 실수 꼴은 세지 않는다(두께 `2.0` 과 가를 수 없다)
 bool cur_digitsField(const std::string& l, int w, int& v) { return deckscan::digitsField(l, w, v); }
+
+// 묶음의 SECID 칸(자리를 안다 — Card 1 첫 칸) — 정수 글자(`cur_digitsField`)에 더해 실수 꼴의 정수 값(`6.0` · `6.000e+00`)도 그 정수로 읽는다.
+// 옛 첫 카드 셈(`cur_scanSectionDefs` — 공백 토큰)과 리더(`KFileReader::parseInt`)가 `6.0` 을 6 으로 읽고, 정수 칸의 실수 꼴은 이 리포가
+// `carryover::integralField` 하나로 읽는다(NIP `5.000e+00` · D-681). 예전엔 쌓인 묶음의 `7.0` 을 못 읽어 그 자리부터 넉넉히 셌는데 그 셈도
+// 실수를 안 세어 SECID 7 을 놓쳤다 — 이월 적용이 「9.0」 옆에 새 섹션 9 를 썼다(적대적 검토 11-08 S8)
+bool cur_setIdField(const std::string& l, int w, int& v) {
+    if (cur_digitsField(l, w, v)) return true;
+    long long x = 0;
+    if (!carryover::integralField(deckscan::firstField(l, w), x) || x <= 0 || x > std::numeric_limits<int>::max()) return false;
+    v = static_cast<int>(x);
+    return true;
+}
 
 CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
     CurSectionSets out;
@@ -152,7 +164,10 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
         for (; j < lines.size(); ++j) {
             const size_t h = lines[j].find_first_not_of(" \t\r");
             if (h != std::string::npos && lines[j][h] == '*') break;
-            if (h != std::string::npos && lines[j][h] == '$') continue;
+            // 주석은 **1열의 `$`** 뿐이다(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」 · 리더 `isCommentLine` 과 같다) —
+            // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴 정수도
+            // 받게 되자(S8) 둘째 카드의 두께 `1.0` 을 SECID 1 로 읽어 진짜 SECID 2 를 놓쳤다(새 섹션이 2 를 다시 냈다 · 11-08 S8 의 퇴행)
+            if (!lines[j].empty() && lines[j][0] == '$') continue;
             rows.push_back(j);
         }
         if (kw.rfind("*SECTION_", 0) != 0) { i = j; continue; }
@@ -176,11 +191,14 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
         for (size_t a : starts) {
             if (a + t >= rows.size()) break;
             int sid = 0;
-            if (!cur_digitsField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 숫자가 아니다
+            if (!cur_setIdField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 수가 아니다
             out.defs[sid].emplace_back(rows[a + t], kw);
         }
+        // 넉넉한 셈은 못 가른 묶음의 **제목 줄 다음**부터 — `rest` 는 늘 묶음의 첫 줄이고 `_TITLE` 이면 그 줄은 꼴을 몰라도 제목이다(LS-DYNA ·
+        // StepForge 리더). 예전엔 그 줄부터 세어 `*SECTION_SEATBELT_TITLE` 의 제목 `2024` 가 가장 큰 SECID 가 되었다 — 이월 적용이 정상 계획을
+        // secid_order 로 거절하고 커서가 2025 로 뛰었다(적대적 검토 11-08 S10). 그 뒤에 쌓인 묶음의 제목은 자리를 몰라 그대로 센다(남은 틈 — 넉넉한 쪽)
         if (rest != std::string::npos && !known)
-            for (size_t r = rest; r < rows.size(); ++r) {
+            for (size_t r = rest + t; r < rows.size(); ++r) {
                 int v = 0;
                 if (cur_digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
             }
@@ -13026,9 +13044,11 @@ static int md_readIntField(const std::string& line, int startCol, int width) {
     try { return std::stoi(f); } catch (...) { return 0; }
 }
 
-// `*PART`(· `_TITLE`) 카드가 가리키는 TMID(Card 1 의 여덟째 칸) — matdb 가 열 카드를 지워도 되는지 본다(11-08 (e))
-static std::set<int> md_partTmids(const std::vector<std::string>& lines) {
-    std::set<int> out;
+// `*PART`(· `_TITLE`) 카드의 (PID, MID, TMID — 첫째 · 셋째 · 여덟째 칸) 가운데 TMID 가 있는 것 — matdb 가 열 카드를 지워도 되는지(11-08 (e)) ·
+// 그 열 카드를 다른 MID 의 파트가 가리키는지(S5) 본다
+struct MdPartThermalRef { int pid = 0, mid = 0, tmid = 0; };
+static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::string>& lines) {
+    std::vector<MdPartThermalRef> out;
     bool inPart = false, titleDone = false;
     for (const auto& ln : lines) {
         const std::string tr = mw_trim(ln);
@@ -13045,10 +13065,40 @@ static std::set<int> md_partTmids(const std::vector<std::string>& lines) {
         if (toks.size() > 7) {
             try {
                 const int t = std::stoi(toks[7]);
-                if (t > 0) out.insert(t);
+                if (t > 0) {
+                    MdPartThermalRef r;
+                    r.tmid = t;
+                    try { r.pid = std::stoi(toks[0]); } catch (...) {}
+                    try { r.mid = std::stoi(toks[2]); } catch (...) {}
+                    out.push_back(r);
+                }
             } catch (...) {}
         }
         titleDone = false;   // 같은 *PART 블록의 다음 (제목, 데이터) 짝
+    }
+    return out;
+}
+
+// 열 재질 카드(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18`)가 정의하는 TMID(첫 데이터 줄 첫 칸 · `_TITLE` 이면 제목 다음) — 새 열 카드에
+// 빈 TMID 를 고른다(11-08 S5)
+static std::set<int> md_thermalTmids(const std::vector<std::string>& lines) {
+    std::set<int> out;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const std::string t = mw_trim(lines[i]);
+        if (t.empty() || t[0] != '*' || !cards::isThermalMaterialKeyword(mw_upper(t))) continue;
+        bool title = mw_upper(t).find("_TITLE") != std::string::npos;
+        for (size_t j = i + 1; j < lines.size(); ++j) {
+            const std::string lt = mw_trim(lines[j]);
+            if (lt.empty() || lt[0] == '$') continue;
+            if (lt[0] == '*') break;
+            if (title) { title = false; continue; }
+            const auto toks = mw_tok10(lines[j]);
+            try {
+                const int id = toks.empty() ? 0 : std::stoi(toks[0]);
+                if (id > 0) out.insert(id);
+            } catch (...) {}
+            break;
+        }
     }
     return out;
 }
@@ -13764,10 +13814,48 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     std::set<int> thermalOnMids;
     for (const auto& mi : matches)
         if (mi.thermal) thermalOnMids.insert(mi.modelMid);
-    std::set<int> partTmids = md_partTmids(rawLines_);
+    const auto mainRefs = md_partThermalRefs(rawLines_);
+    std::vector<MdPartThermalRef> inclRefs;
+    std::set<int> inclThermal;   // 인클루드 파일이 정의한 열 카드 TMID — matdb 는 인클루드를 고치지 않는다
     for (const auto& f : incl_.files) {
-        const auto t = md_partTmids(f.lines);
-        partTmids.insert(t.begin(), t.end());
+        const auto r = md_partThermalRefs(f.lines);
+        inclRefs.insert(inclRefs.end(), r.begin(), r.end());
+        const auto t = md_thermalTmids(f.lines);
+        inclThermal.insert(t.begin(), t.end());
+    }
+    std::set<int> partTmids;
+    for (const auto& r : mainRefs) partTmids.insert(r.tmid);
+    for (const auto& r : inclRefs) partTmids.insert(r.tmid);
+    // 새 열 카드의 TMID — 보통 그 MID(matdb 의 꼴 · TMID = MID)이고 그 번호의 옛 열 카드를 바꿔 넣는다. 그 번호를 **다시 매기지 않는 파트**가
+    // 가리키면(다른 MID 의 *PART — 주 덱에서 이번에 TMID 를 잇는 파트는 빼고 · 인클루드의 파트) 또는 그 번호의 열 카드가 인클루드에 있으면, 옛
+    // 카드를 두고 새 카드에 빈 TMID 를 준다 — `*PART` TMID 가 가리키는 열 카드는 MID 연산이 지우지 않는다(적대적 검토 11-08 S5 — 예전엔 PID 2 가
+    // 가리키는 `*MAT_T01 1` 을 MID 1 의 DB 열 카드로 바꿔 넣어 PID 2 의 열 물성이 조용히 바뀌었다 · rc 0 · --strict rc 0)
+    std::map<int, int> newTmidOf;
+    {
+        std::set<int> taken = md_thermalTmids(rawLines_);
+        taken.insert(inclThermal.begin(), inclThermal.end());
+        taken.insert(partTmids.begin(), partTmids.end());
+        taken.insert(thermalOnMids.begin(), thermalOnMids.end());
+        int next = taken.empty() ? 1 : *taken.rbegin() + 1;
+        for (int m : thermalOnMids) {
+            std::vector<int> others;
+            for (const auto& r : mainRefs)
+                if (r.tmid == m && r.mid != m && !thermalOnMids.count(r.mid)) others.push_back(r.pid);
+            for (const auto& r : inclRefs)
+                if (r.tmid == m && r.mid != m) others.push_back(r.pid);
+            if (others.empty() && !inclThermal.count(m)) {
+                newTmidOf[m] = m;
+                continue;
+            }
+            newTmidOf[m] = next++;
+            std::string who;
+            for (int pid : others) who += (who.empty() ? "" : ", ") + std::to_string(pid);
+            infoMessages.push_back("[matdb] kept thermal card TMID=" + std::to_string(m) + " — " +
+                                   (others.empty() ? std::string("그 열 카드가 인클루드 파일에 있다(인클루드는 고치지 않는다)")
+                                                   : "다른 MID 의 *PART(PID " + who + ")가 가리킨다") +
+                                   " · MID " + std::to_string(m) + " 의 새 열 카드는 TMID " + std::to_string(newTmidOf[m]) +
+                                   "(그 MID 를 쓰는 파트의 TMID 를 잇는다)");
+        }
     }
     for (int i = 0; i < (int)rawLines_.size(); ++i) {
         std::string t = mw_trim(rawLines_[i]);
@@ -13800,6 +13888,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                             infoMessages.push_back("[matdb] kept thermal card TMID=" + std::to_string(id) +
                                                    " — *PART TMID 가 가리킨다(thermal 이 꺼져 새 열 카드를 넣지 않는다 · 그 열 물성은 바꾸기 전 재질의 것이다)");
                         }
+                        if (shouldRemove && thermalOnMids.count(id) && newTmidOf[id] != id) shouldRemove = false;   // 위에서 알렸다(S5)
                     } else {
                         // expansion: id is PID, find its MID
                         auto info = mw_getPartInfo(rawLines_, id);
@@ -13846,7 +13935,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         if (mi.thermal) {
             // *MAT_THERMAL_ISOTROPIC
             if (!dbMat.cardThermal.empty()) {
-                auto thermalLines = md_substituteCardTmid(dbMat.cardThermal, mi.modelMid);
+                auto thermalLines = md_substituteCardTmid(dbMat.cardThermal, newTmidOf[mi.modelMid]);
                 for (auto& tl : thermalLines) insertCards.push_back(tl);
                 ++thermalCount;
             }
@@ -13866,7 +13955,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             for (int pid : pids) {
                 auto info = mw_getPartInfo(rawLines_, pid);
                 if (info.dataLine >= 0)
-                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], mi.modelMid);
+                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], newTmidOf[mi.modelMid]);
             }
         }
 

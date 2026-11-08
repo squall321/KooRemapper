@@ -131,17 +131,30 @@ inline int fieldInt(const std::vector<std::string>& f, size_t i) {
     return v;
 }
 
-// 줄의 첫 칸(고정폭 w · 쉼표 줄은 첫 쉼표 앞)이 숫자만(9자리까지 · 0 보다 크다)이면 그 값 — StepForge 리더의 `raw[:10].strip().isdigit()`.
-// 카드 묶음을 못 가른 자리부터 행마다 첫 칸을 넉넉히 셀 때 쓴다(섹션 SECID · 재질 MID — 그 블록에 쌓인 다른 번호일 수 있다).
-// 실수 · 글자 · 부호 붙은 수는 세지 않는다(제목 `12 mm plate` · 두께 `2.0` 은 번호가 아니다)
-inline bool digitsField(const std::string& l, int w, int& v) {
+// 줄의 첫 칸 글자(고정폭 w · 쉼표 줄은 첫 쉼표 앞 · 앞뒤 공백 뺌)
+inline std::string firstField(const std::string& l, int w) {
     const size_t comma = l.find(',');
-    std::string f = comma != std::string::npos ? l.substr(0, comma) : l.substr(0, std::min(l.size(), static_cast<size_t>(w)));
-    f = trim(f);
-    if (f.empty() || f.size() > 9 || !std::all_of(f.begin(), f.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
+    return trim(comma != std::string::npos ? l.substr(0, comma) : l.substr(0, std::min(l.size(), static_cast<size_t>(w))));
+}
+
+// 줄의 첫 칸(`firstField`)이 정수 글자면 그 값(0 보다 크고 int 안) — 부호 `+` · 앞의 0 · 칸 폭을 다 채운 수(10 칸의 `1000000006` ·
+// `0000000006` · long 20 칸)도 받는다(리더 `KFileReader::parseInt` · LS-DYNA 가 정수 칸에서 받는 꼴). 예전엔 숫자만 9 자리까지 받아(StepForge 리더의
+// `raw[:10].strip().isdigit()`) 쌓인 묶음의 `+6` · `0000000006` · 10 자리 SECID 를 놓쳤다 — offset 이 SECID 6 을 다시 냈고 이월 적용이 「+9」 옆에
+// 새 섹션 9 를 썼다(적대적 검토 11-08 S8). 카드 묶음을 못 가른 자리부터 행마다 첫 칸을 넉넉히 셀 때도 쓴다(섹션 SECID · 재질 MID — 그 블록에 쌓인
+// 다른 번호일 수 있다). 실수 · 글자 · `-` 는 세지 않는다(제목 `12 mm plate` · 두께 `2.0` 은 번호가 아니다) — 자리를 아는 번호 칸(묶음의 Card 1)의
+// 실수 꼴 정수(`6.0`)는 소비자가 `carryover::integralField` 로 따로 읽는다(섹션 묶음 훑기 · `matids`)
+inline bool digitsField(const std::string& l, int w, int& v) {
+    const std::string f = firstField(l, w);
+    size_t p = (!f.empty() && f[0] == '+') ? 1u : 0u;
+    if (p >= f.size() || !std::all_of(f.begin() + static_cast<std::ptrdiff_t>(p), f.end(),
+                                      [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }))
         return false;
-    v = std::stoi(f);
-    return v > 0;
+    while (p + 1 < f.size() && f[p] == '0') ++p;   // 앞의 0
+    if (f.size() - p > 10) return false;            // int 밖
+    const long long x = std::stoll(f.substr(p));
+    if (x <= 0 || x > 2147483647LL) return false;
+    v = static_cast<int>(x);
+    return true;
 }
 
 // 우리가 모델링하지 않은 키워드에서 정수를 **최대한 많이** 긁는다 — 8칸·10칸·공백 토큰의

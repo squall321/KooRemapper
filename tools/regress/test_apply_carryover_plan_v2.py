@@ -148,7 +148,8 @@ def read_deck(path):
         elif kw.startswith("*SECTION_"):
             t = 1 if "_TITLE" in kw else 0
             if len(data) > t:
-                secs[int(data[t][0:10])] = (kw, int(data[t][10:20]))
+                f2 = data[t][10:20].strip()   # ELFORM — 둘째 칸이 실수인 꼴(*SECTION_SEATBELT 의 AREA)은 None
+                secs[int(data[t][0:10])] = (kw, int(f2) if f2.lstrip("+-").isdigit() else None)
         elif kw.startswith("*MAT_"):
             t = 1 if "_TITLE" in kw else 0
             if len(data) > t:
@@ -397,6 +398,7 @@ def main():
         part_r6(binary)
         part_r7(binary)
         part_r8(binary)
+        part_r9(binary)
         part_s(binary)
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
@@ -842,10 +844,27 @@ def part_r3(binary):
         check("R-3%s 읽지 못하는 계획(%s) · report 가 동반 파일(%s) → rc 1 · 폴더 파일 그대로 · 덱 없음(보고 자리가 없어 콘솔로만)" % (tag, how, rp),
               rc == 1 and not changed and not os.path.exists(os.path.join(d, "deck_applied.k")) and unknown in out and not tmp_left(d),
               (rc, changed, out[-300:]))
+    # 계획을 읽지 못하면 덱은 쓰지 않는다 — 산출 자리는 보지 않고 계획의 문제(plan_json)만 적는다(적대적 검토 11-08 S7 — 예전엔 output_clobber
+    # 「동반 파일을 모른다」 만 말해 고칠 것이 계획인데 output 을 바꾸라고 했다)
     d, rc, out, changed = broken("r3h", lambda b: b[:-2], output="fragment_4.k", report="r3h_carryover.json")
     rep = json.load(open(os.path.join(d, "r3h_carryover.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "r3h_carryover.json")) else {}
-    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 output_clobber(까닭에 「동반 파일을 모른다」)",
-          rc == 1 and not changed and "output_clobber" in kinds(rep) and unknown in details(rep, "output_clobber"), (rc, changed, sorted(kinds(rep))))
+    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 plan_json 만(output_clobber 아님)",
+          rc == 1 and not changed and kinds(rep) == {"plan_json"} and rep.get("output_written") is False, (rc, changed, sorted(kinds(rep))))
+    # 앞 실행이 성공해 계획 폴더에 산출 · 보고를 남긴 뒤 계획이 깨졌다 — 다시 돌리면 plan_json(예전 output_clobber 만) · 앞 산출 그대로
+    d = stage("r3j")
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    rc0, out0 = run(binary, d, OP, "a.yaml")
+    outk = os.path.join(d, "deck_applied.k")
+    first = sha(outk) if os.path.exists(outk) else None
+    pp = os.path.join(d, "plan.json")
+    raw = open(pp, "rb").read()
+    open(pp, "wb").write(raw[:-2])
+    rc, out = run(binary, d, OP, "a.yaml")
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-3j 성공한 앞 실행 뒤 계획이 깨졌다 → rc 1 · 보고에 plan_json 만(예전 output_clobber 만) · 앞 산출 그대로",
+          rc0 == 0 and first and rc == 1 and kinds(rep) == {"plan_json"} and rep.get("ok") is False and sha(outk) == first and not tmp_left(d),
+          (rc0, rc, sorted(kinds(rep)), out[-300:]))
     # 앞 실행의 보고는 다시 쓴다 — 같은 report 로 두 번 돌린다(둘째 전에 보고를 「ok true」 로 바꿔 두어 다시 썼는지 본다 · 줄 끝은 CRLF)
     d, rc, out, changed = broken("r3i", lambda b: b[:-2], report="again.json")
     rp = os.path.join(d, "again.json")
@@ -1019,6 +1038,54 @@ def part_r8(binary):
 
 
 
+def part_r9(binary):
+    print("[R-9 인클루드 덱(판 2)의 산출 — 다른 폴더를 가리키는 링크 · 읽기 전용 폴더의 쓸 수 있는 산출(적대적 검토 11-08 S6)]")
+    # 쓴 덱의 되읽기 대조가 *INCLUDE 이름을 임시 덱이 놓인 폴더(링크를 따라간 폴더 · 시스템 임시 폴더)에서 풀어 닫힘이 다르다고 거짓 거절했다 —
+    # 덱이 놓일 자리(준 산출 경로의 폴더 · §52.5)에서 푼다
+    def inc_case(name):
+        d = stage(name)
+        split_include(d, "inc/part8.k", 8, move_defs=True)
+        to_v2(d, include_files=["inc/part8.k"])
+        return d
+
+    def applied(path):
+        return os.path.exists(path) and read(path) != "OLD\n" and "*INCLUDE" in read(path)
+
+    d = inc_case("r9a")
+    write(os.path.join(d, "other", "deck_applied.k"), "OLD\n")
+    os.symlink(os.path.join("other", "deck_applied.k"), os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("R-9a 산출이 other/ 의 파일을 가리키는 링크 → rc 0 · 링크 그대로 · 그 파일이 산출(예전 verify 「닫힘이 다르다」)",
+          rc == 0 and os.path.islink(os.path.join(d, "deck_applied.k")) and applied(os.path.join(d, "other", "deck_applied.k")) and
+          not kinds(rep) and not tmp_left(d) and not tmp_left(os.path.join(d, "other")), (rc, sorted(kinds(rep)), details(rep, "verify")[:200]))
+    d = inc_case("r9b")
+    os.makedirs(os.path.join(d, "other"))
+    os.symlink(os.path.join("other", "deck_applied.k"), os.path.join(d, "deck_applied.k"))
+    rc, out, rep = apply_case(binary, d)
+    check("R-9b 산출이 아직 없는 other/ 파일을 가리키는 링크 → rc 0 · 링크가 가리키는 자리에 산출",
+          rc == 0 and applied(os.path.join(d, "other", "deck_applied.k")) and not kinds(rep), (rc, sorted(kinds(rep)), details(rep, "verify")[:200]))
+    d = inc_case("r9c")
+    write(os.path.join(d, "deck_applied.k"), "OLD\n")
+    write(os.path.join(d, "deck_applied_carryover.json"), "{}\n")
+    write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied.k\n")
+    os.chmod(d, 0o555)
+    try:
+        rc, out = run(binary, d, OP, "a.yaml")
+    finally:
+        os.chmod(d, 0o755)
+    rp = os.path.join(d, "deck_applied_carryover.json")
+    rep = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-9c 읽기 전용 덱 폴더 · 쓸 수 있는 산출 → rc 0 · 산출 · 보고를 제자리에(예전 verify 「닫힘이 다르다」)",
+          rc == 0 and applied(os.path.join(d, "deck_applied.k")) and rep.get("ok") is True and not kinds(rep),
+          (rc, sorted(kinds(rep)), details(rep, "verify")[:200], out[-300:]))
+    # 지킴이 — 산출 자리에 같은 이름의 다른 인클루드가 있는 폴더(링크로 다른 폴더에 쓰는 것과 견줄 것): 판 2 는 덱 폴더에만 쓴다(include_output)
+    d = inc_case("r9d")
+    os.makedirs(os.path.join(d, "sub"))
+    rc, out, rep = apply_case(binary, d, output="sub/deck_applied.k", report="sub/deck_applied_carryover.json")
+    check("R-9d 산출을 다른 폴더(sub/)에 → 거절(include_output — 그 폴더에서는 인클루드 이름이 다른 파일을 가리킨다)",
+          rc == 1 and "include_output" in kinds(rep) and not os.path.exists(os.path.join(d, "sub", "deck_applied.k")), (rc, sorted(kinds(rep))))
+
+
 def part_s(binary):
     print("[S StepForge 권고(D-681 · 사용자 결정 11-07 밤) — LS-DYNA 가 덱을 읽는 꼴로]")
     # S-2 정수 칸의 실수 꼴 — NIP `5.000e+00` 은 5(LS-DYNA 실행 기록) · 새 셸 섹션 카드의 줄 셈(shellSectionRows)이 받는다
@@ -1058,7 +1125,15 @@ def part_s(binary):
             ("s3c", mass8, shell8 % (2, 0, "        12        12        12        12"), "정수로 쓴 셸 두께 12", True),
             ("s3d", mass8, shell8 % (4, 1, "       1.0       1.0       1.0       1.0\n$#      b1        b2        b3        b4\n"
                                         "        90         0         0        90"), "ICOMP 1 의 정수 각도 90", True),
-            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False)):
+            ("s3e", mass8, mass8 + "stacked\n        12         1\n", "진짜 쌓인 카드 묶음(SECID 12 — 지킴이)", False),
+            # 쌓인 묶음의 SECID 를 정수 칸이 받는 꼴 그대로 읽는다 — 예전엔 숫자만 9 자리까지 읽어 그 9 를 못 보고 조각의 새 섹션 9 를 옆에
+            # 썼다(rc 0 · 같은 SECID 둘 — 적대적 검토 11-08 S8)
+            ("s3f", mass8, mass8 + "stacked\n        +9         1\n", "쌓인 묶음의 SECID +9(부호)", False),
+            ("s3g", mass8, mass8 + "stacked\n0000000009         1\n", "쌓인 묶음의 SECID 0000000009(앞의 0 · 칸 폭)", False),
+            ("s3h", mass8, mass8 + "stacked\n       9.0         1\n", "쌓인 묶음의 SECID 9.0(실수 꼴 정수)", False),
+            # 행 수를 모르는 꼴의 `_TITLE` 블록도 첫 줄은 제목이다 — 예전엔 그 2024 를 SECID 로 세어 정상 계획을 secid_order 로 거절했다(11-08 S10)
+            ("s3i", mass8, "*SECTION_SEATBELT_TITLE\n2024\n         8      10.0       1.0\n", "모르는 꼴의 숫자 제목(*SECTION_SEATBELT_TITLE 2024)",
+             True)):
         d = stage(tag)
         deck = os.path.join(d, "deck.k")
         body = read(deck)
@@ -1075,7 +1150,7 @@ def part_s(binary):
             check("S-%s %s → 새 섹션(9 · 10)을 받는다(그 숫자는 SECID 가 아니다)" % (tag[1:], what),
                   rc == 0 and "secid_order" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "secid_order")[:200]))
         else:
-            refused("S-%s %s → 새 섹션 10 이 그 아래다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
+            refused("S-%s %s → 새 섹션(9 · 10)이 그 번호 위가 아니다 · secid_order" % (tag[1:], what), rc, out, rep, d, "secid_order")
 
 
 if __name__ == "__main__":

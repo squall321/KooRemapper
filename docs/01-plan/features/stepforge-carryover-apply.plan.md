@@ -192,7 +192,8 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
 ## 11-08 둘째 — 재질 번호(MID) 가족 고침(사용자 결정 「이번 판에 다 고친다」) — 정한 것
 - **공용 재질 번호 훑기 하나(`parser/MaterialIds.h` · `matids`)** — 세기 · 있나 · 두 번 정의 · 정의 지우기 · 베끼기 · 고정 번호대 겹침이 같은
   셈을 쓴다(둘째 소비자 규칙 — op 마다 일곱 벌의 사본이 따로 셌다). 구조 재질 = `*MAT_*` 가운데 열 재질(`cards::isThermalMaterialKeyword` —
-  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · `$` 는 건너뜀 · 쉼표 줄은 모르는 꼴.
+  TMID)과 `*MAT_ADD_*` 를 뺀 것. 섹션 카드 묶음 셈과 같은 꼴 — 빈 줄도 카드 · 끝의 빈 줄은 여백 · 1열의 `$` 는 건너뜀(11-08 셋째 — 들여쓴 `$`
+  줄은 데이터) · 쉼표 줄은 모르는 꼴.
 - **쌓인 재질 묶음((g))** — 묶음 한 벌의 줄 수를 Vol II R16 카드 요약이 정하는 꼴만 다 읽는다: `*MAT_ELASTIC`(001) 1 + Card 1.1(E < 0 ·
   StepForge 591d5b5 `card_set_rows` 와 같다) + Card 2(`_FLUID`) · `*MAT_PLASTIC_KINEMATIC`(003) 2 · `*MAT_VISCOELASTIC`(006) 1 · `*MAT_NULL`(009) 1
   · `*MAT_RIGID`(020) 3 · `*MAT_PIECEWISE_LINEAR_PLASTICITY`(024 · 옵션 없는 꼴) 4. 저장소 덱의 구조 재질 꼴 가운데 이 여섯이 대부분이다(ELASTIC
@@ -239,6 +240,66 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   도움말 예제(flatten_includes · output_guard_ops · help_truth 가 돌린다) · 회귀 다섯(catalog_binary_parity · element_topology ·
   id_width_overflow · section_cursor_stacked · standalone_yaml_parsing)에 재질 카드를 붙였다(시험 뜻은 그대로). 다층(material_cards)은 층마다
   같은 문을 지난다(빈 층 카드도 거절). 회귀 F 3항(4dfe039 에서 F-1 · F-2 실패).
+
+## 11-08 셋째 — 여섯째 검토 고침(이월 · 번호 훑기 · matdb · hfdamp · 사용자 결정 「들인 결함 + 물성 바꾸는 기존 넷」) — 정한 것
+- **번호 칸 읽기(S8)** — 카드 묶음 셈의 SECID 칸 · 넉넉한 셈(`deckscan::digitsField` — 섹션 · 재질 공용)이 숫자만 9 자리까지 받아(StepForge
+  `isdigit` 꼴) 쌓인 묶음의 `+6` · `0000000006` · 10 자리를 놓쳤다 — offset 이 같은 SECID 를 다시 냈고 이월 적용이 「+9」 옆에 새 섹션 9 를
+  썼다. 이제 정수 칸이 받는 꼴 그대로 — 부호 `+` · 앞의 0 · 칸 폭을 다 채운 수(int 안 · 0 보다 큼). 자리를 아는 번호 칸(묶음의 Card 1 —
+  섹션 SECID `cur_setIdField` · 재질 MID `matids` 의 `midOf`)은 실수 꼴 정수(`6.0` · `6.000e+00`)도 그 정수로 읽는다 — 리더
+  (`KFileReader::parseInt`)와 옛 첫 카드 셈이 그렇게 읽고, 정수 칸의 실수 꼴은 `carryover::integralField` 하나로 읽는다(D-681). 넉넉한 셈은
+  실수 꼴을 세지 않는다 — 행 수를 모르는 꼴의 두께(`2.0` · `12.0`)와 가를 수 없어 세면 거짓 `secid_order` 가 돌아온다(11-08 #2 의 퇴행 꼴).
+  그래서 행 수를 모르는 꼴(보 · 이산 …)에 쌓인 둘째 묶음의 실수 꼴 SECID 는 여전히 못 본다(남은 틈 · 그 블록의 첫 묶음은 옛 첫 카드 셈이
+  읽는다). `withMid`(재질 베끼기)는 실수 꼴 MID 칸도 칸 폭 그대로 바꾼다(토큰 자리 바꾸기는 뒤 칸을 민다). 회귀 — 커서 D 6항 · 재질 G-7 · G-8
+  3항 · 이월 S-3f~h 3항(4f550b3 에서 12 실패) · 단위 1.
+- **모르는 꼴의 제목 줄(S10)** — 넉넉한 셈은 못 가른 묶음의 첫 줄(`rest`)부터 셌다. `rest` 는 늘 묶음의 첫 줄이고 `_TITLE` 이면 그 줄은 꼴을
+  몰라도 제목이다(LS-DYNA · StepForge 리더) — `*SECTION_SEATBELT_TITLE` 의 제목 `2024`(쉼표 제목 `2024,beam` 도)가 가장 큰 SECID 가 되어 정상
+  계획을 `secid_order` 로 거절하고 커서가 2025 로 뛰었다. 이제 제목 줄 다음부터 센다(섹션 · 재질 같은 규칙). 그 뒤에 쌓인 묶음의 제목은 자리를
+  몰라 그대로 센다(넉넉한 쪽 — 남은 틈 · StepForge 도 보 · 이산의 제목을 센다: 검토 행렬의 `beam_title_2024` bound 2024). 회귀 — 커서 E 4항 ·
+  재질 G-9 · 이월 S-3i(4f550b3 에서 6 실패).
+- **주석은 1열의 `$` 뿐(S8 · S10 을 지으며 들인 퇴행을 고침)** — 섹션 묶음 셈과 `matids` 가 첫 비공백 글자가 `$` 인 줄을 주석으로 건넜다. 리더
+  (`KFileReader::isCommentLine`)와 LS-DYNA(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」)는 1열만 주석이다 — 들여쓴 `$`
+  제목(「  $5 tube」)을 건너면 묶음이 한 줄 밀린다. 예전엔 밀린 둘째 카드의 `1.0` 을 SECID 로 못 읽어 넉넉한 셈으로 물러섰는데(우연히 맞았다 —
+  검토 행렬 `shell_indented_dollar_title` 은 4f550b3 에서 2), S8 이 실수 꼴 정수를 받자 그 `1.0` 이 SECID 1 이 되어 진짜 SECID 2 를 놓쳤고(새
+  섹션이 2 를 다시 냈다), S10 의 제목 건너기는 밀린 자리에서 진짜 Card 1 을 건넜다. 이제 둘 다 1열 규칙이다. 카드 한 장 꼴(`*SECTION_SOLID_TITLE`
+  · `*MAT_ELASTIC_TITLE` 에 들여쓴 `$` 제목)은 4f550b3 에서도 Card 1 을 제목으로 삼켜 번호를 놓쳤다 — 같이 고쳐졌다. 들여쓴 `*` 제목 줄(블록이
+  끝난 것으로 본다)은 다음 판 목록 그대로다(검토 행렬 `shell_indented_star_title` — 4f550b3 · 운영 판 모두 1). 옛 첫 카드 셈
+  (`cur_scanSectionDefs` — 있나 · 종류 표)은 아직 첫 비공백 `$` 를 주석으로 본다(그 표만 들여쓴 `$` 제목에서 틀린다 — 남은 틈 · 커서는 두 셈의
+  큰 쪽이라 맞다). 회귀 — 커서 F 2항(F-1 은 e27baed 에서 실패 · F-2 는 4f550b3 에서도) · 재질 G-11(e27baed 에서 새 MID 501 — 밀린 카드의
+  `500.0` 을 MID 로) · G-10(지킴이 — 카드 한 장 `*MAT_ELASTIC_TITLE` 은 리더가 MID 를 읽어 커서가 맞았다) · 단위 1(`matids::defined` — 4f550b3
+  에서는 그 MID 를 몰랐다).
+- **열 카드를 가리키는 다른 파트(S5 — matdb `thermal: true`)** — b83b7bf 는 `thermal: false` 만 막았다(검토의 기본 재현은 그때 고쳐졌음을 확인).
+  `thermal: true` 는 같은 번호(TMID = MID)의 열 카드를 늘 바꿔 넣어, 그 카드를 **다른 MID 의 파트**가 가리키면 그 파트의 열 물성이 조용히 DB 의
+  것으로 바뀌었다(rc 0 · `--strict` 0). 정한 것 — 그때는 옛 카드를 두고 새 카드에 빈 TMID 를 준다(덱 · 인클루드의 열 카드 TMID · `*PART` TMID ·
+  맞춘 MID 가운데 가장 큰 것 + 1, 맞춘 MID 차례로) · 그 MID 를 쓰는 주 덱 파트의 TMID 를 그 번호로 잇는다. 「다른 MID 의 파트」 는 이번에 TMID
+  를 다시 매기지 않는 파트다 — 주 덱에서 thermal 이 켜진 다른 맞춘 MID 의 파트는 제 새 카드로 옮겨 가니 빼고, 인클루드의 파트는 고치지 않으니
+  넣는다. 그 번호의 열 카드가 인클루드에 있어도 빈 TMID 다(예전엔 주 덱에 같은 TMID 를 하나 더 넣었다 — 인클루드는 고치지 않는다). 가리키는
+  파트가 그 MID 의 것뿐이면 예전 그대로(TMID = MID — 산출 같음). 남은 틈 — 인클루드에 있는 그 MID 의 파트는 TMID 를 못 잇는다(예전부터 ·
+  옛 카드를 둔 경우엔 옛 열 물성 그대로). matswap · cclip 은 열 카드를 지우지 않는다(11-08 (a) (b) — 구조 재질 정의만). 회귀 E-5 · E-5d
+  (4f550b3 에서 E-5 실패 · E-5d 는 지키는 항).
+- **깨진 계획을 다시 돌리면(S7)** — 계획을 못 읽으면(#1) 계획 폴더의 파일을 다 입력으로 보는데, 산출 자리도 그 목록과 견주어 앞 실행이 계획
+  폴더에 남긴 `deck_applied.k` 가 걸렸다 — 보고는 `output_clobber`(「동반 파일을 모른다」)만 말하고 고칠 것(계획)은 말하지 않았다. 정한 것 —
+  계획을 못 읽으면 보고 자리만 보고(콘솔 거절 그대로 — R-3e~g), 산출 자리는 **보지 않는다**(덱을 쓰지 않으니 덮을 일이 없다). 그 계획을 적용
+  쪽과 같은 읽기(`parsePlan`)로 읽어 `plan_read` · `plan_json` · `plan_schema` 만 적고 거절한다(덱은 읽지 않는다 — 보고의 deck.sha256_in 은 null).
+  위 #1 의 「output 도 같은 목록을 본다 — 적용 쪽 읽기가 나중에 BOM 을 받게 되어도」 는 이 갈래로 바뀌었다: 그 읽기가 BOM 을 받게 되면 계획은
+  「읽은」 것이고 동반 파일 표가 생기니 산출 자리는 그 표와 견준다. 회귀 v2 R-3h(기대를 plan_json 으로) · R-3j(성공한 실행 뒤 깨진 계획 —
+  4f550b3 에서 둘 다 output_clobber).
+- **인클루드 덱의 되읽기 자리(S6)** — 쓴 덱의 대조(`verifyCarryoverOutput`)가 바꿔 넣기 전 임시 파일의 경로로 닫힘을 풀었다. 임시 파일은 공용
+  `staged_write` 가 정한 자리 — output 이 링크면 따라간 파일 옆, 읽기 전용 폴더의 쓸 수 있는 output 이면 시스템 임시 폴더 — 라 `*INCLUDE` 이름이
+  다른 폴더에서 풀려 「닫힘이 다르다」 로 맞는 산출을 거절했다. 이제 줄은 임시 파일에서 읽고 이름은 output 을 준 그대로의 폴더(§52.5 · 산출 규칙
+  `include_output` 이 덱 폴더와 견주는 그 폴더)에서 푼다 — `verifyCarryoverOutput(tmp, rep, outPath)` · `KFileReader::readFileWithIncludes` 의
+  `resolveAs`(줄은 그 파일 · 이름은 그 경로의 폴더). 쓰기 · 바꿔 넣기(공용 도우미)는 손대지 않았다. 회귀 v2 R-9a~c(4f550b3 에서 셋 다
+  verify) · R-9d(다른 폴더 산출은 그대로 include_output — 지키는 항).
+- **hfdamp 의 재질(P1 · 물성을 바꾸는 기존 결함)** — selective 가 `*MAT_` 블록마다 첫 데이터 줄을 Card 1(MID RO E PR)로 읽었다. 재질 뒤의
+  `*MAT_ADD_EROSION`(첫 칸이 같은 MID)이 RO · E 를 EXCL · MXPRES 로 덮었고, 같은 뿌리로 `_TITLE` 재질은 제목 줄을 Card 1 로 읽었다(검토의
+  `elastic_title` — 0 파트). 둘 다 그 파트의 dt 를 못 재 감쇠에서 빠진다. 줄마다 걷는 재질 읽기를 지우고 `matids::scan` 의 구조 재질 묶음마다
+  Card 1 에서 RO · E · PR 를 읽는다(열 재질 · `*MAT_ADD_*` 는 그 훑기가 뺀다 · 쌓인 묶음도 읽는다). Card 1 에 RO · E · PR 가 없는 꼴(NULL · RIGID
+  · SPRING · DAMPER · VACUUM · HE_BURN — 이름 꼴)은 예전처럼 건너뛴다(번호 이름 `*MAT_009` · `*MAT_020` 은 예전에도 읽었다 — 그대로). 칸은
+  예전처럼 10칸 고정폭(long 덱은 예전부터 못 읽는다 — 남은 틈). 회귀 `test_material_id_family.py` H-1 · H-2(4f550b3 에서 실패) · H-0(지킴이).
+- **extract-parts 되읽기의 재질 셈(다음 판 목록에서 — 조정자 「싸면」)** — `verifyOutput` 이 `*MAT` 블록의 모든 데이터 줄 첫 칸을 MID 로 세어
+  열 재질 TMID · `*MAT_ADD_*` 의 첫 칸(MID · PID)이 미정의 재질을 가렸다. `*MAT` 블록 줄(빈 줄 · 주석까지)을 모아 `matids::inUse` 로 센다 —
+  구조 재질만 · 줄 수를 모르는 꼴은 행마다 넉넉히(그 쌓인 둘째 재질을 미정의로 몰면 거짓 rc 1 — 예전 셈도 넉넉했다). 쓰기 쪽(`*MAT_T01` 블록을
+  재질 2 로 싣는 고르기)은 손대지 않았다(더 싣는 쪽 · 무해). 스테이징 갈래의 extract-parts 고침(1565 줄 뒤 · 표준 헤더)과 겹치지 않는 자리다.
+  회귀 `test_extract_parts.py` S-1 · S-2(4f550b3 에서 실패) · S-3(지킴이).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·

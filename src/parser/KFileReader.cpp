@@ -101,7 +101,7 @@ KFileReader::KFileReader()
     , progressCallback_(nullptr)
 {}
 
-Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string* note, bool* complete) {
+Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string* note, bool* complete, const std::string& resolveAs) {
     if (note) note->clear();
     if (complete) *complete = true;
     std::vector<std::string> mainLines;
@@ -114,7 +114,8 @@ Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string*
             mainLines.push_back(ln);
         }
     }
-    const auto clo = include_closure::read(filename, mainLines);
+    const std::string& at = resolveAs.empty() ? filename : resolveAs;   // `*INCLUDE` 이름을 푸는 자리(주 덱의 폴더)
+    const auto clo = include_closure::read(at, mainLines);
     if (complete) *complete = clo.complete();
     if (clo.files.empty()) {
         if (note && !clo.complete())
@@ -143,7 +144,7 @@ Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string*
         if (complete) *complete = false;
         return readFile(filename);
     }
-    auto flat = include_closure::flatten(mainLines, filename, clo);
+    auto flat = include_closure::flatten(mainLines, at, clo);
     namespace fs = std::filesystem;
     std::error_code ec;
     const fs::path tmp = fs::temp_directory_path(ec) /

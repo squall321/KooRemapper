@@ -12,15 +12,20 @@
   assemble 의 matswap 은 앞 op(offset)이 덧붙인 재질 · 섹션 번호를 못 보고 같은 MID 2 · SECID 2 를 또 냈다.
 
 무엇을 보나.
-  G 공용 커서 — 쌓인 묶음(알려진 꼴은 묶음마다 · 모르는 꼴은 행마다 첫 칸 숫자)을 세어 새 MID 가 겹치지 않는다
+  G 공용 커서 — 쌓인 묶음(알려진 꼴은 묶음마다 · 모르는 꼴은 행마다 첫 칸 숫자)을 세어 새 MID 가 겹치지 않는다 · 묶음의 MID 칸은 실수 꼴
+    정수(`3.0`)도 · 넉넉한 셈은 부호 · 앞의 0 · 10 자리도 받는다(적대적 검토 11-08 S8) · 모르는 꼴의 `_TITLE` 제목 줄은 세지 않는다(S10) ·
+    주석은 1열의 `$` 뿐(들여쓴 `$` 제목은 제목이다 — Vol_I 17862)
   D MID 를 내는 op 마다 같은 셈 — 열 재질 TMID 로 커서를 올리지 않고 쌓인 MID 를 다시 내지 않는다
   A matswap(단독 · assemble) — 옛 MID 의 구조 재질 정의만 지운다(같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다 ·
     MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
   B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
   C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
   E matdb `thermal: false` — `*PART` TMID 가 가리키는 같은 번호 열 카드는 남긴다(가리키지 않는 것은 예전처럼 지운다) ·
-    E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다
+    E-4 쌓인 재질 묶음에서 맞춘 MID 만 바꾸고 같은 블록의 다른 재질은 둔다 ·
+    E-5 `thermal: true` 라도 다른 MID 의 파트가 가리키는 같은 번호 열 카드는 남기고 새 열 카드에 빈 TMID 를 준다(적대적 검토 11-08 S5)
   F offset — material_card(또는 material_cards)가 없으면 거절한다(예전엔 새 *PART 가 정의되지 않은 MID 를 가리킨 덱이 rc 0)
+  H hfdamp — 구조 재질의 Card 1 을 읽는다(`*MAT_ADD_EROSION` 이 RO · E 를 덮지 않는다 · `_TITLE` 재질의 제목 줄은 Card 1 이 아니다 ·
+    적대적 검토 11-08 P1)
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -126,6 +131,28 @@ def part_g(binary, tmp):
          + "".join("%10d   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
                    "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
                    "       0.0       1.0       0.0       0.0\n" for m in (3, 4)), 5),
+        ("G-7 쌓인 둘째 묶음의 MID 를 실수 꼴(3.0)로 — 새 MID 4(예전 3 — 리더는 3 으로 읽는다)",
+         "*MAT_ELASTIC\n" + EL % 2 + "       3.0   7.85E-9    210000       0.3\n", 4),
+    ] + [
+        ("G-8%s 행 수를 모르는 꼴의 둘째 묶음 MID %r — 넉넉한 셈이 받는다 · 새 MID 5(예전 4)" % (tag, text),
+         "*MAT_ORTHOTROPIC_ELASTIC\n"
+         + "".join("%10s   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
+                   "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+                   "       0.0       1.0       0.0       0.0\n" for m in ("3", text)), 5)
+        for tag, text in (("a", "+4"), ("b", "0000000004"))
+    ] + [
+        ("G-9 행 수를 모르는 꼴의 _TITLE 재질 — 제목 2024 는 MID 가 아니다 · 새 MID 4(예전 2025)",
+         "*MAT_ORTHOTROPIC_ELASTIC_TITLE\n2024\n"
+         "         3   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n"
+         "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+         "       0.0       1.0       0.0       0.0\n", 4),
+        ("G-10 지킴이 — *MAT_ELASTIC_TITLE 의 제목이 들여쓴 「  $5 steel」 · 새 MID 3(리더도 MID 2 를 읽는다)",
+         "*MAT_ELASTIC_TITLE\n  $5 steel\n" + EL % 2, 3),
+        ("G-11 행 수를 모르는 꼴의 제목이 들여쓴 「  $5 ortho」 — 제목이다(주석은 1열의 $) · 새 MID 4(e27baed 501 — 밀린 카드의 500.0 을 MID 로)",
+         "*MAT_ORTHOTROPIC_ELASTIC_TITLE\n  $5 ortho\n"
+         "         3   7.85E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n"
+         "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+         "       0.0       1.0       0.0       0.0\n", 4),
     ]
     for k, (name, extra, want) in enumerate(cases):
         d = fresh(tmp, "g%d" % k)
@@ -135,7 +162,7 @@ def part_g(binary, tmp):
         got = offset_new_mid(out)
         mids = [m for _kw, m in card1_mids(os.path.join(d, "out.k"))]
         check(name, rc == 0 and got == want, (rc, got, mids, out[-300:]))
-    d = fresh(tmp, "g6")
+    d = fresh(tmp, "g_floor")
     box(binary, d, STACK)
     open(os.path.join(d, "fl.yaml"), "w").write("model: box.k\noutput: fl.json\n")
     rc, out = run(binary, d, "id_floor", "fl.yaml")
@@ -457,6 +484,30 @@ def part_e(binary, tmp):
     check("E-4 matdb 쌓인 재질 묶음(MID 1 · 9) — MID 1 만 바꾸고 MID 9 는 남긴다 · --strict rc 0(예전 블록째 지워 재질 9 미정의)",
           rc == 0 and elastic_rows(os.path.join(d, "o.k")).count(9) == 1 and rc2 == 0, (rc, elastic_rows(os.path.join(d, "o.k")), rc2, out2[-200:]))
 
+    # E-5 PID 2(MID 2)가 TMID 1 로 *MAT_T01 1 을 가리킨다 — MID 1 을 matdb 로 바꾸어도 그 카드는 PID 2 의 열 물성이다(검토 S5 의 재현).
+    #     thermal: false 는 b83b7bf 부터 남겼고(E-5d), thermal: true 는 그 카드를 MID 1 의 DB 열 카드로 바꿔 넣어 PID 2 의 열 물성이 조용히
+    #     바뀌었다(rc 0 · --strict rc 0) — 이제 옛 카드를 두고 MID 1 의 새 열 카드는 빈 TMID 2 · PID 1 의 TMID 를 2 로 잇는다
+    other = ("*PART\nOTHER\n         2         1         2         0         0         0         0         1\n"
+             "*MAT_ELASTIC\n         2    7.8e-9     2.0e5       0.3\n*MAT_T01\n         1    7.8e-9       0.0       0.0\n       1.0       1.0\n")
+    for tag, extra in (("5", "thermal: true\n"), ("5d", "")):
+        d = fresh(tmp, "e" + tag)
+        box(binary, d, other)
+        os.makedirs(os.path.join(d, "materials"))
+        shutil.copy(os.path.join(REPO, "materials", "material_db.json"), os.path.join(d, "materials"))
+        open(os.path.join(d, "m.yaml"), "w").write("model: box.k\noutput: o.k\nmat_type: MAT_ELASTIC\n" + extra +
+                                                   "materials:\n  - mid: 1\n    match: \"SUS304\"\n")
+        rc, out = run(binary, d, "matdb", "m.yaml")
+        o = os.path.join(d, "o.k")
+        t01, tm = first_ids(o, "*MAT_T01"), part_tmids(o)
+        if tag == "5":
+            iso = first_ids(o, "*MAT_THERMAL_ISOTROPIC")
+            check("E-5 thermal: true — PID 2 가 가리키는 *MAT_T01 1 은 그대로 · MID 1 의 새 열 카드는 TMID 2 · PID 1 TMID 2(예전 T01 1 을 바꿔 넣었다)",
+                  rc == 0 and t01 == [1] and tm.get(2) == 1 and tm.get(1) == 2 and iso == [2] and "kept thermal card TMID=1" in out,
+                  (rc, t01, tm, iso, out[-300:]))
+        else:
+            check("E-5d thermal: false — *MAT_T01 1 그대로 · PID 2 TMID 1 · PID 1 TMID 0", rc == 0 and t01 == [1] and tm.get(2) == 1 and
+                  tm.get(1, 0) == 0, (rc, t01, tm, out[-300:]))
+
 
 def part_f(binary, tmp):
     print("[F offset — 새 층의 재질 카드가 없으면 거절한다(*PART 가 정의되지 않은 MID 를 가리키지 않게)]")
@@ -476,6 +527,27 @@ def part_f(binary, tmp):
     check("F-3 material_card 를 주면 그대로 돈다 — 산출 --strict rc 0", rc == 0 and rc2 == 0, (rc, rc2, out2[-200:]))
 
 
+def part_h(binary, tmp):
+    print("[H hfdamp — 구조 재질의 Card 1 을 읽는다(덧붙임 카드 · 제목 줄은 재질이 아니다)]")
+    hf = "model: box.k\noutput: o.k\ndt_target: 3.0e-7\ncdamp: 0.99\nfhigh_ratio: 100.0\nmode: selective\n"
+    erosion = "*MAT_ADD_EROSION\n         1       0.0       0.0       0.0\n       0.0       0.0       0.0\n"
+    for tag, extra, edit, why in (
+            ("0", "", None, "지킴이 — 덧붙임 없음"),
+            ("1", erosion, None, "재질 뒤의 *MAT_ADD_EROSION(같은 MID 1 · EXCL 0 · MXPRES 0)이 RO · E 를 덮지 않는다(예전 0 파트)"),
+            ("2", "", lambda b: b.replace("*MAT_ELASTIC\n", "*MAT_ELASTIC_TITLE\nsteel\n", 1),
+             "*MAT_ELASTIC_TITLE — 제목 줄(steel)은 Card 1 이 아니다(예전 0 파트)")):
+        d = fresh(tmp, "h" + tag)
+        box(binary, d, extra)
+        if edit:
+            pth = os.path.join(d, "box.k")
+            body = open(pth, encoding="utf-8").read()
+            assert "*MAT_ELASTIC\n" in body
+            open(pth, "w", encoding="utf-8").write(edit(body))
+        open(os.path.join(d, "hf.yaml"), "w").write(hf)
+        rc, out = run(binary, d, "hfdamp", "hf.yaml")
+        check("H-%s hfdamp selective 강철 파트 1 개 — %s" % (tag, why), rc == 0 and "1 part(s) targeted" in out, (rc, out[-300:]))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -490,6 +562,7 @@ def main():
         part_c(binary, tmp)
         part_e(binary, tmp)
         part_f(binary, tmp)
+        part_h(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

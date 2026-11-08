@@ -22,10 +22,10 @@ bool keywordLine(const std::string& l) {
     return g != std::string::npos && l[g] == '*';
 }
 
-bool commentLine(const std::string& l) {
-    const size_t h = l.find_first_not_of(" \t\r");
-    return h != std::string::npos && l[h] == '$';
-}
+// 주석 줄인가 — **1열의 `$`** 뿐이다(Vol_I 17862 · 리더 `KFileReader::isCommentLine` · 섹션 묶음 훑기와 같다). 들여쓴 `$` 줄은 데이터다
+// (제목 「  $5 steel」) — 주석으로 건너면 묶음이 한 줄 밀려 다음 카드의 칸(`40.0`)을 MID 로 읽거나 제목 줄 다음부터 세는 넉넉한 셈이
+// 진짜 Card 1 을 건넜다(11-08 S8 · S10 의 퇴행)
+bool commentLine(const std::string& l) { return !l.empty() && l[0] == '$'; }
 
 // 묶음 한 벌의 데이터 줄 수(`_TITLE` 제목 줄은 뺀다) — 모르면 -1. Vol II R16 의 카드 요약 그대로(MaterialIds.h 머리말)
 int setRows(const std::string& base, const std::string& card1, int w) {
@@ -50,17 +50,25 @@ int setRows(const std::string& base, const std::string& card1, int w) {
     return it == fixed.end() ? -1 : it->second;
 }
 
-// Card 1 의 MID — 옛 첫 카드 훑기와 같은 칸 읽기(고정폭 · 어긋난 줄이면 공백 토큰 · 정수만)
-int midOf(const std::string& card1, int w) { return deckscan::fieldInt(deckscan::cardFields(card1, w), 0); }
+// Card 1 의 MID — 옛 첫 카드 훑기와 같은 칸 읽기(고정폭 · 어긋난 줄이면 공백 토큰). 정수 글자(부호 · 앞의 0 · 칸 폭)에 더해 실수 꼴의 정수 값
+// (`6.0` · `6.000e+00`)도 그 정수로 읽는다 — 리더(`KFileReader::parseInt`)가 그렇게 읽고 정수 칸의 실수 꼴은 `carryover::integralField` 하나로
+// 읽는다(섹션 묶음의 SECID 와 같은 규칙 · 적대적 검토 11-08 S8). 정수가 아닌 값 · 0 이하 · int 밖은 0
+int midOf(const std::string& card1, int w) {
+    const auto f = deckscan::cardFields(card1, w);
+    long long x = 0;
+    if (f.empty() || !carryover::integralField(f[0], x) || x <= 0 || x > 2147483647LL) return 0;
+    return static_cast<int>(x);
+}
 
-// MID 칸을 newMid 로 — 고정폭 칸이 정수면 그 칸을 오른쪽 맞춤으로, 쉼표 줄이면 첫 값을, 칸이 어긋난 줄이면 첫 토큰을 바꾼다
+// MID 칸을 newMid 로 — 고정폭 칸이 수(정수 · 실수 꼴의 정수 `6.0` — `midOf` 가 읽는 꼴)면 그 칸을 오른쪽 맞춤으로, 쉼표 줄이면 첫 값을, 칸이
+// 어긋난 줄이면 첫 토큰을 바꾼다(토큰 길이가 바뀌면 고정폭 줄의 뒤 칸이 밀린다 — 칸이 맞는 줄은 그 길로 가지 않는다)
 std::string withMid(const std::string& line, int w, int newMid) {
     const std::string val = std::to_string(newMid);
     const size_t comma = line.find(',');
     if (comma != std::string::npos) return val + line.substr(comma);
-    int probe = 0;
-    if (cards::toInt(deckscan::trim(line.substr(0, std::min(line.size(), static_cast<size_t>(w)))), probe) &&
-        val.size() <= static_cast<size_t>(w)) {
+    const std::string head0 = deckscan::trim(line.substr(0, std::min(line.size(), static_cast<size_t>(w))));
+    long long probe = 0;
+    if (!head0.empty() && carryover::integralField(head0, probe) && val.size() <= static_cast<size_t>(w)) {
         std::string head(static_cast<size_t>(w) - val.size(), ' ');
         head += val;
         return line.size() > static_cast<size_t>(w) ? head + line.substr(static_cast<size_t>(w)) : head;
@@ -129,7 +137,8 @@ Scan scan(const std::vector<std::string>& lines) {
         }
         if (rest != std::string::npos) {
             blk.remainder = true;
-            for (size_t r = rest; r < rows.size(); ++r) {
+            // 묶음의 제목 줄은 세지 않는다 — `rest` 는 묶음의 첫 줄이고 `_TITLE` 이면 꼴을 몰라도 제목이다(섹션 묶음 셈과 같다 · 11-08 S10)
+            for (size_t r = rest + t; r < rows.size(); ++r) {
                 int v = 0;
                 if (deckscan::digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
             }
