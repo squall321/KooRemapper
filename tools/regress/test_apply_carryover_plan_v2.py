@@ -19,7 +19,8 @@
 무엇을 보나.
   A 실물 둘(바깥 덱 fc160119a36e · 메시 덱 f8ff42845904) · B 진리값 판을 판 2 로 · C 칸 표(판마다) · D 덱 자리 ·
   E 새 셸 섹션(§10.5) · F 인클루드(주 덱만 고침) · G refused_transform ·
-  R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기 · R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
+  R 적대적 검토(11-07 저녁) 고침 — R-1 쌓인 카드 SECID · R-2 인클루드 BOM · R-3 동반 파일 덮기(R-3e~i 읽지 못하는 계획 · 11-08) ·
+  R-4 보고 UTF-8 · R-5 링크 덱 폴더 ·
   R-6 *END 둘 · R-7 수의 끝자리 · R-8 담은 뒤 바뀐 덱(gdb 로 적용 직전에 멈춰 파일을 바꾼다 — 못 멈추면 SKIP) ·
   S StepForge 권고(그쪽 591d5b5 · D-681) — S-2 정수 칸의 실수 꼴 · S-3 새 SECID 차례(카드 묶음으로 센다 · 11-08)
 
@@ -817,6 +818,44 @@ def part_r3(binary):
     rc, out, rep = apply_case(binary, d, output="deck.k", report="deck_carryover.json")
     check("R-3d output 이 model → 덱 그대로 · 거절 까닭을 보고에 쓴다(output_clobber)",
           rc == 1 and sha(os.path.join(d, "deck.k")) == before and "output_clobber" in kinds(rep), (rc, sorted(kinds(rep)), out[-200:]))
+
+    # R-3e~i 계획을 읽지 못하면(깨진 JSON · BOM) 동반 파일을 모른다 — 계획 폴더의 파일을 다 입력으로 본다(적대적 검토 11-08 #1 · 예전엔
+    # 빈 목록이라 거절 보고가 field_2.bin · fragment_5.k 를 덮었다 — rc 1 plan_json 인데 field_2.bin 이 보고가 됐다). 앞 실행의 보고는
+    # 형식 표지("format": "dynaforge-carryover-apply")로 알아보고 다시 쓴다
+    unknown = "동반 파일을 모른다"
+
+    def broken(name, mut, output="deck_applied.k", report="deck_applied_carryover.json"):
+        d = stage(name)
+        pp = os.path.join(d, "plan.json")
+        raw = open(pp, "rb").read()
+        open(pp, "wb").write(mut(raw))
+        before = {f: sha(os.path.join(d, f)) for f in os.listdir(d)}
+        write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: %s\nreport: %s\n" % (output, report))
+        rc, out = run(binary, d, OP, "a.yaml")
+        changed = sorted(f for f, h in before.items() if not os.path.isfile(os.path.join(d, f)) or sha(os.path.join(d, f)) != h)
+        return d, rc, out, changed
+
+    for tag, how, mut, rp in (("e", "끝 2 바이트 잘림", lambda b: b[:-2], "field_2.bin"),
+                              ("f", "끝에 x", lambda b: b + b"x", "fragment_5.k"),
+                              ("g", "BOM", lambda b: b"\xef\xbb\xbf" + b, "field_2.bin")):
+        d, rc, out, changed = broken("r3" + tag, mut, report=rp)
+        check("R-3%s 읽지 못하는 계획(%s) · report 가 동반 파일(%s) → rc 1 · 폴더 파일 그대로 · 덱 없음(보고 자리가 없어 콘솔로만)" % (tag, how, rp),
+              rc == 1 and not changed and not os.path.exists(os.path.join(d, "deck_applied.k")) and unknown in out and not tmp_left(d),
+              (rc, changed, out[-300:]))
+    d, rc, out, changed = broken("r3h", lambda b: b[:-2], output="fragment_4.k", report="r3h_carryover.json")
+    rep = json.load(open(os.path.join(d, "r3h_carryover.json"), encoding="utf-8")) if os.path.exists(os.path.join(d, "r3h_carryover.json")) else {}
+    check("R-3h 읽지 못하는 계획 · output 이 폴더의 조각(fragment_4.k) → 조각 그대로 · 보고에 output_clobber(까닭에 「동반 파일을 모른다」)",
+          rc == 1 and not changed and "output_clobber" in kinds(rep) and unknown in details(rep, "output_clobber"), (rc, changed, sorted(kinds(rep))))
+    # 앞 실행의 보고는 다시 쓴다 — 같은 report 로 두 번 돌린다(둘째 전에 보고를 「ok true」 로 바꿔 두어 다시 썼는지 본다 · 줄 끝은 CRLF)
+    d, rc, out, changed = broken("r3i", lambda b: b[:-2], report="again.json")
+    rp = os.path.join(d, "again.json")
+    first = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    write(rp, '{\n  "format": "dynaforge-carryover-apply",\n  "version": 1,\n  "ok": true\n}\n', newline="\r\n")
+    rc2, out2 = run(binary, d, OP, "a.yaml")
+    second = json.load(open(rp, encoding="utf-8")) if os.path.exists(rp) else {}
+    check("R-3i 읽지 못하는 계획 · 앞 실행의 보고(형식 표지 · CRLF)는 다시 쓴다 — 두 번 다 rc 1 · plan_json 보고",
+          rc == 1 and rc2 == 1 and "plan_json" in kinds(first) and "plan_json" in kinds(second) and second.get("ok") is False,
+          (rc, rc2, sorted(kinds(first)), sorted(kinds(second)), out2[-300:]))
 
 
 

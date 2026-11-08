@@ -14591,7 +14591,7 @@
         "note": "실행 검증된 예제 (StepForge 진리값 판 — keep 2 · morph 1 · transform 1 · remesh 3(새 섹션 하나) · delete 1 · 새 파트 1(조각 없음))"
       },
       "example_folder": "examples/apply_carryover_plan",
-      "notes": "Relative paths resolve against the YAML file's directory; companion files resolve against plan.json's directory. Unknown YAML keys are refused."
+      "notes": "Relative paths resolve against the YAML file's directory; companion files resolve against plan.json's directory. Unknown YAML keys are refused. Output and report may not be a file the op reads (the config YAML, the deck and its *INCLUDE closure, plan.json, the plan's companion files) or a folder: a clashing output is refused as output_clobber in the report, a clashing report is refused on the console only. When plan.json cannot be read (cannot be opened, broken JSON, a leading BOM, not an object, no files table) its companion files are unknown, so every file in plan.json's folder counts as read, except a previous carry-over report recognised by its \"format\": \"dynaforge-carryover-apply\" marker, which may be rewritten (since 2026-11-08 — before, report: field_2.bin was refused as plan_json but overwrote field_2.bin with the report)."
     },
     {
       "name": "stcx_fullangle_drop",

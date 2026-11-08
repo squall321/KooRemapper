@@ -174,6 +174,14 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   둔다). 번호를 세기만 하는 것(커서가 높아질 뿐 · 겹침은 넉넉한 쪽): matswap · cclip 의 최대값, ale `ale_findMaxIds`, cnrb2solid 의 번호 공간 표
   (`Ns::Mat`), cnrb2spring 의 `MAT`. 단독 merge 는 모르는 재질을 알림에만 쓴다.
 
+- **계획을 못 읽으면 동반 파일을 모른다(#1)** — `carryoverCompanionNames` 가 깨진 계획(끝 잘림 · 끝에 `x` · 앞의 BOM)에서 빈 목록을 내
+  `report: field_2.bin` 이 rc 1 `plan_json` 으로 거절하며 field_2.bin 을 보고로 덮었다. 이제 「모른다」(false)를 돌려준다 — 열 수 없다 ·
+  JSON 이 아니다 · 객체가 아니다 · `files` 객체(판 1 · 2 의 필수 칸 · 동반 파일의 표)가 없다. 그때는 계획 폴더의 파일(링크면 가리키는 것이
+  파일인 것)을 다 읽는 파일로 본다 — 앞 실행의 이월 보고(첫 칸 `"format": "dynaforge-carryover-apply"` · 앞의 BOM · 공백 · CRLF 는 건너뛰고
+  본다)만 빼서 같은 report 로 다시 돌릴 수 있게 했다. output 도 같은 목록을 본다 — 계획을 못 읽으면 덱은 어차피 쓰지 않지만 적용 쪽 읽기가
+  나중에 BOM 을 받게 되어도 동반 파일을 덮지 않게(그때 거절 까닭은 `output_clobber` 이고 그 까닭에 「계획을 읽지 못해 동반 파일을 모른다」
+  가 붙는다). 쓰기 · 바꿔 넣기(`CarryStagedFiles`)는 손대지 않았다(공용 도우미로 갈 몫). 회귀 v2 R-3e~i(35a35bb 에서 R-3e~h 실패).
+
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
   품질 관문까지 지나면 덱 · 보고 차례로 바꿔 넣는다(`CarryStagedFiles` — extract-parts `StagedFiles` 의 사본 · 셋째 소비자가 오면 공용으로).

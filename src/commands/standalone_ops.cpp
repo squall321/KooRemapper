@@ -1772,17 +1772,20 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
 }
 
 // 계획이 가리키는 동반 파일 이름 — `files` 의 키와 줄이 가리킨 이름(field.file · field.new_section.file · fragment.file · instead.file).
-// 계획 폴더 바로 아래의 맨 이름만(경로 · `..` 은 적용 쪽이 거절한다). 읽지 못하는 계획이면 빈 목록 — 그 계획은 어차피 거절된다.
-static std::vector<std::string> carryoverCompanionNames(const std::string& planPath) {
-    std::vector<std::string> out;
+// 계획 폴더 바로 아래의 맨 이름만(경로 · `..` 은 적용 쪽이 거절한다). 읽지 못하는 계획(열 수 없다 · JSON 이 아니다 — 깨진 끝 · BOM ·
+// 객체가 아니다 · `files` 객체가 없다)이면 false — 동반 파일을 **모른다**. 그 계획은 어차피 거절되지만 거절 보고는 쓰므로, 부르는 쪽이
+// 계획 폴더의 파일을 다 입력으로 본다(`carryoverFolderFiles` · 적대적 검토 11-08 #1 — 예전엔 빈 목록이라 `report: field_2.bin` 이
+// rc 1 plan_json 으로 거절하며 field_2.bin 을 보고로 덮었다)
+static bool carryoverCompanionNames(const std::string& planPath, std::vector<std::string>& out) {
     std::ifstream f(planPath, std::ios::binary);
-    if (!f.is_open()) return out;
+    if (!f.is_open()) return false;
     std::ostringstream ss;
     ss << f.rdbuf();
     KooRemapper::json::Value v;
     std::string err;
-    if (!KooRemapper::json::parse(ss.str(), v, err) || v.type != KooRemapper::json::Value::Type::Object) return out;
+    if (!KooRemapper::json::parse(ss.str(), v, err) || v.type != KooRemapper::json::Value::Type::Object) return false;
     using VT = KooRemapper::json::Value::Type;
+    if (const auto* fs = v.get("files"); !fs || fs->type != VT::Object) return false;   // 동반 파일의 표(판 1 · 2 의 필수 칸)가 없다
     auto add = [&](const KooRemapper::json::Value* s) {
         if (!s || s->type != VT::String || s->s.empty() || s->s == "." || s->s == "..") return;
         if (s->s.find_first_of("/\\:") != std::string::npos || s->s.find('\0') != std::string::npos) return;
@@ -1806,6 +1809,39 @@ static std::vector<std::string> carryoverCompanionNames(const std::string& planP
                     if (const auto* ns = fld->get("new_section"); ns && ns->type == VT::Object) add(ns->get("file"));
                 }
             }
+    return true;
+}
+
+// 앞 실행의 이월 보고인가 — 우리 보고는 `{` 다음 첫 칸이 `"format": "dynaforge-carryover-apply"` 다(`carryover::toJson`). 앞의 BOM ·
+// 공백 · 줄 끝(CRLF)은 건너뛰고 본다. 동반 파일을 모를 때 이 파일만은 계획 폴더에 있어도 다시 쓴다(같은 report 로 다시 돌릴 수 있게)
+static bool isCarryoverReport(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return false;
+    char buf[256];
+    f.read(buf, sizeof buf);
+    const std::string s(buf, static_cast<size_t>(f.gcount()));
+    size_t i = s.rfind("\xEF\xBB\xBF", 0) == 0 ? 3 : 0;
+    auto token = [&](const std::string& t) {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) ++i;
+        if (s.compare(i, t.size(), t) != 0) return false;
+        i += t.size();
+        return true;
+    };
+    return token("{") && token("\"format\"") && token(":") && token("\"dynaforge-carryover-apply\"");
+}
+
+// 계획 폴더의 파일(링크면 가리키는 것이 파일인 것) — 동반 파일을 모를 때 다 입력으로 본다. 앞 실행의 보고만 뺀다. 폴더는 건너뛴다
+static std::vector<std::string> carryoverFolderFiles(const std::string& planPath) {
+    std::vector<std::string> out;
+    std::filesystem::path dir = std::filesystem::path(planPath).parent_path();
+    if (dir.empty()) dir = ".";
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code fe;
+        if (!it->is_regular_file(fe)) continue;
+        const std::string p = it->path().string();
+        if (!isCarryoverReport(p)) out.push_back(p);
+    }
     return out;
 }
 
@@ -1932,8 +1968,14 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     //   쓰기 관문에 걸린 뒤 「옛 산출」로 지워졌다(11-07 밤 실측)
     std::vector<KooRemapper::output_guard::Input> reads = KooRemapper::output_guard::modelInputs(modelPath);
     reads.push_back({planPath, "plan"});
-    for (const auto& n : carryoverCompanionNames(planPath))
+    std::vector<std::string> companions;
+    const bool companionsKnown = carryoverCompanionNames(planPath, companions);
+    for (const auto& n : companions)
         reads.push_back({(std::filesystem::path(planPath).parent_path() / n).string(), "계획의 동반 파일"});   // 적용 쪽과 같은 자리
+    // 계획을 읽지 못하면 동반 파일을 모른다 — 계획 폴더의 파일을 다 입력으로 본다(앞 실행의 보고는 뺀다 · 적대적 검토 11-08 #1)
+    if (!companionsKnown)
+        for (auto& p : carryoverFolderFiles(planPath))
+            reads.push_back({std::move(p), "계획 폴더의 파일 — 계획을 읽지 못해 동반 파일을 모른다"});
     auto isDir = [](const std::string& p) {
         std::error_code ec;
         return std::filesystem::is_directory(p, ec);
