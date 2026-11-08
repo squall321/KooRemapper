@@ -275,6 +275,37 @@ def sec_k(binary):
         rc_a = finish(a)
         check("K-4 %s 멈춘(산) 실행의 임시 파일 %d 개는 다른 실행이 지우지 않는다 — 둘 다 rc 0 · 끝나면 임시 파일 없음" % (op, len(held)),
               held and kept and rc_b == 0 and rc_a == 0 and not tmp_left(d), (held, kept, rc_b, rc_a, tmp_left(d), out_b[-300:]))
+    # K-6 읽기 전용 폴더(제자리 쓰기 — 시스템 임시 폴더에 써 둔다)에서 SIGKILL 이 남긴 것도 다음 실행이 지운다
+    if os.geteuid() != 0:
+        d = ep_big_dir("K6")
+        ro = os.path.join(d, "ro")
+        os.makedirs(ro)
+        write(os.path.join(ro, "out.k"), "old\n")
+        os.chmod(ro, 0o555)
+        write(os.path.join(d, "e6.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: r.json\n")
+        p = None
+        for _ in range(20):
+            q = start(binary, d, "extract-parts", "e6.yaml")
+            while q.poll() is None:
+                if sys_tmp_of(q.pid):
+                    os.kill(q.pid, signal.SIGSTOP)
+                    if sys_tmp_of(q.pid):
+                        p = q
+                        break
+                    os.kill(q.pid, signal.SIGCONT)
+                    break
+            if p:
+                break
+            q.wait()
+        if p is None:
+            check("K-6 — 실행 가운데 멈추지 못했다", False)
+        else:
+            finish(p, signal.SIGKILL)
+            left = sys_tmp_of(p.pid)
+            rc, out = run(binary, d, "extract-parts", "e6.yaml")
+            check("K-6 읽기 전용 폴더 · SIGKILL 이 시스템 임시 폴더에 남긴 %d 개를 다음 실행이 지운다 — rc 0" % len(left),
+                  left and rc == 0 and not sys_tmp_of(p.pid) and is_new_deck(os.path.join(ro, "out.k")), (left, rc, out[-300:]))
+        os.chmod(ro, 0o755)
     # 다른 산출의 주인 없는 임시 파일은 그대로 — 그 산출을 다시 돌릴 때 지운다
     d = ep_big_dir("K5")
     write(os.path.join(d, "o.yaml"), "model: in.k\noutput: other.k\nparts: [2]\n")

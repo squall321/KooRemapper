@@ -608,13 +608,16 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
     if (!t.err.empty() || t.special || t.dir) return 0;
     const std::string want = detail::nameHash(baseOf(t.path));
     const detail::Owner me = detail::self();
-    // 대상 폴더 · 시스템 임시 폴더(InPlace 의 자리)
+    // 대상 폴더 · 시스템 임시 폴더(InPlace 의 자리 — 대상 폴더에 쓸 수 없을 때만 그리 쓰니 그때만 본다. 늘 보면 붐비는 /tmp 를
+    // 실행마다 · 쓸 자리마다 훑는다)
     std::vector<fs::path> dirs;
     const std::string d0 = dirPartOf(t.path);
     dirs.push_back(d0.empty() ? fs::path(".") : fs::path(d0));
     std::error_code ec;
-    const fs::path td = fs::temp_directory_path(ec);
-    if (!ec && !td.empty() && !fs::equivalent(td, dirs[0], ec)) dirs.push_back(td);
+    if (::access(dirs[0].c_str(), W_OK) != 0) {
+        const fs::path td = fs::temp_directory_path(ec);
+        if (!ec && !td.empty() && !fs::equivalent(td, dirs[0], ec)) dirs.push_back(td);
+    }
     std::vector<std::string> gone;
     for (const auto& d : dirs) {
         std::error_code ie;
