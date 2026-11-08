@@ -391,3 +391,5 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   check.why → check.problems 차례로 `fragment_failed` 에 싣는다. transform 의 `check` 는 선택이다.
 - **그럴듯한 둘** — 돌리면(R ≠ I) `orientation_not_rotated` 경고(재질 축 · 좌표계 · MCID · 초기 응력은 돌리지 않는다). 거절하면 출력 자리의 옛 덱을 지우고
   `stale_output_removed` 로 적는다. → 11-07 밤 사용자 결정으로 없앴다(앞 파일은 그대로 · 아래).
+- (11-08) **판 2 받기 배포** — Drive `dist-20261108-234149Z`(revision `e6407dc`, 바이너리 `c5f74c18`). 배포 바이너리로 라이브 실물 둘을 다시 재 적용 덱
+  sha256 raw `5066e271…` · mesh `842b0924…`(StepForge 에 알림). cae00 은 다음 update-all 로 받는다.
