@@ -26,6 +26,8 @@
       세트 대상(절점 · 파트 · 셸 …)으로 거르고 그 대상으로 번호를 바꾼다(Q 절 · 재검토 N1).
     · 인클루드 찾기 — 패스마다 포함하는 파일의 폴더로 풀고 *INCLUDE_PATH 를 몰랐으며 깊이 8 에서 말없이 멈췄다. 정본 닫힘대로 따라가고
       (주 덱 폴더 먼저 · *INCLUDE_PATH · 깊이 16) 넘거나 못 찾거나 따라가지 않는 변형이 있으면 거절한다(R 절 · 재검토 N3 · D1 · N2).
+    · 되읽기의 재질 셈 — `*MAT` 블록의 모든 데이터 줄 첫 칸을 MID 로 세어 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸이 미정의 재질을 가렸다.
+      공용 재질 훑기(구조 재질만 · 모르는 꼴은 넉넉히)로 센다(S 절 · 2026-11-08).
 
 usage: test_extract_parts.py <KooRemapper 바이너리>
 """
@@ -771,6 +773,30 @@ def main():
         cfg(rd, "R6.yaml", "model: R6.k\noutput: R6_out.k\nparts: [7]\n")
         rc, out = run(binary, rd, "extract-parts", "R6.yaml")
         check("R-6 *INCLUDE_PATH(탐색 경로)만 있으면 거절하지 않는다", rc == 0, out[-300:])
+
+        # ── S: 되읽기의 재질 셈은 구조 재질만(열 재질 TMID · 덧붙임 카드는 MID 를 정의하지 않는다) ─────────────────
+        sd = os.path.join(d, "S")
+        os.makedirs(sd)
+        mat2 = "*MAT_ELASTIC\n         2  1.00E-9   10000     0.4\n"
+        for tag, mat, want, why in (
+                ("1", "*MAT_T01\n         2       0.0       0.0       0.0\n       1.0       1.0\n", 1,
+                 "MID 2 를 *MAT_T01 2(TMID)만 「정의」 — 미정의 재질 1 · rc 1(예전 0 · rc 0)"),
+                ("2", "*MAT_ADD_EROSION\n         2       0.0       0.0       0.0\n       0.0       0.0       0.0\n", 1,
+                 "MID 2 를 *MAT_ADD_EROSION 2 만 「정의」 — 미정의 재질 1 · rc 1(예전 0 · rc 0)"),
+                ("3", "*MAT_ORTHOTROPIC_ELASTIC\n" + "".join(
+                    "%10d   1.00E-9    1000.0    1000.0    1000.0       0.3       0.3       0.3\n" % m +
+                    "     500.0     500.0     500.0       0.0\n       0.0       0.0       0.0       1.0       0.0       0.0\n"
+                    "       0.0       1.0       0.0       0.0\n" for m in (9, 2)), 0,
+                 "지킴이 — 줄 수를 모르는 꼴에 쌓인 둘째 재질 MID 2 는 정의로 센다(넉넉히) · rc 0")):
+            body = base_deck()
+            assert mat2 in body
+            write(os.path.join(sd, "main.k"), body.replace(mat2, mat))
+            write(os.path.join(sd, "inc_part2.k"), INC)
+            cfg(sd, "s.yaml", "model: main.k\noutput: s_out.k\nparts: [1, 2]\nreport: s_rep.json\n")
+            rc, out = run(binary, sd, "extract-parts", "s.yaml")
+            rs = rep(sd, "s_rep.json") if os.path.exists(os.path.join(sd, "s_rep.json")) else {}
+            got = (rs.get("verify") or {}).get("undefined_materials")
+            check("S-%s %s" % (tag, why), got == want and (rc != 0) == (want > 0), (rc, rs.get("verify"), out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

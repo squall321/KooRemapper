@@ -26,6 +26,7 @@
 #include "parser/DeckScan.h"
 #include "parser/DeckWriter.h"
 #include "parser/ElementCardLayout.h"
+#include "parser/MaterialIds.h"      // 되읽기의 재질 셈 — 구조 재질만(열 재질 TMID · *MAT_ADD_* 는 MID 가 아니다)
 #include "parser/IncludeClosure.h"   // 쓸 파일이 입력 덱을 덮는지(sameFile · clobberPair)
 #include "util/StagedWrite.h"       // 임시 파일 + 바꿔 넣기(apply_carryover_plan 과 같은 도우미)
 #include "util/Utf8.h"              // 보고 글자를 바른 UTF-8 로(apply_carryover_plan 보고와 같은 함수)
@@ -1211,6 +1212,8 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
     const std::map<int, int> pidN = pidNodeCounts(idx);
 
     std::vector<int> nodes, secIds, matIds, elemPids, elemNodes, setMembers;
+    std::vector<std::string> matLines;   // `*MAT` 블록의 줄(키워드 · 빈 줄 · 주석까지) — 재질 셈은 공용 재질 훑기가 한다
+    bool inMat = false;
     std::ifstream in(path);
     if (!in.is_open()) return v;
     std::string line, kw;
@@ -1238,6 +1241,8 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
             remaining = 0;
             dataIdx = 0;
+            inMat = starts(kw, "*MAT");
+            if (inMat) matLines.push_back(line);
             inElem = starts(kw, "*ELEMENT");
             if (inElem) {
                 info = KooRemapper::parseElementKeyword(line);
@@ -1247,6 +1252,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             }
             continue;
         }
+        if (inMat) { matLines.push_back(line); continue; }
         if (inElem && opaque && vaux.supported) {
             if (g != std::string::npos && line[g] == '$') continue;
             if (g == std::string::npos && vAuxRemaining == 0) continue;
@@ -1310,9 +1316,6 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
         } else if (starts(kw, "*SECTION")) {
             int id = fieldInt(cardFields(line, 10), 0);
             if (id > 0) secIds.push_back(id);
-        } else if (starts(kw, "*MAT")) {
-            int id = fieldInt(cardFields(line, 10), 0);
-            if (id > 0) matIds.push_back(id);
         } else if (starts(kw, "*SET_NODE")) {
             const int sfw = (fw >= 20) ? 20 : 10;
             const int tn = titleLines(kw);
@@ -1344,6 +1347,10 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
         }
         ++dataIdx;
     }
+    // 재질 — 구조 재질의 MID(공용 재질 훑기 · 줄 수를 모르는 꼴은 행마다 넉넉히 — 쌓인 둘째 재질을 미정의로 몰지 않는다). 열 재질의 TMID ·
+    // `*MAT_ADD_*` 의 첫 칸(MID · PID)은 세지 않는다 — 예전엔 `*MAT` 블록의 모든 데이터 줄 첫 칸을 세어 `*MAT_T01 2` 만 있는 MID 2 를 「정의됨」
+    // 으로 보았다(되읽기가 미정의 재질을 놓쳤다 · 적대적 검토 11-08 다음 판 목록)
+    for (int id : KooRemapper::matids::inUse(matLines)) matIds.push_back(id);
     sortUnique(nodes);
     sortUnique(secIds);
     sortUnique(matIds);

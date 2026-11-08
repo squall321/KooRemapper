@@ -283,6 +283,11 @@ StepForge `docs/REQUEST-2026-11-06-carryover.md`(`47cd7a1`)의 세 파일(계획
   Card 1 에서 RO · E · PR 를 읽는다(열 재질 · `*MAT_ADD_*` 는 그 훑기가 뺀다 · 쌓인 묶음도 읽는다). Card 1 에 RO · E · PR 가 없는 꼴(NULL · RIGID
   · SPRING · DAMPER · VACUUM · HE_BURN — 이름 꼴)은 예전처럼 건너뛴다(번호 이름 `*MAT_009` · `*MAT_020` 은 예전에도 읽었다 — 그대로). 칸은
   예전처럼 10칸 고정폭(long 덱은 예전부터 못 읽는다 — 남은 틈). 회귀 `test_material_id_family.py` H-1 · H-2(4f550b3 에서 실패) · H-0(지킴이).
+- **extract-parts 되읽기의 재질 셈(다음 판 목록에서 — 조정자 「싸면」)** — `verifyOutput` 이 `*MAT` 블록의 모든 데이터 줄 첫 칸을 MID 로 세어
+  열 재질 TMID · `*MAT_ADD_*` 의 첫 칸(MID · PID)이 미정의 재질을 가렸다. `*MAT` 블록 줄(빈 줄 · 주석까지)을 모아 `matids::inUse` 로 센다 —
+  구조 재질만 · 줄 수를 모르는 꼴은 행마다 넉넉히(그 쌓인 둘째 재질을 미정의로 몰면 거짓 rc 1 — 예전 셈도 넉넉했다). 쓰기 쪽(`*MAT_T01` 블록을
+  재질 2 로 싣는 고르기)은 손대지 않았다(더 싣는 쪽 · 무해). 스테이징 갈래의 extract-parts 고침(1565 줄 뒤 · 표준 헤더)과 겹치지 않는 자리다.
+  회귀 `test_extract_parts.py` S-1 · S-2(4f550b3 에서 실패) · S-3(지킴이).
 
 ## 11-07 밤 결정 고침 — 정한 것
 - **출력 규칙(사용자 결정 ①)** — extract-parts(`a33af2f`)와 같은 꼴: 덱 · 보고를 output 폴더의 임시 파일(`.<이름>.kr_tmp_…`)에 쓰고 되읽기 대조 ·
