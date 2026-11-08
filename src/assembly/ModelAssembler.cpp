@@ -14628,6 +14628,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
     if (!insertBlocks.empty()) {
         deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
     }
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[load] Applied " + std::to_string(loadCount) + " load case(s)");
     return true;
@@ -15325,6 +15326,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[contact] Applied " + std::to_string(contactCount) + " contact(s)");
     return true;
@@ -15541,6 +15543,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[boundary] Applied " + std::to_string(bcCount) + " boundary condition(s)");
     return true;
@@ -15829,6 +15832,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
+    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[rbe] Created " + std::to_string(rbeCount)
         + " constraint(s), " + std::to_string(nodesCreated) + " centroid node(s)");
@@ -18020,7 +18024,8 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
     // ★번호를 기존 모델의 최대값 위로 옮긴다(2026-11-08 · 사용자 결정 「고친다」) — 예전엔 battery 덱의 번호(절점 · 요소 1 ~ ·
     //   고정 PID · SECID · MID · 세트 · 곡선 · 접촉)를 그대로 끌어와 기존 모델과 겹쳤다(상자 198 절점이 모두 겹쳐 rc 0).
     //   족마다 「기존 최대값」만큼 옮긴다 — 공용 바닥(`idMaxima` — 모든 요소 족 · 스칼라 절점까지)과, 거기 없는 족(열 재질 · 모래시계 ·
-    //   접촉 · 곡선)은 주 덱 · 인클루드 · 이 실행이 덧붙인 덱을 같은 규칙으로 훑는다. 기존 모델에 없는 족은 옮기지 않는다.
+    //   접촉 · 곡선) · 앞 op 이 제 훑기로 냈을 수 있는 족(섹션 · 세트)은 주 덱 · 인클루드 · 이 실행이 덧붙인 덱을 같은 규칙으로 훑는다.
+    //   기존 모델에 없는 족은 옮기지 않는다.
     //   node_id_offset · elem_id_offset 을 주면 그 값이다 — 기존 최대값 위가 아니면(겹칠 수 있으면) 쓰기 전에 멈춘다.
     bat::ShiftResult sr;
     std::string err;
@@ -18034,9 +18039,11 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         baseMax[bat::FAM_NODE] = mx.node;
         baseMax[bat::FAM_ELEM] = mx.elem;
         baseMax[bat::FAM_PART] = mx.part;
-        baseMax[bat::FAM_SECTION] = mx.section;
         baseMax[bat::FAM_MAT] = mx.material;
-        baseMax[bat::FAM_SET] = mx.set;
+        // ★섹션 · 세트는 커서에 더해 줄(주 덱 · 인클루드 · 이 실행이 덧붙인 덱)을 다시 훑는다(2026-11-08 · 6차 검토 G1) — 같은 실행의
+        //   앞 op 이 제 훑기로 낸 번호가 커서에 없을 수 있다(실측: box + boundary 뒤 battery 의 SID 1 이 둘). 곡선 · 접촉과 같은 셈
+        baseMax[bat::FAM_SECTION] = std::max({mx.section, cur_scanMaxSectionId(rawLines_), inclMax(cur_scanMaxSectionId)});
+        baseMax[bat::FAM_SET] = std::max({mx.set, cur_scanMaxSetId(rawLines_), inclMax(cur_scanMaxSetId)});
         for (int fam : {bat::FAM_TMAT, bat::FAM_HOURGLASS, bat::FAM_CURVE}) {
             auto scan = [fam](const std::vector<std::string>& L) { return ma_maxDefinedIn(L, fam); };
             baseMax[static_cast<size_t>(fam)] = std::max(scan(rawLines_), inclMax(scan));

@@ -22,6 +22,8 @@
   I   use_include: false → battery 덱 파일 없음 · 주 덱에 *INCLUDE 없음 · 한 덱에서 위 판정
   D   phase 2 · use_dynain · dynain_file → rc 1(옮기면 그 dynain 의 번호와 어긋난다) · 아무것도 쓰지 않는다
   L   battery 뒤의 contact 가 낸 접촉 · 세트 번호도 battery 와 겹치지 않는다(뒤 op 의 번호 발급이 battery 덱을 센다)
+  G   battery 앞의 boundary · rbe · load · contact · matswap 이 같은 실행에서 낸 세트 · 섹션 번호와도 겹치지 않는다(2026-11-08 전엔
+      제 훑기로 낸 번호가 공용 커서에 없어 SID 1 · SECID 3 이 둘)
 
 usage: test_assemble_battery_ids.py <KooRemapper 바이너리>
 """
@@ -175,6 +177,10 @@ def facts(blocks):
                 r("mat", num(l, 20, 30))
                 r("hourglass", num(l, 40, 50))
                 r("tmat", num(l, 70, 80))
+        elif kw.startswith("*SECTION_") and title:   # 묶음마다 제목 줄 + 카드(셸은 Card 1 · 2)
+            per = 3 if kw.startswith("*SECTION_SHELL") else 2
+            for q in range(0, len(ls), per):
+                d("section", num(ls[q + 1], 0, 10))
         elif kw == "*SECTION_SHELL":
             for q in range(0, len(ls), 2):
                 d("section", num(ls[q], 0, 10))
@@ -184,6 +190,9 @@ def facts(blocks):
         elif kw == "*HOURGLASS":
             for l in ls:
                 d("hourglass", num(l, 0, 10))
+        elif kw == "*HOURGLASS_TITLE":
+            for q in range(1, len(ls), 2):
+                d("hourglass", num(ls[q], 0, 10))
         elif kw.startswith("*MAT_THERMAL_"):
             d("tmat", num(ls[t0], 0, 10))
         elif kw == "*MAT_ADD_THERMAL_EXPANSION":
@@ -210,16 +219,18 @@ def facts(blocks):
         elif kw.startswith("*DEFINE_CURVE"):
             d("curve", num(ls[t0], 0, 10))
         elif kw.startswith("*CONTACT_"):
-            d("contact", num(ls[0], 0, 10))
-            c1 = ls[1]
+            c0 = 1 if (kw.endswith("_ID") or kw.endswith("_TITLE")) else 0   # ID 카드가 없는 접촉(offset tied 의 _OFFSET)은 Card 1 부터
+            if c0:
+                d("contact", num(ls[0], 0, 10))
+            c1 = ls[c0]
             for idc, tc in ((0, 20), (10, 30)):
                 t = num(c1, tc, tc + 10)
                 if t != 5:
                     r(STYP[t], num(c1, idc, idc + 10))
-            if len(ls) > 4:
-                r("curve", num(ls[4], 20, 30))
-            if len(ls) > 5:
-                r("curve", num(ls[5], 20, 30))
+            if len(ls) > c0 + 3:
+                r("curve", num(ls[c0 + 3], 20, 30))
+            if len(ls) > c0 + 4:
+                r("curve", num(ls[c0 + 4], 20, 30))
         elif kw == "*BOUNDARY_SPC_NODE":
             for l in ls:
                 r("node", num(l, 0, 10))
@@ -475,6 +486,71 @@ def main():
         check("★D phase 2 · use_dynain · dynain_file → rc 1 · INCLUDE_DYNAIN 을 말한다 · 아무것도 쓰지 않는다(옮기면 어긋난다)",
               rc == 1 and "INCLUDE_DYNAIN" in out and not [f for f in os.listdir(d) if f.startswith(("ba.", "bt_"))],
               (rc, out[-300:]))
+
+        print("[G — battery 앞의 op 이 같은 실행에서 낸 번호]")
+        # 앞 op 이 제 훑기로 낸 번호(boundary · rbe 의 SET_NODE · load 의 SET_SEGMENT · contact 의 세트 · matswap 의 SECID)가 공용
+        # 커서에 없어 battery 가 그 위로 옮기지 않았다(2026-11-08 · 6차 검토 G1 — 실측: box + boundary 뒤 battery 의 SID 1 이 둘 ·
+        # matswap 뒤 SECID 3 이 둘)
+        text = battery_yaml("stacked", {"mode": "dent"})
+        before_ops = (
+            ("boundary", "  - type: boundary\n    boundaries:\n      - part: 1\n        dof: xyz\n"
+                         "        direction: [0, 0, -1]\n        select: direction\n        angle: 45.0\n"),
+            ("rbe(rbe2 spider)", "  - type: rbe\n    rbe:\n      - part: 1\n        select: direction\n"
+                                 "        direction: [0, 0, 1]\n        angle: 45.0\n        type: rbe2\n        mode: spider\n"),
+            ("load", "  - type: load\n    loads:\n      - part: 1\n        mode: pressure\n        value: 1.0\n"
+                     "        direction: [0, 0, 1]\n        select: direction\n        angle: 45.0\n"
+                     "        curve:\n          - [0.0, 0.0]\n          - [0.001, 1.0]\n"),
+            ("contact", "  - type: contact\n    contacts:\n      - action: create\n        type: automatic_single_surface\n"
+                        "        slave:\n          pid: 1\n        title: BeforeBattery\n"),
+            ("matswap(two_cubes + rubber)", None))
+        for k, (name, op_text) in enumerate(before_ops):
+            if op_text is None:   # matswap — 예제 덱 둘(PID 1 · 2)에 번들을 바꿔 넣는다
+                d = os.path.join(root, "g%d" % k)
+                os.makedirs(d)
+                for f in ("two_cubes.k", "rubber.k"):
+                    shutil.copyfile(os.path.join(REPO, "examples", "matswap", f), os.path.join(d, f))
+                with open(os.path.join(d, "bat.yaml"), "w", encoding="utf-8") as f:
+                    f.write(text)
+                with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+                    f.write("base_model: two_cubes.k\noutput: ba\noperations:\n  - type: matswap\n    bundle: rubber.k\n"
+                            "    pid: 1\n  - type: battery\n    config: bat.yaml\n")
+            else:
+                d = setup(root, "g%d" % k, binary, text, "", extra_base=False)
+                with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+                    f.write("base_model: box.k\noutput: ba\noperations:\n" + op_text + "  - type: battery\n    config: bat.yaml\n")
+            rc, out = run(binary, d, "assemble", "a.yaml")
+            if not check("★G %s 뒤 battery → rc 0" % name, rc == 0, out[-300:]):
+                continue
+            try:
+                defs, refs, _, _, _ = deck_facts(os.path.join(d, "ba.k"))
+            except DeckUnreadable as e:
+                check("★G %s   └ 덱을 칸대로 읽는다" % name, False, e)
+                continue
+            dup, dangling = integrity(defs, refs)
+            if op_text is None:
+                # two_cubes.k 는 8칸 덱에 10칸 번호를 쓴 예제다(리더는 토큰으로 읽는다) — 이 칸 표로는 절점 · 요소 · 파트 칸을 읽지
+                # 못하니 번호 족(섹션 · 재질 · 모래시계 · 세트 · 곡선)만 본다
+                fams = {"section", "mat", "hourglass", "tmat", "curve", "contact"} | set(SET_KIND.values())
+                dup = {f: v for f, v in dup.items() if f in fams}
+                dangling = [x for x in dangling if x[0] in fams]
+            check("★G %s   └ 앞 op 이 낸 세트 · 섹션 번호와 battery 의 것이 겹치지 않는다 · 끊긴 참조 없음" % name,
+                  not dup and not dangling, (dup, dangling))
+
+        # 제 훑기로 낸 세트가 공용 커서에도 오른다 — 뒤 op 이 커서로 같은 종류의 세트를 내도 겹치지 않는다(실측: load 의 SET_SEGMENT 1
+        # 뒤 offset tied 셸 층이 커서 0 에서 SET_SEGMENT 1 을 다시 냈다 · 2026-11-08 · G1 「allocator 마다 커서를 올린다」)
+        d = setup(root, "g_cursor", binary, text, "", extra_base=False)
+        with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+            f.write("base_model: box.k\noutput: ba\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n" + before_ops[2][1] +
+                    "  - type: offset\n    source_pid: 1\n    element_type: shell\n    thickness: 1.0\n    num_layers: 1\n"
+                    "    offset_direction: +z\n    connection_mode: tied\n    new_pid: 10\n    material_card: |\n"
+                    "      *MAT_ELASTIC\n      $#     mid        ro         e        pr\n"
+                    "           @MID@  7.85E-09  2.10E+05       0.3\n")
+        rc, out = run(binary, d, "assemble", "a.yaml")
+        if check("★G 커서 — load 뒤 offset(element_type: shell · tied) → rc 0", rc == 0, out[-300:]):
+            defs, refs, _, _, _ = deck_facts(os.path.join(d, "ba.k"))
+            dup, dangling = integrity(defs, refs)
+            check("★G 커서   └ load 의 SET_SEGMENT 와 offset 이 커서로 낸 SET_SEGMENT 가 겹치지 않는다(예전엔 둘 다 1)",
+                  not dup and not dangling and len(defs.get("set_segment", [])) == 3, (dup, dangling, defs.get("set_segment")))
 
         print("[L — battery 뒤의 op 이 내는 번호]")
         text = battery_yaml("stacked", {"mode": "dent"})
