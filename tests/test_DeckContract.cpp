@@ -706,6 +706,23 @@ TEST(auxCardReadings_칸마다_맞춤이_달라도_정수_폭_읽기는_든다) 
     ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 1031, 1041}));
     ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({1031}));
+    // 정수 폭으로 쓴 줄의 쓰지 않는 칸(SLEN · SBRID)에 빈칸 · 글자 — 쓰는 칸만 보는 규칙 (a) 라 정수 폭 읽기가 든다(N3 103 을 지킨다)
+    for (const char* sl : {"- 1.5", "1.0 E-3", "x"}) {
+        std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8s%8d%8d", 13, 9, 101, 102, 0, sl, 103, 104);
+        r = auxCardReadings(a, b, 8);
+        ASSERT_TRUE(r.plainAlt);
+        ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
+    }
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8s%8s%8d%8d", 13, 9, 101, 102, "1 2", "0.0", 103, 104);
+    r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
+    // 설명서 꼴 두 절점 띠의 정수꼴 SLEN — SBRID 칸의 빈칸(「1 2」 — 두 읽기가 같은 열)은 (c) 를 끄지 않는다(유령 N3 1000 이 없다)
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8s%16s", 13, 9, 734, 934, "1 2", "1000");
+    ASSERT_FALSE(auxCardReadings(a, b, 8).plainAlt);
+    // 설명서 꼴 줄은 그대로 걸러진다 — 실수 SLEN 의 뒤 절반이 정수 폭 N3 자리(「0.0」)
+    std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8s%16s%8d%8d", 13, 9, 101, 102, "", "0.0", 103, 104);
+    ASSERT_FALSE(auxCardReadings(a, b, 8).plainAlt);
     // 정수 폭으로 쓴 줄 뒤 꼬리 글(설명서 카드 폭 72열 뒤) — LS-DYNA 가 읽지 않는 글자라 정수 폭 읽기를 버리지 않는다(규칙 (b))
     std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8s%8d%8d%s", 13, 9, 101, 102, 0, "0.0", 103, 104, "        belt left 1");
     r = auxCardReadings(a, b, 8);

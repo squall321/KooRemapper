@@ -427,29 +427,6 @@ bool isIntText(const std::string& s) {
     return true;
 }
 
-// 실수 칸 글자 — 부호 · 소수점 · 지수(E · D · 글자 없이 부호 — 「1.0-3」). 정수도 실수다
-bool isRealText(const std::string& s) {
-    size_t i = 0;
-    const size_t n = s.size();
-    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
-    bool digits = false, dot = false;
-    for (; i < n; ++i) {
-        const char c = s[i];
-        if (std::isdigit(static_cast<unsigned char>(c))) { digits = true; continue; }
-        if (c == '.' && !dot) { dot = true; continue; }
-        break;
-    }
-    if (!digits) return false;
-    if (i == n) return true;
-    const char c = s[i];
-    if (c == 'E' || c == 'e' || c == 'D' || c == 'd') ++i;
-    else if (c != '+' && c != '-') return false;
-    if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
-    const size_t d0 = i;
-    while (i < n && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
-    return i == n && i > d0;
-}
-
 bool hasInnerBlank(const std::string& s) { return s.find_first_of(" \t") != std::string::npos; }
 
 // 소비자가 쓰는 칸(EID · PID · 절점 칸 — 카드 안) — 이 칸만 깨끗하면 manual 이 깨끗하다(헤더 「읽기들」)
@@ -484,13 +461,21 @@ bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f,
     if (cardEnd > n * static_cast<size_t>(fw)) return false;                            // (b)
     for (size_t k = n; k < f.size(); ++k)
         if (k * static_cast<size_t>(fw) < manualWidth && !f[k].empty()) return false;   // 설명서 카드 안 · 정수 폭 카드 밖에 글자
-    for (size_t k = 0; k < n && k < f.size(); ++k) {                                    // (a)
-        const std::string& t = f[k];
-        if (t.empty()) continue;
-        if (hasInnerBlank(t)) return false;
-        const bool real = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(k)) != a.wideFields.end();
-        if (real ? !isRealText(t) : !isIntText(t)) return false;
-    }
+    // (a) — 그 읽기가 쓰는 칸(EID · PID · 절점)이 깨끗한 정수(또는 빈 칸)다. 쓰지 않는 칸(SBRID · SLEN · MASS)의 글자는 보지 않는다 —
+    //   정수 폭으로 쓴 줄의 SLEN 「- 1.5」 · 「1.0 E-3」 · SBRID 「1 2」 가 그 읽기를 버려 safe 가 진짜 N3 을 지웠다(2026-11-08 「지키는
+    //   쪽은 잃지 않는다」). 설명서 꼴 줄은 쓰는 칸이 거른다 — 설명서 SLEN 의 뒤 절반이 정수 폭 N3 자리라 실수(「0.0」 · 「1.5」)면 여기서,
+    //   정수꼴(「10」)이면 (b) · (c) 가 막는다
+    auto usedBad = [&](int k) {
+        if (k < 0 || static_cast<size_t>(k) >= f.size()) return false;
+        const std::string& t = f[static_cast<size_t>(k)];
+        return !t.empty() && (hasInnerBlank(t) || !isIntText(t));
+    };
+    if (a.hasEid && usedBad(0)) return false;
+    if (a.hasPart && usedBad(a.partField)) return false;
+    for (int q = 0; a.nodeSkip >= 0 && q < a.nodeCount; ++q)
+        if (usedBad(a.nodeSkip + q)) return false;
+    for (int q = 0; a.nodeSkip2 >= 0 && q < a.nodeCount2; ++q)
+        if (usedBad(a.nodeSkip2 + q)) return false;
     if (!manualDoubtful && a.family == AuxFamily::SEATBELT && a.nodeSkip2 >= 0 && a.nodeCount2 == 2) {     // (c)
         const int n3 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2));
         const int n4 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2 + 1));
@@ -549,9 +534,12 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
     }
     cut(false, r.plain);
     // 다른 읽기 — 정수 폭이 규칙 (a)-(d)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
-    const size_t n = static_cast<size_t>(std::max(a.card1Fields, 0));
+    // 설명서 꼴이 아닐 수 있다 — 넓은 칸(SLEN · MASS)에 빈칸이 끼었다(정수 폭 두 칸 — 「0.5」 와 N3 — 이 그 자리에 함께 든다). 두 읽기가
+    // 같은 열인 칸(SBRID 「1 2」)의 빈칸은 쓴 꼴을 말하지 않는다 — 그 빈칸으로 (c) 를 끄면 설명서 꼴 두 절점 띠의 정수꼴 SLEN 이 유령 N3 이
+    // 됐다(2026-11-08 퍼즈 — (a) 가 쓰는 칸만 보게 된 뒤)
     bool doubtful = false;
-    for (size_t k = 0; k < n && k < r.manual.f.size(); ++k) doubtful = doubtful || hasInnerBlank(r.manual.f[k]);
+    for (int k : a.wideFields)
+        if (k >= 0 && static_cast<size_t>(k) < r.manual.f.size()) doubtful = doubtful || hasInnerBlank(r.manual.f[static_cast<size_t>(k)]);
     // (b) 는 설명서 카드 폭 안의 글자만 본다 — 정수 폭으로 쓴 줄 뒤 꼬리 글(「        belt left 1」 · 「mass on lid」)이 그 읽기를 버려
     // safe 가 진짜 N3 을 지우고(rc 0) 고른 PID 의 질량을 버렸다(2026-11-08 — 규칙 (e) 를 뺀 같은 원칙)
     const size_t mw = manualCardWidth(a, fw);
