@@ -115,6 +115,8 @@ void printOverview(std::ostream& os, const std::string& version) {
     os << "    따라가지 않는 *INCLUDE_TRANSFORM 같은 변형 인클루드의 파일 · dynain/bundle/dat/entities 같은 다른 입력)과 같은 파일이면\n";
     os << "    — 철자(./ · ../ · 절대 경로) · 심볼릭 링크 · 하드 링크가\n";
     os << "    달라도 — 아무것도 쓰지 않고 [ERROR] + 종료 코드 1 (2026-11-07). in-place 는 assemble 만(output == base_model)\n";
+    os << "  - 덱 · dynain · IGA 를 쓰다 실패하면(디스크 참 · 할당량 · 파일 크기 상한 · EIO) [ERROR] + 종료 코드 1 —\n";
+    os << "    extract-parts · apply_carryover_plan 은 바꿔 넣지 않는다(앞 파일 그대로). 바로 쓰는 op 의 그 파일은 잘렸을 수 있다(2026-11-08)\n";
     os << "  - restack·merge 는 비운 PID 를 가리키던 자리를 옮기고, 못 옮기면 rc=1 (pid_refs: warn 으로 끌 수 있다)\n";
     os << "  - 실패하면 [ERROR] 줄을 찍고 종료 코드 1\n";
     os << "  - SIF 안 경로: /opt/kooremapper/bin/KooRemapper, 번들 재질 DB /opt/kooremapper/materials/material_db.json\n";

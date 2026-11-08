@@ -249,7 +249,11 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         }
         (void)endSuppressed;
 
-        writer.close();
+        // 쓰기 · 닫기 실패(디스크 참 · 파일 크기 상한)면 잘린 덱이다 — 성공이라 하지 않는다(여섯째 검토 S2)
+        if (!writer.close()) {
+            errorMessage_ = "덱을 쓰다 멈췄다: " + writer.error();
+            return false;
+        }
         return true;
     }
     catch (const std::exception& e) {
@@ -286,7 +290,10 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
         writeElementSection(file, mesh);
         writeEnd(file);
 
-        writer.close();
+        if (!writer.close()) {   // 쓰기 · 닫기 실패면 잘린 덱이다(여섯째 검토 S2)
+            errorMessage_ = "덱을 쓰다 멈췄다: " + writer.error();
+            return false;
+        }
         return true;
     }
     catch (const std::exception& e) {

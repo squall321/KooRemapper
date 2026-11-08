@@ -210,6 +210,23 @@ std::string dirPartOf(const std::string& p) {
     return sep == std::string::npos ? std::string() : p.substr(0, sep + 1);
 }
 
+// 폴더를 물리로 푼 절대 경로(심볼릭 링크 · `..` 를 커널처럼) — 빈 글은 현재 폴더. 못 풀면 빈 글(errno 그대로)
+std::string physicalDir(const std::string& dir) {
+#ifndef _WIN32
+    if (char* rp = ::realpath(dir.empty() ? "." : dir.c_str(), nullptr)) {
+        std::string s = rp;
+        std::free(rp);
+        if (s.size() > 1 && s.back() == '/') s.pop_back();
+        return s;
+    }
+    return std::string();
+#else
+    std::error_code ec;
+    const fs::path c = fs::canonical(dir.empty() ? fs::path(".") : fs::path(dir), ec);
+    return ec ? std::string() : c.string();
+#endif
+}
+
 // ── 대상 ─────────────────────────────────────────────────────────────────────
 // 대상 — 심볼릭 링크면 끝까지 따라간 파일(매달린 링크면 링크가 가리키는 자리 — 앞 판은 링크를 따라 썼다). 일반 파일이 아니면 special
 struct Target {
@@ -242,15 +259,29 @@ Target resolveTarget(const std::string& dst) {
     }
     const int e = errno;
     if (e != ENOENT) { t.err = errText(e); return t; }
+    // 없다 — 매달린 링크면 그 링크가 가리키는 자리에 만든다(앞 판은 링크를 따라 썼다). ★커널처럼 **물리로** 푼다 — 링크가 놓인 폴더를
+    //   realpath 로 풀고 그 안에서 링크 글을 잇는다. 예전엔 `parent_path()/글` 을 lexically_normal 로 풀어, 폴더 링크를 지난
+    //   `S/../deck.k` 가 낱말로 `deck.k`(입력 덱)가 되어 rc 0 으로 그것을 덮었다(여섯째 검토 S3 — 커널은 arch/deck.k 를 쓴다)
     std::string p = dst;
+    bool link = false;
     for (int hop = 0; hop < 40; ++hop) {
         struct stat lst;
         if (::lstat(p.c_str(), &lst) != 0 || !S_ISLNK(lst.st_mode)) break;
         std::error_code ec;
         fs::path to = fs::read_symlink(p, ec);
         if (ec) break;
-        if (to.is_relative()) to = fs::path(p).parent_path() / to;
-        p = to.lexically_normal().string();
+        link = true;
+        if (to.is_relative()) {
+            const std::string at = physicalDir(dirPartOf(p));
+            if (at.empty()) { t.err = errText(errno); return t; }
+            to = fs::path(at) / to;
+        }
+        p = to.string();
+    }
+    if (link) {   // 마지막 자리도 그 폴더를 물리로 풀어 잇는다(폴더가 없으면 커널처럼 실패)
+        const std::string at = physicalDir(dirPartOf(p));
+        if (at.empty()) { t.err = errText(errno); return t; }
+        p = at + "/" + baseOf(p);
     }
     t.path = p;
 #else
@@ -280,8 +311,10 @@ bool writeAll(int fd, const char* data, size_t n, int& e) {
     return true;
 }
 
-// 임시 파일을 있는 대상에 제자리로 옮겨 쓴다(자르고 쓴다 — 원자적이 아니다). 대상은 있어야 한다(새로 만들지 않는다)
-bool copyInto(const std::string& from, const std::string& to, std::string& why) {
+// 임시 파일을 있는 대상에 제자리로 옮겨 쓴다(자르고 쓴다 — 원자적이 아니다). 대상은 있어야 한다(새로 만들지 않는다). 대상을 연(잘라
+// 낸) 뒤 멈추면 `touched` — 그 파일은 앞 내용도 새 내용도 아니다(대상을 열지 못했으면 앞 파일 그대로)
+bool copyInto(const std::string& from, const std::string& to, std::string& why, bool& touched) {
+    touched = false;
     const int in = ::open(from.c_str(), O_RDONLY | O_CLOEXEC);
     if (in < 0) { why = "임시 파일을 다시 열지 못했다(" + errText(errno) + ")"; return false; }
     const int out = ::open(to.c_str(), O_WRONLY | O_TRUNC | O_CLOEXEC);
@@ -291,6 +324,7 @@ bool copyInto(const std::string& from, const std::string& to, std::string& why) 
         why = "대상을 열지 못했다(" + errText(e) + ")";
         return false;
     }
+    touched = true;   // O_TRUNC — 여기서부터 앞 내용은 없다
     char buf[1 << 16];
     bool ok = true;
     int e = 0;
@@ -307,7 +341,8 @@ bool copyInto(const std::string& from, const std::string& to, std::string& why) 
     }
     if (::close(out) != 0 && ok) { ok = false; e = errno; }
     ::close(in);
-    if (!ok) why = "제자리로 옮겨 쓰다 멈췄다(" + errText(e) + ") — 그 파일은 반쯤 쓴 채일 수 있다";
+    if (!ok) why = "제자리로 옮겨 쓰다 멈췄다(" + errText(e) + ") — 그 파일은 잘려 반쯤 쓴 채다(앞 내용도 새 내용도 아니다)";
+    else touched = false;
     return ok;
 }
 #endif
@@ -521,10 +556,13 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
         return true;
     }
 #ifndef _WIN32
+    bool touched = false;
     if (it->mode == Mode::InPlace) {
-        if (!copyInto(it->tmp, it->target, why)) return false;
-        ::unlink(it->tmp.c_str());
-        disarm(it->slot);
+        if (!copyInto(it->tmp, it->target, why, touched)) {
+            if (touched) damaged_.push_back(dst);
+            return false;
+        }
+        dropTemp(*it);
         items_.erase(it);
         return true;
     }
@@ -546,10 +584,12 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
     const int e = errno;
     // 폴더 권한(끈적 폴더 · 바뀐 권한)이 이름 바꾸기를 막는데 있는 파일에 쓸 수 있으면 제자리로 쓴다 — 원자적이 아니다
     if ((e == EACCES || e == EPERM) && present && S_ISREG(st.st_mode) && ::access(it->target.c_str(), W_OK) == 0) {
-        if (!copyInto(it->tmp, it->target, why)) return false;
-        ::unlink(it->tmp.c_str());
-        disarm(it->slot);
+        if (!copyInto(it->tmp, it->target, why, touched)) {
+            if (touched) damaged_.push_back(dst);
+            return false;
+        }
         notes_.push_back({true, "「" + dst + "」 를 이름 바꾸기로 바꿔 넣지 못해(" + errText(e) + ") 그 파일에 제자리로 썼다 — 원자적이 아니다"});
+        dropTemp(*it);   // 같은 까닭(폴더 권한)으로 못 지울 수 있다 — 그러면 비우고 그렇다고 말한다
         items_.erase(it);
         return true;
     }
@@ -567,17 +607,36 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
 void StagedFiles::discard(const std::string& dst) {
     for (auto it = items_.begin(); it != items_.end();) {
         if (it->dst != dst) { ++it; continue; }
-        if (it->mode != Mode::Direct) {   // Direct 의 대상(장치 · FIFO)은 지우지 않는다
-            std::error_code ec;
-            fs::remove(it->tmp, ec);
-            disarm(it->slot);
-        }
+        if (it->mode != Mode::Direct) dropTemp(*it);   // Direct 의 대상(장치 · FIFO)은 지우지 않는다
         it = items_.erase(it);
     }
 }
 
+// 이번 실행의 임시 파일을 지운다. 폴더에 쓸 수 없어(잡은 뒤 폴더 권한이 바뀌었다) 못 지우면 0 바이트로 비우고(파일 쓰기 권한이면
+// 된다 — 자리를 돌려준다) 그렇다고 말한다 — 예전엔 제자리 쓰기로 넘어간 뒤 꽉 찬 임시 파일이 rc 0 으로 말없이 남았다(여섯째 검토
+// S11). 임시 이름은 말하지 않는다(그 폴더의 숨은 파일이다 · 폴더에 쓸 수 있게 되면 다음 실행이 주인 없는 것을 지운다)
+void StagedFiles::dropTemp(const Item& it) {
+#ifndef _WIN32
+    if (::unlink(it.tmp.c_str()) != 0 && errno != ENOENT) {
+        const int e = errno;
+        const bool emptied = ::truncate(it.tmp.c_str(), 0) == 0;
+        const std::string dir = dirPartOf(it.tmp);
+        notes_.push_back({true, "「" + it.dst + "」 의 임시 파일을 지우지 못했다(" + errText(e) + ") — " + (emptied ? "0 바이트로 비워 " : "") +
+                                "그 폴더(" + (dir.empty() ? std::string(".") : dir) + ")에 숨은 파일로 남겼다. 폴더에 쓸 수 있게 되면 다음 실행이 지운다"});
+    }
+#else
+    std::error_code ec;
+    fs::remove(it.tmp, ec);
+#endif
+    disarm(it.slot);
+}
+
 void StagedFiles::discardAll() {
     while (!items_.empty()) discard(items_.front().dst);
+}
+
+bool StagedFiles::damaged(const std::string& dst) const {
+    return std::find(damaged_.begin(), damaged_.end(), dst) != damaged_.end();
 }
 
 bool StagedFiles::has(const std::string& dst) const {
@@ -594,6 +653,16 @@ std::vector<Note> StagedFiles::takeNotes() {
     std::vector<Note> out;
     out.swap(notes_);
     return out;
+}
+
+// ── 쓰기가 닿을 자리 ──────────────────────────────────────────────────────────
+std::string physicalTarget(const std::string& dst) {
+    if (dst.empty()) return dst;
+    const Target t = resolveTarget(dst);
+    if (!t.err.empty() || t.special) return dst;
+    if (t.path != dst) return t.path;   // 링크 — 있으면 realpath, 매달렸으면 물리로 따라간 자리
+    const std::string at = physicalDir(dirPartOf(dst));
+    return at.empty() ? dst : at + "/" + baseOf(dst);
 }
 
 // ── 주인 없는 임시 파일 ───────────────────────────────────────────────────────
@@ -618,7 +687,7 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
         const fs::path td = fs::temp_directory_path(ec);
         if (!ec && !td.empty() && !fs::equivalent(td, dirs[0], ec)) dirs.push_back(td);
     }
-    std::vector<std::string> gone;
+    int gone = 0;
     for (const auto& d : dirs) {
         std::error_code ie;
         for (fs::directory_iterator itr(d, ie), end; !ie && itr != end; itr.increment(ie)) {
@@ -630,17 +699,15 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
             if (ownerAlive(o.pid, o.start)) continue;                                           // 산 프로세스의 것은 지우지 않는다
             struct stat lst;
             if (::lstat(itr->path().c_str(), &lst) != 0 || !S_ISREG(lst.st_mode)) continue;
-            if (::unlink(itr->path().c_str()) == 0) gone.push_back(n);
+            if (::unlink(itr->path().c_str()) == 0) ++gone;
         }
     }
-    if (!gone.empty() && notes) {
-        std::string list;
-        for (size_t i = 0; i < gone.size() && i < 3; ++i) list += (i ? " · " : "") + gone[i];
-        if (gone.size() > 3) list += " …";
-        notes->push_back({false, "앞 실행이 끝나지 못하고 남긴 「" + dst + "」 의 임시 파일 " + std::to_string(gone.size()) +
-                                     " 개를 지웠다(주인 프로세스가 없다): " + list});
-    }
-    return static_cast<int>(gone.size());
+    // 지운 수만 말한다 — 임시 이름(호스트 · pid · 시작 시각을 담은 숨은 이름)은 찍지 않는다(여섯째 검토 — 예전엔 셋까지 찍었다).
+    // 다른 알림도 임시 이름은 말하지 않는다
+    if (gone > 0 && notes)
+        notes->push_back({false, "앞 실행이 끝나지 못하고 남긴 「" + dst + "」 의 임시 파일 " + std::to_string(gone) +
+                                     " 개를 지웠다(주인 프로세스가 없다)"});
+    return gone;
 #endif
 }
 
@@ -660,8 +727,13 @@ CommitLock::CommitLock(const std::string& dst, double waitSec) {
                                 "산출 · 곁 파일 · 보고가 서로 다른 실행의 것으로 섞일 수 있다"});
     };
     for (;;) {
-        const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
-        if (fd < 0) { unlocked("잠금 파일을 만들 수 없다: " + errText(errno)); return; }
+        // ★링크를 따라가지 않는다(O_NOFOLLOW) — 잠금 이름에 심어 둔 심볼릭 링크가 그것이 가리키는 자리에 파일을 만들게 했다(여섯째 검토)
+        const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0666);
+        if (fd < 0) {
+            const int e = errno;
+            unlocked(e == ELOOP ? std::string("잠금 파일 자리가 심볼릭 링크다 — 따라가지 않는다") : "잠금 파일을 만들 수 없다: " + errText(e));
+            return;
+        }
         for (;;) {
             if (::flock(fd, LOCK_EX | LOCK_NB) == 0) break;
             const int e = errno;
@@ -676,7 +748,7 @@ CommitLock::CommitLock(const std::string& dst, double waitSec) {
         }
         // 쥔 파일이 아직 그 이름인가 — 앞 주인이 풀며 지웠으면(그 사이 새 파일이 섰다) 다시 잡는다
         struct stat a, b;
-        if (::fstat(fd, &a) == 0 && ::stat(path_.c_str(), &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
+        if (::fstat(fd, &a) == 0 && ::lstat(path_.c_str(), &b) == 0 && S_ISREG(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
             fd_ = fd;
             slot_ = arm(path_);   // 신호 때도 지운다 — 쥔 동안 지우는 것은 푸는 차례와 같다
             return;

@@ -386,7 +386,14 @@ _KR_TMP_LEFTOVERS = (".kr_tmp_0a1b2c3d_4242_1f_1_9e8d7c6b.k",      # 지금 꼴 
                      ".kr_tmp_0a1b2c3d_4242_1f_2_12345678",        # 지금 꼴 — 보고 · 번호 지도
                      ".kr_tmp_lock_9e8d7c6b",                       # 바꿔 넣는 동안의 잠금 파일
                      ".out.k.kr_tmp_2419321781716105_1",            # 옛 꼴(a33af2f · 0895025)
-                     "sub/.kr_tmp_0a1b2c3d_4242_1f_3_9e8d7c6b.k")   # 하위 폴더 산출의 것
+                     "sub/.kr_tmp_0a1b2c3d_4242_1f_3_9e8d7c6b.k",   # 하위 폴더 산출의 것
+                     # 11-08 부터 다른 임시 파일도 같은 표지를 지닌다(여섯째 검토 — 예전 이름 `.__preproc_flat.k` · `.__flipped_ref.k` ·
+                     # `.kr_flat_` · `__mf.*` · `__pol<회차>_<덩어리>.*` 은 표지가 없어 SIGKILL 된 잡이 남기면 산출로 올라갔다)
+                     "m1.k.kr_tmp_preproc_flat.k",                 # map 앞처리 평판
+                     "m2.k.kr_tmp_flipped_ref.k",                  # map prestress 고리의 뒤집은 기준
+                     ".main.kr_tmp_flat_211332767_57632.k",        # flatten_includes 의 펼친 덱
+                     "mf_out.kr_tmp_mf.stl", "mf_out.kr_tmp_mf.msh",   # meshfix gmsh 왕복
+                     "mf_out.kr_tmp_pol0_0.geo")                   # meshfix polish
 
 
 @_aio

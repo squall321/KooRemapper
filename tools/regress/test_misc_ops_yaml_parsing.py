@@ -155,7 +155,7 @@ def main():
     write(mf, "mf.yaml", 'model: tet.k\noutput: "mf # x.k"   # 결과\npid: 1\nlc_target: 0.5\n')
     rc, out = run(binary, mf, "meshfix", "mf.yaml", env={"KOOREMAPPER_GMSH": stub})
     check("meshfix: 따옴표 안 '#' 을 살린 임시 파일 이름",
-          os.path.exists(os.path.join(mf, "mf # x__mf.stl")), f"rc={rc} {sorted(os.listdir(mf))}")
+          os.path.exists(os.path.join(mf, "mf # x.kr_tmp_mf.stl")), f"rc={rc} {sorted(os.listdir(mf))}")
     argv = open(args_path).read().splitlines() if os.path.exists(args_path) else []
     check("meshfix: gmsh 인자가 어긋나지 않음 (.geo 하나 + -v 3 -parse_and_exit)",
           len(argv) == 5 and argv[0] == "4" and argv[1].endswith(".geo")

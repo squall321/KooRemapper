@@ -425,7 +425,7 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
     bool flatWasPreprocessed = flatScaled || flipInputX || flipInputY || flipInputZ;
     if (flatWasPreprocessed) {
         if (scaledFlatTmpPath.empty()) {
-            scaledFlatTmpPath = outputFile + ".__preproc_flat.k";
+            scaledFlatTmpPath = outputFile + ".kr_tmp_preproc_flat.k";   // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다(2026-11-08)
         }
         KFileWriter w;
         // 앞처리한 기준은 평판의 카드(*PART · *SECTION · *MAT …)를 그대로 옮긴다 — 고리가 원래 평판과 같은 K-파일 재료를 본다.

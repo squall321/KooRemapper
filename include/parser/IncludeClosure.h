@@ -152,7 +152,7 @@ bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::
 std::string partFile(const Closure& c, int pid);
 
 // 펼친 덱을 **주 덱 옆** 임시 파일로 쓴다 — 줄을 읽는 op 이 그 경로를 그대로 읽게 하려는 것이다(상대 경로 기준인 폴더가 같다).
-// 이름은 `.<줄기>.kr_flat_<시각>_<주소>.k` · 개행은 주 덱을 따른다. 소멸자가 지운다. 인클루드가 없으면 `active()` 가 거짓이고
+// 이름은 `.<줄기>.kr_tmp_flat_<시각>_<주소>.k`(`.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다 · 2026-11-08) · 개행은 주 덱을 따른다. 소멸자가 지운다. 인클루드가 없으면 `active()` 가 거짓이고
 // `path()` 는 주 덱 그대로다(파일을 쓰지 않는다). ⚠ `make` 를 부르기 전의 `path()` 는 비어 있다 — 부르는 쪽은
 // `active()` 일 때만 경로를 바꿔 쓴다(2026-10-17 — 엔진 로더가 그 빈 경로를 열어 모든 op 이 멈춘 적이 있다).
 class FlatDeck {

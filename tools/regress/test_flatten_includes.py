@@ -13,7 +13,7 @@
     A. 안 쪼갠 덱 — 기준(rc 0)
     B. 쪼갠 덱 · 옵션 없음 — rc 1 이고 `flatten_includes` 를 안내한다(조용한 무편집 없음)
     C. 쪼갠 덱 · `flatten_includes: true` — rc 0 이고 산출이 A 와 같다(주석·빈 줄·*KEYWORD·*END 만 빼고 대조) ·
-       주 덱 옆 임시 파일(`.*.kr_flat_*.k`)이 남지 않는다
+       주 덱 옆 임시 파일(`.*.kr_tmp_flat_*.k`)이 남지 않는다
   그리고 펼칠 수 없는 닫힘(없는 파일)은 펼치지 않고 까닭을 말한다(D).
 
 usage: test_flatten_includes.py <KooRemapper 바이너리>
@@ -126,7 +126,7 @@ def main():
                 norm(open(os.path.join(dirs[2], o), errors="replace").read()) for o in outs)
             check("%s C flatten_includes: true — rc 0 · 산출이 안 쪼갠 덱과 같다" % name, rc_ == 0 and same,
                   (rc_, [l for l in oc.splitlines() if "ERROR" in l][:2]))
-            left = glob.glob(os.path.join(dirs[2], "**", ".*.kr_flat_*.k"), recursive=True)
+            left = glob.glob(os.path.join(dirs[2], "**", ".*.kr_tmp_flat_*.k"), recursive=True)
             check("%s C 임시 파일이 남지 않는다" % name, not left, left)
         finally:
             for t in dirs:

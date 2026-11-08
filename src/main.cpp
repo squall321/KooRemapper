@@ -19,6 +19,7 @@
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
+#include "parser/DeckWriter.h"   // deck_write::failures — 잘린 덱을 rc 0 으로 내지 않는다
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
 #include "mapper/MeshRemapper.h"
@@ -1901,10 +1902,10 @@ static int runMain(int argc, char* argv[]) {
             std::string alignLow = bboxAlignMode;
             for (auto& c : alignLow) c = (char)std::tolower((unsigned char)c);
             // 앞처리 평판 임시 파일 — flip_input 이나 bbox_align: source 가 평판을 바꾸면 runMapping 이 쓴다
-            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".__preproc_flat.k");
+            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".kr_tmp_preproc_flat.k");
             const bool chain = yamlMode && pre_enabled && !pre_output.empty();
             if (chain) {
-                if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");
+                if (flipX || flipY || flipZ) writes.push_back(outputPath + ".kr_tmp_flipped_ref.k");
                 // ★고리 prestress 가 쓸 이름은 재료가 있는지에 달렸다 — runPrestress 와 같은 판정을 map 이 쓰기 **전에** 한다(2026-11-07).
                 //   예전엔 재료가 없을 때 CSV(prestress.output 그 자리)가 map 산출을 덮는 것을 map 이 산출을 쓴 뒤에야 보았다.
                 //   재료가 있으면 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain)
@@ -2001,7 +2002,7 @@ static int runMain(int argc, char* argv[]) {
             }
             bool needFlipRef = (flipX || flipY || flipZ);
             if (needFlipRef) {
-                tempRefPath = outputPath + ".__flipped_ref.k";
+                tempRefPath = outputPath + ".kr_tmp_flipped_ref.k";   // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다(2026-11-08)
                 std::cout << "\n";
                 console.info("Generating flip-aligned reference for prestress: "
                              + tempRefPath);
@@ -3165,11 +3166,21 @@ static int runMain(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     // 명령이 던진 예외를 잡지 않아 terminate → abort(rc 134)로 죽던 것(예: indent 의 points 누락)을
     // 오류 메시지 + rc 1 로 바꾼다
+    int rc = 1;
     try {
-        return runMain(argc, argv);
+        rc = runMain(argc, argv);
     } catch (const std::exception& e) {
         ConsoleOutput console;
         console.error(std::string("Unhandled error: ") + e.what());
         return 1;
     }
+    // ★덱 쓰기가 실패했는데(디스크 참 · 파일 크기 상한 · EIO — 잘린 덱) op 이 rc 0 을 돌려준 길 — 찍고 rc 1(여섯째 검토 S2).
+    //   op 이 스스로 다뤘으면(rc≠0) 이미 말했다
+    if (rc == 0 && !KooRemapper::deck_write::failures().empty()) {
+        ConsoleOutput console;
+        for (const auto& f : KooRemapper::deck_write::failures())
+            console.error("덱을 쓰다 멈췄다 — " + f + " — 그 파일은 잘렸을 수 있다(rc 1)");
+        rc = 1;
+    }
+    return rc;
 }

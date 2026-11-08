@@ -425,13 +425,18 @@ bool FlatDeck::make(const std::string& mainPath, std::string& why) {
     // 이름이 겹치지 않게 — 같은 폴더에서 잡이 겹쳐도(플랫폼 잡 폴더) 갈리도록 시각과 이 객체의 주소를 붙인다(Windows 도 같다)
     const auto tick = static_cast<unsigned long long>(std::chrono::steady_clock::now().time_since_epoch().count());
     const fs::path tmp = mp.parent_path() /
-        ("." + stem + ".kr_flat_" + std::to_string(tick % 1000000007ULL) + "_" +
+        ("." + stem + ".kr_tmp_flat_" + std::to_string(tick % 1000000007ULL) + "_" +   // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다
          std::to_string(reinterpret_cast<std::uintptr_t>(this) % 100000ULL) + ".k");
     {
         DeckWriter w(tmp.string(), deck_newline::detect(mainPath));
         if (!w.ok()) { why = "펼친 덱을 쓸 수 없다: " + tmp.string(); return false; }
         for (const auto& l : flat) w.stream() << l << "\n";
-        w.close();
+        if (!w.close()) {   // 잘린 펼친 덱을 읽게 두지 않는다(여섯째 검토 S2)
+            std::error_code ec;
+            fs::remove(tmp, ec);
+            why = "펼친 덱을 쓰다 멈췄다: " + w.error();
+            return false;
+        }
     }
     tmp_ = tmp.string();
     files_ = c.files.size();

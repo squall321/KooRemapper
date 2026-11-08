@@ -891,6 +891,68 @@ TEST(NewlineStreambuf_LF_모드는_그대로_둔다) {
     ASSERT_EQ(sink.str(), std::string("a\nb\n"));
 }
 
+// ── 쓰기 오류 — 잘린 덱을 멀쩡한 스트림으로 끝내지 않는다(여섯째 검토 S2) ───────────
+// 디스크가 차거나 파일 크기 상한에 걸리면 아래 파일 버퍼가 짧게 쓴다. CRLF 갈래가 그 결과를 버려 스트림이 멀쩡했고
+// `DeckWriter::close()` 는 아무것도 돌려주지 않았다.
+
+namespace {
+// `cap` 글자만 받고 그 뒤로는 실패하는 버퍼(디스크가 찬 파일의 대역)
+struct CappedSink : std::streambuf {
+    std::string got;
+    size_t cap;
+    explicit CappedSink(size_t c) : cap(c) {}
+    int_type overflow(int_type c) override {
+        if (traits_type::eq_int_type(c, traits_type::eof())) return traits_type::not_eof(c);
+        if (got.size() >= cap) return traits_type::eof();
+        got.push_back(traits_type::to_char_type(c));
+        return c;
+    }
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        const std::streamsize room = static_cast<std::streamsize>(cap) - static_cast<std::streamsize>(got.size());
+        const std::streamsize w = std::max<std::streamsize>(0, std::min(room, n));
+        got.append(s, static_cast<size_t>(w));
+        return w;
+    }
+};
+}  // namespace
+
+TEST(NewlineStreambuf_는_짧은_쓰기를_스트림_실패로_올린다_CRLF_LF) {
+    for (DeckNewline nl : {DeckNewline::CRLF, DeckNewline::LF}) {
+        CappedSink sink(5);
+        NewlineStreambuf buf(&sink, nl);
+        std::ostream out(&buf);
+        out << "abc\ndef\nghi\n";
+        out.flush();
+        ASSERT_TRUE(out.bad());
+        ASSERT_TRUE(buf.failed());
+        ASSERT_EQ(sink.got.size(), (size_t)5);
+    }
+}
+
+TEST(DeckWriter_close_는_쓰기_오류를_돌려주고_공용_기록에_남긴다) {
+    if (!std::filesystem::exists("/dev/full")) return;   // 리눅스의 「늘 찬 장치」 — 쓰기마다 ENOSPC
+    const size_t before = deck_write::failures().size();
+    for (DeckNewline nl : {DeckNewline::CRLF, DeckNewline::LF}) {
+        DeckWriter w("/dev/full", nl);
+        ASSERT_TRUE(w.ok());
+        for (int i = 0; i < 20000; ++i) w.stream() << "       1     0.0     0.0     0.0\n";   // 파일 버퍼를 넘게
+        ASSERT_FALSE(w.close());
+        ASSERT_TRUE(w.failed());
+        ASSERT_TRUE(w.error().find("/dev/full") != std::string::npos);
+        ASSERT_FALSE(w.close());   // 두 번 닫아도 같은 답
+    }
+    ASSERT_EQ(deck_write::failures().size(), before + 2);
+    deck_write::failures().resize(before);   // 다른 시험에 남기지 않는다
+    {   // 멀쩡한 쓰기는 true 이고 기록이 없다
+        const std::string p = (std::filesystem::temp_directory_path() / "koorm_deckwriter_ok.k").string();
+        DeckWriter w(p, DeckNewline::LF);
+        w.stream() << "*KEYWORD\n*END\n";
+        ASSERT_TRUE(w.close());
+        std::filesystem::remove(p);
+    }
+    ASSERT_EQ(deck_write::failures().size(), before);
+}
+
 // ── 정렬·탐색 — 세트 멤버 판정이 여기 얹힌다 ────────────────────────────
 
 TEST(sortUnique_와_inSorted) {
