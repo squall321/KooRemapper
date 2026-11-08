@@ -529,6 +529,34 @@ static int ma_maxDefinedIn(const std::vector<std::string>& lines, int fam) {
     return mx;
 }
 
+// 덱 글자에서 번호 발급이 보는 **정의 카드 머리**만 남긴다(2026-11-08 · `addedDecks_`) — 키워드 줄마다 그 블록의 주석 아닌 첫
+// 데이터 줄 셋(제목 · Card 1 · Card 2). `inclMax` 의 훑기들(세트 · 곡선 · 접촉 · CNRB · ICID · 재질 · 모래시계 · 열 재질)은 모두 제목
+// 다음 첫 카드만 읽는다 — `*HOURGLASS` 는 카드마다 정의라 다 둔다. 번호가 커서로 지켜지는 큰 블록(`*NODE` · `*ELEMENT_*` ·
+// `*INITIAL_*`)은 통째로 뺀다
+static std::vector<std::string> ma_definitionHeaders(const std::string& text) {
+    std::vector<std::string> keep;
+    std::istringstream in(text);
+    std::string l;
+    bool skip = false, every = false;
+    int left = 0;
+    while (std::getline(in, l)) {
+        if (!l.empty() && l[0] == '*') {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+            skip = kw.rfind("*NODE", 0) == 0 || kw.rfind("*ELEMENT_", 0) == 0 || kw.rfind("*INITIAL_", 0) == 0;
+            every = kw.rfind("*HOURGLASS", 0) == 0;
+            left = 3;
+            if (!skip) keep.push_back(l);
+            continue;
+        }
+        if (skip || (!l.empty() && l[0] == '$')) continue;
+        if (every || left > 0) {
+            keep.push_back(l);
+            --left;
+        }
+    }
+    return keep;
+}
+
 // ★대상이 인클루드 안에만 있는가(헤더의 주석 참조). 판정 자료는 `raiseMaxIdsOverIncludes` 가 같은 리더로 센 것이다.
 static std::string ma_flattenHint() {
     return " — 고쳐 쓰는 op 은 주 덱만 고친다. `flatten_includes: true` 를 주면 인클루드 닫힘을 펼쳐 홀로 서는 한 덱으로 "
@@ -18034,8 +18062,8 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
     //   접촉 · 곡선)은 주 덱 · 인클루드 · 이 실행이 덧붙인 덱을 같은 규칙으로 훑는다. 기존 모델에 없는 족은 옮기지 않는다.
     //   node_id_offset · elem_id_offset 을 주면 그 값이다 — 기존 최대값 위가 아니면(겹칠 수 있으면) 쓰기 전에 멈춘다.
     bat::ShiftResult sr;
-    std::string err, unused;
-    if (!bat::shiftBatteryIds(deckText, bat::IdShift{}, unused, sr, err)) {
+    std::string err;
+    if (!bat::scanBatteryIds(deckText, sr, err)) {   // 범위만 — 옮긴 사본을 짓지 않는다
         errorMessage_ = "[battery] " + err;
         return false;
     }
@@ -18083,12 +18111,7 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         errorMessage_ = "[battery] " + err + " — 아무 파일도 쓰지 않았다";
         return false;
     }
-    std::vector<std::string> shiftedLines;
-    {
-        std::istringstream in(shifted);
-        std::string l;
-        while (std::getline(in, l)) shiftedLines.push_back(l);
-    }
+    std::string().swap(deckText);   // 옮기기 전 글자는 더 쓰지 않는다 — 바로 놓는다
 
     std::string kPath;
     if (op.useInclude) {
@@ -18103,13 +18126,14 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         // *INCLUDE 는 주 덱의 **첫** *END 앞에(없으면 끝에) — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 그 인클루드를
         // 읽지 않았다(첫 *END 에서 멈춘다 · 셋째 묶음)
         deckscan::insertBeforeFirstEnd(rawLines_, {"*INCLUDE\n" + kPath});
-        addedDecks_.push_back(shiftedLines);   // 뒤 op 의 번호 발급(inclMax)이 이 덱의 번호를 센다
+        addedDecks_.push_back(ma_definitionHeaders(shifted));   // 뒤 op 의 번호 발급(inclMax)이 이 덱의 번호를 센다 — 머리만
     } else {
         // ★use_include: false — battery 덱의 카드를 주 덱의 첫 *END 앞에 펼친다(2026-11-08 · 카탈로그가 적은 그대로). 앞 머리
         //   ($ 주석 · *KEYWORD)와 *END 는 뺀다 — 주 덱의 것을 쓴다. battery 덱 파일은 쓰지 않는다
         std::string body;
         bool inBody = false;
-        for (const auto& l : shiftedLines) {
+        std::istringstream in(shifted);
+        for (std::string l; std::getline(in, l);) {
             const std::string kw = l.empty() || l[0] != '*' ? std::string() : deckscan::kwBare(deckscan::keywordToken(l));
             if (kw == "*KEYWORD") { inBody = true; continue; }
             if (kw == "*END") break;

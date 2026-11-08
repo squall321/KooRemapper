@@ -214,8 +214,10 @@ private:
     // 주 덱의 인클루드 닫힘(파일마다 경로·줄, LS-DYNA 가 읽는 차례). 번호 커서가 주 덱과 **같은 스캐너**로
     // 인클루드에 이미 있는 번호까지 세려고 든다 — 쪼개지 않은 같은 덱이면 rawLines_ 에 들어 있었을 줄이다.
     include_closure::Closure incl_;
-    // 이 실행이 `*INCLUDE` 로 덧붙인 덱의 줄(assemble 의 battery — 2026-11-08). 로드 뒤에 생겨 incl_ 에 없다 — 뒤 op 의 번호
-    // 발급(`inclMax`)이 인클루드처럼 센다(battery 의 곡선 · 접촉 · 세트 번호를 다시 내지 않게)
+    // 이 실행이 `*INCLUDE` 로 덧붙인 덱(assemble 의 battery — 2026-11-08)의 **정의 카드 머리만** — 키워드 줄과 첫 데이터 카드 몇 장
+    // (`ma_definitionHeaders`). 로드 뒤에 생겨 incl_ 에 없다 — 뒤 op 의 번호 발급(`inclMax`)이 인클루드처럼 센다(battery 의 곡선 ·
+    // 접촉 · 세트 번호를 다시 내지 않게). 덱 통째(절점 · 요소 · 초기 변형률 줄)는 들고 있지 않는다(11-08 — 실행 내내 덱마다 수십 MB 를
+    // 들었다). 절점 · 요소 번호는 커서(maxNodeId_ · maxElementId_)를 올려 지킨다
     std::vector<std::vector<std::string>> addedDecks_;
     bool flattenIncludes_ = false;
     std::vector<output_guard::Input> guardInputs_;   // 읽은 파일(모델 · 인클루드 · 다른 입력) — writeOutput 의 쓰기 관문이 본다

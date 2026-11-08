@@ -43,5 +43,7 @@ struct ShiftResult {
 // deck 의 정의 · 참조 번호를 족마다 by 만큼 옮겨 out 에 담는다(by 가 모두 0 이면 out == deck — 범위만 잰다).
 // 모르는 키워드 · 읽지 못한 번호 칸 · 0 이어야 할 칸 · 칸 폭이나 int 를 넘는 번호면 false 와 err(그 줄 · 키워드 · 까닭).
 bool shiftBatteryIds(const std::string& deck, const IdShift& by, std::string& out, ShiftResult& res, std::string& err);
+// 옮기지 않고 범위 · 거절만 본다(위와 같은 걸음 — 옮긴 글자를 짓지 않아 덱 크기만큼의 사본이 없다 · 2026-11-08)
+bool scanBatteryIds(const std::string& deck, ShiftResult& res, std::string& err);
 
 }  // namespace bat
