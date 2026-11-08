@@ -70,7 +70,9 @@
       권한 · /dev/null[퇴행] · 죽은 잡의 `.kr_tmp_` 등록 · cnrb2solid 죽은 CNRB · 보고 UTF-8) · 이월 2~3차(확인 6: secid_order 거짓 거절[퇴행] ·
       못 읽은 계획의 곁 파일 · 열 재질과 `info --strict` · 빈 제목 줄 · 긴 이름 · 죽은 잡 임시)
 - [ ] 갈래 넷 고침(11-08) — 걷기 · 이월 · battery(넷째 묶음) · 공용 임시 파일 도우미(+ 러너가 `.kr_tmp_` 를 등록하지 않게)
-- [ ] 합치기 · 단위 · 전체 회귀 · 마지막 검토(출력 관문 · battery 갈래 포함) · main · push · 배포
+- [x] 여섯째 고침 22(`5fba485` — 단위 229 · 회귀 130) · 마지막 검토 둘 — 22 모두 고쳐짐 · 데이터를 잃는 퇴행 0(걷기 · 이월) ·
+      퇴행 다섯(관문 · battery · 임시 파일: 제목 붙은 접촉 CID · map+prestress 제자리 체인 · meshfix 남긴 파일 · 잠금 경고 · map 견딘 쓰기 rc)
+- [ ] 퇴행 다섯 고침 → 합치기 · 시험 · 재현 대조 → main · push · 배포
 - [ ] 고친 것만 겨냥한 적대적 검토
 - [ ] main 에 합치기 · 단위 · 전체 회귀(gmsh 변수 둘) · push
 - [ ] compat 빌드 · 잡 확인 뒤 API 재기동 · 스모크 · CLI · Drive 게시 · appt313 스테이징 · cae00 점검 · 포털 알림
@@ -88,6 +90,9 @@
   다툼에 든다 — 질량은 그 읽기에서 MASS 가 비면 안 든다. 정상 줄에 유령 절점이 생기던 퇴행(재검토 1 · 2 · 6)을 막는다.
 
 ## 다음 판으로 미룬 것(11-08 사용자 결정 — 운영 판에도 있는 기존 결함)
+- ★(마지막 검토가 새로 짚은 것 — 물성을 조용히 바꾼다, 먼저 할 것) unfold 가 요소를 rc 0 으로 버린다(`examples/foldable_display/test_small_bent.k`
+  100 → 53 · `examples/wave/wave_bent.k` 250 → 238) · tetremesh 가 같은 EID 의 솔리드를 셸로 덮어 잃고 8절점 셸을 4절점으로 · `_THICKNESS` 값을 버리고
+  i10 입력을 8칸으로 쓴다 · extract-parts 가 `LONG=Y` 덱을 못 읽는다 · id_floor 의 elem_start 가 int 범위를 넘는다(2147483648).
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
 - battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
 - I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.
