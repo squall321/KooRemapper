@@ -25,6 +25,21 @@ inline void note(const std::string& what) { failures().push_back(what); }
 inline std::string describe(const std::string& path, int err) {
     return path + " (" + (err ? std::string(std::strerror(err)) : std::string("쓰기 실패")) + ")";
 }
+// 이 블록 동안의 쓰기 실패는 op 이 알고 견딘다(제 말로 [WARN] 을 내고 산출은 멀쩡하다) — 끝날 때 이 블록이 적은 것을 공용 기록에서
+// 뺀다. 블록 밖의 실패는 그대로다(마지막 검토 — map 이 앞처리 평판 임시 파일 쓰기 실패를 [WARN] 으로 넘기는데 main 이 그 기록으로 rc 1 ·
+// 「그 파일은 잘렸을 수 있다」 를 냈다 — 산출 m.k 는 멀쩡했다)
+class Tolerated {
+public:
+    Tolerated() : mark_(failures().size()) {}
+    ~Tolerated() {
+        if (failures().size() > mark_) failures().resize(mark_);
+    }
+    Tolerated(const Tolerated&) = delete;
+    Tolerated& operator=(const Tolerated&) = delete;
+
+private:
+    size_t mark_;
+};
 }  // namespace deck_write
 
 // `\n` 을 그 덱의 개행으로 바꿔 흘려보내는 streambuf.

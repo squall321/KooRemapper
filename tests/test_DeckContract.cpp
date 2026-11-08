@@ -1035,6 +1035,20 @@ TEST(DeckWriter_close_는_쓰기_오류를_돌려주고_공용_기록에_남긴�
     ASSERT_EQ(deck_write::failures().size(), before);
 }
 
+TEST(deck_write_Tolerated_는_그_블록이_적은_실패만_공용_기록에서_뺀다) {
+    auto& f = deck_write::failures();
+    const size_t before = f.size();
+    deck_write::note("블록 밖 — 남는다");
+    {
+        deck_write::Tolerated tolerated;   // op 이 견디는 쓰기(제 말로 [WARN])
+        deck_write::note("블록 안 — 뺀다");
+        ASSERT_EQ(f.size(), before + 2);
+    }
+    ASSERT_EQ(f.size(), before + 1);
+    ASSERT_EQ(f.back(), std::string("블록 밖 — 남는다"));
+    f.resize(before);   // 다른 시험에 남기지 않는다
+}
+
 // ── 정렬·탐색 — 세트 멤버 판정이 여기 얹힌다 ────────────────────────────
 
 TEST(sortUnique_와_inSorted) {

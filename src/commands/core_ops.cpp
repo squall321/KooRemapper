@@ -433,7 +433,12 @@ int runMapping(const std::string& bentFile, const std::string& flatFile,
         //   고리가 조용히 변형률만 냈다. 절점 · 솔리드 요소는 뒤집은 메시에서(HEX8 차례 바꿈 포함), 나머지 카드는 평판 그대로다
         std::error_code tec;
         const bool tempExisted = std::filesystem::exists(scaledFlatTmpPath, tec);
-        const bool wrote = w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
+        // 쓰기 실패는 아래 [WARN] 으로 견딘다(고리 prestress 가 원래 평판을 쓴다 · 산출과 무관) — 공용 쓰기 실패 기록에 남기지 않는다
+        // (main 이 그것으로 rc 1 · 「잘렸을 수 있다」 를 내지 않게 · 마지막 검토)
+        const bool wrote = [&] {
+            KooRemapper::deck_write::Tolerated tolerated;
+            return w.writeFileWithSource(scaledFlatTmpPath, flatMesh, flatFile, false);
+        }();
         if (!wrote) {
             console.warning("Failed to write pre-processed flat temp: "
                             + w.getErrorMessage()

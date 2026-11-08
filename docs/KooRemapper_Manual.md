@@ -507,7 +507,9 @@ LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄�
 덱 · dynain · IGA 파일을 쓰다 실패하면(디스크 참 ENOSPC · 할당량 EDQUOT · 파일 크기 상한 EFBIG · EIO) `[ERROR]` 가 그 파일과 까닭을
 말하고 **종료 코드 1** 입니다. 공용 쓰기 계층(`DeckWriter` — 짧은 쓰기 · 스트림 상태 · 닫기)과 `writeOutput`(assemble · 단독 op 의 덱 ·
 dynain · IGA) · `DynainWriter` · 메시 쓰기(`KFileWriter`) · 펼친 덱(`flatten_includes`)이 결과를 보고, 부르는 op 이 그 결과를 보지
-않아도 `main` 이 rc 0 을 rc 1 로 바꿉니다. `extract-parts` · `apply_carryover_plan` 은 바꿔 넣지 않고(앞 파일 그대로 · 임시 파일만
+않아도 `main` 이 rc 0 을 rc 1 로 바꿉니다. op 이 알고 **견디는** 쓰기는 예외입니다 — `map` 은 앞처리 평판 임시 파일
+(`<output>.kr_tmp_preproc_flat.k`)을 못 쓰면 [WARN] 을 내고 고리 prestress 가 원래 평판을 기준으로 쓰며 산출은 멀쩡하니 rc 를 바꾸지
+않습니다(마지막 검토 — 그 실패도 rc 1 · 「그 파일은 잘렸을 수 있다」 로 바꿨다 · 회귀 `test_staged_write.py` W-6). `extract-parts` · `apply_carryover_plan` 은 바꿔 넣지 않고(앞 파일 그대로 · 임시 파일만
 지운다) 보고에 그 오류를 적습니다 — 바꿔 넣을 때 그 파일에 제자리로 옮겨 쓰는 길(읽기 전용 폴더 · 이름 바꾸기를 막은 폴더 권한)에서
 멈췄으면 그 파일은 잘렸고 그렇다고 말합니다(보고 `output_damaged` · §48.1 · 회귀 P). 바로 쓰는 op(그 밖의 op)의 그 파일은 **잘렸을 수 있습니다** — 지우지 않으니 쓰지 말고 다시
 돌리세요. 예전엔 결과를 보지 않아 잘린 덱(`*NODE` 가운데서 끊긴 덱 · 마지막 섹션을 잃은 덱)을 rc 0 · ok 보고로 냈습니다(여섯째 검토

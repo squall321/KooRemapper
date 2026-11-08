@@ -47,6 +47,7 @@
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
+    W-6 — op 이 [WARN] 으로 견디는 쓰기(map 의 앞처리 평판 임시 파일)는 rc 를 바꾸지 않는다(마지막 검토 — 공용 기록이 rc 1 로 바꿨다).
 
 바이너리는 늘 주소 공간 8 GB 상한(RLIMIT_AS — prlimit --as 와 같다)으로 돌린다(끝없이 읽히는 장치를 되읽던 판의 탐침이 50 GB 까지 자라
 이 상자의 다른 서비스가 죽었다 · 11-08).
@@ -1078,6 +1079,29 @@ def sec_w(binary):
         check("W-%d %s(%s) 산출 반 크기 상한 — rc 1 · [ERROR] 가 쓰다 멈춘 파일과 까닭(File too large)을 말한다" %
               (k, opname, "writeOutput" if k == 4 else "DeckWriter"),
               rc0 == 0 and size > 0 and rc == 1 and "File too large" in out and "[ERROR]" in out, (rc0, size, rc, out[-300:]))
+    # W-6 op 이 견디는 쓰기 실패는 rc 를 바꾸지 않는다 — map 은 앞처리 평판 임시 파일(<output>.kr_tmp_preproc_flat.k)을 못 쓰면 [WARN]
+    # 으로 넘기고(고리 prestress 가 원래 평판을 쓴다) 산출은 멀쩡하다. 그 자리를 /dev/full 링크로(마지막 검토 — 공용 쓰기 실패 기록이
+    # main 에서 rc 1 · 「그 파일은 잘렸을 수 있다」 로 바꿨다)
+    d = os.path.join(TMP, "W6_map")
+    os.makedirs(d)
+    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
+    sec, out = "", []
+    for ln in open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines():   # x 를 0.5% 늘린 평판
+        if ln.startswith("*"):
+            sec = ln.strip().upper()
+        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
+            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
+        out.append(ln)
+    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    write(os.path.join(d, "m.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
+                                     "prestress:\n  enabled: true\n  output: m.dynain\n  E: 210000.0\n  nu: 0.3\n")
+    if os.path.exists("/dev/full"):
+        os.symlink("/dev/full", os.path.join(d, "m.k.kr_tmp_preproc_flat.k"))
+        rc, said = run(binary, d, "map", "m.yaml")
+        deck = open(os.path.join(d, "m.k"), encoding="utf-8", errors="replace").read() if os.path.exists(os.path.join(d, "m.k")) else ""
+        check("W-6 map 이 견디는 앞처리 평판 임시 파일 쓰기 실패(/dev/full) — rc 0 · [WARN] 만 · [ERROR] 없음 · m.k · m.dynain",
+              rc == 0 and "Failed to write pre-processed flat temp" in said and "[ERROR]" not in said and "*END" in deck and
+              os.path.exists(os.path.join(d, "m.dynain")), (rc, [ln for ln in said.splitlines() if "[ERROR]" in ln or "[WARN]" in ln][:4]))
 
 
 # ── P 제자리로 옮겨 쓰다 멈춘 산출 ────────────────────────────────────────────
