@@ -12712,14 +12712,14 @@
           "type": "number",
           "required": false,
           "default": "17.5",
-          "desc": "Positive (Al) tab X-center coordinate (mm)"
+          "desc": "Positive (Al) tab X-center coordinate (mm) The default centers (17.5 / 52.5) assume a 70 mm wide cell; for the stacked model each tab must overlap the cell (0..cell_width) unless no_pcm — a tab entirely outside is refused with exit code 1 (until 2026-11-08 its strip read node numbers outside the grid and the deck pointed at nodes it does not have, exit code 0)."
         },
         {
           "path": "tabs.neg_x_center",
           "type": "number",
           "required": false,
           "default": "52.5",
-          "desc": "Negative (Cu) tab X-center coordinate (mm)"
+          "desc": "Negative (Cu) tab X-center coordinate (mm) The default centers (17.5 / 52.5) assume a 70 mm wide cell; for the stacked model each tab must overlap the cell (0..cell_width) unless no_pcm — a tab entirely outside is refused with exit code 1 (until 2026-11-08 its strip read node numbers outside the grid and the deck pointed at nodes it does not have, exit code 0)."
         },
         {
           "path": "pcm.width",

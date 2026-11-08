@@ -433,7 +433,9 @@ public:
 
         int ixStart = (int)std::round(xLo/dx);
         int ixEnd   = (int)std::round(xHi/dx);
-        ixStart = std::max(0, std::min(ixStart, nx));
+        // ★시작 열은 nx-1 까지(2026-11-08) — 예전엔 nx 까지라 셀 끝에 걸친 탭(xLo/dx 가 nx 로 반올림)이 ixEnd = nx+1 을 만들어 격자
+        //   (ny+1)×(nx+1) 밖을 읽었다(덱에 없는 절점 번호 — 실측 174421089). 셀 밖 탭은 짓기 전에 거절한다(buildBatteryDeck)
+        ixStart = std::max(0, std::min(ixStart, nx - 1));
         ixEnd   = std::max(ixStart+1, std::min(ixEnd, nx));
         int nCols = ixEnd - ixStart;
 

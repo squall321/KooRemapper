@@ -15,6 +15,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <tuple>
 #include <fstream>
 #include <sstream>
 #include <cstdio>
@@ -444,6 +445,24 @@ static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, c
         console.error("[battery] Unknown model_type: " + cfg.modelType +
                       " (supported: stacked, wound)");
         return false;
+    }
+
+    // ★탭이 셀과 겹쳐야 한다(2026-11-08) — 탭 줄은 셀 위 가장자리(+Y) 격자 열에서 뻗는다. 셀 밖 탭(기본 중심 17.5 · 52.5 는 폭 70
+    //   셀 기준)은 격자 밖 절점 번호를 읽어 덱에 없는 절점을 가리켰다(rc 0)
+    if (!cfg.noPcm) {
+        const auto& tb = cfg.tabs;
+        for (const auto& [name, key, c] : {std::make_tuple("양극", "pos_x_center", tb.posXCenter),
+                                           std::make_tuple("음극", "neg_x_center", tb.negXCenter)}) {
+            const double lo = c - tb.width / 2.0, hi = c + tb.width / 2.0;
+            if (hi > 0.0 && lo < cfg.geo.cellWidth) continue;
+            char buf[320];
+            snprintf(buf, sizeof(buf),
+                     "[battery] %s 탭(tabs.%s %g · width %g → x %g~%g)이 셀(cell_width %g) 밖이다 — 탭 줄을 지을 격자 열이 없다. "
+                     "tabs.pos_x_center · neg_x_center 를 셀 안으로 주라(기본 17.5 · 52.5 는 폭 70 셀 기준) — 아무 파일도 쓰지 않았다",
+                     name, key, c, tb.width, lo, hi, cfg.geo.cellWidth);
+            console.error(buf);
+            return false;
+        }
     }
 
     // ── Stacked model ─────────────────────────────────────────

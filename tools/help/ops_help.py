@@ -122,6 +122,8 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
    outputs=["examples/battery/swell/stacked/battery_stacked_swell_tier0_phase1.k"],
    notes=["설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.",
           "output 경로의 폴더가 있어야 한다.",
+          "(stacked) 탭(tabs.pos_x_center · neg_x_center — 기본 17.5 · 52.5 는 폭 70 셀 기준)이 셀과 겹치지 않으면 rc 1",
+          "  (2026-11-08 전엔 탭 줄이 격자 밖을 읽어 덱에 없는 절점을 가리키고 rc 0). no_pcm 이면 탭을 짓지 않는다",
           "assemble 의 - type: battery 도 같은 규칙 — 이 설정의 output 은 이 설정 폴더, 항목에 준 output 은 assemble YAML 폴더 기준이고",
           "  주 덱의 *INCLUDE 는 주 덱 폴더 기준 이름으로 적는다(2026-11-07 전엔 둘 다 작업 폴더 기준)",
           "assemble 안에서는 번호를 족마다 기존 모델의 최대값 위로 옮겨 얹는다(절점 · 요소 · 파트 · 섹션 · 재질 · 열 재질 · 모래시계 ·",

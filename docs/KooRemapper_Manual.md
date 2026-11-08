@@ -4094,6 +4094,7 @@ KooRemapper battery <config.yaml>
 | `wound.flat` / `.flat_ratio` / `.n_winds` | (wound) 편평·비율·권취 수 |
 | `swelling.soc` / `.nmc_cte` / `.graphite_cte` | SOC·양극/음극 팽창률 |
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
+| `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0) |
 
 > **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
