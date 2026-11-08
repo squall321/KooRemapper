@@ -26,6 +26,19 @@ struct Note {
     std::string text;
 };
 
+// 쓸 자리 하나를 어떻게 쓰나 — `reserve` 가 대상의 꼴로 정한다(배포 판 752fa2b 은 산출 자리에 제자리로 썼다 — 그 꼴들을 되살린다)
+enum class Mode {
+    // 대상 폴더의 임시 파일에 쓰고 이름 바꾸기로 바꿔 넣는다(원자적 — 보통). 대상이 심볼릭 링크면 끝까지 따라간 파일 옆에 쓰고 그 파일로
+    // 바꿔 넣는다(링크는 그대로 · 매달린 링크면 링크가 가리키는 자리에 만든다). 있던 파일의 권한 비트를 잇는다. 하드 링크 · 소유자 ·
+    // ACL 은 잇지 않는다 — 새 파일로 바뀌므로 다른 하드 링크 이름은 앞 내용을 그대로 가리킨다. 쓸 수 없는 파일(읽기 전용)은 거절한다
+    Rename,
+    // 대상 폴더에 새 파일을 만들 수 없다(읽기 전용 폴더 등) — 있는 일반 파일에 쓸 수 있으면 시스템 임시 폴더에 써 두었다가 바꿔 넣을 때
+    // 그 파일에 제자리로 옮겨 쓴다. **원자적이 아니다**(옮겨 쓰는 사이에 멈추면 반쯤 쓴 파일이 남는다 — 그 말을 [WARN] 으로 남긴다)
+    InPlace,
+    // 대상이 일반 파일이 아니다(문자 장치 · FIFO · 소켓 — `/dev/null`) — 대상에 바로 쓴다. 임시 파일이 없고 바꿔 넣지도 지우지도 않는다
+    Direct,
+};
+
 // 쓸 파일 묶음(산출 · 곁 파일 · 보고). 지우는 것은 이번 실행이 만든 임시 파일뿐이다 — 앞 파일 · 폴더 · 남의 파일은 건드리지 않는다.
 // 사라질 때(실패로 돌아갈 때) 바꿔 넣지 않은 임시 파일을 지운다
 class StagedFiles {
@@ -35,23 +48,34 @@ public:
     StagedFiles(const StagedFiles&) = delete;
     StagedFiles& operator=(const StagedFiles&) = delete;
 
-    // `dst` 의 임시 경로를 잡는다 — 같은 폴더(바꿔 넣기가 한 파일 시스템 안의 이름 바꾸기다) · 점으로 시작하는 이름. 쓰는 쪽은
-    // `writePath` 에 쓴다. `suffix` 는 임시 이름의 끝이다(덱 쓰기가 <접두>.k 를 쓰면 ".k"). 실패면 false 와 까닭(`why`)
+    // `dst` 를 쓸 자리를 잡는다 — 쓰는 쪽은 `writePath` 에 쓴다(Rename · InPlace 는 비어 있는 임시 파일, Direct 는 `dst` 그 자체).
+    // `suffix` 는 임시 이름의 끝이다(덱 쓰기가 <접두>.k 를 쓰면 ".k"). 같은 `dst` 를 다시 잡으면 앞 임시 파일은 버린다.
+    // 실패면 false 와 까닭(`why` — 대상이 폴더 · 쓸 수 없는 파일 · 폴더가 없다 …). InPlace 면 [WARN] 한 줄이 `takeNotes` 에 쌓인다
     bool reserve(const std::string& dst, const std::string& suffix, std::string& writePath, std::string& why);
-    // 글을 임시 파일에 쓴다(바이너리 — 개행 그대로). 자리를 잡고(reserve) 쓰기까지 한다
+    // 글을 쓴다(바이너리 — 개행 그대로). 자리를 잡고(reserve) 쓰기까지 한다
     bool writeText(const std::string& dst, const std::string& text, std::string& why);
-    // 임시 파일을 `dst` 로 바꿔 넣는다. 실패면 false 와 까닭(임시 파일은 남는다 — `discard` · 사라질 때 지운다)
+    // 바꿔 넣는다. Rename — 대상이 일반 파일이 아니게 됐으면(장치 · FIFO · 폴더) 그 위로 바꿔 넣지 않는다(root 여도). 이름 바꾸기를
+    // 폴더 권한이 막으면(EACCES · EPERM) 있는 일반 파일에 제자리로 옮겨 쓴다([WARN] 원자적이 아님). InPlace — 제자리로 옮겨 쓴다.
+    // Direct — 할 일이 없다. 실패면 false 와 까닭(임시 파일은 남는다 — `discard` · 사라질 때 지운다)
     bool commit(const std::string& dst, std::string& why);
-    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다
+    // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다(Direct 의 대상은 지우지 않는다)
     void discard(const std::string& dst);
     void discardAll();
+    bool has(const std::string& dst) const;
+    Mode mode(const std::string& dst) const;   // 잡지 않은 자리는 Rename
+    // 쌓인 말을 꺼낸다(꺼내면 비운다)
+    std::vector<Note> takeNotes();
 
 private:
     struct Item {
-        std::string dst, tmp;
-        int slot = -1;   // 신호 때 지울 경로 표의 자리
+        std::string dst, target, tmp;
+        Mode mode = Mode::Rename;
+        bool existed = false;   // 잡을 때 대상이 있었다 — 바꿔 넣을 때 그 권한 비트를 잇는다
+        unsigned perm = 0;
+        int slot = -1;          // 신호 때 지울 경로 표의 자리
     };
     std::vector<Item> items_;
+    std::vector<Note> notes_;
 };
 
 // 앞 실행이 죽으며 남긴 임시 파일을 지운다 — `dst` 의 것(같은 폴더 · 같은 대상 이름 해시)이고, 같은 호스트 · pid 이름공간에서 그 주인

@@ -1898,12 +1898,18 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
     //   (예전엔 거절하면 앞 실행의 덱을 「옛 산출」로 지웠다 — 플랫폼에서 앞 잡의 출력이 사라졌다 · `stale_output_removed`)
     KooRemapper::staged_write::StagedFiles staged;
     KooRemapper::carryover::Report rep;
+    // 도우미가 남긴 말(읽기 전용 폴더의 제자리 쓰기 · 이름 바꾸기 대신 제자리로 쓴 것 — 원자적이 아니다)을 찍는다
+    auto stagedNotes = [&]() {
+        for (const auto& n : staged.takeNotes())
+            n.warn ? console.warning(std::string("[") + tag + "] " + n.text) : console.println(std::string("[") + tag + "] " + n.text);
+    };
     auto writeReport = [&]() {
         std::string why;
         if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), why) || !staged.commit(reportPath, why)) {
-            console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath);
+            console.error(std::string("[") + tag + "] 보고를 쓸 수 없다: " + reportPath + " (" + why + ")");
             return false;
         }
+        stagedNotes();
         console.println(std::string("[") + tag + "] Report: " + reportPath);
         return true;
     };
@@ -1954,13 +1960,16 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         if (!assembler.applyCarryoverPlan(planPath, outPath, rep))
             return refuse("사전 검사에서 " + std::to_string(rep.problems.size()) + " 건이 걸렸다 — 계획 전체를 적용하지 않았고 덱을 쓰지 않았다");
         for (const auto& msg : assembler.infoMessages) console.println(msg);
-        // 덱은 output 옆의 임시 파일에 쓴다(쓰기는 <접두>.k 를 쓴다). 쓰기 관문이 남긴 말의 임시 이름은 output 이름으로 바꿔 싣는다
+        // 덱은 output 옆의 임시 파일에 쓴다(쓰기는 <접두>.k 를 쓴다). 쓰기 관문이 남긴 말의 임시 이름은 output 이름으로 바꿔 싣는다.
+        // 링크면 따라간 파일 옆 · 읽기 전용 폴더의 쓸 수 있는 파일이면 시스템 임시 폴더에(바꿔 넣을 때 제자리로) · 장치 · FIFO 면 그 자리에
+        // 바로(공용 staged_write — 배포 판이 제자리로 쓰던 꼴들)
         std::string tmpDeck, stageWhy;
         if (!staged.reserve(outPath, ".k", tmpDeck, stageWhy)) {
-            rep.problems.push_back({0, "write", "output 옆에 임시 파일 이름을 잡지 못했다: " + outPath});
+            rep.problems.push_back({0, "write", "output 자리(" + outPath + ")에 쓸 수 없다(" + stageWhy + ")"});
             unapply();
             return refuse("덱 쓰기가 멈췄다 — 산출이 없다(output 자리의 앞 파일은 그대로다)");
         }
+        stagedNotes();
         if (!writeOutputChecked(assembler, tmpDeck.substr(0, tmpDeck.size() - 2), tag, console)) {
             std::string msg = assembler.getErrorMessage().empty() ? std::string("쓰기 관문에서 멈췄다") : assembler.getErrorMessage();
             for (size_t at = msg.find(tmpDeck); at != std::string::npos; at = msg.find(tmpDeck, at + outPath.size()))
@@ -1982,19 +1991,22 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         printList(rep.warnings, false);
         // 보고를 먼저 임시로 써 두고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다
         if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), stageWhy)) {
-            rep.problems.push_back({0, "write", "보고를 임시 파일에 쓰지 못했다: " + reportPath});
+            rep.problems.push_back({0, "write", "보고를 임시 파일에 쓰지 못했다: " + reportPath + " (" + stageWhy + ")"});
             unapply();
             return refuse("보고를 쓸 수 없다 — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다)");
         }
+        stagedNotes();
         if (!staged.commit(outPath, stageWhy)) {
-            rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다"});
+            rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다(" + stageWhy + ")"});
             unapply();
             return refuse("덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
         }
+        stagedNotes();
         if (!staged.commit(reportPath, stageWhy)) {   // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다
-            console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath);
+            console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath + " (" + stageWhy + ")");
             return 1;
         }
+        stagedNotes();
         console.println(std::string("[") + tag + "] Report: " + reportPath);
         console.println(std::string("[") + tag + "] Done -> " + outPath + "  (sha256 " + rep.deckShaOut + ")");
         return 0;

@@ -1554,6 +1554,10 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     std::vector<std::string> reads{yamlFile};
     if (!o.model.empty()) reads.push_back(o.model);
     KooRemapper::staged_write::StagedFiles staged;
+    // 도우미가 남긴 말(읽기 전용 폴더의 제자리 쓰기 · 이름 바꾸기 대신 제자리로 쓴 것 — 원자적이 아니다)을 찍는다
+    auto stagedNotes = [&]() {
+        for (const auto& n : staged.takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
+    };
     auto reportWritable = [&]() {
         if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
         for (const auto& r : reads)
@@ -1642,8 +1646,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             if (staged.writeText(o.reportPath, reportJson(false), why) && staged.commit(o.reportPath, why))
                 console.info("report: " + o.reportPath);
             else
-                console.error("Cannot write report: " + o.reportPath);
+                console.error("Cannot write report: " + o.reportPath + " (" + why + ")");
             staged.discardAll();
+            stagedNotes();
         }
         return 1;
     };
@@ -1889,8 +1894,11 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     // ── 패스 2 — 쓰기(임시 파일 — 다 되기 전엔 산출 자리를 건드리지 않는다) ─────────────────────────────
+    //    링크면 따라간 파일 옆 · 읽기 전용 폴더의 쓸 수 있는 파일이면 시스템 임시 폴더에(바꿔 넣을 때 제자리로) · 장치 · FIFO(`/dev/null`)면
+    //    그 자리에 바로 쓴다(공용 staged_write — 배포 판이 제자리로 쓰던 꼴들)
     std::string tmpOut, stageWhy;
-    if (!staged.reserve(o.output, "", tmpOut, stageWhy)) return fail("write", "Cannot open output: " + o.output);
+    if (!staged.reserve(o.output, "", tmpOut, stageWhy)) return fail("write", "Cannot open output: " + o.output + " (" + stageWhy + ")");
+    stagedNotes();
     {
         KooRemapper::DeckWriter w(tmpOut, KooRemapper::deck_newline::detect(o.model));
         if (!w.ok()) return fail("write", "Cannot open output: " + o.output);
@@ -1960,7 +1968,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         for (size_t i = 0; i < pk.allElems.size(); ++i)
             mf << (i ? "," : "") << "[" << pk.allElems[i] << "," << (i + 1) << "]";
         mf << "]\n}\n";
-        if (!staged.writeText(mapWrite, mf.str(), stageWhy)) return fail("write", "Cannot write renumber map: " + mapWrite);
+        if (!staged.writeText(mapWrite, mf.str(), stageWhy))
+            return fail("write", "Cannot write renumber map: " + mapWrite + " (" + stageWhy + ")");
+        stagedNotes();
         if (pk.nodes.size() > 1000000)
             console.warning("번호 표가 " + std::to_string(pk.nodes.size()) +
                             " 항이다 — 파일이 크다. 되돌리려면 필요하므로 지우지 말라");
@@ -1992,17 +2002,21 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     // ── 바꿔 넣기 — 보고를 임시로 먼저 쓰고(못 쓰면 아무것도 바꾸지 않는다) 산출 · 번호 지도 · 보고 차례로 ─────────
     const bool writeReport = reportWritable();
     if (writeReport) {
-        if (!staged.writeText(o.reportPath, reportJson(true), stageWhy)) return fail("write", "Cannot write report: " + o.reportPath);
+        if (!staged.writeText(o.reportPath, reportJson(true), stageWhy))
+            return fail("write", "Cannot write report: " + o.reportPath + " (" + stageWhy + ")");
+        stagedNotes();
     }
-    if (!staged.commit(o.output, stageWhy)) return fail("write", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output);
+    if (!staged.commit(o.output, stageWhy)) return fail("write", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output + " (" + stageWhy + ")");
+    stagedNotes();
     console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
                     " · 요소 카드 " + std::to_string(st.elemCards) +
                     " · *PART " + std::to_string(st.partsEmitted) + ")");
     if (rm.on) {
         if (!staged.commit(mapWrite, stageWhy)) {
-            console.error("번호 지도를 제 이름으로 바꿔 넣지 못했다: " + mapWrite + " — 산출은 썼는데 되돌릴 표가 없다");
+            console.error("번호 지도를 제 이름으로 바꿔 넣지 못했다: " + mapWrite + " (" + stageWhy + ") — 산출은 썼는데 되돌릴 표가 없다");
             return 1;
         }
+        stagedNotes();
         console.info("  renumber map: " + mapWrite);
     } else if (fileExists(mapPathOf) && !KooRemapper::include_closure::sameFile(mapPathOf, o.reportPath)) {
         // 지난 실행이 남긴 번호 지도는 번호를 매기지 않은 이 산출과 짝이 아니다 — 이 op 의 번호 지도로 알아볼 때만 지운다
@@ -2016,9 +2030,10 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     }
     if (writeReport) {
         if (!staged.commit(o.reportPath, stageWhy)) {
-            console.error("Cannot write report: " + o.reportPath + " — 산출은 썼다");
+            console.error("Cannot write report: " + o.reportPath + " (" + stageWhy + ") — 산출은 썼다");
             return 1;
         }
+        stagedNotes();
         console.info("report: " + o.reportPath);
     }
     return 0;

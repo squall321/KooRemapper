@@ -14,6 +14,7 @@
 
 #ifndef _WIN32
 #include <csignal>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -152,5 +153,78 @@ TEST(StagedWrite_sweepStale_은_주인_없는_같은_산출의_임시_파일만_
     ASSERT_TRUE(fs::exists(s.root / keepLive));
     ASSERT_EQ(notes.size(), (size_t)1);
     ASSERT_FALSE(notes[0].warn);
+}
+
+TEST(StagedWrite_링크는_따라간_파일로_바꿔_넣고_권한_비트를_잇는다) {
+    SwScratch s("link");
+    fs::create_directories(s.root / "real");
+    const std::string target = s.at("real/t.k");
+    std::ofstream(target) << "old\n";
+    fs::permissions(target, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read);   // 0640
+    fs::create_symlink("real/t.k", s.root / "out.k");
+    staged_write::StagedFiles st;
+    std::string why;
+    ASSERT_TRUE(st.writeText(s.at("out.k"), "new\n", why));
+    ASSERT_TRUE(st.mode(s.at("out.k")) == staged_write::Mode::Rename);
+    ASSERT_EQ(countTemps(s.root / "real"), 1);   // 따라간 파일 옆
+    ASSERT_TRUE(st.commit(s.at("out.k"), why));
+    ASSERT_TRUE(fs::is_symlink(s.root / "out.k"));
+    ASSERT_EQ(slurp(target), std::string("new\n"));
+    ASSERT_TRUE((fs::status(target).permissions() & fs::perms::all) ==
+                (fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read));
+    // 매달린 링크 — 링크가 가리키는 자리에 만든다
+    fs::create_symlink("real/new.k", s.root / "dangle.k");
+    ASSERT_TRUE(st.writeText(s.at("dangle.k"), "made\n", why));
+    ASSERT_TRUE(st.commit(s.at("dangle.k"), why));
+    ASSERT_TRUE(fs::is_symlink(s.root / "dangle.k"));
+    ASSERT_EQ(slurp(s.at("real/new.k")), std::string("made\n"));
+}
+
+TEST(StagedWrite_장치는_바로_쓰고_지우지_않으며_일반_파일이_아니게_된_자리로는_바꿔_넣지_않는다) {
+    SwScratch s("dev");
+    staged_write::StagedFiles st;
+    std::string why, path;
+    ASSERT_TRUE(st.reserve("/dev/null", ".k", path, why));
+    ASSERT_TRUE(st.mode("/dev/null") == staged_write::Mode::Direct);
+    ASSERT_EQ(path, std::string("/dev/null"));
+    st.discardAll();   // 장치는 지우지 않는다
+    ASSERT_TRUE(fs::is_character_file("/dev/null"));
+    // 잡을 때는 일반 파일이었는데 바꿔 넣기 전에 FIFO 로 바뀌었다 — 그 위로 바꿔 넣지 않는다(root 여도)
+    const std::string dst = s.at("out.k");
+    std::ofstream(dst) << "old\n";
+    ASSERT_TRUE(st.writeText(dst, "new\n", why));
+    fs::remove(dst);
+    ASSERT_EQ(::mkfifo(dst.c_str(), 0644), 0);
+    ASSERT_FALSE(st.commit(dst, why));
+    ASSERT_TRUE(why.find("FIFO") != std::string::npos);
+    ASSERT_TRUE(fs::is_fifo(dst));
+    st.discardAll();
+    ASSERT_EQ(countTemps(s.root), 0);
+    ASSERT_TRUE(fs::is_fifo(dst));
+}
+
+TEST(StagedWrite_읽기_전용_폴더의_쓸_수_있는_파일은_바꿔_넣을_때_제자리로_쓰고_경고한다) {
+    if (::geteuid() == 0) return;   // root 는 폴더 권한을 넘는다
+    SwScratch s("ro");
+    fs::create_directories(s.root / "ro");
+    const std::string dst = s.at("ro/out.k");
+    std::ofstream(dst) << "old\n";
+    fs::permissions(s.root / "ro", fs::perms::owner_read | fs::perms::owner_exec);
+    staged_write::StagedFiles st;
+    std::string why;
+    ASSERT_TRUE(st.writeText(dst, "new\n", why));
+    ASSERT_TRUE(st.mode(dst) == staged_write::Mode::InPlace);
+    auto notes = st.takeNotes();
+    ASSERT_EQ(notes.size(), (size_t)1);
+    ASSERT_TRUE(notes[0].warn);
+    ASSERT_EQ(slurp(dst), std::string("old\n"));   // 바꿔 넣기 전에는 그대로
+    ASSERT_TRUE(st.commit(dst, why));
+    ASSERT_EQ(slurp(dst), std::string("new\n"));
+    fs::permissions(s.root / "ro", fs::perms::owner_all);
+    // 읽기 전용 파일은 앞 판(제자리 쓰기)처럼 거절한다
+    fs::permissions(dst, fs::perms::owner_read);
+    ASSERT_FALSE(st.writeText(dst, "newer\n", why));
+    ASSERT_EQ(slurp(dst), std::string("new\n"));
+    fs::permissions(dst, fs::perms::owner_read | fs::perms::owner_write);
 }
 #endif

@@ -14,6 +14,10 @@
     다시 돌려도 아무도 치우지 않았다. 이제 신호를 받으면 이번 실행의 임시 파일을 지우고 그 신호로 끝나며, SIGKILL 이 남긴 것은 다음
     실행이 주인 프로세스가 없을 때만 지운다(산 프로세스 · 다른 산출의 것은 그대로). 실행 가운데 멈추는 자리는 임시 파일이 보일 때
     SIGSTOP 으로 잡는다(멈춘 뒤 다시 보고 · 이미 끝났으면 다시 돌린다).
+  O 산출 자리 꼴 — 배포 판은 산출 자리에 제자리로 썼다. 임시 파일 + 이름 바꾸기가 그 꼴들을 바꿨다: 심볼릭 링크가 일반 파일로 바뀌고 ·
+    모드가 0644 로 돌아가고 · `/dev/null`(보고만 보는 마른 실행) · FIFO · 읽기 전용 폴더의 쓸 수 있는 파일을 거절했다. 링크는 따라간
+    파일 옆에서 바꿔 넣고(링크 그대로) · 권한 비트를 잇고 · 장치 · FIFO 는 바로 쓰고 · 읽기 전용 폴더면 [WARN] 와 함께 바꿔 넣을 때
+    제자리로 쓴다(거절 · 실패면 그 파일 그대로). 하드 링크는 새 파일로 바뀐다(다른 이름은 앞 내용) · 읽기 전용 파일은 앞 판처럼 거절.
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
@@ -276,6 +280,134 @@ def sec_k(binary):
           rc1 == 0 and kept and rc2 == 0 and not tmp_left(d), (left, rc1, kept, rc2, tmp_left(d)))
 
 
+# ── O 산출 자리 꼴 ───────────────────────────────────────────────────────────
+def is_new_deck(path):
+    try:
+        return open(path, encoding="utf-8", errors="replace").read().startswith("*KEYWORD")
+    except OSError:
+        return False
+
+
+def sys_tmp_of(pid):
+    """시스템 임시 폴더(InPlace 의 자리)에 그 프로세스가 남긴 임시 파일."""
+    td = tempfile.gettempdir()
+    return [n for n in os.listdir(td) if n.startswith(".kr_tmp_") and "_%d_" % pid in n]
+
+
+def sec_o(binary):
+    import stat
+    import threading
+    print("[O] 산출 자리 꼴 — 링크 · 모드 · /dev/null · FIFO · 읽기 전용 폴더(배포 판이 되던 꼴)")
+    # O-1 링크 산출 — 따라간 파일이 새것 · 링크 그대로
+    for op in ("extract-parts", "apply_carryover_plan"):
+        d = ep_dir("O1_" + op) if op == "extract-parts" else co_dir("O1_" + op)
+        name = "out.k" if op == "extract-parts" else "deck_applied.k"
+        os.makedirs(os.path.join(d, "real"))
+        write(os.path.join(d, "real", "t.k"), "old\n")
+        os.symlink("real/t.k", os.path.join(d, name))
+        rc, out, rep = ep(binary, d) if op == "extract-parts" else co(binary, d)
+        check("O-1 %s 링크 산출 — 링크 그대로 · 따라간 파일이 새 덱 · rc 0" % op,
+              rc == 0 and os.path.islink(os.path.join(d, name)) and is_new_deck(os.path.join(d, "real", "t.k")) and not tmp_left(d),
+              (rc, os.path.islink(os.path.join(d, name)), out[-300:]))
+        # 매달린 링크 — 링크가 가리키는 자리에 만든다
+        d = ep_dir("O1d_" + op) if op == "extract-parts" else co_dir("O1d_" + op)
+        os.makedirs(os.path.join(d, "real"))
+        os.symlink("real/new.k", os.path.join(d, name))
+        rc, out, rep = ep(binary, d) if op == "extract-parts" else co(binary, d)
+        check("O-2 %s 매달린 링크 — 링크가 가리키는 자리에 만든다 · 링크 그대로" % op,
+              rc == 0 and os.path.islink(os.path.join(d, name)) and is_new_deck(os.path.join(d, "real", "new.k")) and not tmp_left(d),
+              (rc, os.path.exists(os.path.join(d, "real", "new.k")), out[-300:]))
+        # 모드 0640 을 잇는다 · 하드 링크는 새 파일로 바뀐다(다른 이름은 앞 내용 — 문서에 적은 그대로)
+        d = ep_dir("O3_" + op) if op == "extract-parts" else co_dir("O3_" + op)
+        p = os.path.join(d, name)
+        write(p, "old\n")
+        os.chmod(p, 0o640)
+        os.link(p, os.path.join(d, "other.k"))
+        rc, out, rep = ep(binary, d) if op == "extract-parts" else co(binary, d)
+        st = os.stat(p)
+        check("O-3 %s 있던 산출의 모드 0640 을 잇는다 · 하드 링크의 다른 이름은 앞 내용(바뀐다)" % op,
+              rc == 0 and stat.S_IMODE(st.st_mode) == 0o640 and is_new_deck(p) and open(os.path.join(d, "other.k")).read() == "old\n",
+              (rc, oct(stat.S_IMODE(st.st_mode)), out[-300:]))
+        # 읽기 전용 파일 — 앞 판처럼 거절(이름 바꾸기로 덮지 않는다)
+        d = ep_dir("O8_" + op) if op == "extract-parts" else co_dir("O8_" + op)
+        p = os.path.join(d, name)
+        write(p, "old\n")
+        os.chmod(p, 0o444)
+        rc, out, rep = ep(binary, d) if op == "extract-parts" else co(binary, d)
+        check("O-8 %s 읽기 전용 산출 파일 — rc 1 · 그 파일 그대로 · 보고 output_written false" % op,
+              rc == 1 and open(p).read() == "old\n" and isinstance(rep, dict) and rep.get("output_written") is False and not tmp_left(d),
+              (rc, out[-300:]))
+    # O-4 /dev/null — 보고만 보는 마른 실행(배포 판이 됐다) · 장치는 그대로
+    for extra, tag in (("verify: false\n", "verify false"), ("", "verify true")):
+        d = ep_dir("O4_" + tag.replace(" ", "_"))
+        rc, out, rep = ep(binary, d, output="/dev/null", extra=extra)
+        check("O-4 extract-parts output: /dev/null (%s) — rc 0 · 보고 ok · /dev/null 은 문자 장치 그대로" % tag,
+              rc == 0 and ok_report(rep) and stat.S_ISCHR(os.lstat("/dev/null").st_mode) and not tmp_left(d), (rc, out[-300:]))
+    d = co_dir("O4_co")
+    rc, out, _ = co(binary, d, report="/dev/null")
+    check("O-4 apply_carryover_plan report: /dev/null — rc 0 · 덱은 쓴다", rc == 0 and is_new_deck(os.path.join(d, "deck_applied.k")),
+          (rc, out[-300:]))
+    # O-5 FIFO 산출 — 읽는 쪽이 덱을 받고 FIFO 는 그대로(이름 바꾸기로 일반 파일이 되지 않는다)
+    d = ep_dir("O5")
+    fifo = os.path.join(d, "out.k")
+    os.mkfifo(fifo)
+    got = []
+
+    def reader():
+        with open(fifo, "rb") as f:
+            got.append(f.read())
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    rc, out, rep = ep(binary, d, extra="verify: false\n")
+    t.join(10)
+    if t.is_alive():   # 쓰는 쪽이 오지 않았다 — 읽는 쪽을 풀어 준다
+        os.close(os.open(fifo, os.O_WRONLY | os.O_NONBLOCK))
+    check("O-5 extract-parts FIFO 산출 — rc 0 · 읽는 쪽이 덱을 받았다 · FIFO 그대로",
+          rc == 0 and got and got[0].startswith(b"*KEYWORD") and stat.S_ISFIFO(os.lstat(fifo).st_mode) and not tmp_left(d),
+          (rc, len(got[0]) if got else None, out[-300:]))
+    # O-6 읽기 전용 폴더의 쓸 수 있는 파일 — [WARN](원자적이 아님)와 함께 제자리로 · 시스템 임시 폴더에 남는 것 없음
+    if os.geteuid() == 0:
+        check("O-6 읽기 전용 폴더 — root 는 폴더 권한을 넘는다(건너뜀)", True)
+        return
+    d = ep_dir("O6")
+    ro = os.path.join(d, "ro")
+    os.makedirs(ro)
+    for f in ("out.k", "r.json"):
+        write(os.path.join(ro, f), "old\n")
+    os.chmod(ro, 0o555)
+    write(os.path.join(d, "e.yaml"), "model: in.k\noutput: ro/out.k\nparts: [1]\nreport: ro/r.json\n")
+    p = subprocess.Popen([binary, "extract-parts", "e.yaml"], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace")
+    out = p.communicate(timeout=300)[0]
+    rep = load(os.path.join(ro, "r.json"))
+    check("O-6 extract-parts 읽기 전용 폴더의 쓸 수 있는 산출 · 보고 — rc 0 · 둘 다 새것 · [WARN] 원자적이 아님 · 임시 폴더 깨끗",
+          p.returncode == 0 and is_new_deck(os.path.join(ro, "out.k")) and ok_report(rep) and "[WARN]" in out and "원자적이 아니다" in out
+          and not sys_tmp_of(p.pid), (p.returncode, sys_tmp_of(p.pid), out[-400:]))
+    # 거절 · 실패면 그 파일 그대로(바꿔 넣을 때만 제자리로 쓴다)
+    write(os.path.join(d, "bad.k"), shell_deck().replace("       1       1       1       2       7       6",
+                                                          "       1       1       1       2       7     999"))
+    os.chmod(ro, 0o755)
+    write(os.path.join(ro, "out.k"), "old\n")
+    os.chmod(ro, 0o555)
+    write(os.path.join(d, "e2.yaml"), "model: bad.k\noutput: ro/out.k\nparts: [1]\nreport: ro/r.json\n")
+    rc, out = run(binary, d, "extract-parts", "e2.yaml")
+    rep = load(os.path.join(ro, "r.json"))
+    check("O-7 읽기 전용 폴더 · 되읽기 실패 — rc 1 · 산출 파일은 앞 내용 그대로 · 보고 output_written false",
+          rc == 1 and open(os.path.join(ro, "out.k")).read() == "old\n" and isinstance(rep, dict) and rep.get("output_written") is False,
+          (rc, out[-300:]))
+    os.chmod(ro, 0o755)
+    d = co_dir("O6_co")
+    ro = os.path.join(d, "ro")
+    os.makedirs(ro)
+    write(os.path.join(ro, "deck_applied.k"), "old\n")
+    write(os.path.join(ro, "deck_applied_carryover.json"), "{}\n")
+    os.chmod(ro, 0o555)
+    rc, out, rep = co(binary, d, output="ro/deck_applied")
+    check("O-6 apply_carryover_plan 읽기 전용 폴더의 쓸 수 있는 덱 · 보고 — rc 0 · 둘 다 새것 · [WARN] 원자적이 아님",
+          rc == 0 and is_new_deck(os.path.join(ro, "deck_applied.k")) and ok_report(rep) and "원자적이 아니다" in out, (rc, out[-400:]))
+    os.chmod(ro, 0o755)
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -286,6 +418,7 @@ def main():
     try:
         sec_e(binary)
         sec_k(binary)
+        sec_o(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:
