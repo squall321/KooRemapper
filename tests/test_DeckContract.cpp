@@ -253,8 +253,8 @@ TEST(auxPrimaryFields_질량_PID_는_33_40열이다) {
     std::snprintf(b, sizeof b, "%20d%20d%20s%20d", 95001, 1, "1.0", 7);
     ASSERT_EQ(deckscan::fieldInt(primaryOf(a, b, 20), pf), 7);
     ASSERT_EQ(deckscan::fieldInt(primaryOf(a, "95001,1,1.0,7", 8), pf), 7);
-    // 칸이 어긋난 줄(MASS 를 8칸에 쓴 줄) — 토큰 차례로 읽는다(`deckscan::cardFields` 와 같은 되돌림)
-    ASSERT_EQ(deckscan::fieldInt(primaryOf(a, "      12     105     0.5       9", 8), pf), 9);
+    // MASS 를 8칸에 쓴 줄 — 하나로 읽은 칸은 늘 설명서 칸이다(33-40열이 비어 PID 0). 정수 폭의 PID 9 는 다른 읽기가 낸다(`auxPidsOf`)
+    ASSERT_EQ(deckscan::fieldInt(primaryOf(a, "      12     105     0.5       9", 8), pf), 0);
     // 넓은 칸이 없는 족은 정수 폭 그대로다
     const auto beam = auxElementCard("*ELEMENT_BEAM");
     ASSERT_TRUE(primaryOf(beam, std8, 8) == deckscan::cardFields(std8, 8));
@@ -464,11 +464,13 @@ TEST(auxCardReadings_안전띠_N3_N4_는_57_72열이다) {
     ASSERT_TRUE(r.comma);
     ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 7), 104);
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
-    // 공백으로만 가른 줄 — 고정폭 두 읽기가 다 깨끗하지 않다 → 공백 토큰이 하나로 읽은 칸 · 제자리가 없다
+    // 공백으로만 가른 줄 — 고정폭 줄이라 열로만 읽는다(공백 토큰은 읽기가 아니다 · 2026-11-08). EID 칸(1-8열)에 빈칸이 껴 깨끗하지
+    // 않고 제자리가 없다. 절점은 열 자리의 값뿐이다(칸 4 = 25-32열의 104)
     r = auxCardReadings(a, "13 9 101 102 888 0.0 103 104", 8);
     ASSERT_FALSE(r.manualClean);
-    ASSERT_FALSE(r.plainClean);
-    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 7), 104);
+    ASSERT_TRUE(auxPrimaryFields(r) == r.manual.f);
+    ASSERT_FALSE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({104}));
     ASSERT_FALSE(auxManualNodesPlaceable(a, r));
     // 걸음(이월 적용의 나눠 쓴 절점 · 바닥)도 같은 칸을 본다
     const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_SEATBELT", std8, "*END"};
@@ -497,12 +499,16 @@ TEST(auxCardReadings_정수_폭으로_쓴_안전띠_줄은_두_읽기를_다_낸
     ASSERT_TRUE(r.plainAlt);                                                          // 64열 안 · 칸이 다 깨끗 · N3 · N4 둘 다 — 그렇게 썼을 수 있다
     ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({103}));                  // 번호 매기기 — 덱에 103 이 있으면 모호하다
     ASSERT_TRUE(auxManualNodesPlaceable(a, r));
-    // ② SLEN 「0.0」 을 8칸에 — 설명서 칸의 SLEN 자리에 공백이 낀다 → 하나로 읽은 칸은 정수 폭
+    ASSERT_TRUE(auxNodesSure(a, r) == std::vector<int>({101, 102, 104}));            // 두 읽기가 다 말한다
+    ASSERT_TRUE(auxNodesUnsure(a, r) == std::vector<int>({103}));                    // 정수 폭만 — 덱에 있을 때만 쓰는 절점
+    // ② SLEN 「0.0」 을 8칸에 — 설명서 칸의 SLEN 자리(41-56열)에 공백이 낀다. SLEN 은 쓰는 칸이 아니라 manual 은 깨끗하고 하나로 읽은
+    //   칸이다(N3 = 104 · N4 없음). 정수 폭 읽기가 다른 읽기로 든다
     std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8s%8d%8d", 13, 9, 101, 102, 888, "0.0", 103, 104);
     r = auxCardReadings(a, b, 8);
-    ASSERT_FALSE(r.manualClean);
-    ASSERT_TRUE(r.plainClean);
-    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 7), 104);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_TRUE(auxPrimaryFields(r) == r.manual.f);
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 6), 104);
+    ASSERT_TRUE(r.plainAlt);
     ASSERT_EQ(r.plain.col[7], (size_t)56);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
     ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({103}));
@@ -565,12 +571,95 @@ TEST(auxCardReadings_정수_폭으로_쓴_안전띠_줄은_두_읽기를_다_낸
     ASSERT_FALSE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({42, 101, 102, 1000003}));
     ASSERT_TRUE(auxNodesDisputed(a, r).empty());
-    // 8칸에 SLEN 「0.5」 · N3 만(첫 검토의 꼴) — 설명서 칸이 깨끗하지 않아 primary 는 정수 폭(N3 103) · 절점 셋을 다 지키고 번호 매기기는 거절
+    // 8칸에 SLEN 「0.5」 · N3 만(첫 검토의 꼴) — 설명서 칸의 SLEN 자리에 「0.5     103」 이 든다(빈칸이 낀 칸 — 설명서 꼴이 아닐 수 있다)
+    // → 규칙 (c) 를 보지 않아 정수 폭의 N3 103 이 다른 읽기로 든다. 절점 셋을 다 지키고 번호 매기기는 갈림(103)으로 거절한다
     std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8d%8s%8d", 13, 9, 101, 102, 7, "0.5", 103);
     r = auxCardReadings(a, b, 8);
-    ASSERT_FALSE(r.manualClean);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103}));
-    ASSERT_FALSE(auxManualNodesPlaceable(a, r));
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({103}));
+}
+
+TEST(auxCardReadings_고정폭_줄은_늘_설명서_칸이다) {
+    // 2026-11-08 재검토 — 깨끗함을 줄 전체의 칸으로 재어, 카드 폭 뒤 글자나 SLEN · MASS 의 빈칸이 끼면 공백 토큰이 manual 을 갈음했다.
+    // 꼬리 글이 붙은 안전띠 줄은 N4 를 버려 cleanup-nodes safe 가 쓰는 절점 103 을 지웠고(rc 0) 질량 줄은 버려졌다. LS-DYNA 는 열로
+    // 읽고 카드 폭 뒤 글자를 읽지 않는다 — 고정폭 줄은 늘 manual 이 하나로 읽은 칸이고 깨끗함은 쓰는 칸(EID · PID · 절점)만 본다
+    const auto belt = auxElementCard("*ELEMENT_SEATBELT");
+    auto r = auxCardReadings(belt, "      13       9     101     102                     0.0     103     104        belt left 1", 8);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_FALSE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(belt, r) == std::vector<int>({101, 102, 103, 104}));
+    ASSERT_TRUE(auxManualNodesPlaceable(belt, r));
+    for (const char* slen : {"- 1.5", "1 000.0", "1. 5"}) {   // SLEN 칸 안의 빈칸 — 쓰는 칸이 아니다
+        char b[160];
+        std::snprintf(b, sizeof b, "%8d%8d%8d%8d%8s%16s%8d%8d", 13, 9, 101, 102, "", slen, 103, 104);
+        r = auxCardReadings(belt, b, 8);
+        ASSERT_TRUE(r.manualClean);
+        ASSERT_TRUE(auxNodesUnion(belt, r) == std::vector<int>({101, 102, 103, 104}));
+        ASSERT_TRUE(auxNodesDisputed(belt, r).empty());
+        ASSERT_TRUE(auxManualNodesPlaceable(belt, r));
+    }
+    // 쓰는 칸(N3 57-64열)에 빈칸이 끼면 그 칸은 값이 없고 제자리가 없다 — 다른 칸의 절점은 그대로
+    r = auxCardReadings(belt, "      13       9     101     102                     0.0  10 3      104", 8);
+    ASSERT_FALSE(r.manualClean);
+    ASSERT_TRUE(auxNodesUnion(belt, r) == std::vector<int>({101, 102, 104}));
+    ASSERT_FALSE(auxManualNodesPlaceable(belt, r));
+    // 질량 — MASS 칸의 빈칸 · 칸이 붙은 줄 뒤 꼬리 글. PID 는 33-40열(예전엔 공백 토큰으로 읽어 질량을 버렸다)
+    const auto mass = auxElementCard("*ELEMENT_MASS");
+    r = auxCardReadings(mass, "   95001     105        1.0 E-03       7", 8);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 1), 105);
+    ASSERT_TRUE(auxPidsOf(mass, r) == std::vector<int>({7}));
+    r = auxCardReadings(mass, "   9500110000005           0.001       7  mass on lid", 8);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 0), 95001);
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 1), 10000005);
+    ASSERT_TRUE(auxPidsOf(mass, r) == std::vector<int>({7}));
+    ASSERT_TRUE(auxNodesUnion(mass, r) == std::vector<int>({10000005}));
+}
+
+TEST(auxCardReadings_정수_폭_읽기는_칸마다_같은_꼴로_쓴_줄만) {
+    // 규칙 (e) — 정수 폭 쓰개는 칸마다 같은 꼴로 쓴다. 칸마다 맞춤이 다른 설명서 꼴 i10 줄(N3 오른쪽 · N4 왼쪽 맞춤)을 정수 폭으로
+    // 자르면 「10」(SLEN 의 끝)이 칸 61-70 의 가운데 · 「103104」 가 칸 71-80 의 가운데에 놓인다 — 다른 읽기가 아니다. 2026-11-08 전엔
+    // 고아 절점 10 을 남기고 번호 매기기를 거절했다(재검토 퍼즈 i10 1200 줄 가운데 34)
+    const auto a = auxElementCard("*ELEMENT_SEATBELT");
+    char b[200];
+    std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10s%16s%10d%-10s", 1, 9, 101, 102, "", "10", 103, "104");
+    auto r = auxCardReadings(a, b, 10);
+    ASSERT_TRUE(r.manualClean);
+    ASSERT_FALSE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
+    ASSERT_TRUE(auxNodesDisputed(a, r).empty());
+    ASSERT_TRUE(auxManualNodesPlaceable(a, r));
+    ASSERT_TRUE(auxNodesSure(a, r) == std::vector<int>({101, 102, 103, 104}));   // 다른 읽기가 없으면 manual 이 다 확실하다
+    ASSERT_TRUE(auxNodesUnsure(a, r).empty());
+    // 정수 폭으로 고르게 쓴 줄은 그대로 든다 — 오른쪽 맞춤(긴 N3 · 짧은 N4) · 왼쪽 맞춤 · 칸마다 뒤 한 칸 비움(`%7d `)
+    std::snprintf(b, sizeof b, "%10d%10d%10d%10d%10s%10s%10d%10d", 13, 9, 101, 102, "", "", 123456789, 1234);
+    r = auxCardReadings(a, b, 10);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 1234, 6789, 123456789}));   // 설명서 칸은 N3 을 「12345」 · 「6789」 로 자른다
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({123456789}));
+    // 확실한 절점은 두 읽기가 다 말하는 것 · 나머지는 한 읽기만 — 설명서 칸의 6789 는 덱에 없을 수 있다(되읽기가 미정의로 세지 않는다)
+    ASSERT_TRUE(auxNodesSure(a, r) == std::vector<int>({101, 102, 1234}));
+    ASSERT_TRUE(auxNodesUnsure(a, r) == std::vector<int>({6789, 123456789}));
+    std::snprintf(b, sizeof b, "%-8d%-8d%-8d%-8d%-8d%-8s%-8d%-8d", 13, 9, 101, 102, 0, "", 103, 104);
+    r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 103, 104}));
+    std::snprintf(b, sizeof b, "%7d %7d %7d %7d %7s %7s %7d %7d ", 13, 9, 101, 102, "", "0.5", 1031, 1041);
+    r = auxCardReadings(a, b, 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxNodesUnion(a, r) == std::vector<int>({101, 102, 1031, 1041}));
+    ASSERT_TRUE(auxNodesDisputed(a, r) == std::vector<int>({1031}));
+    // 질량 — 고르게 쓴 정수 폭 줄의 PID 는 후보로 든다 · 칸마다 맞춤이 다른 줄은 아니다
+    const auto m = auxElementCard("*ELEMENT_MASS");
+    r = auxCardReadings(m, "   95001     105     1.0       7", 8);
+    ASSERT_TRUE(r.plainAlt);
+    ASSERT_TRUE(auxPidsOf(m, r) == std::vector<int>({7}));
+    r = auxCardReadings(m, "95001   105        1.0      77", 8);
+    ASSERT_FALSE(r.plainAlt);
+    ASSERT_TRUE(auxPidsOf(m, r).empty());
 }
 
 TEST(auxManualNodesPlaceable_0_인_칸은_주석과_겹쳐도_된다) {
@@ -616,14 +705,16 @@ TEST(auxPidsOf_질량_PID_후보는_읽기마다) {
     ASSERT_TRUE(r.manualClean);
     ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 3), 0);
     ASSERT_TRUE(auxPidsOf(a, r) == std::vector<int>({10000005}));
-    // 8칸에 쓴 줄 — 설명서 칸이 깨끗하지 않다 → 하나로 읽은 칸은 정수 폭
+    // 8칸에 쓴 줄 — 하나로 읽은 칸은 설명서 칸(33-40열이 비어 PID 0), 정수 폭의 PID 9 는 다른 읽기로 든다(MASS 칸에 빈칸이 낀다)
     r = auxCardReadings(a, "      12     105     0.5       9", 8);
-    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 3), 9);
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 3), 0);
+    ASSERT_TRUE(r.plainAlt);
     ASSERT_TRUE(auxPidsOf(a, r) == std::vector<int>({9}));
-    // primary 가 정수 폭이고 줄이 카드 폭 밖까지 가도 primary 의 PID 는 늘 든다(예전엔 건너뛰어 33-40열의 7 만 냈다 — 재검토)
+    // 줄이 33-40열까지 가면 그 PID 가 LS-DYNA 가 읽는 PID 다 — 정수 폭 읽기는 32열 밖에 글자가 있어 다른 읽기가 아니다(규칙 (b))
     r = auxCardReadings(a, "      12     105     0.5       9       7", 8);
-    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 3), 9);
-    ASSERT_TRUE(auxPidsOf(a, r) == std::vector<int>({9}));
+    ASSERT_EQ(deckscan::fieldInt(auxPrimaryFields(r), 3), 7);
+    ASSERT_FALSE(r.plainAlt);
+    ASSERT_TRUE(auxPidsOf(a, r) == std::vector<int>({7}));
     // 걸음은 후보 전부를 넘긴다(이월 적용 aux_in_part 가 본다)
     const std::vector<std::string> L = {"*KEYWORD", "*ELEMENT_MASS", "   95001       11.00E-0310000005", "*END"};
     std::vector<NonGridElementCard> cs;

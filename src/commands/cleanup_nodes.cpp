@@ -106,9 +106,9 @@ struct Scan {
     // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN1 · SN2 가 가리킨다). `*NODE` 줄이 아니라 지울 후보가 아니고, 되읽기의
     // 「정의된 절점」 에 든다(번호는 `*NODE` 와 겹치지 않는다 — Vol_I 214757)
     std::vector<int> definedScalar;
-    std::vector<int> byElement;        // 요소가 쓰는 절점(보 족은 하나로 읽은 칸 — `auxPrimaryFields`)
-    // 보 족 줄을 **다른 읽기**로만 읽을 때 나오는 절점(넓은 칸 뒤 — 설명서 칸 · 정수 폭 · 토큰이 갈린다, 2026-11-07 사용자 결정
-    // 「둘 다 남긴다」). 지우지 않는다. 되읽기는 입력에 있던 것만 본다(다른 읽기가 지어낸 번호는 원래 없던 절점일 수 있다)
+    std::vector<int> byElement;        // 요소가 쓰는 절점(보 족은 든 읽기가 다 말하는 절점 — `auxNodesSure`)
+    // 보 족 줄의 **한 읽기**만 말하는 절점(넓은 칸 뒤 — 설명서 칸 · 정수 폭이 갈린다, 2026-11-07 사용자 결정 「둘 다 남긴다」 ·
+    // `auxNodesUnsure`). 지우지 않는다. 되읽기는 입력에 있던 것만 본다(한 읽기가 지어낸 번호는 원래 없던 절점일 수 있다)
     std::vector<int> byElementAlt;
     std::map<std::string, std::vector<int>> keepInts;      // keep 키워드 → 그 블록의 정수
     std::map<std::string, std::vector<int>> unknownInts;   // 그 밖 키워드 → 정수
@@ -294,11 +294,11 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
                 if (auxLineIdx == 0) {
                     // 칸은 공용 판정기가 자른다 — 안전띠 SLEN 은 E16 이라 N3 · N4 가 57-72열이다(정수 폭으로 자르면 N4 를 놓쳐
                     // safe 가 쓰는 절점을 지웠다 · 2026-11-07). 줄이 두 가지로 읽혀 갈리면(정수 폭으로 쓴 안전띠 줄) **둘 다** 남긴다 —
-                    // 하나로 읽은 칸은 byElement, 다른 읽기만 말하는 절점은 byElementAlt. 되읽기 검증(verifyDeck)도 이 걸음을 쓴다.
+                    // 든 읽기가 다 말하는 절점은 byElement, 한 읽기만 말하는 절점은 byElementAlt(덱에 있었던 것만 되읽기가 잰다 —
+                    // 갈리는 줄의 설명서 칸은 덱에 없는 번호를 말할 수 있다 · 11-08). 되읽기 검증(verifyDeck)도 이 걸음을 쓴다.
                     const auto rd = KooRemapper::auxCardReadings(aux, line, fw);
-                    const auto& prim = KooRemapper::auxPrimaryFields(rd);
-                    for (int v : KooRemapper::auxNodesOf(aux, prim)) sc.byElement.push_back(v);
-                    for (int v : KooRemapper::auxNodesAlt(aux, rd, prim)) sc.byElementAlt.push_back(v);
+                    for (int v : KooRemapper::auxNodesSure(aux, rd)) sc.byElement.push_back(v);
+                    for (int v : KooRemapper::auxNodesUnsure(aux, rd)) sc.byElementAlt.push_back(v);
                 } else {
                     // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을
                     // 지웠다 · 재검토 D2 · SN 은 아무도 안 읽었다 — 셋째 묶음). SN 이 `*NODE` 번호면 그 절점을 지키고, 스칼라 절점이면

@@ -12,6 +12,7 @@
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
 #include "parser/ElementCardLayout.h"   // hasKeywordCard — 첫 카드 판정 정본
+#include "parser/DeckScan.h"            // 덧붙이는 자리 — 주 덱의 첫 *END(firstEndLine)
 #include "parser/IncludeClosure.h"     // info 가 주 덱을 인클루드까지 읽어 판정한다
 #include "parser/NodeRefs.h"           // 세트·경계조건이 가리키는 절점 — 칸 자리 정본
 #include "parser/DeckScan.h"
@@ -1369,24 +1370,16 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
         //   `deckFieldWidth` 가 첫 `*KEYWORD` 에서 멈추므로 i10 덱이 8칸으로 읽힌다.
         if (!KooRemapper::hasKeywordCard(defLines)) dstFile << "*KEYWORD\n";
 
-        // Copy original content, inserting *INCLUDE before *END.
-        bool endFound = false;
-        for (const auto& line : defLines) {
-            std::string trimmedLine = line;
-            size_t start = trimmedLine.find_first_not_of(" \t");
-            if (start != std::string::npos) {
-                trimmedLine = trimmedLine.substr(start);
-            }
-            if (trimmedLine.length() >= 4 &&
-                (trimmedLine[0] == '*') &&
-                (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
-                (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
-                (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
+        // Copy original content, inserting *INCLUDE before the first *END — 한 번만(LS-DYNA 는 첫 *END 에서 멈춘다). 예전엔 *END 마다
+        // 넣어, 첫 *END 뒤를 그대로 두는 메시 쓰기(KFileWriter · 854b383) 뒤로는 *END 가 둘인 덱에 *INCLUDE 가 두 벌 나갔다
+        const size_t endAt = deckscan::firstEndLine(defLines);
+        const bool endFound = endAt < defLines.size();
+        for (size_t i = 0; i < defLines.size(); ++i) {
+            if (i == endAt) {
                 dstFile << "*INCLUDE\n";
                 dstFile << dynainFilename << "\n";
-                endFound = true;
             }
-            dstFile << line << "\n";
+            dstFile << defLines[i] << "\n";
         }
 
         if (!endFound) {

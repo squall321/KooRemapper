@@ -59,14 +59,14 @@ inline bool isDataLine(const std::string& l) {
 // LS-DYNA 는 첫 `*END` 에서 읽기를 멈춘다(그 뒤 줄은 해석에 들지 않는다). 덱을 고쳐 쓰는 op 이 덧붙이는 카드는 **첫** `*END` 앞에
 // **한 번** 넣는다 — `*END` 마다 넣으면 `*END` 가 둘인 덱에 같은 카드가 두 벌 나가고(둘째 벌은 읽히지 않는다), 마지막 `*END` 앞에
 // 넣으면 읽히지 않으며, `*END` 가 없는데 넣지 않으면 카드가 조용히 빠진다(셋째 묶음 — contact · boundary · rbe · battery · database ·
-// cnrb2solid · hfdamp). 쓰기(`ModelAssembler::writeOutput` 의 `endInsertsDone`)와 같은 규칙이다.
+// cnrb2solid · hfdamp · 11-08 squeeze 의 덧붙임 · map prestress 훅). 쓰기(`ModelAssembler::writeOutput` 의 `endInsertsDone`)와 같은 규칙이다.
 
-// 첫 `*END` 줄의 차례(키워드 줄이고 토큰이 `*END` — 대소문자 · 칸폭 접미사 무관) · 없으면 줄 수
+// 첫 `*END` 줄의 차례(**1열이 `*`** 인 키워드 줄이고 토큰이 `*END` — 대소문자 · 칸폭 접미사 무관) · 없으면 줄 수. 들여쓴 `  *END` 는
+// 키워드가 아니다 — LS-DYNA(「키워드 앞 `*` 는 1열」 · Vol_I 17940)와 `KFileReader::isKeywordLine` 이 앞 블록의 데이터로 읽는다. 예전엔
+// 들여쓴 줄도 `*END` 로 보아 `*COMMENT` 글 속의 「  *END」 앞에 카드를 넣었다 — 그 줄이 넣은 블록의 데이터가 됐다(2026-11-08 재검토)
 inline size_t firstEndLine(const std::vector<std::string>& lines) {
-    for (size_t i = 0; i < lines.size(); ++i) {
-        const size_t g = lines[i].find_first_not_of(" \t");
-        if (g != std::string::npos && lines[i][g] == '*' && kwBare(keywordToken(lines[i])) == "*END") return i;
-    }
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (!lines[i].empty() && lines[i][0] == '*' && kwBare(keywordToken(lines[i])) == "*END") return i;
     return lines.size();
 }
 

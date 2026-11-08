@@ -379,7 +379,8 @@ z_tolerance: 0.1
 r_tolerance: 0.5
 """},
    cmds=["KooRemapper cnrb2solid cnrb.yaml"], outputs=["bolt_simple_solid.k"],
-   notes=["입력 모델에 원형으로 배치된 *CONSTRAINED_NODAL_RIGID_BODY 가 있어야 한다. 헤드는 head_offset_r·head_thickness·head_position"])
+   notes=["입력 모델에 원형으로 배치된 *CONSTRAINED_NODAL_RIGID_BODY 가 있어야 한다. 헤드는 head_offset_r·head_thickness·head_position",
+          "주 덱의 첫 *END 앞만 읽는다(CNRB · 절점 · 세트) — 그 뒤의(읽히지 않는) CNRB 는 바꾸지 않고 그 자리에 둔다"])
 op("merge", "표면·재메시", "적층 파트들을 하나의 균질화 재질 층으로 병합 (voigt/reuss/vrh)", "병합 균질화 homogenize",
    "KooRemapper merge <config.yaml>",
    needs=["examples/merge/three_layer.k"],
@@ -1199,9 +1200,11 @@ report: extract_report.json
           "  16칸 실수라 질량 PID 는 33-40열, 안전벨트 N3 · N4 는 57-72열이다(i10 · long 도 그 꼴대로 자른다).",
           "  보 `_ELBOW` 의 가운데 절점 MN(마지막 옵션 카드 · 8칸 표)도 싣고 번호를 바꾼다 · `_WARPAGE` 의 SN1 · SN2(Card 9 —",
           "  스칼라 절점)도 — 그 `*NODE_SCALAR` 줄을 싣고 번호를 매기면 NID 도 같은 새 번호로(되읽기도 SN 을 잰다)",
+          "  고정폭 줄은 늘 설명서 칸으로 읽는다 — 카드 폭 뒤 꼬리 글 · SLEN · MASS 칸 안 빈칸이 있어도 공백 토큰으로 갈음하지 않는다.",
           "  줄을 정수 폭으로 써(SLEN · MASS 를 8칸에) 두 가지로 읽히면 두 읽기의 절점을 **다** 싣는다(덱에 있는 것만).",
           "  정수 폭 읽기는 칸이 다 깨끗하고 꼴이 맞고 · 줄이 정수 폭 카드 폭 안에서 끝나고 · 안전벨트면 N3 ⟺ N4 ·",
-          "  질량이면 MASS 가 있을 때만 다른 읽기다 — 설명서 꼴 줄(정수꼴 SLEN · i10 왼쪽 맞춤)에 유령 절점이 없다.",
+          "  질량이면 MASS 가 있고 · 칸마다 같은 꼴(같은 왼쪽 · 오른쪽 여백)로 썼을 때만 다른 읽기다 — 설명서 꼴 줄(정수꼴 SLEN ·",
+          "  i10 왼쪽 맞춤 · 칸마다 맞춤이 다른 줄)에 유령 절점이 없다.",
           "  질량 PID 가 읽기마다 갈리고 그 하나를 고르면 **거절**한다(파일:줄을 댄다)",
           "★그래도 모르는 변형(`*ELEMENT_MASS_NODE_SET`·`*ELEMENT_INERTIA` 등)이 **고른 파트의**",
           "  요소를 담고 있으면 **거절한다**. 조용히 빠뜨린 덱은 그럴듯하게 돌면서 틀린다.",
@@ -1223,9 +1226,10 @@ report: extract_report.json
           "  낸다(`<output>_renumber_map.json` · 첫 키 kind) — 없으면 되돌릴 수 없다. 그 자리에 남의 파일이 있으면 덮지 않고 거절,",
           "  번호를 안 매기면 이 op 의 지도로 알아볼 때만 지운다(남의 파일은 두고 경고)",
           "  칸만 **제자리에서** 갈아 끼우므로 좌표 글자는 바이트 그대로다(실수 왕복 오차 0).",
-          "  보 족 카드의 절점은 설명서 칸의 **열 자리**에 쓴다 — 콤마 자유형식 · 절점 칸이 어긋난 줄 · 두 가지로",
-          "  읽혀 다른 읽기의 절점이 덱에 있는 줄은 줄마다 파일:줄을 대고 거절한다(rc 1 · 산출 없음 —",
-          "  renumber: false 면 그대로 싣는다). 설명서대로 쓴 줄(빈 SLEN · 소수점 · 지수 · 왼쪽 맞춤)은 그대로 된다.",
+          "  보 족 카드의 절점은 설명서 칸의 **열 자리**에 쓴다 — 콤마 자유형식 · 쓰는 칸(EID · PID · 절점)에 빈칸이 낀 줄 ·",
+          "  두 가지로 읽혀 다른 읽기의 절점이 덱에 있는 줄은 줄마다 파일:줄을 대고 거절한다(rc 1 · 산출 없음 —",
+          "  renumber: false 면 그대로 싣는다). 설명서대로 쓴 줄(빈 SLEN · 소수점 · 지수 · 왼쪽 맞춤 · 카드 폭 뒤 꼬리 글 ·",
+          "  SLEN 칸 안 빈칸)은 그대로 된다.",
           "  *NODE · 격자 요소 · *SET_SEGMENT · _COLUMN 의 콤마 줄도 제자리가 없어 줄을 대고 거절한다(되읽기도 깨진 콤마 줄을 센다)",
           "`include.sets: referenced` 는 세트를 **자른다**(빼지 않는다) — 세트를 가리키는 접촉·",
           "  경계 카드가 미정의 참조가 되면 덱이 안 돈다. `*SET_SEGMENT` 는 **네 절점이 다 남은**",
@@ -1269,8 +1273,9 @@ report: cleanup_report.json
           "output · report 가 읽는 덱(주 덱 · 인클루드)과 같은 파일이면 **거절**한다 — 고쳐 쓰기가 입력을 비우고 다시 읽는다.",
           "  설정 YAML · 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일도 덮지 않는다(산출이 그 파일을 가리킨다)",
           "보 족 카드(보 · 이산 · 질량 · 안전벨트 · 플롯)는 칸 자리를 안다(보 `_ELBOW` 의 가운데 절점 MN · `_WARPAGE` 의 SN1 · SN2 도 —"
-          " SN 이 스칼라 절점이면 되읽기가 `*NODE_SCALAR` 를 본다) — 안전벨트 SLEN 을 8칸에 써 줄이 두 가지로",
-          "  읽히면 두 읽기의 절점을 **다** 남긴다(`nodes.used_only_by_other_reading`)"])
+          " SN 이 스칼라 절점이면 되읽기가 `*NODE_SCALAR` 를 본다) — 고정폭 줄은 늘 설명서 칸으로 읽고(카드 폭 뒤 꼬리 글 ·",
+          "  SLEN · MASS 칸 안 빈칸에도) 안전벨트 SLEN 을 8칸에 써 줄이 두 가지로 읽히면 두 읽기의 절점을 **다** 남긴다",
+          "  (한 읽기만 말하는 절점 수 `nodes.used_only_by_other_reading` — 덱에 없는 번호는 되읽기가 미정의로 세지 않는다)"])
 op("neutralaxis", "정보·메타", "적층의 EI 가중 중립축·굽힘강성 계산", "중립축 적층 EI 굽힘강성 stack 중립면",
    "KooRemapper neutralaxis <mesh_file> [--axis x|y|z]",
    files={"box.yaml": BOX}, cmds=[BOX_CMD, "KooRemapper neutralaxis box.k"], outputs=[],

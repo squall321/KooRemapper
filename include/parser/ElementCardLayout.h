@@ -153,20 +153,26 @@ AuxElementCard auxElementCard(const std::string& keywordLine);
 // 칸 번호(`partField`·`nodeSkip`)는 **칸 차례**다. 넓은 칸(`wideFields`)이 있는 족(안전띠 SLEN · 질량 MASS)의 줄은 두 가지로
 // 읽힐 수 있고, 갈리면 넓은 칸 **뒤** 칸(안전띠 N3 · N4 · 질량 PID)이 다르다.
 //   manual — 설명서 칸(넓은 칸은 실수 폭 `realFieldWidth` — 표준·i10 16 · long 20, 나머지는 정수 폭 `fw`. Vol_I 19315-19316 ·
-//            19353-19354). 고정폭 줄은 **늘 열로** 자른다 — 칸 안에 공백이 끼어도(정수 폭으로 쓴 줄의 SLEN 자리). LS-DYNA 가 읽는 칸이다
+//            19353-19354). 고정폭 줄은 **늘 열로** 자르고 **늘 이것이 primary** 다 — LS-DYNA 가 읽는 칸이고 카드 폭 뒤 글자는 읽지 않는다
 //   plain  — 모든 칸을 정수 폭으로(설명서와 다르게 쓴 줄 — 이 리포의 옛 픽스처 · 손으로 쓴 덱). 넓은 칸이 없는 족은 manual 과 같다
-//   tokens — 공백 토큰. 고정폭 두 읽기 가운데 칸 안에 공백이 낀 것이 있을 때만(칸이 어긋난 줄 — `deckscan::cardFields` 의 되돌림)
 // 콤마 자유형식은 콤마 토큰 하나가 읽기다(manual = plain = 토큰, 열 자리 없음). 꼬리 `$…` 주석과 꼬리 공백은 칸을 자르기 전에 뺀다.
-// 하나로 읽는다면 `auxPrimaryFields` — manual 이 깨끗하면 그것 · 아니면 plain · 아니면 토큰(전부터의 꼴). primary 는 언제나 든다.
-// ★다른 읽기는 정수 폭(plain)뿐이다 — 공백 토큰은 고정폭 두 읽기가 다 깨끗하지 않을 때 primary 로만 쓴다(토큰을 다른 읽기로 세면
-//   칸 사이에 빈칸 없이 붙은 숫자를 엉뚱한 칸으로 읽는다 — 재검토 퍼즈의 i10 줄이 유령 절점 1000 을 냈다).
-// ★다른 읽기(primary 가 아닌 plain)는 **그 줄을 정말 그렇게 썼을 수 있을 때만** 합집합 · 다툼 · PID 후보에 든다(재검토 R1 · R2 · R6 뒤
+// ★manual 의 깨끗함(`manualClean`)은 **소비자가 쓰는 칸만** 본다 — EID · PID · 절점 칸(카드 안). 카드 폭 뒤 글자(「belt left 1」 ·
+//   「mass on lid」)와 쓰지 않는 칸의 빈칸(SLEN 「- 1.5」 · MASS 「1.0 E-03」)은 manual 을 흐리지 않는다. 2026-11-08 전엔 줄 전체의
+//   칸을 보아 깨끗하지 않으면 공백 토큰이 manual 을 갈음했다 — 꼬리 글이 붙은 안전띠 줄의 N4 를 버려 `cleanup-nodes` safe 가
+//   쓰는 절점을 지웠고(rc 0) 질량 줄을 버렸다. 공백 토큰은 이제 읽기가 아니다(쓰는 칸에 빈칸이 끼면 그 칸은 값이 없고 번호를 제자리에
+//   쓰지 못한다 — `auxManualNodesPlaceable`).
+// ★다른 읽기는 정수 폭(plain)뿐이고 **그 줄을 정말 그렇게 썼을 수 있을 때만** 합집합 · 다툼 · PID 후보에 든다(재검토 R1 · R2 · R6 뒤
 //   사용자 결정 2026-11-07 — 예전엔 정수꼴 SLEN 「10」 의 뒤 절반을 N3 으로 읽어 고아 절점 10 을 남기고 · 싣고 · 번호 매기기를 거절했다)
 //   (a) 그 읽기가 쓰는 칸(카드 칸 전부)이 깨끗하고 칸 꼴이 맞다 — 칸 안에 빈칸이 없고 정수 칸은 정수 · 실수 칸은 실수(또는 빈 칸)
 //   (b) 줄의 끝(꼬리 공백 · `$…` 주석을 뺀)이 정수 폭 카드 폭(`card1Fields` × fw — 질량 32열 · 안전띠 64열, i10 40 · 80열) 안이다 —
 //       그 뒤에 글자가 있으면(질량의 33-40열 PID · 안전띠의 65-72열 N4) 설명서 칸으로 쓴 줄이다
-//   (c) 안전띠는 N3 > 0 ⟺ N4 > 0(Vol_I 160381 — N4 는 N3 이 있을 때만, 그때는 반드시)
+//   (c) 안전띠는 N3 > 0 ⟺ N4 > 0(Vol_I 160381 — N4 는 N3 이 있을 때만, 그때는 반드시). 단 manual 의 카드 칸 하나에 빈칸이 끼면
+//       (설명서 꼴로 쓴 줄이 아닐 수 있다 — 정수 폭으로 쓴 「0.5」 와 N3 이 SLEN 자리에 함께 든다) 보지 않는다
 //   (d) 질량은 그 읽기의 MASS 칸이 비지 않았다(MASS 가 빈 질량 요소로 읽는 읽기는 쓴 꼴이 아니다)
+//   (e) 정수 폭 카드의 글자가 든 칸이 다 **같은 왼쪽 여백**이거나 다 **같은 오른쪽 여백**이다(정수 폭 쓰개는 칸마다 같은 꼴로 쓴다 —
+//       `%8d` · `%-8d` · `%7d `). 칸마다 맞춤이 다른 설명서 꼴 줄은 정수 폭으로 자르면 넓은 칸 뒤 글자가 칸 가운데에 놓인다 —
+//       2026-11-08 전엔 i10 줄 `%10d×4 · 빈 SBRID · %16s 「10」 · %10d 103 · %-10s 104` 를 정수 폭으로 읽어 고아 절점 10 을 남기고
+//       번호 매기기를 거절했다(재검토 퍼즈 i10 1200 줄 가운데 34)
 // 쓰는 법 — 지키는 쪽(절점을 남기거나 싣는 쪽 · 지운 절점 보고 · 이월 적용의 나눠 쓴 절점)은 든 읽기의 **합집합**, 번호를 제자리에
 // 바꿔 쓰는 쪽은 manual 의 열 자리에 쓰되 manual 이 깨끗하지 않거나 줄이 **모호하면 거절**한다(`auxNodesDisputed` 가 덱에 있는
 // 절점을 말할 때).
@@ -177,18 +183,16 @@ struct AuxCardCut {
 };
 struct AuxCardReadings {
     bool comma = false;               // 콤마 자유형식 — manual · plain 은 콤마 토큰(열 자리 없음)
-    AuxCardCut manual;                // 설명서 칸
-    bool manualClean = false;         // manual 칸마다 안 공백이 없다
+    AuxCardCut manual;                // 설명서 칸 — primary
+    bool manualClean = false;         // 소비자가 쓰는 칸(EID · PID · 절점 칸)에 안 공백이 없다(콤마 줄은 칸마다)
     AuxCardCut plain;                 // 정수 폭 칸
-    bool plainClean = false;
-    std::vector<std::string> tokens;  // 공백 토큰 — 고정폭 읽기 가운데 깨끗하지 않은 것이 있을 때만
     size_t contentLen = 0;            // 줄의 끝 — 꼬리 `$…` 주석 · 꼬리 공백을 뺀 길이
     size_t commentAt = std::string::npos;   // `$` 주석이 시작하는 열(0-기반 · 없으면 npos) — 번호를 쓸 칸과 겹치면 제자리가 없다
-    bool plainAlt = false;            // plain 이 primary 가 아닌데 위 규칙을 지켜 다른 읽기로 든다
+    bool plainAlt = false;            // plain 이 위 규칙 (a)-(e)를 지켜 다른 읽기로 든다
 };
 AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line, int fw);
 
-// 하나로 읽는다면 — manual 이 깨끗하면 manual · 아니면 plain · 아니면 토큰(콤마 줄은 콤마 토큰)
+// 하나로 읽는다면 — manual(콤마 줄은 콤마 토큰)
 const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r);
 // 칸 차례로 나눈 줄 하나가 말하는 절점(`nodeSkip` · `nodeSkip2` 구간의 양수, 칸 차례대로)
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f);
@@ -199,7 +203,12 @@ std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, 
 // 갈림 — 합집합 가운데 manual 에 없는 절점(정렬 · 유일). 번호를 manual 의 열 자리에 바꿔 쓰는 쪽이 본다 — 그 절점이 덱에 있으면
 // 줄이 모호하다
 std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r);
-// manual 에 번호를 제자리에 쓸 수 있는가 — 콤마 줄이 아니고 manual 의 칸이 다 깨끗하며 절점 칸이 비었거나 정수이고, 번호를 쓸
+// 확실한 절점 — 든 읽기가 **다** 말하는 절점(정렬 · 유일 — 다른 읽기가 없으면 manual 의 절점). 되읽기는 이것이 덱에 다 있어야 한다
+std::vector<int> auxNodesSure(const AuxElementCard& a, const AuxCardReadings& r);
+// 한 읽기만 말하는 절점 — 합집합 − 확실(정렬 · 유일). 지키는 쪽은 덱에 있으면 남기고 싣고, 되읽기는 입력 덱에 있던 것만 잰다 — 갈리는
+// 줄의 한 읽기는 덱에 없는 번호를 말할 수 있다(정수 폭으로 쓴 i10 줄을 설명서 칸으로 자르면 N4 칸에 N4 의 끝 네 자리가 든다 · 11-08)
+std::vector<int> auxNodesUnsure(const AuxElementCard& a, const AuxCardReadings& r);
+// manual 에 번호를 제자리에 쓸 수 있는가 — 콤마 줄이 아니고 manual 의 쓰는 칸이 깨끗하며 절점 칸이 비었거나 정수이고, 번호를 쓸
 // (양수인) 절점 칸이 `$` 주석과 겹치지 않는다(줄 가운데 주석은 설명서 문법이 아니다 — 겹친 칸에 쓰면 주석을 덮는다 · 0 은 쓰지 않는다)
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
 // 카드 안 `cardLine` 째 줄(0 = Card 1)이 옵션 카드의 절점 줄이면 그 절점 칸(차례 — 8칸 표), 아니면 nullptr

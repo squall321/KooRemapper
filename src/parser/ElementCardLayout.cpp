@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
-#include <sstream>
+#include <iterator>
 #include <vector>
 
 namespace KooRemapper {
@@ -449,8 +449,46 @@ bool isRealText(const std::string& s) {
     return i == n && i > d0;
 }
 
-// 다른 읽기 `f` 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(d)
-bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f, size_t contentLen, int fw) {
+bool hasInnerBlank(const std::string& s) { return s.find_first_of(" \t") != std::string::npos; }
+
+// 소비자가 쓰는 칸(EID · PID · 절점 칸 — 카드 안) — 이 칸만 깨끗하면 manual 이 깨끗하다(헤더 「읽기들」)
+bool usedFieldsClean(const AuxElementCard& a, const std::vector<std::string>& f) {
+    auto bad = [&](int k) { return k >= 0 && static_cast<size_t>(k) < f.size() && hasInnerBlank(f[static_cast<size_t>(k)]); };
+    if (a.hasEid && bad(0)) return false;
+    if (a.hasPart && bad(a.partField)) return false;
+    for (int q = 0; a.nodeSkip >= 0 && q < a.nodeCount; ++q)
+        if (bad(a.nodeSkip + q)) return false;
+    for (int q = 0; a.nodeSkip2 >= 0 && q < a.nodeCount2; ++q)
+        if (bad(a.nodeSkip2 + q)) return false;
+    return true;
+}
+
+// 정수 폭 카드의 칸마다 글자가 같은 자리에 붙었나 — 글자가 든 칸이 다 같은 왼쪽 여백이거나 다 같은 오른쪽 여백(규칙 (e)).
+// 정수 폭으로 쓰는 쓰개(`%8d` · `%-8d` · `%7d ` …)는 칸마다 같은 꼴로 쓴다. 칸마다 맞춤이 다른 설명서 꼴 줄을 정수 폭으로 자르면
+// 넓은 칸 뒤 칸의 글자가 칸 가운데에 놓인다(i10 의 N4 를 77열부터 왼쪽 맞춤 → 정수 폭 칸 71-80 의 가운데)
+bool plainMarginsUniform(const std::string& body, size_t n, int fw) {
+    const size_t w = static_cast<size_t>(fw);
+    bool any = false, left = true, right = true;
+    size_t lm = 0, rm = 0;
+    for (size_t k = 0; k < n; ++k) {
+        const size_t c0 = k * w;
+        if (c0 >= body.size()) break;
+        const std::string seg = body.substr(c0, w);
+        const size_t s = seg.find_first_not_of(" \t");
+        if (s == std::string::npos) continue;
+        const size_t e = seg.find_last_not_of(" \t");
+        const size_t l = s, r = w - 1 - e;
+        if (!any) { lm = l; rm = r; any = true; continue; }
+        if (l != lm) left = false;
+        if (r != rm) right = false;
+    }
+    return left || right;
+}
+
+// 다른 읽기(정수 폭) 가 「그 줄을 그렇게 썼을 수 있는」 읽기인가 — 헤더의 규칙 (a)-(e). `manualDoubtful` 이면(설명서 칸 하나에 빈칸이
+// 낀다 — 설명서 꼴로 쓴 줄이 아닐 수 있다) (c) 는 보지 않는다(정수 폭으로 쓴 N3 만 있는 줄도 그 N3 을 지킨다)
+bool altReadingValid(const AuxElementCard& a, const std::string& body, const std::vector<std::string>& f, size_t contentLen,
+                     int fw, bool manualDoubtful) {
     if (a.card1Fields <= 0 || fw <= 0) return false;
     const size_t n = static_cast<size_t>(a.card1Fields);
     if (contentLen > n * static_cast<size_t>(fw)) return false;                         // (b)
@@ -459,22 +497,22 @@ bool altReadingValid(const AuxElementCard& a, const std::vector<std::string>& f,
     for (size_t k = 0; k < n && k < f.size(); ++k) {                                    // (a)
         const std::string& t = f[k];
         if (t.empty()) continue;
-        if (t.find_first_of(" \t") != std::string::npos) return false;
+        if (hasInnerBlank(t)) return false;
         const bool real = std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(k)) != a.wideFields.end();
         if (real ? !isRealText(t) : !isIntText(t)) return false;
     }
-    if (a.family == AuxFamily::SEATBELT && a.nodeSkip2 >= 0 && a.nodeCount2 == 2) {     // (c)
+    if (!manualDoubtful && a.family == AuxFamily::SEATBELT && a.nodeSkip2 >= 0 && a.nodeCount2 == 2) {     // (c)
         const int n3 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2));
         const int n4 = deckscan::fieldInt(f, static_cast<size_t>(a.nodeSkip2 + 1));
         if ((n3 > 0) != (n4 > 0)) return false;
     }
     if (a.family == AuxFamily::MASS && a.hasEid && (f.size() <= 2 || f[2].empty())) return false;   // (d)
-    return true;
+    return plainMarginsUniform(body, n, fw);                                            // (e)
 }
 
-// primary 와 든 다른 읽기 — 차례대로(primary 먼저)
+// manual 과 든 다른 읽기 — 차례대로(manual 먼저)
 std::vector<const std::vector<std::string>*> usedReadings(const AuxCardReadings& r) {
-    std::vector<const std::vector<std::string>*> out{&auxPrimaryFields(r)};
+    std::vector<const std::vector<std::string>*> out{&r.manual.f};
     if (r.plainAlt) out.push_back(&r.plain.f);
     return out;
 }
@@ -491,54 +529,44 @@ AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line
     if (cmt != std::string::npos) body.erase(cmt);
     while (!body.empty() && (body.back() == ' ' || body.back() == '\t')) body.pop_back();
     r.contentLen = body.size();
-    auto inner = [](const std::string& s) { return s.find_first_of(" \t") != std::string::npos; };
     if (body.find(',') != std::string::npos) {               // 자유형식 — 콤마 토큰이 곧 칸 차례 · 열 자리 없음
         r.comma = true;
         r.manual.f = deckscan::cardFields(body, fw);
-        r.manualClean = std::none_of(r.manual.f.begin(), r.manual.f.end(), inner);
+        r.manualClean = std::none_of(r.manual.f.begin(), r.manual.f.end(), hasInnerBlank);
         r.plain = r.manual;
-        r.plainClean = r.manualClean;
         return r;
     }
-    // 고정폭 — 열로 자른다. 칸 안에 공백이 끼어도 자르기는 그대로 두고 깨끗하지 않다고만 적는다
+    // 고정폭 — 열로 자른다(LS-DYNA 가 읽는 칸 — 카드 폭 뒤 글자는 읽지 않는다). 칸 안에 공백이 끼어도 자르기는 그대로 둔다
     const size_t rw = static_cast<size_t>(realFieldWidth(fw));
     auto cut = [&](bool wideAware, AuxCardCut& t) {
-        bool clean = true;
         for (size_t pos = 0, q = 0; pos < body.size(); ++q) {
             const bool wide = wideAware &&
                               std::find(a.wideFields.begin(), a.wideFields.end(), static_cast<int>(q)) != a.wideFields.end();
             const size_t w = wide ? rw : static_cast<size_t>(fw);
-            std::string f = deckscan::trim(body.substr(pos, w));
-            if (inner(f)) clean = false;
-            t.f.push_back(std::move(f));
+            t.f.push_back(deckscan::trim(body.substr(pos, w)));
             t.col.push_back(pos);
             t.width.push_back(w);
             pos += w;
         }
-        return clean;
     };
-    r.manualClean = cut(true, r.manual);
+    cut(true, r.manual);
+    // 깨끗함은 소비자가 쓰는 칸만 — 카드 폭 뒤 글자(「belt left 1」) · 쓰지 않는 칸의 빈칸(SLEN 「- 1.5」 · MASS 「1.0 E-03」)은
+    // manual 을 흐리지 않는다(예전엔 줄 전체를 보아 공백 토큰이 manual 을 갈음했다 — 절점 103 · 질량을 버렸다, 2026-11-08)
+    r.manualClean = usedFieldsClean(a, r.manual.f);
     if (a.wideFields.empty()) {
         r.plain = r.manual;
-        r.plainClean = r.manualClean;
-    } else {
-        r.plainClean = cut(false, r.plain);
+        return r;
     }
-    if (!r.manualClean || !r.plainClean) {                   // 칸이 어긋난 줄 — 공백 토큰도 한 읽기다
-        std::istringstream iss(body);
-        for (std::string t; iss >> t;) r.tokens.push_back(t);
-    }
-    // 다른 읽기 — primary 가 아닌 plain 이 규칙 (a)-(d)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다.
-    // 공백 토큰은 다른 읽기로 세지 않는다(헤더 — 붙은 숫자를 엉뚱한 칸으로 읽는다)
-    if (!a.wideFields.empty()) r.plainAlt = &auxPrimaryFields(r) != &r.plain.f && altReadingValid(a, r.plain.f, r.contentLen, fw);
+    cut(false, r.plain);
+    // 다른 읽기 — 정수 폭이 규칙 (a)-(e)를 지킬 때만 든다. 넓은 칸이 없는 족은 plain 이 manual 이라 다른 읽기가 없다
+    const size_t n = static_cast<size_t>(std::max(a.card1Fields, 0));
+    bool doubtful = false;
+    for (size_t k = 0; k < n && k < r.manual.f.size(); ++k) doubtful = doubtful || hasInnerBlank(r.manual.f[k]);
+    r.plainAlt = altReadingValid(a, body, r.plain.f, r.contentLen, fw, doubtful);
     return r;
 }
 
-const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) {
-    if (r.comma || r.manualClean) return r.manual.f;
-    if (r.plainClean) return r.plain.f;
-    return r.tokens;
-}
+const std::vector<std::string>& auxPrimaryFields(const AuxCardReadings& r) { return r.manual.f; }
 
 std::vector<int> auxNodesOf(const AuxElementCard& a, const std::vector<std::string>& f) {
     std::vector<int> out;
@@ -573,6 +601,29 @@ std::vector<int> auxNodesAlt(const AuxElementCard& a, const AuxCardReadings& r, 
 
 std::vector<int> auxNodesDisputed(const AuxElementCard& a, const AuxCardReadings& r) {
     return auxNodesAlt(a, r, r.manual.f);
+}
+
+std::vector<int> auxNodesSure(const AuxElementCard& a, const AuxCardReadings& r) {
+    auto sorted = [&](const std::vector<std::string>& f) {
+        std::vector<int> v = auxNodesOf(a, f);
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+        return v;
+    };
+    const std::vector<int> m = sorted(r.manual.f);
+    if (!r.plainAlt) return m;
+    const std::vector<int> p = sorted(r.plain.f);
+    std::vector<int> out;
+    std::set_intersection(m.begin(), m.end(), p.begin(), p.end(), std::back_inserter(out));
+    return out;
+}
+
+std::vector<int> auxNodesUnsure(const AuxElementCard& a, const AuxCardReadings& r) {
+    const std::vector<int> s = auxNodesSure(a, r);
+    std::vector<int> out;
+    for (int v : auxNodesUnion(a, r))
+        if (!std::binary_search(s.begin(), s.end(), v)) out.push_back(v);
+    return out;
 }
 
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r) {

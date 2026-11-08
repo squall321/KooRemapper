@@ -1,5 +1,6 @@
 #include "squeeze_assemble.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
+#include "parser/DeckScan.h"      // 덧붙이는 자리 — 주 덱의 첫 *END(insertBeforeFirstEnd)
 #include "parser/DeckWriter.h"
 #include "util/YamlComment.h"
 #include "relax.h"
@@ -388,7 +389,7 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
 
         bool hasDynain = (dynainElementCount > 0);
 
-        // Re-read the compressed mesh and insert before *END
+        // Re-read the compressed mesh and insert before the first *END
         // 자기 산출 덱을 다시 읽어 덮어쓴다 — 개행은 덮어쓰기 전에 봐 둔다.
         const KooRemapper::DeckNewline meshNl = KooRemapper::deck_newline::detect(meshOutputFile);
         std::ifstream srcFile(meshOutputFile);
@@ -396,68 +397,36 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
             console.error("Failed to re-read compressed mesh");
             return 1;
         }
-
-        std::string meshContent;
-        std::string line;
-        bool endFound = false;
-
-        while (std::getline(srcFile, line)) {
-            std::string trimmedLine = line;
-            size_t start = trimmedLine.find_first_not_of(" \t");
-            if (start != std::string::npos) {
-                trimmedLine = trimmedLine.substr(start);
-            }
-
-            if (trimmedLine.length() >= 4 &&
-                (trimmedLine[0] == '*') &&
-                (trimmedLine[1] == 'E' || trimmedLine[1] == 'e') &&
-                (trimmedLine[2] == 'N' || trimmedLine[2] == 'n') &&
-                (trimmedLine[3] == 'D' || trimmedLine[3] == 'd')) {
-                if (hasDynain) {
-                    meshContent += "*INCLUDE\n";
-                    meshContent += dynainBasename + "\n";
-                }
-                if (!swellingCards.empty()) {
-                    meshContent += swellingCards;
-                }
-                if (config.relax.enabled) {
-                    const auto& rc = config.relax;
-                    if (rc.endtime > 0) {
-                        char tbuf[64];
-                        snprintf(tbuf, sizeof(tbuf), "*CONTROL_TERMINATION\n$#  endtim\n%10.4g\n", rc.endtime);
-                        meshContent += tbuf;
-                    }
-                    meshContent += relax_generateCards(rc.level, rc.mode, rc.drterm,
-                        rc.nrcyckOvr, rc.drtolOvr, rc.drfctrOvr,
-                        rc.tssfdrOvr, rc.irelalOvr, rc.edttlOvr, rc.d3drlf);
-                }
-                endFound = true;
-            }
-            meshContent += line + "\n";
-        }
+        std::vector<std::string> meshLines;
+        for (std::string line; std::getline(srcFile, line);) meshLines.push_back(line);
         srcFile.close();
 
-        if (!endFound) {
-            if (hasDynain) {
-                meshContent += "*INCLUDE\n";
-                meshContent += dynainBasename + "\n";
-            }
-            if (!swellingCards.empty()) {
-                meshContent += swellingCards;
-            }
-            if (config.relax.enabled) {
-                const auto& rc = config.relax;
-                if (rc.endtime > 0) {
-                    char tbuf[64];
-                    snprintf(tbuf, sizeof(tbuf), "*CONTROL_TERMINATION\n$#  endtim\n%10.4g\n", rc.endtime);
-                    meshContent += tbuf;
-                }
-                meshContent += relax_generateCards(rc.level, rc.mode, rc.drterm,
-                    rc.nrcyckOvr, rc.drtolOvr, rc.drfctrOvr,
-                    rc.tssfdrOvr, rc.irelalOvr, rc.edttlOvr, rc.d3drlf);
-            }
-            meshContent += "*END\n";
+        // 덧붙이는 카드(dynain *INCLUDE · 열팽창 · DR) — 주 덱의 **첫** *END 앞에 한 벌만(없으면 끝에 붙이고 *END 를 쓴다).
+        // 예전엔 *END 마다 넣어, 첫 *END 뒤를 그대로 두는 메시 쓰기(KFileWriter · 854b383) 뒤로는 *END 가 둘인 덱에 두 벌이 나갔다
+        std::string appendix;
+        if (hasDynain) {
+            appendix += "*INCLUDE\n";
+            appendix += dynainBasename + "\n";
         }
+        if (!swellingCards.empty()) {
+            appendix += swellingCards;
+        }
+        if (config.relax.enabled) {
+            const auto& rc = config.relax;
+            if (rc.endtime > 0) {
+                char tbuf[64];
+                snprintf(tbuf, sizeof(tbuf), "*CONTROL_TERMINATION\n$#  endtim\n%10.4g\n", rc.endtime);
+                appendix += tbuf;
+            }
+            appendix += relax_generateCards(rc.level, rc.mode, rc.drterm,
+                rc.nrcyckOvr, rc.drtolOvr, rc.drfctrOvr,
+                rc.tssfdrOvr, rc.irelalOvr, rc.edttlOvr, rc.d3drlf);
+        }
+        const bool endFound = KooRemapper::deckscan::firstEndLine(meshLines) < meshLines.size();
+        KooRemapper::deckscan::insertBeforeFirstEnd(meshLines, {appendix});
+        if (!endFound) meshLines.push_back("*END");
+        std::string meshContent;
+        for (const auto& l : meshLines) meshContent += l + "\n";
 
         KooRemapper::DeckWriter dstFile_w(meshOutputFile, meshNl);
         if (!dstFile_w.ok()) {

@@ -14,10 +14,18 @@
     · hfdamp(assemble 도 같은 함수) · 단독 contact — **마지막** `*END` 앞에 넣었다.
     · map · shellmap · squeeze 의 메시 쓰기(KFileWriter) — 원본의 `*END` 를 모두 지우고 끝에 하나만 써 첫 `*END` 뒤의(읽히지 않던) 카드가
       산출에서 살아났다. 이제 첫 `*END` 에서 끝내고 남은 원본 줄은 그 뒤에 그대로 둔다.
+    · 단독 squeeze 의 덧붙임(dynain `*INCLUDE` · `*MAT_ADD_THERMAL_EXPANSION` · `*INITIAL_TEMPERATURE_NODE` · DR · `*CONTROL_TERMINATION` ·
+      `*DATABASE_BINARY_D3DRLF`) · map 의 prestress 훅(`*INCLUDE <dynain>`) — `*END` 마다 넣었다. 메시 쓰기가 첫 `*END` 뒤를 남기게 된 뒤로
+      `*END` 가 둘인 덱에 두 벌이 나갔다(2026-11-08 재검토). 이제 공용 `deckscan` 으로 첫 `*END` 앞에 한 번.
+    · cnrb2solid — 덱 전체를 읽어 첫 `*END` 뒤의(읽히지 않는) CNRB 를 산 솔리드로 바꿨다(그 PNODE 도 지웠다). 이제 첫 `*END` 앞만 읽는다.
+    · 들여쓴 `  *END` — 키워드의 `*` 는 1열이다(Vol_I 17940 · 리더 `KFileReader::isKeywordLine`). 첫 `*END` 찾기(`deckscan::firstEndLine`)와
+      메시 쓰기(KFileWriter)가 들여쓴 줄도 `*END` 로 보아, `*COMMENT` 글 속의 「  *END」 앞에 카드를 넣고(그 줄이 넣은 블록의 데이터가
+      됐다) 메시 쓰기는 거기서 `*END` 를 쓰고 원본 `*END` 를 또 베꼈다(2026-11-08 재검토).
 
 무엇을 보나.
   `*END` 가 둘인 덱 — 넣은 카드 수가 `*END` 하나인 덱과 같고, 넣은 카드가 다 첫 `*END` 앞에 있다(contact · boundary · rbe) ·
-  배터리 `*INCLUDE` 가 첫 `*END` 앞에 있다 · `*END` 가 없는 덱에도 카드가 들어간다(contact · boundary · rbe).
+  배터리 `*INCLUDE` 가 첫 `*END` 앞에 있다 · `*END` 가 없는 덱에도 카드가 들어간다(contact · boundary · rbe) · squeeze 의 덧붙임과
+  map prestress 훅의 `*INCLUDE` 도 `*END` 가 둘인 덱에 한 벌 · 첫 `*END` 앞 · `*END` 가 없으면 끝에 붙이고 `*END` 를 쓴다.
 
 usage: test_end_insert_once.py <KooRemapper 바이너리>
 """
@@ -161,6 +169,77 @@ def main():
                   rc2 == 0 and n2 == n1 and before2, (rc2, n2, before2, t2[-300:]))
             check("%s-3 *END 가 없는 덱에도 %s 카드가 들어간다" % (name, prefix), rc0 == 0 and n0 == n1, (rc0, n0, t0[-300:]))
 
+        # 단독 squeeze — 덧붙이는 카드(응력 dynain 의 *INCLUDE · 열팽창 · DR)는 첫 *END 앞에 한 벌(예전엔 *END 마다 — 2026-11-08 재검토)
+        sq_cases = (
+            ("squeeze-eps", "parts:\n  - pid: 1\n    eps_x: -0.01\n    eps_y: 0.0\n    eps_z: 0.0\nmaterial:\n  E: 210000.0\n  nu: 0.3\n"
+                            "relax:\n  level: 2\n  mode: explicit\n  drterm: 0.0\n  endtime: 1.0\n  d3drlf: true\n",
+             ("*INCLUDE", "*CONTROL_TERMINATION", "*CONTROL_DYNAMIC_RELAXATION", "*DATABASE_BINARY_D3DRLF")),
+            ("squeeze-swell", "parts:\n  - pid: 1\n    swelling: 0.04\nrelax:\n  level: 2\n  mode: explicit\n  endtime: 1.0\n",
+             ("*MAT_ADD_THERMAL_EXPANSION", "*INITIAL_TEMPERATURE_NODE", "*CONTROL_DYNAMIC_RELAXATION")),
+        )
+        for name, ycfg, kws in sq_cases:
+            print("[%s]" % name)
+            write(os.path.join(d, name + ".yaml"), ycfg)
+            got = {}
+            for deck in ("one", "two", "none"):
+                out = "%s_%s_out.k" % (name, deck)
+                rc, text = run(binary, d, "squeeze", deck + ".k", name + ".yaml", out)
+                L = lines_of(os.path.join(d, out))
+                rows = {k: kw_rows(L, k) for k in kws}
+                ends = [i for i, l in enumerate(L) if l.upper().startswith("*END")]
+                got[deck] = (rc, {k: len(v) for k, v in rows.items()}, all(i < first_end(L) for v in rows.values() for i in v), ends, text)
+            rc1, n1, _, _, t1 = got["one"]
+            rc2, n2, before2, ends2, t2 = got["two"]
+            rc0, n0, before0, ends0, t0 = got["none"]
+            check("%s-1 기준 — *END 하나인 덱에 덧붙임 %s 가 하나씩 들어간다" % (name, "/".join(kws)),
+                  rc1 == 0 and all(v == 1 for v in n1.values()), (rc1, n1, t1[-300:]))
+            check("%s-2 ★*END 가 둘인 덱 — 덧붙임이 한 벌이고 다 첫 *END 앞이다 · *END 둘이 그대로" % name,
+                  rc2 == 0 and n2 == n1 and before2 and len(ends2) == 2, (rc2, n2, before2, ends2, t2[-300:]))
+            check("%s-3 *END 가 없는 덱 — 덧붙임을 끝에 붙이고 *END 를 쓴다" % name,
+                  rc0 == 0 and n0 == n1 and before0 and len(ends0) == 1, (rc0, n0, before0, ends0, t0[-300:]))
+
+        # cnrb2solid — 첫 *END 뒤의 CNRB 는 읽히지 않는다: 바꾸지 않고(PNODE 도 그대로) 그 자리에 둔다(2026-11-08 재검토 TCN_dead)
+        print("[cnrb2solid — 첫 *END 뒤의 죽은 CNRB]")
+
+        def node_lines(Ls):
+            """첫 *END 앞 *NODE 블록의 데이터 줄 수."""
+            n, on = 0, False
+            for l in Ls:
+                if l.startswith("*"):
+                    if l.upper().startswith("*END"):
+                        break
+                    on = l.upper().split()[0] == "*NODE"
+                    continue
+                if on and l.strip() and not l.lstrip().startswith("$"):
+                    n += 1
+            return n
+        bl = bolt.splitlines()
+        c0 = next(i for i, l in enumerate(bl) if l.upper().startswith("*CONSTRAINED_NODAL_RIGID_BODY"))
+        c1 = next(i for i in range(c0 + 1, len(bl)) if bl[i].startswith("*"))
+        cnrb_blk, rest = bl[c0:c1], bl[:c0] + bl[c1:]
+        e0 = next(i for i, l in enumerate(rest) if l.upper().startswith("*END"))
+        dead_only = rest[:e0 + 1] + cnrb_blk + ["*END"]
+        live_dead = bl[:next(i for i, l in enumerate(bl) if l.upper().startswith("*END")) + 1] + \
+            [cnrb_blk[0], cnrb_blk[1]] + [cnrb_blk[2].replace(cnrb_blk[2][:10], "%10d" % 777, 1)] + cnrb_blk[3:] + ["*END"]
+        for tag, deck_lines, want_solids in (("dead", dead_only, 0), ("live_dead", live_dead, 1)):
+            write(os.path.join(d, "cn_%s.k" % tag), "\n".join(deck_lines) + "\n")
+            write(os.path.join(d, "cn_%s.yaml" % tag), "model: cn_%s.k\noutput: cn_%s_out.k\nE: 200000.0\nPR: 0.3\nRHO: 7.85e-9\n"
+                                                         "radius_scale: 0.999\nnum_circum_nodes: 8\ninner_radius_ratio: 0.3\n"
+                                                         "axis_direction: auto\nz_tolerance: 0.1\nr_tolerance: 0.5\n" % (tag, tag))
+            rc, text = run(binary, d, "cnrb2solid", "cn_%s.yaml" % tag)
+            L = lines_of(os.path.join(d, "cn_%s_out.k" % tag))
+            fe = first_end(L)
+            solids = [i for i in kw_rows(L, "*ELEMENT_SOLID") if i < fe]
+            cn_after = [i for i in kw_rows(L, "*CONSTRAINED_NODAL_RIGID_BODY") if i > fe]
+            src_nodes, out_nodes = node_lines(deck_lines), node_lines(L)
+            if tag == "dead":
+                check("cnrb2solid-dead ★첫 *END 뒤의 CNRB 만 있는 덱 — 바꾸지 않는다(솔리드 0 · PNODE 그대로 · CNRB 는 첫 *END 뒤에 그대로)",
+                      rc == 0 and not solids and out_nodes == src_nodes and len(cn_after) == 1, (rc, solids, src_nodes, out_nodes, cn_after, text[-300:]))
+            else:
+                check("cnrb2solid-live_dead ★산 CNRB 만 바꾸고 첫 *END 뒤의 CNRB(PID 777)는 그 자리에 둔다",
+                      rc == 0 and len(solids) == want_solids and len(cn_after) == 1 and "       777" in L[cn_after[0] + 2],
+                      (rc, solids, cn_after, text[-300:]))
+
         # map(KFileWriter) — 첫 *END 뒤의 카드는 산출에서도 첫 *END 뒤에 남는다(읽히지 않던 것을 살리지 않는다)
         print("[map — 메시 쓰기(KFileWriter)]")
         run(binary, d, "generate", "arc", "--dim-i", "6", "--dim-j", "3", "--dim-k", "2", "g")
@@ -173,6 +252,56 @@ def main():
         dp = [i for i, l in enumerate(L) if l == "dead part"]
         check("map ★원본의 첫 *END 뒤 카드(죽은 *PART 99)가 산출에서도 첫 *END 뒤다 · *END 둘이 그대로",
               rc == 0 and len(ends) == 2 and len(dp) == 1 and dp[0] > ends[0], (rc, ends, dp, text[-300:]))
+
+        # 들여쓴 「  *END」(*COMMENT 글 속) 는 끝이 아니다 — 1열 규칙(Vol_I 17940 · 리더와 같다). 덧붙임은 그 뒤 1열 *END 앞, 메시 쓰기는 *END 하나
+        print("[들여쓴 *END — *COMMENT 글 속의 「  *END」 는 끝이 아니다]")
+        cmt_end = "*COMMENT\n  *END\n*END\n"
+        write(os.path.join(d, "ind_box.k"), box.replace("*END\n", "") + cmt_end)
+        write(os.path.join(d, "ind_flat.k"), flat.replace("*END\n", "") + cmt_end)
+
+        def ind_rows(L, prefixes):
+            ind = [i for i, l in enumerate(L) if l == "  *END"]
+            ends = [i for i, l in enumerate(L) if l.upper().startswith("*END")]
+            rows = [i for p in prefixes for i in kw_rows(L, p)]
+            return ind, ends, rows
+        write(os.path.join(d, "ind_db.yaml"), "model: ind_box.k\noutput: ind_db_out.k\npreset: drop\ndt: 0.0001\ndt_plot: 0.005\n")
+        rc, text = run(binary, d, "database", "ind_db.yaml")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_db_out.k")), ("*DATABASE_BINARY_D3PLOT",))
+        check("indent-database ★*DATABASE 카드가 「  *END」 뒤 · 1열 *END 앞이다(예전엔 「  *END」 앞 — 그 줄이 넣은 블록의 데이터가 됐다)",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and rows and all(ind[0] < i < ends[0] for i in rows), (rc, ind, ends, rows, text[-300:]))
+        rc, text = run(binary, d, "map", "g_bent.k", "ind_flat.k", "ind_map_out.k")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_map_out.k")), ("*NODE", "*ELEMENT_SOLID"))
+        check("indent-map ★메시 쓰기 — *END 하나 · 「  *END」 는 *COMMENT 글로 그대로(예전엔 거기서 *END 를 쓰고 원본 *END 를 또 베꼈다)",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and ind[0] < ends[0] and rows and max(rows) < ind[0], (rc, ind, ends, rows, text[-300:]))
+        rc, text = run(binary, d, "squeeze", "ind_box.k", "squeeze-eps.yaml", "ind_sq_out.k")
+        ind, ends, rows = ind_rows(lines_of(os.path.join(d, "ind_sq_out.k")), ("*INCLUDE", "*CONTROL_DYNAMIC_RELAXATION"))
+        check("indent-squeeze ★덧붙임이 「  *END」 뒤 · 1열 *END 앞 · *END 하나",
+              rc == 0 and len(ind) == 1 and len(ends) == 1 and len(rows) == 2 and all(ind[0] < i < ends[0] for i in rows),
+              (rc, ind, ends, rows, text[-300:]))
+
+        # map prestress 훅 — 동반 덱의 *INCLUDE <dynain> 은 첫 *END 앞에 한 번(예전엔 *END 마다 — 2026-11-08 재검토)
+        print("[map prestress 훅]")
+        write(os.path.join(d, "flat_one.k"), flat)
+        write(os.path.join(d, "flat_two.k"), flat + TAIL)
+        write(os.path.join(d, "flat_none.k"), flat.replace("*END\n", ""))
+        hook = {}
+        for deck in ("one", "two", "none"):
+            write(os.path.join(d, "mh_%s.yaml" % deck), "bent: g_bent.k\nflat: flat_%s.k\noutput: mh_%s.k\nprestress:\n  enabled: true\n"
+                                                        "  output: mh_%s.dynain\n  E: 210000.0\n  nu: 0.3\n" % (deck, deck, deck))
+            rc, text = run(binary, d, "map", "mh_%s.yaml" % deck)
+            L = lines_of(os.path.join(d, "mh_%s.k" % deck))
+            inc = kw_rows(L, "*INCLUDE")
+            ends = [i for i, l in enumerate(L) if l.upper().startswith("*END")]
+            hook[deck] = (rc, inc, ends, text)
+        rc, inc, ends, text = hook["one"]
+        check("map-hook-1 기준 — *END 하나인 덱에 *INCLUDE 하나가 첫 *END 앞이다", rc == 0 and len(inc) == 1 and ends and inc[0] < ends[0],
+              (rc, inc, ends, text[-300:]))
+        rc, inc, ends, text = hook["two"]
+        check("map-hook-2 ★*END 가 둘인 덱 — *INCLUDE 가 한 번이고 첫 *END 앞이다 · *END 둘이 그대로",
+              rc == 0 and len(inc) == 1 and len(ends) == 2 and inc[0] < ends[0], (rc, inc, ends, text[-300:]))
+        rc, inc, ends, text = hook["none"]
+        check("map-hook-3 *END 가 없는 덱 — *INCLUDE 를 끝에 붙이고 *END 를 쓴다",
+              rc == 0 and len(inc) == 1 and len(ends) == 1 and inc[0] < ends[0], (rc, inc, ends, text[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
