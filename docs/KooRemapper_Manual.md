@@ -3708,6 +3708,22 @@ dynain 또는 K 파일의 `*NODE` 블록에서 일치하는 NID만 좌표 갱신
 
 → 독립 명령 [37. database](#37-database--database-출력-제어) 참조
 
+### 39.21 battery — 배터리 셀 덱 얹기
+
+```yaml
+- type: battery
+  config: bat.yaml        # battery 설정(§43.1) — 그 설정 폴더 기준으로 덱을 쓴다
+  # output: bx            # 덱 접두사를 이 YAML 폴더 기준으로 바꾼다
+  # node_id_offset: 0     # 0 = 기존 모델의 최대값 위로 저절로
+  # elem_id_offset: 0
+  # use_include: true     # false 면 덱 파일 없이 주 덱에 펼친다
+```
+
+battery 덱을 지어 번호를 기존 모델 위로 옮기고 주 덱의 첫 `*END` 앞에 `*INCLUDE`(또는 펼침)로 얹습니다. battery 덱은 홀로 도는
+해석 덱이라 그 **제어 · 출력 카드 · 고정구 · 경계조건 · 하중도 함께** 실리고, 주 덱에도 제어 · 출력 카드가 있으면 같은 키워드가 두 번
+실릴 수 있습니다(고르지 않습니다 — 어느 것을 남길지는 뒤에 정할 설계 일 · 2026-11-08 사용자 결정). 번호 규칙 · 함께 실리는 카드
+목록은 [§43.1](#431-battery--배터리-셀-생성) 을 보세요.
+
 ---
 
 
@@ -4137,8 +4153,21 @@ KooRemapper battery <config.yaml>
 > (phase 2 · `use_dynain`) 번호를 옮길 때 거절합니다 — 그 dynain 은 다른 실행의 번호입니다. battery 쓰개가 내지 않는 카드나 뜻을 모르는
 > 0 아닌 번호 칸이 있으면 옮기지 않고 거절합니다. 뒤 처리(contact · load …)가 새로 내는 번호도 battery 덱의 번호 위로 냅니다. 예전에는
 > battery 덱을 번호 그대로 끌어와 기존 모델과 겹쳤고(상자 198 절점이 모두 겹쳐 종료 코드 0), 두 오프셋과 `use_include` 는 읽기만
-> 했습니다. battery 덱의 `*CONTROL_*` · `*DATABASE_*` · 고정구 · 경계조건은 그대로 실립니다(번호 겹침만 다룹니다). 단독 `battery` 는 한 덱이
-> 홀로 서므로 해당이 없습니다(설정 40가지로 지은 덱에 족 안에서 겹친 번호 0).
+> 했습니다. 번호 겹침만 다룹니다 — 함께 실리는 카드는 아래 문단. 단독 `battery` 는 한 덱이 홀로 서므로 해당이 없습니다(설정 40가지로
+> 지은 덱에 족 안에서 겹친 번호 0).
+>
+> **`assemble` 이 battery 덱과 함께 싣는 것(2026-11-08 · 사용자 결정 「지금은 그대로 · 문서에 적는다」)**: battery 덱은 홀로 도는
+> 해석 덱이라 assemble 은 그 카드를 **전부** 주 덱의 카드 옆에 싣습니다(번호만 옮깁니다).
+> - 해석 제어 — `*CONTROL_TERMINATION` · `_TIMESTEP` · `_ENERGY` · `_HOURGLASS` · `_BULK_VISCOSITY` · `_SHELL` · `_SOLID` · `_CONTACT` ·
+>   `_SOLUTION`, DR 모드(`swell` · `bare`)면 `_DYNAMIC_RELAXATION`, phase 2 면 `_THERMAL_SOLVER` · `_THERMAL_TIMESTEP`
+> - 출력 — `*DATABASE_BINARY_D3PLOT` · `_EXTENT_BINARY` · `_GLSTAT` · `_MATSUM` · `_RCFORC`
+> - 고정구 — 압입자 · 바닥판 · PCM · 탭(`mode` · `no_fixture` · `no_pcm` · `no_impactor` 에 따라 — `swell` · `bare` 는 `no_fixture`)
+> - 경계조건 · 하중 — `*BOUNDARY_SPC_NODE` · `_SPC_SET` · `*BOUNDARY_PRESCRIBED_MOTION_SET` · `*LOAD_SEGMENT_SET` ·
+>   `*LOAD_THERMAL_VARIABLE` · `*AIRBAG_LINEAR_FLUID`, 초기 응력 · 변형률(`*INITIAL_STRESS_SHELL` · `*INITIAL_STRAIN_SOLID`), 접촉 · 곡선
+>
+> 주 덱에도 `*CONTROL_*` · `*DATABASE_*` 가 있으면 **같은 키워드가 두 번** 실릴 수 있습니다 — KooRemapper 는 그 겹침을 고르거나 지우지
+> 않고 알리지도 않습니다. battery 의 경계조건 · 하중 · 고정구도 주 덱의 해석 조건과 함께 걸립니다. 어느 것을 남길지(battery 의 제어 ·
+> 출력 · 고정구를 뺄지)는 뒤에 정할 설계 일입니다. 지금 덜 수 있는 것은 고정구뿐입니다(`no_fixture: true` — PCM · 탭 · 압입자 · 바닥판).
 >
 > **배치의 덱 이름(2026-11-07)**: 덱 이름은 `<output><tier>_phase{1|2}.k` 입니다 — tier 는 다섯 칸(`_tier-1` · `_tier0` ·
 > `_tier0_5` · `_tier1` · `_tier2`)으로 묶이고, phase 2 가 아니면 모두 `_phase1` 입니다. `batch.model_types` 에 종류가 **둘 이상**이면

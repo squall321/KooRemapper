@@ -89,6 +89,8 @@ EXTRA = """*SET_NODE_LIST
          1         0         3         0
          0         0
          0         0
+*CONTROL_TERMINATION
+     0.010
 """
 
 
@@ -424,6 +426,11 @@ def main():
             if len(incs) == 1:
                 why = bytes_ok(std, os.path.join(d, incs[0]))
                 check("%s — 줄 수가 같고 바뀐 글자는 번호 칸의 숫자 · 공백뿐" % name, not why, why)
+                if k == 0:   # 문서(§43.1 · 2026-11-08 「지금은 그대로」) — battery 의 제어 카드도 주 덱의 것 옆에 실린다
+                    terms = sum(1 for p in (main_k, os.path.join(d, incs[0])) for l in open(p, encoding="utf-8")
+                                if l.upper().startswith("*CONTROL_TERMINATION"))
+                    check("%s — battery 의 *CONTROL_TERMINATION 이 주 덱의 것과 함께 실린다(둘 — 문서 그대로 · 고르지 않는다)" % name,
+                          terms == 2, terms)
 
         print("[E — 준 오프셋]")
         text = battery_yaml("stacked", {})
