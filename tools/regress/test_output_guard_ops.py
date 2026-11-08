@@ -21,6 +21,8 @@
   문서에 적힌 in-place — assemble 의 output == base_model 은 rc 0(인클루드 · 설정 · 다른 입력은 거절)
   위치 인자 op(map · shellmap · unfold · extract-surface · strain · prestress · squeeze · generate · generate-var · matswap 옛 꼴)과
   빈 output(boundary · rbe) · 곁 파일(warpage 진단 · cad_solid_merge 대응표 · stackwrap `_neutral.k`)은 따로 본다.
+  루프 안 쓰기(2026-11-08): 진단 셋끼리는 같아도 된다 · 덱 산출이 입력이면 battery 덱 · 진단 셋(과 그 폴더)보다 먼저 멈춘다(단독
+  warpage 도). 단독 battery 덱(batch 전부) · foldsurface `_curve.csv` 가 설정을 가리키는 링크면 거절.
 
 usage: test_output_guard_ops.py <KooRemapper 바이너리>
 """
@@ -436,6 +438,19 @@ def special_yaml(st, binary):
           "  - type: update\n    dynain: bx_tier0_phase1.k\n")
     expect_refused("assemble battery 덱(bx_tier0_phase1.k)이 뒤 update 의 dynain — 쓰기 전에", binary, d,
                    ["assemble", "bat_asm.yaml"])
+    # 단독 battery 덱 · foldsurface 의 `<output>_curve.csv` — 그 자리가 설정 YAML 을 가리키는 심볼릭 링크면 설정을 덮었다(rc 0 ·
+    # 2026-11-08 전엔 견주지 않았다 · 6차 검토 G6). batch 는 한 조합이라도 걸리면 어느 덱도 쓰지 않는다
+    bat = "output: bt\nmodel_type: stacked\ntier: -1\nphase: 1\nmode: dent\n"
+    for tag, extra, link in (("single", "", "bt_tier-1_phase1.k"),
+                             ("batch", "batch:\n  tiers: [-1, 0]\n", "bt_tier0_phase1.k")):
+        d = os.path.join(st.root, "battery_link_" + tag)
+        os.makedirs(d)
+        write(os.path.join(d, "b.yaml"), bat + extra)
+        os.symlink("b.yaml", os.path.join(d, link))
+        expect_refused("battery(%s) 덱 %s → 설정 b.yaml 을 가리키는 심볼릭 링크" % (tag, link), binary, d, ["battery", "b.yaml"])
+    d, argv = st.case("foldsurface", "link")
+    os.symlink(argv[1], os.path.join(d, "fold_curve.csv"))
+    expect_refused("foldsurface fold_curve.csv → 설정을 가리키는 심볼릭 링크", binary, d, argv)
     # meshfix polish — 임시 파일 `<줄기>__pol<회차>_<덩어리>.*` 은 gmsh 를 돌려 봐야 정해지니 그 꼴의 입력이 있으면 gmsh 전에 막는다
     d, argv = st.case("meshfix", "polish")
     cfg = read(os.path.join(d, argv[1]))

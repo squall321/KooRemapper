@@ -9,6 +9,7 @@
 #include "battery/BatteryMeshWound.h"
 #include "battery/BatterySwelling.h"
 #include "cli/ConsoleOutput.h"
+#include "parser/OutputGuard.h"   // 단독 battery 의 덱이 설정 YAML(링크 · 철자가 달라도)을 덮지 않게
 #include "util/YamlComment.h"
 
 #include <map>
@@ -672,6 +673,13 @@ static int generateBatch(const BatteryConfig& baseCfg,
                      "따로 돌려라");
         return 1;
     }
+    // ★쓸 덱 전부를 읽는 파일(명령줄의 설정 YAML)과 견준다 — 하나라도 쓰기 전에(2026-11-08 · 6차 검토 G6). 예전엔 견주지 않아 덱
+    //   자리가 설정을 가리키는 심볼릭 링크면 rc 0 으로 설정을 덮었다
+    {
+        std::vector<std::string> decks;
+        for (const auto& [name, who] : byName) { (void)who; decks.push_back(name); }
+        if (KooRemapper::output_guard::refuse("battery", decks, {}, console)) return 1;
+    }
     // ★조합 하나라도 못 만들면 rc 1 과 못 만든 조합의 요약(2026-11-07) — 예전엔 실패를 버리고 rc 0 이었다(자동화는 rc 만 본다).
     //   나머지 조합은 끝까지 만든다
     std::vector<std::string> failed;
@@ -734,6 +742,8 @@ int runBattery(const std::string& yamlFile, ConsoleOutput& console) {
     if (isBatch) {
         if (generateBatch(cfg, console) != 0) return 1;
     } else {
+        // ★덱을 쓰기 전에 읽는 파일(명령줄의 설정 YAML)과 견준다(2026-11-08 · 6차 검토 G6 — 예전엔 링크로 설정을 덮고 rc 0)
+        if (KooRemapper::output_guard::refuse("battery", {batteryKFilePath(cfg)}, {}, console)) return 1;
         std::string out = generateBatteryKFile(cfg, console);
         if (out.empty()) return 1;
         // ★use_dynain: true 인데 dynain_file 이 비면 *INCLUDE_DYNAIN 이 빠진다 — 알린다(2026-11-08 · 예전엔 말없이)

@@ -122,6 +122,7 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
    outputs=["examples/battery/swell/stacked/battery_stacked_swell_tier0_phase1.k"],
    notes=["설정 키가 많아 저장소 예제(examples/battery/swell/stacked|wound/*.yaml)를 복사해 고쳐 쓰는 편이 안전하다.",
           "output 경로의 폴더가 있어야 한다.",
+          "쓸 덱(batch 면 전부)이 설정 YAML 과 같은 파일이면(링크 · 철자가 달라도) 아무 덱도 쓰지 않고 rc 1(2026-11-08 전엔 덮고 rc 0)",
           "(stacked) 탭(tabs.pos_x_center · neg_x_center — 기본 17.5 · 52.5 는 폭 70 셀 기준)이 셀과 겹치지 않으면 rc 1",
           "  (2026-11-08 전엔 탭 줄이 격자 밖을 읽어 덱에 없는 절점을 가리키고 rc 0). no_pcm 이면 탭을 짓지 않는다",
           "assemble 의 - type: battery 도 같은 규칙 — 이 설정의 output 은 이 설정 폴더, 항목에 준 output 은 assemble YAML 폴더 기준이고",
@@ -887,7 +888,8 @@ points: 201
           "elastica 는 다중해다 — [0, Bmax] 를 연속법으로 훑어 **첫 교차**를 집는다(뒤집힘이 가장 적은 해)",
           "fold_angle 이 L/min_radius 라디안을 넘으면 불가능하다(원호가 상한) — 필요한 R·L 을 찍고 rc=1",
           "arc_length 가 R*α 보다 많이 길면 해가 물결이 된다 — 뒤집힘 수를 찍고 경고한다",
-          "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다"])
+          "덱을 읽지도 쓰지도 않는다. 산출물은 CSV 하나다",
+          "<output>_curve.csv 가 설정 YAML 과 같은 파일이면(링크 · 철자가 달라도) 풀기 전에 rc 1(2026-11-08 전엔 덮고 rc 0)"])
 op("stackwrap", "변형·초기응력", "적층을 EI 중립축 기준으로 기준 셸에 감기", "적층 감기 stackwrap 중립면 폴더블 wrap",
    "KooRemapper stackwrap <config.yaml>",
    needs=["examples/stackwrap/ref_shell.k"],
