@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -12,12 +13,14 @@
 #include <filesystem>
 #include <mutex>
 #include <system_error>
+#include <thread>
 
 #ifdef _WIN32
 #include <process.h>
 #else
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -604,6 +607,64 @@ int sweepStale(const std::string& dst, std::vector<Note>* notes) {
     }
     return static_cast<int>(gone.size());
 #endif
+}
+
+// ── 바꿔 넣는 동안의 잠금 ─────────────────────────────────────────────────────
+CommitLock::CommitLock(const std::string& dst, double waitSec) {
+#ifdef _WIN32
+    (void)dst;
+    (void)waitSec;
+#else
+    if (dst.empty()) return;
+    const Target t = resolveTarget(dst);
+    if (!t.err.empty() || t.special || t.dir) return;
+    path_ = dirPartOf(t.path) + ".kr_tmp_lock_" + detail::nameHash(baseOf(t.path));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(waitSec);
+    auto unlocked = [&](const std::string& why) {
+        notes_.push_back({true, "바꿔 넣는 동안 「" + dst + "」 를 잠그지 못했다(" + why + ") — 같은 산출을 동시에 쓰는 다른 실행이 있으면 "
+                                "산출 · 곁 파일 · 보고가 서로 다른 실행의 것으로 섞일 수 있다"});
+    };
+    for (;;) {
+        const int fd = ::open(path_.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+        if (fd < 0) { unlocked("잠금 파일을 만들 수 없다: " + errText(errno)); return; }
+        for (;;) {
+            if (::flock(fd, LOCK_EX | LOCK_NB) == 0) break;
+            const int e = errno;
+            if (e == EINTR) continue;
+            if (e != EWOULDBLOCK) { ::close(fd); unlocked("flock: " + errText(e)); return; }
+            if (std::chrono::steady_clock::now() > deadline) {
+                ::close(fd);
+                unlocked("다른 실행이 " + std::to_string(static_cast<int>(waitSec)) + " 초 넘게 쥐고 있다");
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        // 쥔 파일이 아직 그 이름인가 — 앞 주인이 풀며 지웠으면(그 사이 새 파일이 섰다) 다시 잡는다
+        struct stat a, b;
+        if (::fstat(fd, &a) == 0 && ::stat(path_.c_str(), &b) == 0 && a.st_dev == b.st_dev && a.st_ino == b.st_ino) {
+            fd_ = fd;
+            slot_ = arm(path_);   // 신호 때도 지운다 — 쥔 동안 지우는 것은 푸는 차례와 같다
+            return;
+        }
+        ::close(fd);
+        if (std::chrono::steady_clock::now() > deadline) { unlocked("잠금 파일이 자꾸 바뀐다"); return; }
+    }
+#endif
+}
+
+CommitLock::~CommitLock() {
+#ifndef _WIN32
+    if (fd_ < 0) return;
+    disarm(slot_);   // 지운 뒤에는 그 이름이 다른 실행의 새 잠금일 수 있다 — 표에서 먼저 뺀다
+    ::unlink(path_.c_str());
+    ::close(fd_);
+#endif
+}
+
+std::vector<Note> CommitLock::takeNotes() {
+    std::vector<Note> out;
+    out.swap(notes_);
+    return out;
 }
 
 }  // namespace staged_write

@@ -7,6 +7,7 @@
 
 #include "util/StagedWrite.h"
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -226,5 +227,45 @@ TEST(StagedWrite_읽기_전용_폴더의_쓸_수_있는_파일은_바꿔_넣을_
     ASSERT_FALSE(st.writeText(dst, "newer\n", why));
     ASSERT_EQ(slurp(dst), std::string("new\n"));
     fs::permissions(dst, fs::perms::owner_read | fs::perms::owner_write);
+}
+
+TEST(StagedWrite_CommitLock_은_같은_산출을_쥔_다른_프로세스가_풀_때까지_기다린다) {
+    SwScratch s("lock");
+    const std::string dst = s.at("out.k");
+    int ready[2];
+    ASSERT_EQ(::pipe(ready), 0);
+    const pid_t c = ::fork();
+    if (c == 0) {   // 자식 — 잠그고 알린 뒤 0.4 초 쥔다
+        ::close(ready[0]);
+        {
+            staged_write::CommitLock lk(dst);
+            if (!lk.held()) ::_exit(3);
+            if (::write(ready[1], "x", 1) != 1) ::_exit(4);
+            ::usleep(400000);
+        }
+        ::_exit(0);
+    }
+    ::close(ready[1]);
+    char b = 0;
+    ASSERT_EQ(::read(ready[0], &b, 1), (ssize_t)1);
+    ::close(ready[0]);
+    {   // 짧게만 기다리면 잠그지 못하고 경고한다
+        staged_write::CommitLock quick(dst, 0.05);
+        ASSERT_FALSE(quick.held());
+        auto n = quick.takeNotes();
+        ASSERT_EQ(n.size(), (size_t)1);
+        ASSERT_TRUE(n[0].warn);
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    {
+        staged_write::CommitLock lk(dst);
+        ASSERT_TRUE(lk.held());
+        const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        ASSERT_GT(waited, 0.2);   // 자식이 풀 때까지 기다렸다
+    }
+    int st = 0;
+    ASSERT_EQ(::waitpid(c, &st, 0), c);
+    ASSERT_TRUE(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    ASSERT_EQ(countTemps(s.root), 0);   // 잠금 파일(.kr_tmp_lock_…)도 지웠다
 }
 #endif

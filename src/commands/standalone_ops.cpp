@@ -1989,21 +1989,26 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         rep.ok = true;
         rep.outputWritten = true;
         printList(rep.warnings, false);
-        // 보고를 먼저 임시로 써 두고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다
+        // 보고를 먼저 임시로 써 두고 잠금을 쥐고 덱 · 보고 차례로 바꿔 넣는다 — 덱을 바꿔 넣지 못하면 앞 파일 그대로 거절한다.
+        // ★보고는 늘 마지막이다. 잠금(.kr_tmp_lock_<이름 해시> · flock)은 같은 output 을 쓰는 동시 실행이 덱과 보고를 섞지 못하게 한다
         if (!staged.writeText(reportPath, KooRemapper::carryover::toJson(rep), stageWhy)) {
             rep.problems.push_back({0, "write", "보고를 임시 파일에 쓰지 못했다: " + reportPath + " (" + stageWhy + ")"});
             unapply();
             return refuse("보고를 쓸 수 없다 — 덱을 바꿔 넣지 않았다(output 자리의 앞 파일은 그대로다)");
         }
         stagedNotes();
+        KooRemapper::staged_write::CommitLock commitLock(outPath);
+        for (const auto& n : commitLock.takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
         if (!staged.commit(outPath, stageWhy)) {
             rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다(" + stageWhy + ")"});
             unapply();
             return refuse("덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
         }
         stagedNotes();
-        if (!staged.commit(reportPath, stageWhy)) {   // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다
-            console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath + " (" + stageWhy + ")");
+        // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다. 이름 바꾸기를 폴더 권한이 막으면 도우미가 그 파일에 제자리로 쓴다([WARN])
+        if (!staged.commit(reportPath, stageWhy)) {
+            console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath + " (" + stageWhy +
+                          ") — 그 자리의 보고(있으면)는 이번 실행의 것이 아니다");
             return 1;
         }
         stagedNotes();

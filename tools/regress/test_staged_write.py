@@ -18,6 +18,10 @@
     모드가 0644 로 돌아가고 · `/dev/null`(보고만 보는 마른 실행) · FIFO · 읽기 전용 폴더의 쓸 수 있는 파일을 거절했다. 링크는 따라간
     파일 옆에서 바꿔 넣고(링크 그대로) · 권한 비트를 잇고 · 장치 · FIFO 는 바로 쓰고 · 읽기 전용 폴더면 [WARN] 와 함께 바꿔 넣을 때
     제자리로 쓴다(거절 · 실패면 그 파일 그대로). 하드 링크는 새 파일로 바뀐다(다른 이름은 앞 내용) · 읽기 전용 파일은 앞 판처럼 거절.
+  C 바꿔 넣기 차례 — 산출을 바꿔 넣은 뒤 번호 지도가 실패하면 rc 1 · 새 산출 · 앞 번호 지도 · 앞 보고(앞 실행을 말한다)가 남았다.
+    보고는 늘 마지막이고 실제로 바꿔 넣은 것을 말한다(뒤가 실패하면 그 상태로 다시 쓴다). 같은 산출을 쓰는 동시 실행은 잠금
+    `.kr_tmp_lock_<이름 해시>`(flock)로 바꿔 넣기가 겹치지 않는다 — 이 시험이 그 잠금을 쥐고 실행이 기다리는지 본다(이름 해시는
+    FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다).
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
@@ -408,6 +412,165 @@ def sec_o(binary):
     os.chmod(ro, 0o755)
 
 
+# ── C 바꿔 넣기 차례 · 잠금 ─────────────────────────────────────────────────
+def name_hash(base):
+    """도우미의 이름 해시 — FNV-1a 64 의 아래 32 비트(16진 8 자리)."""
+    h = 1469598103934665603
+    for c in base.encode("utf-8"):
+        h = ((h ^ c) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    return "%08x" % (h & 0xFFFFFFFF)
+
+
+def temp_of(d, base):
+    """그 대상의 임시 파일 — 지금 꼴(이름 해시)과 옛 꼴(.<이름>.kr_tmp_) 둘 다."""
+    h = name_hash(base)
+    return [n for n in os.listdir(d) if (n.startswith(".kr_tmp_") and not n.startswith(".kr_tmp_lock_") and
+                                         n.split(".")[1].endswith("_" + h)) or n.startswith("." + base + ".kr_tmp_")]
+
+
+def stop_before_commit(binary, d, args, base, also=(), tries=40):
+    """그 대상(과 `also` 의 대상)의 임시 파일이 다 보이면 SIGSTOP — 멈춘 뒤에도 있어야 한다(아직 바꿔 넣지 않았다)."""
+    staged = lambda: temp_of(d, base) and all(temp_of(d, b) for b in also)  # noqa: E731
+    for _ in range(tries):
+        p = start(binary, d, *args)
+        while p.poll() is None:
+            if staged():
+                os.kill(p.pid, signal.SIGSTOP)
+                if staged():
+                    return p
+                os.kill(p.pid, signal.SIGCONT)
+                break
+        p.wait()
+    return None
+
+
+def first_shell_pid(path):
+    sect = ""
+    for ln in open(path, encoding="utf-8", errors="replace"):
+        if ln.startswith("*"):
+            sect = ln.strip()
+        elif sect == "*ELEMENT_SHELL" and ln.strip() and not ln.startswith("$"):
+            return int(ln[8:16])
+    return None
+
+
+def hold_lock(d, base):
+    import fcntl
+    fd = os.open(os.path.join(d, ".kr_tmp_lock_" + name_hash(base)), os.O_RDWR | os.O_CREAT, 0o666)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def sec_c(binary):
+    print("[C] 바꿔 넣기 차례 — 보고는 늘 마지막이고 바꿔 넣은 것을 말한다 · 같은 산출의 동시 실행은 잠금으로 겹치지 않는다")
+    # C-1 산출을 바꿔 넣은 뒤 번호 지도가 실패한다(멈춘 사이 그 자리를 폴더로) — 보고가 그 상태를 말한다
+    d = ep_big_dir("C1")
+    rc0, _ = run(binary, d, *EP_ARGS)
+    write(os.path.join(d, "e2.yaml"), "model: in.k\noutput: out.k\nparts: [2]\nrenumber: true\nreport: r.json\n")
+    p = stop_before_commit(binary, d, ("extract-parts", "e2.yaml"), "out.k", also=("out_renumber_map.json",))
+    if p is None:
+        check("C-1 — 바꿔 넣기 전에 멈추지 못했다", False)
+    else:
+        mp = os.path.join(d, "out_renumber_map.json")
+        os.remove(mp)
+        os.mkdir(mp)
+        rc = finish(p)
+        rep = load(os.path.join(d, "r.json"))
+        ok = (rc0 == 0 and rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and rep.get("output_written") is True and
+              str(rep.get("output", "")).endswith("out.k") and rep.get("renumber", {}).get("map") is None and
+              rep.get("parts_selected") == [2] and any(r.get("kind") == "commit" for r in rep.get("refusals", [])) and
+              first_shell_pid(os.path.join(d, "out.k")) == 2 and not tmp_left(d))
+        check("C-1 extract-parts 번호 지도 바꿔 넣기 실패 — rc 1 · 보고가 새 산출(parts [2]) · output_written true · map null · ok false",
+              ok, (rc0, rc, rep if not isinstance(rep, dict) else {k: rep.get(k) for k in ("ok", "output_written", "parts_selected",
+                                                                                            "renumber", "refusals")}, tmp_left(d)))
+    # C-2 보고 자리의 폴더가 멈춘 사이 읽기 전용이 된다 — 그 파일에 제자리로 쓴다(앞 실행을 말하는 보고를 남기지 않는다)
+    if os.geteuid() != 0:
+        d = ep_big_dir("C2")
+        os.makedirs(os.path.join(d, "rep"))
+        write(os.path.join(d, "e.yaml"), "model: in.k\noutput: out.k\nparts: [1]\nrenumber: true\nreport: rep/r.json\n")
+        rc0, _ = run(binary, d, *EP_ARGS)
+        write(os.path.join(d, "e2.yaml"), "model: in.k\noutput: out.k\nparts: [2]\nrenumber: true\nreport: rep/r.json\n")
+        p = stop_before_commit(binary, d, ("extract-parts", "e2.yaml"), "out.k")
+        if p is None:
+            check("C-2 — 바꿔 넣기 전에 멈추지 못했다", False)
+        else:
+            os.chmod(os.path.join(d, "rep"), 0o555)
+            rc = finish(p)
+            os.chmod(os.path.join(d, "rep"), 0o755)
+            rep = load(os.path.join(d, "rep", "r.json"))
+            check("C-2 extract-parts 보고 폴더가 읽기 전용이 됐다 — rc 0 · 보고가 이번 실행(parts [2]) · 임시 파일 없음",
+                  rc0 == 0 and rc == 0 and ok_report(rep) and rep.get("parts_selected") == [2] and not tmp_left(d),
+                  (rc0, rc, rep if not isinstance(rep, dict) else rep.get("parts_selected")))
+    # C-3 산출 바꿔 넣기가 실패한다(멈춘 사이 그 자리를 폴더로) — 보고 ok false · output_written false
+    d = ep_big_dir("C3")
+    run(binary, d, *EP_ARGS)
+    p = stop_before_commit(binary, d, EP_ARGS, "out.k")
+    if p is None:
+        check("C-3 — 바꿔 넣기 전에 멈추지 못했다", False)
+    else:
+        os.remove(os.path.join(d, "out.k"))
+        os.mkdir(os.path.join(d, "out.k"))
+        rc = finish(p)
+        rep = load(os.path.join(d, "r.json"))
+        check("C-3 extract-parts 산출 바꿔 넣기 실패 — rc 1 · 보고 ok false · output_written false · map null · 임시 파일 없음",
+              rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and rep.get("output_written") is False and
+              rep.get("renumber", {}).get("map") is None and not tmp_left(d), (rc, rep if not isinstance(rep, dict) else rep.get("refusals")))
+    # C-4 · C-5 이월 적용 — 덱 바꿔 넣기 실패 · 보고 폴더가 읽기 전용이 됐다
+    d = co_ready("C4")
+    run(binary, d, *CO_ARGS)
+    p = stop_before_commit(binary, d, CO_ARGS, "deck_applied.k")
+    if p is None:
+        check("C-4 — 바꿔 넣기 전에 멈추지 못했다", False)
+    else:
+        os.remove(os.path.join(d, "deck_applied.k"))
+        os.mkdir(os.path.join(d, "deck_applied.k"))
+        rc = finish(p)
+        rep = load(os.path.join(d, "deck_applied_carryover.json"))
+        check("C-4 apply_carryover_plan 덱 바꿔 넣기 실패 — rc 1 · 보고 ok false · output_written false",
+              rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and rep.get("output_written") is False and not tmp_left(d),
+              (rc, rep if not isinstance(rep, dict) else rep.get("problems")))
+    if os.geteuid() != 0:
+        d = co_dir("C5")
+        os.makedirs(os.path.join(d, "rep"))
+        args = ("apply_carryover_plan", "a.yaml")
+        write(os.path.join(d, "a.yaml"), "model: deck.k\nplan: plan.json\noutput: deck_applied\nreport: rep/r.json\n")
+        write(os.path.join(d, "rep", "r.json"), "{\"old\": true}\n")
+        p = stop_before_commit(binary, d, args, "deck_applied.k")
+        if p is None:
+            check("C-5 — 바꿔 넣기 전에 멈추지 못했다", False)
+        else:
+            os.chmod(os.path.join(d, "rep"), 0o555)
+            rc = finish(p)
+            os.chmod(os.path.join(d, "rep"), 0o755)
+            rep = load(os.path.join(d, "rep", "r.json"))
+            check("C-5 apply_carryover_plan 보고 폴더가 읽기 전용이 됐다 — rc 0 · 보고가 이번 실행(ok · output_written)",
+                  rc == 0 and ok_report(rep) and "old" not in rep and not tmp_left(d), (rc, rep))
+    # C-6 · C-7 잠금 — 이 시험이 잠금을 쥔 동안 실행은 바꿔 넣지 않고 기다린다 · 풀면 끝나고 잠금 파일을 지운다
+    for op, mk, args, out_name in (("extract-parts", ep_big_dir, EP_ARGS, "out.k"),
+                                   ("apply_carryover_plan", co_ready, CO_ARGS, "deck_applied.k")):
+        d = mk("C6_" + op)
+        run(binary, d, *args)
+        before = sha(os.path.join(d, out_name))
+        fd = hold_lock(d, out_name)
+        p = start(binary, d, *args)
+        t0 = time.time()
+        while p.poll() is None and time.time() - t0 < 20 and not [n for n in tmp_left(d) if not n.startswith(".kr_tmp_lock_")]:
+            time.sleep(0.01)
+        time.sleep(1.0)   # 기다리는 실행이면 이 사이 바꿔 넣지 않는다
+        waited = p.poll() is None and sha(os.path.join(d, out_name)) == before
+        os.close(fd)      # 푼다
+        rc = p.wait(timeout=120)
+        check("C-%d %s 잠금을 쥔 동안 기다리고(산출 그대로) 풀면 rc 0 · 잠금 파일을 지운다" % (6 if op == "extract-parts" else 7, op),
+              waited and rc == 0 and not os.path.exists(os.path.join(d, ".kr_tmp_lock_" + name_hash(out_name))) and not tmp_left(d),
+              (waited, rc, tmp_left(d)))
+    # C-8 죽은 실행이 남긴(쥐는 이 없는) 잠금 파일은 막지 않는다 — 쓰고 지운다
+    d = ep_dir("C8")
+    lock = os.path.join(d, ".kr_tmp_lock_" + name_hash("out.k"))
+    write(lock, "")
+    rc, out, rep = ep(binary, d)
+    check("C-8 쥐는 이 없는 잠금 파일 — rc 0 · 보고 ok · 잠금 파일 지움", rc == 0 and ok_report(rep) and not os.path.exists(lock), (rc, out[-200:]))
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -419,6 +582,7 @@ def main():
         sec_e(binary)
         sec_k(binary)
         sec_o(binary)
+        sec_c(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

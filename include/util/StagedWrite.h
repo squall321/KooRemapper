@@ -78,6 +78,27 @@ private:
     std::vector<Note> notes_;
 };
 
+// 바꿔 넣는 동안(산출 → 곁 파일 → 보고) 같은 산출을 쓰는 다른 실행이 끼지 못하게 하는 권고 잠금 — 대상 폴더의 잠금 파일
+// `.kr_tmp_lock_<이름 해시>` 를 flock 으로 쥔다(쥔 뒤 그 이름이 아직 그 파일인지 보고 · 풀 때 지운다 — 신호 때도 지운다). 잠그지 못하면
+// (폴더에 못 만든다 · flock 이 안 되는 파일 시스템 · `waitSec` 를 넘게 다른 실행이 쥐고 있다) 잠그지 않고 [WARN] 를 남긴다. 일반 파일이
+// 아닌 대상(Direct)은 잠그지 않는다. 지키는 것 — 같은 산출을 쓰는 실행끼리 바꿔 넣기가 겹치지 않는다(산출 · 곁 파일 · 보고가 한 실행의
+// 것). 지키지 않는 것 — 바꿔 넣는 사이에 읽는 쪽은 반쯤 바뀐 묶음(새 산출 · 앞 보고)을 볼 수 있다(파일마다의 이름 바꾸기만 원자적이다)
+class CommitLock {
+public:
+    explicit CommitLock(const std::string& dst, double waitSec = 30.0);
+    ~CommitLock();
+    CommitLock(const CommitLock&) = delete;
+    CommitLock& operator=(const CommitLock&) = delete;
+    bool held() const { return fd_ >= 0; }
+    std::vector<Note> takeNotes();
+
+private:
+    int fd_ = -1;
+    int slot_ = -1;
+    std::string path_;
+    std::vector<Note> notes_;
+};
+
 // 앞 실행이 죽으며 남긴 임시 파일을 지운다 — `dst` 의 것(같은 폴더 · 같은 대상 이름 해시)이고, 같은 호스트 · pid 이름공간에서 그 주인
 // 프로세스가 없을 때만(pid 가 없거나 그 번호를 다른 프로세스가 물려받았다 — 시작 시각이 다르다). 산 프로세스의 것 · 다른 호스트의 것 ·
 // 다른 산출의 것 · 옛 꼴 이름은 건드리지 않는다. 지운 수를 돌려주고 지웠으면 `notes` 에 [INFO] 한 줄
