@@ -38,8 +38,9 @@ public:
     std::pair<double, double> getCurvatureRange() const;
     double getAverageCurvature() const;
 
-    // 디버깅
-    void exportDebugData(const std::string& prefix) const;
+    // 디버깅 — `<prefix>_raw.dat` · `_curvature.dat` · `_warpage.vtk`. 접두사의 폴더가 없으면 만든다(2026-11-08). 폴더를 못 만들거나
+    // 파일 하나라도 못 쓰면 false 와 그 파일을 적은 `err` — 「Exported」 는 셋을 다 쓴 뒤에만 찍는다
+    bool exportDebugData(const std::string& prefix, std::string& err) const;
 
 private:
     int nRows_ = 0;

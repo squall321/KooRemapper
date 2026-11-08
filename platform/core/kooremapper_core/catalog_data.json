@@ -2790,7 +2790,7 @@
           "type": "string",
           "required": false,
           "default": "debug/warp",
-          "desc": "Path prefix for the debug files <prefix>_raw.dat, <prefix>_curvature.dat and <prefix>_warpage.vtk (only used if debug: true); its folder must exist. A relative prefix is relative to the folder of the YAML that holds it (until 2026-11-07 the working directory)."
+          "desc": "Path prefix for the debug files <prefix>_raw.dat, <prefix>_curvature.dat and <prefix>_warpage.vtk (only used if debug: true); a missing folder is created, and if it cannot be created or any of the three files cannot be written the run stops with exit code 1 before the deck is written (until 2026-11-08 a missing folder silently wrote nothing and still printed Exported). A relative prefix is relative to the folder of the YAML that holds it (until 2026-11-07 the working directory)."
         },
         {
           "path": "flatten_includes",
@@ -9453,7 +9453,7 @@
           "type": "string",
           "required": false,
           "default": "debug/warp",
-          "desc": "(warpage) Path prefix for the debug files <prefix>_raw.dat, <prefix>_curvature.dat and <prefix>_warpage.vtk; its folder must exist. A relative prefix is relative to the folder of the YAML that holds it (until 2026-11-07 the working directory)."
+          "desc": "(warpage) Path prefix for the debug files <prefix>_raw.dat, <prefix>_curvature.dat and <prefix>_warpage.vtk; a missing folder is created, and if it cannot be created or any of the three files cannot be written the run stops with exit code 1 before the deck is written (until 2026-11-08 a missing folder silently wrote nothing and still printed Exported). A relative prefix is relative to the folder of the YAML that holds it (until 2026-11-07 the working directory)."
         },
         {
           "path": "operations[].offset_direction",

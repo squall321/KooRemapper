@@ -475,7 +475,8 @@ operations:
           "행 0 = 2축 최소 (bend 의 dat 는 행 0 = 최대). 값 단위는 unit(기본 um)",
           "mode: prestress(기본, 초기응력만) | deform(노드 이동). outside_behavior: zero(기본) | clamp | extrapolate",
           "debug: true 면 <debug_prefix>_raw.dat · _curvature.dat · _warpage.vtk 를 쓴다 — debug_prefix(기본 debug/warp)는 YAML 폴더",
-          "  기준이고 그 폴더는 미리 있어야 한다(2026-11-07 전엔 작업 폴더 기준)"])
+          "  기준(2026-11-07 전엔 작업 폴더)이고 그 폴더가 없으면 만든다. 폴더를 못 만들거나 하나라도 못 쓰면 덱을 쓰기 전에 rc 1",
+          "  (2026-11-08 전엔 없는 폴더면 아무것도 쓰지 않고 「Exported」 를 찍었다)"])
 op("bend", "변형·초기응력", "처짐 함수 w(x1,x2) 로 파트를 굽히고 초기응력 계산", "굽힘 bending 곡률 formula",
    "KooRemapper bend <config.yaml>",
    files=boxed({"bend.yaml": """base_model: box.k

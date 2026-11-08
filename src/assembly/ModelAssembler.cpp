@@ -9403,7 +9403,12 @@ bool ModelAssembler::applyWarpage(const WarpageOperation& op, double E, double n
             errorMessage_ = "warpage debug_prefix: " + why + " — 출력 파일을 쓰지 않았습니다";
             return false;
         }
-        grid.exportDebugData(debugPrefix);
+        // ★없는 폴더는 만들고, 진단 셋을 다 쓰지 못하면 덱을 쓰기 전에 멈춘다(2026-11-08) — 예전엔 쓰지 못하고도 rc 0 에 「Exported」
+        std::string exportErr;
+        if (!grid.exportDebugData(debugPrefix, exportErr)) {
+            errorMessage_ = "warpage debug: " + exportErr + " — 덱을 쓰지 않았습니다(debug: false 로 끄거나 debug_prefix 를 고쳐라)";
+            return false;
+        }
     }
 
     // 10. Mode-specific processing
