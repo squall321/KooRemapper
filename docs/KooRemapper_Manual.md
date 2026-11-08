@@ -5346,7 +5346,9 @@ rc≠0 이면 **산출 · 번호 지도를 쓰지 않는다**(그럴듯하게 �
 wrote」 는 바꿔 넣은 뒤에만 찍는다).
 
 보고(`report`)는 **성공 · 실패 모두 쓴다** — `ok` · `output_written` · `refusals`(거절마다 `kind` · `message` · `lines` 전부)를 적고, 쓰지
-않은 파일은 대지 않는다(실패면 `output` · `renumber.map` 이 `null`). 거절 목록은 콘솔에 줄마다 찍고 **[ERROR] 요약 줄**(목록 수 ·
+않은 파일은 대지 않는다(실패면 `output` · `renumber.map` 이 `null`). 보고의 글자는 늘 바른 UTF-8 이다 — 덱 줄 · 키워드 · 경로의 깨진
+바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모델 경로 등)는 U+FFFD 로 바꿔 싣는다(이월 적용 보고와 같은 공용 함수 `util::validUtf8` · 예전엔
+그대로 실어 엄격한 리더에서 읽히지 않았다 · 회귀 `test_staged_write.py` U). 거절 목록은 콘솔에 줄마다 찍고 **[ERROR] 요약 줄**(목록 수 ·
 첫 세 줄)을 하나 더 낸다 — 플랫폼 잡 요약(`error_summary`)은 [ERROR] 줄만 모은다. 번호를 안 매긴 실행은 지난 실행의 번호 지도를
 지우되 **이 op 의 번호 지도로 알아볼 때만**(첫 키 `"kind": "extract-parts renumber map"` · 앞 판은 `"note": "old -> new…"` 다음
 `"nodes"`) 지우고, 아니면 그대로 두고 경고한다. 번호를 매길 때 그 자리에 남의 파일이 있으면 덮지 않고 거절한다. 2026-11-07 전(검토 #8 ·
@@ -5973,7 +5975,8 @@ null). 칸 하나라도 다르면 손대는 줄은 `deck_range`(칸 · 계획 �
 `warnings` · `shift` · `parts[처리마다 result · 옮긴 수 · 최대 변위 · 지운 수 · 넣은 구간 · 새 섹션(바꿔 넣기 {secid · elform} · 모프
 {secid · thickness}) · 뒤집힘 앞뒤 · refused_transform]` · `added` · `touches_changed`. 거절해도 · 내부 오류에도 쓴다 — `ok` · `output_written`(이번
 실행이 output 자리에 덱을 바꿔 넣었나) · 걸린 것 전부. 보고의 글자는 늘 바른 UTF-8 이다 — 계획(JSON 리더는 글자를 검사하지 않는다) · 덱 줄 · 경로에서 온
-깨진 바이트는 U+FFFD 로 바꿔 싣고, 줄을 보일 때는 글자 경계에서 자른다(계획 글자를 이유로 거절하지 않는다 — 실을 때 고친다).
+깨진 바이트는 U+FFFD 로 바꿔 싣고(공용 함수 `util::validUtf8` — extract-parts 보고도 같다), 줄을 보일 때는 글자 경계에서 자른다(계획 글자를
+이유로 거절하지 않는다 — 실을 때 고친다).
 수는 다시 읽으면 같은 double 이 되는 가장 짧은 꼴(15 → 16 → 17 자리)로 쓴다 — `refused_transform` 은 계획 값과 비트까지 같다(예전 `%.15g` 는
 `1.0000000000000002` 를 `1` 로 냈다 · 적대적 검토 11-07).
 
@@ -5997,7 +6000,7 @@ output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 - 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
   진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
-- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말) · 단위 `tests/test_StagedWrite.cpp`.
+- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 

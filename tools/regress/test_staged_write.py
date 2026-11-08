@@ -24,6 +24,8 @@
     FNV-1a 64 의 아래 32 비트 — 도우미의 정의를 여기서 다시 센다).
   M 말 — 쓰기 관문의 말(long 덱은 `.k` 없는 접두)과 되읽기 예외가 임시 이름을 콘솔 · 보고에 실었다. 멈춘 사이 임시 덱을 못 읽게
     (chmod 000) 해 그 실패를 일으키고 콘솔 · 보고 어디에도 `.kr_tmp_` 가 없고 제 이름이 있는지 본다.
+  U 보고 글자 — extract-parts 보고는 덱 · 경로의 깨진 바이트(CP949 로 쓴 `*INCLUDE` 이름 · 모르는 키워드 · 모델 경로)를 그대로 실어
+    엄격한 UTF-8 리더에서 읽히지 않았다(3차 검토 TJ_euckr). 이월 적용 보고(54ac559)와 같은 함수로 U+FFFD 를 싣는다.
 
 usage: test_staged_write.py <KooRemapper 바이너리>
 """
@@ -633,6 +635,50 @@ def sec_m(binary):
               p.returncode == 1 and rc == 1 and ".kr_tmp_" not in said, (p.returncode, rc, [l for l in said.splitlines() if ".kr_tmp_" in l][:2]))
 
 
+# ── U 보고 글자 ──────────────────────────────────────────────────────────────
+def strict_report(path):
+    """엄격한 UTF-8 로 읽은 보고 — 못 읽으면 None."""
+    try:
+        return json.loads(open(path, "rb").read().decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+
+def sec_u(binary):
+    print("[U] 보고 글자 — extract-parts 보고는 깨진 바이트 대신 U+FFFD 를 싣는다(늘 바른 UTF-8)")
+    cp949 = "한글".encode("cp949")
+    # U-1 CP949 로 쓴 *INCLUDE 이름(없는 파일) — 인클루드 거절의 목록 줄
+    d = ep_dir("U1")
+    with open(os.path.join(d, "m.k"), "wb") as f:
+        f.write(b"*KEYWORD\n*INCLUDE\nin.k\n*INCLUDE\n" + cp949 + b".k\n*END\n")
+    write(os.path.join(d, "e.yaml"), "model: m.k\noutput: out.k\nparts: [1]\nreport: r.json\n")
+    rc, out = run(binary, d, "extract-parts", "e.yaml")
+    rep = strict_report(os.path.join(d, "r.json"))
+    line = " ".join(" ".join(r.get("lines", [])) for r in rep.get("refusals", [])) if rep else ""
+    check("U-1 CP949 *INCLUDE 이름 — rc 1 · 보고가 바른 UTF-8 · 그 줄에 U+FFFD · 거절 include",
+          rc == 1 and rep is not None and "�" in line and ".k" in line and rep["refusals"][0]["kind"] == "include", (rc, line[:200]))
+    # U-2 깨진 바이트의 모르는 키워드(버리고 dropped_keywords 에 센다) · U-3 CP949 이름의 모델
+    d = ep_dir("U2", deck=shell_deck().replace("*END\n", ""))
+    with open(os.path.join(d, "in.k"), "ab") as f:
+        f.write(b"*" + cp949 + b"_CARD\n        1\n*END\n")
+    rc, out, _ = ep(binary, d)
+    rep = strict_report(os.path.join(d, "r.json"))
+    keys = list((rep or {}).get("dropped_keywords", {}))
+    check("U-2 깨진 바이트의 모르는 키워드 — rc 0 · 보고가 바른 UTF-8 · dropped_keywords 에 U+FFFD 꼴로",
+          rc == 0 and rep is not None and any("�" in k for k in keys), (rc, keys))
+    d = os.path.join(TMP, "U3")
+    os.makedirs(d)
+    model = cp949 + b"_model.k"
+    with open(os.path.join(d.encode(), model), "wb") as f:
+        f.write(shell_deck().encode())
+    with open(os.path.join(d, "e.yaml"), "wb") as f:
+        f.write(b"model: " + model + b"\noutput: out.k\nparts: [1]\nreport: r.json\n")
+    rc, out = run(binary, d, "extract-parts", "e.yaml")
+    rep = strict_report(os.path.join(d, "r.json"))
+    check("U-3 CP949 이름의 모델 — rc 0 · 보고가 바른 UTF-8 · model 에 U+FFFD",
+          rc == 0 and rep is not None and "�" in rep.get("model", "") and rep.get("ok") is True, (rc, (rep or {}).get("model")))
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -646,6 +692,7 @@ def main():
         sec_o(binary)
         sec_c(binary)
         sec_m(binary)
+        sec_u(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

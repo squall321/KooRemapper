@@ -28,6 +28,7 @@
 #include "parser/ElementCardLayout.h"
 #include "parser/IncludeClosure.h"   // 쓸 파일이 입력 덱을 덮는지(sameFile · clobberPair)
 #include "util/StagedWrite.h"       // 임시 파일 + 바꿔 넣기(apply_carryover_plan 과 같은 도우미)
+#include "util/Utf8.h"              // 보고 글자를 바른 UTF-8 로(apply_carryover_plan 보고와 같은 함수)
 #include "util/YamlComment.h"
 
 #include <algorithm>
@@ -1362,7 +1363,11 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
 // 리포트
 // ─────────────────────────────────────────────────────────────────────────────
 
-std::string jsonStr(const std::string& s) {
+// 보고에 싣는 글은 늘 바른 UTF-8 이다 — 덱 줄 · 경로(CP949 로 쓴 `*INCLUDE` 이름 등)의 깨진 바이트는 U+FFFD 로 바꾸고(공용
+// `util::validUtf8` — 이월 적용 보고와 같은 규칙) 따옴표 · 역슬래시 · 제어 글자를 이스케이프한다. 예전엔 깨진 바이트를 그대로 실어
+// 보고가 엄격한 UTF-8 리더에서 읽히지 않았다(3차 검토 TJ_euckr)
+std::string jsonStr(const std::string& raw) {
+    const std::string s = KooRemapper::util::validUtf8(raw);
     std::string o = "\"";
     for (char c : s) {
         if (c == '"' || c == '\\') { o += '\\'; o += c; }

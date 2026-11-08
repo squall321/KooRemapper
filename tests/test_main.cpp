@@ -22,6 +22,8 @@
 #include "test_CarryoverPlan.cpp"
 // 임시 파일 + 바꿔 넣기 공용 도우미(extract-parts · apply_carryover_plan) — 2026-11-08
 #include "test_StagedWrite.cpp"
+// 보고 글자를 바른 UTF-8 로(공용 util::validUtf8) — 2026-11-08
+#include "test_Utf8.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;
