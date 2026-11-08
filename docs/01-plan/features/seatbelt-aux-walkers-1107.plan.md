@@ -14,6 +14,9 @@
 - 고치다 새로 찾은 기존 위험 여덟(출력이 입력을 덮는 것 다섯 · extract-parts 셋) — 「이번 판에 같이 고친다」.
 - boundary · rbe 가 output 을 빼면 model 자리에 쓰던 것(카탈로그에 적혀 있었다) — 「거절로 바꾸고 문장을 고친다」(`c4b40d6` · `001f1bc`).
 - 셋째로 새로 본 기존 결함 열하나 — 「이번 판에 같이」.
+- 뒤집은 map → prestress 체인 — 「뒤집어도 재질을 싣는다」(`267dbae`). battery 배치 여러 종류 — 「종류가 둘 이상이면 이름에 넣는다」(`0e6cd77`).
+- 넷째로 나온 넷(assemble battery 번호 겹침 · warpage 거짓 메시지 · dynain 빠짐 경고 없음 · 도우미 중복) — 「넷 다 이번 판」.
+- 사용자 「필요하면 서브에이전트 나눠」(11-08) — 갈래 넷(걷기 · 이월 · battery · 임시 파일 도우미).
 - 검토 중 LS-PrePost 가 고쳐 쓴 `~/LSTC/LS-PrePost4.12` 설정 — 「홈 폴더로 바꾼다」(했다 — 세 줄 · 최근 목록 두 줄, 고치기 전 사본은 scratch).
 
 ## 고칠 것(검토 번호)
@@ -59,7 +62,12 @@
 - [ ] 셋째 묶음 열하나 — 출력 관문 갈래: assemble 중간 쓰기 · map `bbox_align: source` 임시 · map 실패 뒤 `.__preproc_flat.k` ·
       prestress 곁 이름(`rfind('.')`) · battery 배치 같은 이름 · YAML op 여덟의 경로 기준 / 안전띠 갈래: WARPAGE SN1 · SN2 · strip 의 덮지 않을
       목록 · contact · boundary · rbe 의 `*END` 마다 넣기 · battery `*INCLUDE` 를 마지막 `*END` 앞에 / 판 2 갈래: 공용 SECID 커서의 쌓인 카드
-- [ ] 고친 것 전부 적대적 검토(갈래 셋) — 2차 고침 · 출력 관문은 아직 검토 전
+- [x] 셋째 묶음 — 걷기(`6341aac` · `719c7dd` · `bac32a6` · `854b383` · `6953d6d`) · 출력(`9c226d6` … `c415fee` · `267dbae` … `6c17972`) · 이월(`0895025` … `f8d319c`)
+- [x] 검토 — 걷기 3~5차(확인 6: 꼬리 글자 · 빈칸 낀 SLEN/MASS 의 절점 · 질량 빠짐[퇴행] · squeeze · map 덧붙이기 두 번[퇴행] · 임시 파일 링크 ·
+      권한 · /dev/null[퇴행] · 죽은 잡의 `.kr_tmp_` 등록 · cnrb2solid 죽은 CNRB · 보고 UTF-8) · 이월 2~3차(확인 6: secid_order 거짓 거절[퇴행] ·
+      못 읽은 계획의 곁 파일 · 열 재질과 `info --strict` · 빈 제목 줄 · 긴 이름 · 죽은 잡 임시)
+- [ ] 갈래 넷 고침(11-08) — 걷기 · 이월 · battery(넷째 묶음) · 공용 임시 파일 도우미(+ 러너가 `.kr_tmp_` 를 등록하지 않게)
+- [ ] 합치기 · 단위 · 전체 회귀 · 마지막 검토(출력 관문 · battery 갈래 포함) · main · push · 배포
 - [ ] 고친 것만 겨냥한 적대적 검토
 - [ ] main 에 합치기 · 단위 · 전체 회귀(gmsh 변수 둘) · push
 - [ ] compat 빌드 · 잡 확인 뒤 API 재기동 · 스모크 · CLI · Drive 게시 · appt313 스테이징 · cae00 점검 · 포털 알림
