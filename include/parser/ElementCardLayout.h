@@ -169,6 +169,10 @@ AuxElementCard auxElementCard(const std::string& keywordLine);
 //   (c) 안전띠는 N3 > 0 ⟺ N4 > 0(Vol_I 160381 — N4 는 N3 이 있을 때만, 그때는 반드시). 단 manual 의 카드 칸 하나에 빈칸이 끼면
 //       (설명서 꼴로 쓴 줄이 아닐 수 있다 — 정수 폭으로 쓴 「0.5」 와 N3 이 SLEN 자리에 함께 든다) 보지 않는다
 //   (d) 질량은 그 읽기의 MASS 칸이 비지 않았다(MASS 가 빈 질량 요소로 읽는 읽기는 쓴 꼴이 아니다)
+//   (e) 정수 폭 카드의 글자가 든 칸이 다 **같은 왼쪽 여백**이거나 다 **같은 오른쪽 여백**이다(정수 폭 쓰개는 칸마다 같은 꼴로 쓴다 —
+//       `%8d` · `%-8d` · `%7d `). 칸마다 맞춤이 다른 설명서 꼴 줄은 정수 폭으로 자르면 넓은 칸 뒤 글자가 칸 가운데에 놓인다 —
+//       2026-11-08 전엔 i10 줄 `%10d×4 · 빈 SBRID · %16s 「10」 · %10d 103 · %-10s 104` 를 정수 폭으로 읽어 고아 절점 10 을 남기고
+//       번호 매기기를 거절했다(재검토 퍼즈 i10 1200 줄 가운데 34)
 // 쓰는 법 — 지키는 쪽(절점을 남기거나 싣는 쪽 · 지운 절점 보고 · 이월 적용의 나눠 쓴 절점)은 든 읽기의 **합집합**, 번호를 제자리에
 // 바꿔 쓰는 쪽은 manual 의 열 자리에 쓰되 manual 이 깨끗하지 않거나 줄이 **모호하면 거절**한다(`auxNodesDisputed` 가 덱에 있는
 // 절점을 말할 때).
@@ -184,7 +188,7 @@ struct AuxCardReadings {
     AuxCardCut plain;                 // 정수 폭 칸
     size_t contentLen = 0;            // 줄의 끝 — 꼬리 `$…` 주석 · 꼬리 공백을 뺀 길이
     size_t commentAt = std::string::npos;   // `$` 주석이 시작하는 열(0-기반 · 없으면 npos) — 번호를 쓸 칸과 겹치면 제자리가 없다
-    bool plainAlt = false;            // plain 이 위 규칙 (a)-(d)를 지켜 다른 읽기로 든다
+    bool plainAlt = false;            // plain 이 위 규칙 (a)-(e)를 지켜 다른 읽기로 든다
 };
 AuxCardReadings auxCardReadings(const AuxElementCard& a, const std::string& line, int fw);
 
