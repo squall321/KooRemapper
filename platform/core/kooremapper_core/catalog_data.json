@@ -14335,7 +14335,7 @@
           "yaml_path": "report",
           "required": false,
           "default": null,
-          "description": "Write the result as JSON, on success and on failure: ok, output_written, refusals (kind, message and the full list of file:line entries), selected parts, picked counts, needed section/material IDs, sets trimmed and dropped, dropped keywords, the renumber map path (null when none was written) and the read-back verification. Never written over the YAML, an input file or a folder."
+          "description": "Write the result as JSON, on success and on failure: ok, output_written, output_damaged (true when an in-place copy at commit time stopped midway and left the file at output truncated: neither the old file nor this run's output), refusals (kind, message and the full list of file:line entries), selected parts, picked counts, needed section/material IDs, sets trimmed and dropped, dropped keywords, the renumber map path (null when none was written) and the read-back verification. Never written over the YAML, an input file or a folder."
         }
       ],
       "example": {
@@ -14579,7 +14579,7 @@
           "role": "yaml_field",
           "yaml_path": "report",
           "required": false,
-          "description": "Report JSON (format dynaforge-carryover-apply): ok, output_written, plan (with deck_from) and deck hashes, the verified include list, every problem and warning, shift, per-row results. Default <output stem>_carryover.json. Written on success and on refusal (via a temporary file); it must differ from output, must not be a directory and must differ from every file the op reads, the config YAML included (then the refusal is console only)."
+          "description": "Report JSON (format dynaforge-carryover-apply): ok, output_written (false on refusal: the old file stays, except when an in-place copy at commit time stopped midway; then problems carries kind output_damaged and the file at output is truncated), plan (with deck_from) and deck hashes, the verified include list, every problem and warning, shift, per-row results. Default <output stem>_carryover.json. Written on success and on refusal (via a temporary file); it must differ from output, must not be a directory and must differ from every file the op reads, the config YAML included (then the refusal is console only)."
         }
       ],
       "example": {

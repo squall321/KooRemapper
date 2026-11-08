@@ -1546,7 +1546,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ── 실행의 결과 — 보고는 성공 · 실패 모두 쓴다(재검토 R3 · R4 · R5 뒤 사용자 결정 2026-11-07) ─────────────────────
     // ★이번 실행이 만들지 않은 파일은 지우지 않고 폴더는 지우지 않는다. 산출 · 번호 지도 · 보고는 같은 폴더의 임시 파일에 쓰고 다 되면
-    //   바꿔 넣는다 — 실패하면 앞 실행의 파일이 그대로다. 보고에는 ok · output_written · 거절 목록 전부(`refusals`)를 적고 쓰지 않은
+    //   바꿔 넣는다 — 실패하면 앞 실행의 파일이 그대로다(제자리로 옮겨 쓰다 멈춘 때만 빼고 — 그 파일은 잘렸다 · 보고 output_damaged).
+    //   보고에는 ok · output_written · 거절 목록 전부(`refusals`)를 적고 쓰지 않은
     //   파일은 대지 않는다. 거절 목록은 [ERROR] 요약 줄로도 낸다 — 플랫폼 잡 요약(error_summary)이 [ERROR] 줄만 모은다
     DeckIndex idx;
     std::vector<int> sel;
@@ -1586,6 +1587,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
         jf << "  \"output\": " << (written ? jsonStr(o.output) : std::string("null")) << ",\n";   // 쓰지 않은 파일은 대지 않는다
         jf << "  \"ok\": " << (ok ? "true" : "false") << ",\n";
         jf << "  \"output_written\": " << (written ? "true" : "false") << ",\n";
+        // 바꿔 넣다 멈춰 산출 자리의 파일이 잘렸다(제자리로 옮겨 쓰는 길 — 앞 파일도 이번 산출도 아니다 · 여섯째 검토 — 예전엔
+        // output_written false 와 「앞 파일은 그대로다」 만 말했다)
+        jf << "  \"output_damaged\": " << (staged.damaged(o.output) ? "true" : "false") << ",\n";
         jf << "  \"refusals\": [";
         for (size_t i = 0; i < refusals.size(); ++i) {
             jf << (i ? "," : "") << "\n    {\"kind\": " << jsonStr(refusals[i].kind)
@@ -2052,7 +2056,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     commitHeld = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output);
     for (const auto& n : commitHeld->takeNotes()) n.warn ? console.warning(n.text) : console.info(n.text);
     if (!staged.commit(o.output, stageWhy))
-        return fail("commit", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output + " (" + stageWhy + ") — 같은 이름의 앞 파일은 그대로다");
+        return fail("commit", "산출을 제 이름으로 바꿔 넣지 못했다: " + o.output + " (" + stageWhy + ") — " +
+                                   (staged.damaged(o.output) ? std::string("쓰지 말고 다시 돌려라(보고 output_damaged)")
+                                                             : std::string("같은 이름의 앞 파일은 그대로다")));
     stagedNotes();
     console.success("wrote: " + o.output + "  (*NODE " + std::to_string(st.nodeLines) +
                     " · 요소 카드 " + std::to_string(st.elemCards) +
@@ -2067,7 +2073,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             if (staged.writeText(o.reportPath, reportJson(false, true, false), why) && staged.commit(o.reportPath, why))
                 console.info("report: " + o.reportPath + " (ok false — 산출은 바꿔 넣었다)");
             else
-                console.error("Cannot write report: " + o.reportPath + " (" + why + ") — 그 자리의 보고(있으면)는 이번 실행의 것이 아니다");
+                console.error("Cannot write report: " + o.reportPath + " (" + why + ") — " +
+                              (staged.damaged(o.reportPath) ? "그 자리의 보고는 잘렸다(읽지 마라)" : "그 자리의 보고(있으면)는 이번 실행의 것이 아니다"));
             staged.discardAll();
             stagedNotes();
         }
@@ -2099,8 +2106,8 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     if (writeReport) {
         // 이름 바꾸기를 폴더 권한이 막으면 도우미가 그 파일에 제자리로 쓴다([WARN]). 그것도 못 하면 그 자리의 보고는 앞 실행의 것이다
         if (!staged.commit(o.reportPath, stageWhy)) {
-            console.error("Cannot write report: " + o.reportPath + " (" + stageWhy + ") — 산출 · 번호 지도는 바꿔 넣었다 · 그 자리의 "
-                          "보고(있으면)는 이번 실행의 것이 아니다");
+            console.error("Cannot write report: " + o.reportPath + " (" + stageWhy + ") — 산출 · 번호 지도는 바꿔 넣었다 · " +
+                          (staged.damaged(o.reportPath) ? "그 자리의 보고는 잘렸다(읽지 마라)" : "그 자리의 보고(있으면)는 이번 실행의 것이 아니다"));
             return 1;
         }
         stagedNotes();

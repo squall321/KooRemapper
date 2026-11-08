@@ -15,6 +15,7 @@
 
 #ifndef _WIN32
 #include <csignal>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -307,5 +308,58 @@ TEST(StagedWrite_CommitLock_은_같은_산출을_쥔_다른_프로세스가_풀_
     ASSERT_EQ(::waitpid(c, &st, 0), c);
     ASSERT_TRUE(WIFEXITED(st) && WEXITSTATUS(st) == 0);
     ASSERT_EQ(countTemps(s.root), 0);   // 잠금 파일(.kr_tmp_lock_…)도 지웠다
+}
+
+namespace {
+// 그 블록 동안만 파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다) — 빠져나갈 때(ASSERT 의 return 도) 되돌린다
+struct FsizeCap {
+    struct rlimit old {};
+    struct sigaction oldAct {};
+    explicit FsizeCap(rlim_t cap) {
+        struct sigaction ign {};
+        ign.sa_handler = SIG_IGN;
+        ::sigaction(SIGXFSZ, &ign, &oldAct);
+        ::getrlimit(RLIMIT_FSIZE, &old);
+        struct rlimit nw = old;
+        nw.rlim_cur = cap;
+        ::setrlimit(RLIMIT_FSIZE, &nw);
+    }
+    ~FsizeCap() {
+        ::setrlimit(RLIMIT_FSIZE, &old);
+        ::sigaction(SIGXFSZ, &oldAct, nullptr);
+    }
+};
+}  // namespace
+
+TEST(StagedWrite_제자리로_옮겨_쓰다_멈추면_damaged_가_참이고_대상을_열지_못했으면_거짓이다) {
+    if (::geteuid() == 0) return;   // root 는 폴더 · 파일 권한을 넘는다
+    SwScratch s("dmg");
+    fs::create_directories(s.root / "ro");
+    const std::string dst = s.at("ro/out.k"), keep = s.at("ro/keep.k");
+    std::ofstream(dst) << "old\n";
+    std::ofstream(keep) << "old\n";
+    fs::permissions(s.root / "ro", fs::perms::owner_read | fs::perms::owner_exec);
+    staged_write::StagedFiles st;
+    std::string why;
+    const std::string big(64 * 1024, 'x');
+    ASSERT_TRUE(st.writeText(dst, big, why));   // 읽기 전용 폴더 — 시스템 임시 폴더에 써 둔다(InPlace)
+    ASSERT_TRUE(st.writeText(keep, big, why));
+    fs::permissions(keep, fs::perms::owner_read);   // 대상을 열지 못한다 — 앞 파일 그대로
+    bool failed = false;
+    {
+        FsizeCap cap(1000);
+        failed = !st.commit(dst, why);
+    }
+    ASSERT_TRUE(failed);
+    ASSERT_TRUE(st.damaged(dst));
+    ASSERT_TRUE(why.find("잘려") != std::string::npos);
+    ASSERT_EQ(fs::file_size(dst), (uintmax_t)1000);   // 잘렸다 — 앞 내용도 새 내용도 아니다
+    ASSERT_FALSE(st.commit(keep, why));
+    ASSERT_FALSE(st.damaged(keep));
+    ASSERT_EQ(slurp(keep), std::string("old\n"));
+    st.discardAll();
+    ASSERT_TRUE(st.damaged(dst));   // 지운 뒤에도 남는다(실패 보고가 묻는다)
+    fs::permissions(keep, fs::perms::owner_read | fs::perms::owner_write);
+    fs::permissions(s.root / "ro", fs::perms::owner_all);
 }
 #endif

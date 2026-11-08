@@ -1981,7 +1981,8 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         }
     };
     // 거절 · 실패 — 이번 실행의 임시 파일만 지우고 보고(ok false · output_written false · 걸린 것 전부)를 쓴다. output 자리의 앞 파일은
-    // 그대로다 — 보고의 output_written 이 그것이 이번 산출이 아니라고 말한다
+    // 그대로다 — 보고의 output_written 이 그것이 이번 산출이 아니라고 말한다(제자리로 옮겨 쓰다 멈춘 때만 빼고 — 그 파일은 잘렸다 ·
+    // problems 의 output_damaged)
     // 바꿔 넣는 동안 쥐는 잠금 — 거절 보고를 쓸 때도 쥔다(아직 안 쥐었으면 그때만 · 여섯째 검토 — 예전엔 잠금 없이 썼다)
     std::unique_ptr<KooRemapper::staged_write::CommitLock> commitHeld;
     auto refuse = [&](const std::string& why) {
@@ -2068,15 +2069,20 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         commitHeld = std::make_unique<KooRemapper::staged_write::CommitLock>(outPath);
         for (const auto& n : commitHeld->takeNotes()) console.warning(std::string("[") + tag + "] " + n.text);
         if (!staged.commit(outPath, stageWhy)) {
-            rep.problems.push_back({0, "write", "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다(" + stageWhy + ")"});
+            // 제자리로 옮겨 쓰다 멈췄으면 output 자리의 파일은 잘렸다 — 「앞 파일은 그대로다」 라고 말하지 않는다(여섯째 검토)
+            const bool damaged = staged.damaged(outPath);
+            rep.problems.push_back({0, damaged ? "output_damaged" : "write",
+                                    "쓴 덱을 output 자리(" + outPath + ")로 바꿔 넣지 못했다(" + stageWhy + ")" +
+                                        (damaged ? " — 쓰지 말고 다시 돌려라" : "")});
             unapply();
-            return refuse("덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
+            return refuse(damaged ? "덱을 output 자리에 옮겨 쓰다 멈췄다 — 그 파일은 잘려 반쯤 쓴 채다(앞 덱도 이번 덱도 아니다 · 쓰지 말고 다시 돌려라)"
+                                  : "덱을 바꿔 넣지 못했다 — output 자리의 앞 파일은 그대로다");
         }
         stagedNotes();
         // 덱은 이미 바꿔 넣었다 — 보고 없이 성공이라 말하지 않는다. 이름 바꾸기를 폴더 권한이 막으면 도우미가 그 파일에 제자리로 쓴다([WARN])
         if (!staged.commit(reportPath, stageWhy)) {
             console.error(std::string("[") + tag + "] 덱은 바꿔 넣었지만(" + outPath + ") 보고를 바꿔 넣지 못했다: " + reportPath + " (" + stageWhy +
-                          ") — 그 자리의 보고(있으면)는 이번 실행의 것이 아니다");
+                          ") — " + (staged.damaged(reportPath) ? "그 자리의 보고는 잘렸다(읽지 마라)" : "그 자리의 보고(있으면)는 이번 실행의 것이 아니다"));
             return 1;
         }
         stagedNotes();

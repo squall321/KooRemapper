@@ -33,6 +33,10 @@
   F 제자리 쓰기로 넘어간 뒤의 임시 파일 — 잡은 뒤 폴더가 읽기 전용이 되면 이름 바꾸기가 EACCES 라 그 파일에 제자리로 쓰는데, 같은 까닭으로
     임시 파일을 못 지워 꽉 찬 채 rc 0 · 말없이 남았다(여섯째 검토 S11). 이제 0 바이트로 비우고 [WARN] 로 말하며, 폴더에 쓸 수 있게 된
     다음 실행이 지운다.
+  P 제자리로 옮겨 쓰다 멈춘 산출 — 읽기 전용 폴더(시스템 임시 폴더에 써 두었다가) · 이름 바꾸기를 막은 폴더 권한이면 바꿔 넣을 때 그
+    파일에 제자리로 옮겨 쓴다. 그 사이 쓰기가 멈추면(크기 상한 · 디스크가 찼다) 그 파일은 잘렸는데 말은 「앞 파일은 그대로다」 · 보고는
+    output_written false 뿐이었다(여섯째 검토). 이제 잘렸다고 말하고 보고가 output_damaged(extract-parts 칸 · 이월 적용 problems 갈래)로
+    적는다. 이 시험이 잠금을 쥔 동안 실행이 다 써 두고 기다리게 하고, 그 사이 폴더 권한 · 크기 상한(prlimit — 산출 반)을 건다.
   T 임시 파일 이름 표지 — 플랫폼은 `.kr_tmp_` 가 든 파일만 산출로 올리지 않는다. map 의 앞처리 평판(`.__preproc_flat.k`) · 뒤집은 기준
     (`.__flipped_ref.k`) · 펼친 덱(`.kr_flat_`) · meshfix 의 gmsh 왕복(`__mf.*`) · polish(`__pol<회차>_<덩어리>.*`)는 표지가 없어 SIGKILL 된
     잡이 남기면 산출로 올라갔다(여섯째 검토 — runner 의 걸러내기). 이름에 표지를 붙였다 — strace 로 실행이 만들었다 지운 파일을 모아
@@ -996,6 +1000,73 @@ def sec_w(binary):
               rc0 == 0 and size > 0 and rc == 1 and "File too large" in out and "[ERROR]" in out, (rc0, size, rc, out[-300:]))
 
 
+# ── P 제자리로 옮겨 쓰다 멈춘 산출 ────────────────────────────────────────────
+def start_nofsz(binary, d, *args):
+    """SIGXFSZ 무시로 띄운다 — 뒤에 prlimit 로 크기 상한을 걸면 넘는 쓰기가 EFBIG 로 짧게 끝난다(말을 모은다)."""
+    return subprocess.Popen([binary, *args], cwd=d, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                            errors="replace", preexec_fn=lambda: signal.signal(signal.SIGXFSZ, signal.SIG_IGN))
+
+
+def sec_p(binary):
+    print("[P] 제자리로 옮겨 쓰다 멈췄다 — 그 파일이 잘렸다고 말한다(앞 파일이 그대로라고 하지 않는다 · output_damaged)")
+    import resource
+    if os.geteuid() == 0:
+        check("P — root 는 폴더 권한을 넘는다(건너뜀)", True)
+        return
+    k = 0
+    for op in ("extract-parts", "apply_carryover_plan"):
+        for how in ("rename_fallback", "inplace"):
+            k += 1
+            name = "P%d_%s_%s" % (k, op, how)
+            if op == "extract-parts":
+                d = ep_dir(name, deck=shell_deck(40, 20))
+                write(os.path.join(d, "p.yaml"), "model: in.k\noutput: o/out.k\nparts: [1]\nreport: o/r.json\n")
+                args, out_name, rep_name = ("extract-parts", "p.yaml"), "out.k", "r.json"
+            else:
+                d = co_dir(name)
+                write(os.path.join(d, "p.yaml"), "model: deck.k\nplan: plan.json\noutput: o/deck_applied\nreport: o/rep.json\n")
+                args, out_name, rep_name = ("apply_carryover_plan", "p.yaml"), "deck_applied.k", "rep.json"
+            o = os.path.join(d, "o")
+            os.makedirs(o)
+            rc0, _ = run(binary, d, *args)   # 앞 실행 — 제자리로 옮겨 쓸 산출 · 보고가 있다
+            out_p = os.path.join(o, out_name)
+            full = os.path.getsize(out_p) if os.path.exists(out_p) else 0
+            limit = full // 2
+            # 이 시험이 잠금을 쥔 동안 실행은 다 써 두고 기다린다. rename_fallback — 그 사이 폴더를 읽기 전용으로(이름 바꾸기 EACCES →
+            # 그 파일에 제자리로) · inplace — 처음부터 읽기 전용(시스템 임시 폴더에 써 두었다가 제자리로). 풀기 전에 크기 상한(산출 반)을 건다
+            fd = hold_lock(o, out_name)
+            if how == "inplace":
+                os.chmod(o, 0o555)
+            p = start_nofsz(binary, d, *args)
+            staged = (lambda: temp_of(o, out_name) and temp_of(o, rep_name)) if how == "rename_fallback" else \
+                     (lambda: len(sys_tmp_of(p.pid)) >= 2)
+            t0 = time.time()
+            while p.poll() is None and time.time() - t0 < 60 and not staged():
+                time.sleep(0.01)
+            time.sleep(0.5)   # 보고를 써 두고 잠금에서 기다린다
+            waiting = p.poll() is None
+            if how == "rename_fallback":
+                os.chmod(o, 0o555)
+            if waiting:
+                resource.prlimit(p.pid, resource.RLIMIT_FSIZE, (limit, limit))
+            os.close(fd)
+            said = p.communicate(timeout=300)[0]
+            size = os.path.getsize(out_p)
+            os.chmod(o, 0o755)
+            rep = load(os.path.join(o, rep_name))
+            if op == "extract-parts":
+                marked = isinstance(rep, dict) and rep.get("output_damaged") is True and rep.get("output_written") is False
+            else:
+                marked = isinstance(rep, dict) and any(x.get("kind") == "output_damaged" for x in rep.get("problems", []))
+            check("P-%d %s %s · 옮겨 쓰다 멈췄다(산출 반 크기 상한) — rc 1 · 그 파일이 잘렸다고 말한다(앞 파일 그대로라 하지 않는다) · 보고 "
+                  "ok false · output_damaged" % (k, op, how),
+                  rc0 == 0 and limit > 0 and waiting and p.returncode == 1 and size == limit and isinstance(rep, dict) and
+                  rep.get("ok") is False and marked and "잘려 반쯤 쓴 채다" in said and "앞 파일은 그대로다" not in said and
+                  "File too large" in said and ".kr_tmp_" not in said,
+                  (rc0, limit, waiting, p.returncode, size, rep if not isinstance(rep, dict) else
+                   {x: rep.get(x) for x in ("ok", "output_written", "output_damaged", "problems")}, said[-500:]))
+
+
 def main():
     global TMP
     if len(sys.argv) < 2:
@@ -1013,6 +1084,7 @@ def main():
         sec_w(binary)
         sec_d(binary)
         sec_f(binary)
+        sec_p(binary)
         sec_t(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다

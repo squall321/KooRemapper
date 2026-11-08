@@ -33,7 +33,8 @@ enum class Mode {
     // ACL 은 잇지 않는다 — 새 파일로 바뀌므로 다른 하드 링크 이름은 앞 내용을 그대로 가리킨다. 쓸 수 없는 파일(읽기 전용)은 거절한다
     Rename,
     // 대상 폴더에 새 파일을 만들 수 없다(읽기 전용 폴더 등) — 있는 일반 파일에 쓸 수 있으면 시스템 임시 폴더에 써 두었다가 바꿔 넣을 때
-    // 그 파일에 제자리로 옮겨 쓴다. **원자적이 아니다**(옮겨 쓰는 사이에 멈추면 반쯤 쓴 파일이 남는다 — 그 말을 [WARN] 으로 남긴다)
+    // 그 파일에 제자리로 옮겨 쓴다. **원자적이 아니다**(옮겨 쓰는 사이에 멈추면 반쯤 쓴 파일이 남는다 — 그 말을 [WARN] 으로 남기고 ·
+    // 멈추면 `damaged` 가 참이다)
     InPlace,
     // 대상이 일반 파일이 아니다(문자 장치 · FIFO · 소켓 — `/dev/null`) — 대상에 바로 쓴다. 임시 파일이 없고 바꿔 넣지도 지우지도 않는다
     Direct,
@@ -58,6 +59,10 @@ public:
     // 폴더 권한이 막으면(EACCES · EPERM) 있는 일반 파일에 제자리로 옮겨 쓴다([WARN] 원자적이 아님). InPlace — 제자리로 옮겨 쓴다.
     // Direct — 할 일이 없다. 실패면 false 와 까닭(임시 파일은 남는다 — `discard` · 사라질 때 지운다)
     bool commit(const std::string& dst, std::string& why);
+    // 실패한 바꿔 넣기가 대상을 잘라 낸 뒤 멈췄다 — 제자리로 옮겨 쓰는 길(InPlace · 이름 바꾸기를 폴더 권한이 막은 때)에서만 생긴다.
+    // 그 자리의 파일은 앞 내용도 새 내용도 아니다(잘려 반쯤 쓴 채). 부르는 쪽은 그때 「앞 파일은 그대로다」 라고 말하지 않는다(여섯째
+    // 검토 — 예전엔 그렇게 말했고 보고도 그 꼴이었다). `discard` 뒤에도 남는다
+    bool damaged(const std::string& dst) const;
     // 바꿔 넣지 않은 임시 파일을 지운다 — 이번 실행이 만든 것뿐이다(Direct 의 대상은 지우지 않는다)
     void discard(const std::string& dst);
     void discardAll();
@@ -81,6 +86,7 @@ private:
     std::vector<Item> items_;
     std::vector<std::pair<std::string, std::string>> names_;   // 임시 꼴 → 제 이름(긴 것부터 바꾼다)
     std::vector<Note> notes_;
+    std::vector<std::string> damaged_;   // 바꿔 넣다 잘라 낸 채 멈춘 대상(dst)
 };
 
 // 쓰기가 실제로 닿을 자리 — 심볼릭 링크(매달린 것도)는 커널처럼 물리로 따라간 파일, 그 밖은 폴더를 물리로 푼 절대 경로. 장치 ·

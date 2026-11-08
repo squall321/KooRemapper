@@ -311,8 +311,10 @@ bool writeAll(int fd, const char* data, size_t n, int& e) {
     return true;
 }
 
-// 임시 파일을 있는 대상에 제자리로 옮겨 쓴다(자르고 쓴다 — 원자적이 아니다). 대상은 있어야 한다(새로 만들지 않는다)
-bool copyInto(const std::string& from, const std::string& to, std::string& why) {
+// 임시 파일을 있는 대상에 제자리로 옮겨 쓴다(자르고 쓴다 — 원자적이 아니다). 대상은 있어야 한다(새로 만들지 않는다). 대상을 연(잘라
+// 낸) 뒤 멈추면 `touched` — 그 파일은 앞 내용도 새 내용도 아니다(대상을 열지 못했으면 앞 파일 그대로)
+bool copyInto(const std::string& from, const std::string& to, std::string& why, bool& touched) {
+    touched = false;
     const int in = ::open(from.c_str(), O_RDONLY | O_CLOEXEC);
     if (in < 0) { why = "임시 파일을 다시 열지 못했다(" + errText(errno) + ")"; return false; }
     const int out = ::open(to.c_str(), O_WRONLY | O_TRUNC | O_CLOEXEC);
@@ -322,6 +324,7 @@ bool copyInto(const std::string& from, const std::string& to, std::string& why) 
         why = "대상을 열지 못했다(" + errText(e) + ")";
         return false;
     }
+    touched = true;   // O_TRUNC — 여기서부터 앞 내용은 없다
     char buf[1 << 16];
     bool ok = true;
     int e = 0;
@@ -338,7 +341,8 @@ bool copyInto(const std::string& from, const std::string& to, std::string& why) 
     }
     if (::close(out) != 0 && ok) { ok = false; e = errno; }
     ::close(in);
-    if (!ok) why = "제자리로 옮겨 쓰다 멈췄다(" + errText(e) + ") — 그 파일은 반쯤 쓴 채일 수 있다";
+    if (!ok) why = "제자리로 옮겨 쓰다 멈췄다(" + errText(e) + ") — 그 파일은 잘려 반쯤 쓴 채다(앞 내용도 새 내용도 아니다)";
+    else touched = false;
     return ok;
 }
 #endif
@@ -552,8 +556,12 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
         return true;
     }
 #ifndef _WIN32
+    bool touched = false;
     if (it->mode == Mode::InPlace) {
-        if (!copyInto(it->tmp, it->target, why)) return false;
+        if (!copyInto(it->tmp, it->target, why, touched)) {
+            if (touched) damaged_.push_back(dst);
+            return false;
+        }
         dropTemp(*it);
         items_.erase(it);
         return true;
@@ -576,7 +584,10 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
     const int e = errno;
     // 폴더 권한(끈적 폴더 · 바뀐 권한)이 이름 바꾸기를 막는데 있는 파일에 쓸 수 있으면 제자리로 쓴다 — 원자적이 아니다
     if ((e == EACCES || e == EPERM) && present && S_ISREG(st.st_mode) && ::access(it->target.c_str(), W_OK) == 0) {
-        if (!copyInto(it->tmp, it->target, why)) return false;
+        if (!copyInto(it->tmp, it->target, why, touched)) {
+            if (touched) damaged_.push_back(dst);
+            return false;
+        }
         notes_.push_back({true, "「" + dst + "」 를 이름 바꾸기로 바꿔 넣지 못해(" + errText(e) + ") 그 파일에 제자리로 썼다 — 원자적이 아니다"});
         dropTemp(*it);   // 같은 까닭(폴더 권한)으로 못 지울 수 있다 — 그러면 비우고 그렇다고 말한다
         items_.erase(it);
@@ -622,6 +633,10 @@ void StagedFiles::dropTemp(const Item& it) {
 
 void StagedFiles::discardAll() {
     while (!items_.empty()) discard(items_.front().dst);
+}
+
+bool StagedFiles::damaged(const std::string& dst) const {
+    return std::find(damaged_.begin(), damaged_.end(), dst) != damaged_.end();
 }
 
 bool StagedFiles::has(const std::string& dst) const {
