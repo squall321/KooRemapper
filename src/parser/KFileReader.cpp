@@ -622,6 +622,12 @@ bool KFileReader::parseNodeSection(std::ifstream& file) {
 }
 
 bool KFileReader::parseElementSolidSection(std::ifstream& file) {
+    // 두께 셸(`*ELEMENT_TSHELL`)도 이 칸으로 읽는다 — 그 번호를 적어 둔다(원본 없는 쓰기가 `*ELEMENT_TSHELL` 로 쓴다 · 2026-11-08)
+    const bool tshell = currentKeyword_.rfind("ELEMENT_TSHELL", 0) == 0;
+    auto addSolid = [&](const Element& e) {
+        mesh_.addElement(e);
+        if (tshell) mesh_.thickShellIds.insert(e.id);
+    };
     std::string line;
     std::streampos lastPos;
     int elementCount = 0;
@@ -696,7 +702,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                             elem.nodeIds = nodeIds;
                             elem.type = ElementType::PENTA6;
                         }
-                        mesh_.addElement(elem);
+                        addSolid(elem);
                         elementCount++;
                         continue;  // Successfully parsed, move to next line
                     }
@@ -733,7 +739,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                     elem.nodeIds = nodeIds;
                     elem.type = ElementType::PENTA6;
                 }
-                mesh_.addElement(elem);
+                addSolid(elem);
                 elementCount++;
             }
             // Check if this is Format 2 (two lines: eid/pid on first line)
@@ -869,7 +875,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                                 elem.nodeIds = nodeIds;
                                 elem.type = ElementType::PENTA6;
                             }
-                            mesh_.addElement(elem);
+                            addSolid(elem);
                             elementCount++;
                             parsedNodeLine = true;
                         }
@@ -894,7 +900,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
                             elem.nodeIds = nodeIds;
                             elem.type = ElementType::PENTA6;
                         }
-                        mesh_.addElement(elem);
+                        addSolid(elem);
                         elementCount++;
                     }
                 }

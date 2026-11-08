@@ -1036,6 +1036,10 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
     console.info("Generating flat mesh from bent mesh...");
     FlatMeshGenerator generator;
     Mesh flatMesh = generator.generateFlatMesh(bentMesh);
+    // 두께 셸(`*ELEMENT_TSHELL` — 리더가 육면체 칸으로 읽는다)은 펼쳐도 두께 셸이다 — 같은 번호의 요소를 그 키워드로 쓴다(2026-11-08 —
+    // 원본 없는 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다)
+    for (int eid : bentMesh.thickShellIds)
+        if (flatMesh.elements.count(eid)) flatMesh.thickShellIds.insert(eid);
 
     if (flatMesh.getNodeCount() == 0) {
         console.error("Failed to generate flat mesh: " + generator.getErrorMessage());

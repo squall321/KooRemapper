@@ -290,6 +290,7 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
 
         writeNodeSection(file, mesh, useMappedPositions);
         writeElementSection(file, mesh);
+        writeShellSections(file, mesh);   // 셸 · 두께 셸은 제 키워드로(예전엔 `*ELEMENT_SOLID` 에 섞였다)
         writeEnd(file);
 
         writer.close();
@@ -352,6 +353,9 @@ void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
     std::vector<std::pair<int, const Element*>> sortedElements;
     for (const auto& [id, elem] : mesh.elements) {
         if (skipIds && skipIds->count(id)) continue;
+        // 셸(QUAD4) · 두께 셸은 솔리드 블록에 쓰지 않는다 — 원본이 있으면 그 블록을 그대로 베끼고, 없으면 `writeShellSections` 가 제
+        // 키워드로 쓴다(2026-11-08 — 셸은 n5-n8 = n1-n4 인 겹친 육면체로, 두께 셸은 솔리드로 나갔다)
+        if (elem.type == ElementType::QUAD4 || mesh.thickShellIds.count(id)) continue;
         sortedElements.push_back({id, &elem});
     }
     // 쉘만 있는 덱이면 쓸 솔리드가 하나도 없다 — 빈 *ELEMENT_SOLID 블록을 남기지 않는다
@@ -418,6 +422,30 @@ void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
             }
         }
         file << std::endl;
+    }
+}
+
+void KFileWriter::writeShellSections(std::ostream& file, const Mesh& mesh) {
+    std::vector<const Element*> shells, tshells;
+    for (const auto& [id, elem] : mesh.elements) {
+        if (elem.type == ElementType::QUAD4) shells.push_back(&elem);
+        else if (mesh.thickShellIds.count(id)) tshells.push_back(&elem);
+    }
+    if (!shells.empty()) {
+        file << "*ELEMENT_SHELL" << std::endl;
+        for (const Element* e : shells) {
+            file << std::setw(idFieldWidth_) << e->id << std::setw(idFieldWidth_) << e->partId;
+            for (int i = 0; i < 4; ++i) file << std::setw(idFieldWidth_) << e->nodeIds[i];
+            file << std::endl;
+        }
+    }
+    if (!tshells.empty()) {
+        file << "*ELEMENT_TSHELL" << std::endl;
+        for (const Element* e : tshells) {
+            file << std::setw(idFieldWidth_) << e->id << std::setw(idFieldWidth_) << e->partId;
+            for (int i = 0; i < Element::NUM_NODES; ++i) file << std::setw(idFieldWidth_) << e->nodeIds[i];
+            file << std::endl;
+        }
     }
 }
 

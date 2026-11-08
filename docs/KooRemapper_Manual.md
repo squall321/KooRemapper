@@ -901,7 +901,8 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 
 ### 출력
 
-- `output_flat.k`: 전개된 평면 메시
+- `output_flat.k`: 전개된 평면 메시 — 굽힌 덱의 두께 셸(`*ELEMENT_TSHELL`) 칸은 펼친 덱에서도 `*ELEMENT_TSHELL` 이다(2026-11-08 전엔
+  원본 없는 메시 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다 · 회귀 `test_kfilewriter_blocks.py` B-3)
 - 콘솔: 격자 차원(I, J, K) 및 평면 길이(I=호 길이, J, K) 출력
 
 ### 주의사항
@@ -4511,6 +4512,11 @@ KooRemapper tetremesh <config.yaml>
 > (예전에는 작업 폴더 기준이었습니다). `meshfix`([§40](#40-meshfix--tet4-재메시-gmsh-기반))도 같습니다.
 
 **근거**: help(`Usage:` + YAML 스키마), pyKooCAE `surface_remesh.md`, 2026-09-18 실행 확인. `report_only: true` 로 먼저 품질 스캔 후 재메시가 안전하다.
+
+★산출은 메시(`*NODE` · 요소)만 쓴다 — 셸은 `*ELEMENT_SHELL`(EID PID N1-N4), 두께 셸은 `*ELEMENT_TSHELL`(EID PID N1-N8)로 쓴다(2026-11-08
+여섯째 검토 — 그 전엔 다 `*ELEMENT_SOLID` 로 써서 셸은 n5-n8 = n1-n4 인 부피 0 육면체로, 두께 셸은 솔리드로 나갔다 · rc 0 · 회귀
+`test_kfilewriter_blocks.py` B-1 · B-2). 셸 요소마다의 두께 카드(`*ELEMENT_SHELL_THICKNESS` 의 둘째 카드)와 `*PART` · `*SECTION_*` ·
+`*MAT_*` 같은 메시 밖 카드는 산출에 싣지 않는다(원래부터 — 원본 덱에서 옮겨 붙인다).
 
 ---
 

@@ -121,6 +121,10 @@ public:
     // 절점 칸이 모자란 2차 요소 수 — PID → 수. 매뉴얼 Card 2 는 N1..N10 열 칸 한 장이다(노드를 8+2 로 쪼갠 덱은 둘째 줄이
     // 다음 요소의 Card 1 로 읽힌다 — LS-DYNA 도 그렇게 읽는다). 그 파트는 기하를 믿을 수 없다.
     std::map<int, int> partIncompleteSolids;
+    // ★두께 셸(`*ELEMENT_TSHELL`)로 읽은 요소 번호(2026-11-08) — 리더는 그 카드를 솔리드와 같은 칸으로 읽어 `elements` 에 육면체로 담는다.
+    // 원본 없이 덱을 지어내는 쓰기(`KFileWriter::writeFile` — tetremesh)가 이것을 보고 `*ELEMENT_TSHELL` 로 쓴다(예전엔 `*ELEMENT_SOLID`
+    // 로 써서 두께 셸이 솔리드가 됐다). 셸(`*ELEMENT_SHELL`)은 요소 꼴(QUAD4)이 이미 가른다
+    std::set<int> thickShellIds;
     std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
@@ -427,6 +431,7 @@ public:
         partSolidElform.clear();
         solidAllNodes.clear();
         partIncompleteSolids.clear();
+        thickShellIds.clear();
         name_.clear();
         dimI = dimJ = dimK = 0;
         gridDimensionsSet = false;

@@ -106,6 +106,9 @@ private:
     void writeElementSection(std::ostream& file, const Mesh& mesh,
                              const std::set<int>* skipIds = nullptr);
     void writeEnd(std::ostream& file);
+    // 원본 없는 쓰기(`writeFile`)에서만 — 셸(QUAD4)은 `*ELEMENT_SHELL`(EID PID N1-N4), 두께 셸(`Mesh::thickShellIds`)은 `*ELEMENT_TSHELL`
+    // (EID PID N1-N8). `writeElementSection` 은 둘 다 `*ELEMENT_SOLID` 로 쓰지 않는다(2026-11-08 — 셸이 겹친 육면체 · 두께 셸이 솔리드가 됐다)
+    void writeShellSections(std::ostream& file, const Mesh& mesh);
 
     std::string formatDouble(double value) const;
     std::string formatInt(int value, int width) const;
