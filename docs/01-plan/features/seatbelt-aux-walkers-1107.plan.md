@@ -17,6 +17,9 @@
 - 뒤집은 map → prestress 체인 — 「뒤집어도 재질을 싣는다」(`267dbae`). battery 배치 여러 종류 — 「종류가 둘 이상이면 이름에 넣는다」(`0e6cd77`).
 - 넷째로 나온 넷(assemble battery 번호 겹침 · warpage 거짓 메시지 · dynain 빠짐 경고 없음 · 도우미 중복) — 「넷 다 이번 판」.
 - 사용자 「필요하면 서브에이전트 나눠」(11-08) — 갈래 넷(걷기 · 이월 · battery · 임시 파일 도우미).
+- 다섯째 묶음 — 「다 이번 판」. offset 에 material_card 가 없으면 — 「거절한다」(`995e86e`). battery 덱의 제어 · 출력 카드 — 「지금은 그대로 · 문서」(`1e813a3`).
+- 여섯째 검토(38) — 「들인 결함 18 + 물성 바꾸는 기존 넷」(hfdamp `*MAT_ADD_EROSION` 이 RO · E · battery 접촉 Card C 자리 · map 이 살아 있는 솔리드를
+  버림 · KFileWriter 가 셸을 솔리드로 쓴다는 의심). 나머지 기존 결함은 아래 「다음 판」 목록. 같은 종류 번호 중복 — 「info 만 알리고 연산은 그대로」.
 - 검토 중 LS-PrePost 가 고쳐 쓴 `~/LSTC/LS-PrePost4.12` 설정 — 「홈 폴더로 바꾼다」(했다 — 세 줄 · 최근 목록 두 줄, 고치기 전 사본은 scratch).
 
 ## 고칠 것(검토 번호)
@@ -83,3 +86,15 @@
   성공 · 실패 모두 쓴다(거절 목록이 거기 남는다 — 지우면 플랫폼은 원시 로그에서만 본다).
 - (11-07) 다른 읽기는 깨끗하고(칸 안에 빈칸 없음) · 그 줄이 정수 폭 카드 안에서 끝나고 · 안전띠면 N3 > 0 ⟺ N4 > 0(Vol_I)일 때만 합집합 ·
   다툼에 든다 — 질량은 그 읽기에서 MASS 가 비면 안 든다. 정상 줄에 유령 절점이 생기던 퇴행(재검토 1 · 2 · 6)을 막는다.
+
+## 다음 판으로 미룬 것(11-08 사용자 결정 — 운영 판에도 있는 기존 결함)
+- output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
+- battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
+- I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.
+- extract-parts 되읽기가 TMID 를 MID 로 센다 · 섹션 훑기의 들여 쓴 `*` 제목 줄 · `--strict` 의 빈 `_TITLE` 줄 거짓 중복 · 쌓인 카드 중복을 첫 정의만 본다.
+- matswap · cclip 이 쌓인 이웃이 있는 `*SECTION` · `*HOURGLASS` 블록을 통째로 지운다 · 단독 matswap · cclip · ale 의 SECID 최대 셈이 첫 카드만.
+- matdb 가 블록 첫 재질만 고른다(`mid:` 로 쌓인 재질을 못 고름) · `thermal: true` 가 같은 TMID 의 다른 파트 열 물성을 바꾼다 · 목록 밖 `*MAT_ADD_*` 를 안 지운다.
+- IGA 가 모르는 꼴 재질을 블록 끝까지 베낀다 · KFileReader 가 첫 `*MAT_ELASTIC` 묶음만 · ale 사용자 재질은 첫 `*MAT_` 블록 · KFileReader:265 2차 솔리드 절점 목록(확인 전).
+- SIGKILL 이 남긴 임시 파일은 같은 output · 같은 호스트 표지의 다음 실행만 치운다(HWAX 실행기 · pid 이름공간) · Windows 만의 것(meshfix `__mf.log.bat` · prestress `pre.K`).
+- battery 탭이 셀 모서리를 걸치면 경고 없이 좁힌다 · 옵션 카드 절점은 아직 토큰 읽기 · '모르는' 절점은 되읽기에서 빠진다 · cnrb2solid 파서의 들여 쓴 `*`.
+- 이상한 열 재질 철자(`*MAT_T1` · `T19` · `T001`) · `--strict` 가 TMID 참조를 안 본다 · extract-parts 가 `*MAT_ADD_THERMAL_EXPANSION` 을 버린다 · 섹션 묶음 셈의 메모리.
