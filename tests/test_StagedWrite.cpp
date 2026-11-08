@@ -12,6 +12,12 @@
 #include <sstream>
 #include <string>
 
+#ifndef _WIN32
+#include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 using namespace KooRemapper;
 
 namespace {
@@ -88,3 +94,63 @@ TEST(StagedWrite_긴_이름도_쓰고_바꿔_넣고_실패면_임시_파일만_�
     ASSERT_EQ(countTemps(s.root), 0);
     ASSERT_EQ(slurp(dst), std::string("new\n"));
 }
+
+#ifndef _WIN32
+TEST(StagedWrite_SIGTERM_을_받으면_이번_임시_파일을_지우고_그_신호로_끝난다) {
+    SwScratch s("sig");
+    const std::string dst = s.at("out.k");
+    std::ofstream(dst) << "old\n";
+    const pid_t c = ::fork();
+    if (c == 0) {   // 자식 — 임시 파일을 쓰고 바꿔 넣기 전에 스스로 SIGTERM
+        staged_write::StagedFiles st;
+        std::string why;
+        if (!st.writeText(dst, "half\n", why)) ::_exit(3);
+        ::raise(SIGTERM);
+        ::_exit(4);   // 오지 않는다
+    }
+    int status = 0;
+    ASSERT_EQ(::waitpid(c, &status, 0), c);
+    ASSERT_TRUE(WIFSIGNALED(status));
+    ASSERT_EQ(WTERMSIG(status), SIGTERM);
+    ASSERT_EQ(countTemps(s.root), 0);
+    ASSERT_EQ(slurp(dst), std::string("old\n"));
+}
+
+TEST(StagedWrite_sweepStale_은_주인_없는_같은_산출의_임시_파일만_지운다) {
+    SwScratch s("sweep");
+    const std::string dst = s.at("out.k");
+    const auto me = staged_write::detail::self();
+    // 죽은 pid — 끝난 자식의 번호(거둔 뒤라 없다)
+    const pid_t dead = ::fork();
+    if (dead == 0) ::_exit(0);
+    int st = 0;
+    ::waitpid(dead, &st, 0);
+    auto put = [&](const staged_write::detail::Owner& o, const std::string& target) {
+        const std::string n = staged_write::detail::tempBaseName(o, 1, target, "");
+        std::ofstream((s.root / n).string()) << "x";
+        return n;
+    };
+    staged_write::detail::Owner deadOwner{me.host, static_cast<long>(dead), 1};
+    staged_write::detail::Owner reused{me.host, me.pid, me.start + 1};      // 이 프로세스의 번호 · 다른 시작 — 번호를 물려받았다
+    staged_write::detail::Owner other{"0badc0de", static_cast<long>(dead), 1};
+    if (other.host == me.host) other.host = "0badc0df";
+    staged_write::detail::Owner parent{me.host, static_cast<long>(::getppid()), 0};   // 산 프로세스(시작 시각 모름)
+    const std::string gone1 = put(deadOwner, "out.k");
+    const std::string gone2 = put(reused, "out.k");
+    const std::string keepMine = put(me, "out.k");
+    const std::string keepHost = put(other, "out.k");
+    const std::string keepOther = put(deadOwner, "other.k");
+    const std::string keepLive = put(parent, "out.k");
+    std::vector<staged_write::Note> notes;
+    const bool knowsStart = me.start != 0;   // 리눅스 /proc — 모르면 번호를 물려받은 것을 가리지 못해 산 것으로 둔다
+    ASSERT_EQ(staged_write::sweepStale(dst, &notes), knowsStart ? 2 : 1);
+    ASSERT_FALSE(fs::exists(s.root / gone1));
+    ASSERT_EQ(fs::exists(s.root / gone2), !knowsStart);
+    ASSERT_TRUE(fs::exists(s.root / keepMine));
+    ASSERT_TRUE(fs::exists(s.root / keepHost));
+    ASSERT_TRUE(fs::exists(s.root / keepOther));
+    ASSERT_TRUE(fs::exists(s.root / keepLive));
+    ASSERT_EQ(notes.size(), (size_t)1);
+    ASSERT_FALSE(notes[0].warn);
+}
+#endif

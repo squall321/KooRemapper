@@ -16,7 +16,9 @@
 #ifdef _WIN32
 #include <process.h>
 #else
+#include <signal.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -24,6 +26,84 @@ namespace KooRemapper {
 namespace staged_write {
 
 namespace {
+
+namespace fs = std::filesystem;
+
+std::string absOf(const std::string& p) {
+    std::error_code ec;
+    const fs::path a = fs::absolute(fs::path(p), ec);
+    return ec ? p : a.lexically_normal().string();
+}
+
+// ── 신호 때 지울 경로 표 ──────────────────────────────────────────────────────
+// 처리기 안에서는 할당 · 잠금 · stdio 를 쓰지 않는다 — 미리 적어 둔 경로를 unlink 하고 원래 처분으로 되돌려 그 신호를 다시 보낸다
+// (종료 상태가 그 신호다). 플랫폼 취소는 SIGTERM 다음 SIGKILL · 시간 초과는 SIGKILL 이다 — SIGKILL 이 남긴 것은 다음 실행이 치운다
+// (`sweepStale`). 이름에 pid · 시작 시각이 들어 이 프로세스 말고는 그 이름을 만들지 않는다 — 바꿔 넣은 뒤 표에서 빼기 전에 신호가
+// 와도 지우는 것은 없는 이름이다.
+#ifndef _WIN32
+constexpr int kSlots = 32;
+constexpr size_t kPathCap = 4096;
+struct Slot {
+    std::atomic<int> state{0};   // 0 빈 자리 · 1 적는 중 · 2 지울 경로
+    char path[kPathCap];
+};
+Slot g_slot[kSlots];
+static_assert(std::atomic<int>::is_always_lock_free, "신호 처리기가 읽는 표지는 잠금 없이 읽혀야 한다");
+const int kSignals[3] = {SIGTERM, SIGINT, SIGHUP};
+struct sigaction g_prev[3];
+volatile sig_atomic_t g_hooked[3] = {0, 0, 0};
+
+extern "C" void krStagedWriteOnSignal(int sig) {
+    const int saved = errno;
+    for (int i = 0; i < kSlots; ++i)
+        if (g_slot[i].state.load(std::memory_order_acquire) == 2) ::unlink(g_slot[i].path);
+    for (int k = 0; k < 3; ++k)
+        if (kSignals[k] == sig && g_hooked[k]) ::sigaction(sig, &g_prev[k], nullptr);
+    errno = saved;
+    ::raise(sig);   // 처리기를 나가면 원래 처분(보통 끝내기)으로 그 신호가 간다
+}
+
+void hookSignals() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        for (int k = 0; k < 3; ++k) {
+            struct sigaction prev;
+            if (::sigaction(kSignals[k], nullptr, &prev) != 0) continue;
+            // 무시하라던 신호(nohup 의 SIGHUP 등)는 그대로 둔다
+            if (!(prev.sa_flags & SA_SIGINFO) && prev.sa_handler == SIG_IGN) continue;
+            struct sigaction sa;
+            std::memset(&sa, 0, sizeof sa);
+            sa.sa_handler = krStagedWriteOnSignal;
+            sigemptyset(&sa.sa_mask);
+            for (int s : kSignals) sigaddset(&sa.sa_mask, s);
+            g_prev[k] = prev;
+            g_hooked[k] = 1;   // 처리기가 처분을 되돌릴 수 있게 설치 **앞**에 적는다
+            if (::sigaction(kSignals[k], &sa, nullptr) != 0) g_hooked[k] = 0;
+        }
+    });
+}
+
+int arm(const std::string& path) {
+    const std::string a = absOf(path);
+    if (a.empty() || a.size() >= kPathCap) return -1;
+    hookSignals();
+    for (int i = 0; i < kSlots; ++i) {
+        int expect = 0;
+        if (!g_slot[i].state.compare_exchange_strong(expect, 1, std::memory_order_acq_rel)) continue;
+        std::memcpy(g_slot[i].path, a.c_str(), a.size() + 1);
+        g_slot[i].state.store(2, std::memory_order_release);
+        return i;
+    }
+    return -1;   // 표가 찼다 — 그 파일은 신호 때 남고 다음 실행이 치운다
+}
+
+void disarm(int i) {
+    if (i >= 0 && i < kSlots) g_slot[i].state.store(0, std::memory_order_release);
+}
+#else
+int arm(const std::string&) { return -1; }
+void disarm(int) {}
+#endif
 
 // FNV-1a 64 — 이름 해시 · 호스트 표지(암호가 아니다 — 같은 폴더 안에서 산출을 가르는 데 쓴다)
 uint64_t fnv1a(const std::string& s) {
@@ -90,6 +170,17 @@ std::string hostTag() {
     }();
     return tag;
 }
+
+#ifndef _WIN32
+// 주인 프로세스가 살았나 — 모르면 산 것으로 본다(지우지 않는다)
+bool ownerAlive(long pid, unsigned long long start) {
+    if (pid <= 0 || pid > 0x7fffffffL) return true;
+    if (::kill(static_cast<pid_t>(pid), 0) != 0 && errno == ESRCH) return false;
+    const unsigned long long now = procStart(pid);
+    if (now != 0 && start != 0 && now != start) return false;   // 그 번호를 다른 프로세스가 물려받았다 — 주인은 죽었다
+    return true;
+}
+#endif
 
 }  // namespace
 
@@ -169,7 +260,8 @@ bool StagedFiles::reserve(const std::string& dst, const std::string& suffix, std
         const std::string t = dir + detail::tempBaseName(me, ++g_serial, base, suffix);
         std::error_code ec;
         if (std::filesystem::exists(t, ec) || ec) continue;
-        items_.push_back({dst, t});
+        // 신호 때 지울 경로로 먼저 적는다 — 이 이름은 이 프로세스만 만든다(없을 때 unlink 는 아무것도 지우지 않는다)
+        items_.push_back({dst, t, arm(t)});
         writePath = t;
         return true;
     }
@@ -194,6 +286,7 @@ bool StagedFiles::commit(const std::string& dst, std::string& why) {
     std::error_code ec;
     std::filesystem::rename(it->tmp, dst, ec);
     if (ec) { why = ec.message(); return false; }
+    disarm(it->slot);
     items_.erase(it);
     return true;
 }
@@ -203,12 +296,49 @@ void StagedFiles::discard(const std::string& dst) {
         if (it->dst != dst) { ++it; continue; }
         std::error_code ec;
         std::filesystem::remove(it->tmp, ec);
+        disarm(it->slot);
         it = items_.erase(it);
     }
 }
 
 void StagedFiles::discardAll() {
     while (!items_.empty()) discard(items_.front().dst);
+}
+
+// ── 주인 없는 임시 파일 ───────────────────────────────────────────────────────
+int sweepStale(const std::string& dst, std::vector<Note>* notes) {
+#ifdef _WIN32
+    (void)dst;
+    (void)notes;
+    return 0;
+#else
+    if (dst.empty()) return 0;
+    const size_t sep = dst.find_last_of('/');
+    const std::string dir = sep == std::string::npos ? std::string(".") : dst.substr(0, sep + 1);
+    const std::string want = detail::nameHash(sep == std::string::npos ? dst : dst.substr(sep + 1));
+    const detail::Owner me = detail::self();
+    std::vector<std::string> gone;
+    std::error_code ec;
+    for (fs::directory_iterator itr(dir, ec), end; !ec && itr != end; itr.increment(ec)) {
+        const std::string n = itr->path().filename().string();
+        detail::Owner o;
+        std::string h;
+        if (!detail::parseTempName(n, o, h) || h != want || o.host != me.host) continue;   // 다른 산출 · 다른 호스트(잴 수 없다)
+        if (o.pid == me.pid && o.start == me.start) continue;                               // 이 프로세스의 것
+        if (ownerAlive(o.pid, o.start)) continue;                                           // 산 프로세스의 것은 지우지 않는다
+        struct stat lst;
+        if (::lstat(itr->path().c_str(), &lst) != 0 || !S_ISREG(lst.st_mode)) continue;
+        if (::unlink(itr->path().c_str()) == 0) gone.push_back(n);
+    }
+    if (!gone.empty() && notes) {
+        std::string list;
+        for (size_t i = 0; i < gone.size() && i < 3; ++i) list += (i ? " · " : "") + gone[i];
+        if (gone.size() > 3) list += " …";
+        notes->push_back({false, "앞 실행이 끝나지 못하고 남긴 「" + dst + "」 의 임시 파일 " + std::to_string(gone.size()) +
+                                     " 개를 지웠다(주인 프로세스가 없다): " + list});
+    }
+    return static_cast<int>(gone.size());
+#endif
 }
 
 }  // namespace staged_write

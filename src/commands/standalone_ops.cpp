@@ -1936,6 +1936,12 @@ int runApplyCarryoverPlan(const std::string& yamlFile, ConsoleOutput& console) {
         rep.problems.push_back({0, "output_clobber", outClobber});
         return refuse("output 자리에 쓸 수 없다 — 아무것도 쓰지 않았다(보고만 남긴다)");
     }
+    // 앞 실행이 끝나지 못하고(SIGKILL · 시간 초과) 남긴 덱 · 보고의 임시 파일 — 주인 프로세스가 없는 것만 지운다(공용 staged_write)
+    {
+        std::vector<KooRemapper::staged_write::Note> notes;
+        for (const std::string& p : {outPath, reportPath}) KooRemapper::staged_write::sweepStale(p, &notes);
+        for (const auto& n : notes) n.warn ? console.warning(std::string("[") + tag + "] " + n.text) : console.println(std::string("[") + tag + "] " + n.text);
+    }
 
     // 이 op 안의 어떤 예외도 보고를 남기고 덱을 바꿔 넣지 않는다(리뷰 11-07 — map::at 이 보고 없이 rc 1 로 끝났다)
     std::string internal;

@@ -1685,6 +1685,12 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
             return fail("clobber", "번호 지도 자리 「" + mapWrite + "」 에 이 op 의 번호 지도가 아닌 파일이 있다 — 덮지 않는다", {},
                         "그 파일을 옮기거나 output 이름을 바꿔라");
     }
+    // 앞 실행이 끝나지 못하고(SIGKILL · 시간 초과) 남긴 이 산출 · 번호 지도 · 보고의 임시 파일 — 주인 프로세스가 없는 것만 지운다
+    {
+        std::vector<KooRemapper::staged_write::Note> notes;
+        for (const std::string& p : {o.output, mapPathOf, o.reportPath}) KooRemapper::staged_write::sweepStale(p, &notes);
+        for (const auto& n : notes) n.warn ? console.warning(n.text) : console.info(n.text);
+    }
 
     console.info("extract-parts: " + o.model);
 
