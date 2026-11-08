@@ -8755,84 +8755,13 @@ int ModelAssembler::findPartMid(int pid) const {
 }
 
 std::string ModelAssembler::extractMaterialBlock(int origMid, int newMid) const {
-    // Scan rawLines_ for *MAT_* keyword blocks, find the one with origMid, copy with newMid
-    bool inMat = false;
-    bool onFirstData = false;
-    std::string result;
-    std::string header;
-
-    for (const auto& line : rawLines_) {
-        if (!line.empty() && line[0] == '*') {
-            if (inMat && !result.empty()) {
-                // End of material block - return it
-                return result;
-            }
-            inMat = false;
-            onFirstData = false;
-            result.clear();
-            header.clear();
-
-            std::string upper = line;
-            for (auto& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            if (upper.substr(0, 5) == "*MAT_" || upper.substr(0, 4) == "*MAT") {
-                inMat = true;
-                onFirstData = true;
-                header = line;
-                continue;
-            }
-            continue;
-        }
-        if (!inMat) continue;
-        if (!line.empty() && line[0] == '$') {
-            // Comment inside material block - include it
-            if (!result.empty()) result += line + "\n";
-            else header += "\n" + line;  // comment before first data line → append to header
-            continue;
-        }
-        if (onFirstData) {
-            // First data line - check if MID matches
-            // Try to parse first field (MID can be fixed-width or space-sep)
-            int mid = -1;
-            // Try space-sep first
-            std::istringstream iss(line);
-            std::string tok;
-            if (iss >> tok) {
-                try { mid = std::stoi(tok); } catch (...) {}
-            }
-            if (mid != origMid) {
-                inMat = false;
-                result.clear();
-                continue;
-            }
-            // Found our material!
-            result = header + "\n";
-            // Write first data line with newMid substituted
-            // Replace first field in line
-            std::string newLine = line;
-            size_t pos = 0;
-            while (pos < newLine.size() && std::isspace(newLine[pos])) pos++;
-            size_t end = pos;
-            while (end < newLine.size() && std::isdigit(newLine[end])) end++;
-            if (end > pos) {
-                std::string midStr = std::to_string(newMid);
-                // Preserve field width if possible
-                int origWidth = static_cast<int>(end - pos);
-                // Right-align in original width
-                while (static_cast<int>(midStr.size()) < origWidth) midStr = " " + midStr;
-                newLine.replace(pos, end - pos, midStr);
-            }
-            result += newLine + "\n";
-            onFirstData = false;
-            continue;
-        }
-        // Subsequent data lines - copy as-is
-        result += line + "\n";
-    }
-    // End of file with material still open
-    if (inMat && !result.empty()) {
-        return result;
-    }
-    return "";  // Not found
+    // 그 MID 의 **구조 재질** 정의를 newMid 로 베낀다 — 공용 재질 훑기(`matids::copyDefinition` · 11-08 (c)). 같은 번호 TMID 의 열 재질과
+    // `*MAT_ADD_*` 는 고르지 않고, `_TITLE` 재질은 제목 줄을 건너 MID 를 읽고, MID 칸은 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 **첫**
+    // `*MAT` 블록을 베껴 열 카드 · 덧붙임 카드가 앞이면 그것을 IGA 재질로 냈고, `_TITLE` 재질은 제목을 MID 로 읽어 못 찾아 빈 재질(0 물성)을
+    // 냈고, 자리가 늘어난 MID(9 → 10)는 칸을 한 글자 밀어 RO 칸을 깨뜨렸다. 주 덱에 없으면 인클루드 파일에서 찾는다.
+    std::string out = matids::copyDefinition(rawLines_, origMid, newMid);
+    for (size_t k = 0; out.empty() && k < incl_.files.size(); ++k) out = matids::copyDefinition(incl_.files[k].lines, origMid, newMid);
+    return out;
 }
 
 std::string ModelAssembler::generateIGAContent(

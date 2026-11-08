@@ -326,7 +326,9 @@ operations:
       - target_pid: 1
         element_size: 4.0
 """}),
-   cmds=[BOX_CMD, "KooRemapper iga iga.yaml"], outputs=["box_iga.k"])
+   cmds=[BOX_CMD, "KooRemapper iga iga.yaml"], outputs=["box_iga.k"],
+   notes=["IGA 재질은 원 파트 MID 의 구조 재질을 새 MID 로 베낀다(2026-11-08) — 같은 번호 TMID 의 열 재질 · *MAT_ADD_* 는 고르지 않고 _TITLE",
+          "  재질도 찾으며(주 덱에 없으면 인클루드) MID 칸만 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 첫 *MAT 블록을 베꼈다"])
 
 # ── 표면·재메시 ──
 op("extract-surface", "표면·재메시", "솔리드 파트의 윗면/아랫면/전체 표면을 셸로 추출", "표면추출 surface shell 면",

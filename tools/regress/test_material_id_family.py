@@ -17,6 +17,7 @@
   A matswap(단독 · assemble) — 옛 MID 의 구조 재질 정의만 지운다(같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임 · 쌓인 다른 재질은 둔다 ·
     MID 꼴 덧붙임은 번호를 다시 쓰면 두고 재질이 사라지면 지운다 · 지운 뒤에도 쓰이는 번호는 다시 주지 않는다)
   B cclip — 같은 규칙(클립은 새 MID 를 받아 옛 재질이 사라진다 — MID 꼴 덧붙임도 지운다)
+  C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 카드 · 덧붙임 카드가 앞이어도) · `_TITLE` 재질 · MID 칸 폭 그대로
 
 usage: test_material_id_family.py <KooRemapper 바이너리>
 """
@@ -335,6 +336,59 @@ def part_b(binary, tmp):
           rc == 0 and k["erosion"] == [], (rc, k))
 
 
+def iga_material(path):
+    """IGA 패치 파일의 재질 블록 — (키워드, MID 칸 10자, RO 칸 10자)."""
+    L = open(path, encoding="utf-8").read().split("\n") if os.path.exists(path) else []
+    for i, l in enumerate(L):
+        if not l.startswith("*MAT"):
+            continue
+        j, title = i + 1, l.strip().upper().endswith("_TITLE")
+        while j < len(L) and L[j].startswith("$"):
+            j += 1
+        if title:
+            j += 1
+            while j < len(L) and L[j].startswith("$"):
+                j += 1
+        return l.strip().upper(), (L[j][:10] if j < len(L) else ""), (L[j][10:20] if j < len(L) else "")
+    return None, "", ""
+
+
+def part_c(binary, tmp):
+    print("[C IGA 재질 베끼기 — 그 MID 의 구조 재질(열 재질 · 덧붙임 카드는 고르지 않는다 · _TITLE · 칸 폭)]")
+    iga = "base_model: box.k\noutput: o\noperations:\n  - type: iga\n    targets:\n      - target_pid: 1\n        element_size: 5.0\n"
+
+    def first(text, front):
+        """재질 카드들(front)을 상자의 *MAT_ELASTIC 앞에 둔다 — 첫 칸이 그 MID 인 첫 *MAT 블록이 구조 재질이 아니게."""
+        return text.replace("*MAT_ELASTIC", front + "*MAT_ELASTIC", 1)
+
+    cases = [
+        ("C-1 같은 번호 TMID 의 *MAT_T01 이 앞에 있다 — 구조 재질(*MAT_ELASTIC)을 베낀다(예전 열 카드)",
+         lambda b: first(b, T01 % 1), "mid: 1", "*MAT_ELASTIC"),
+        ("C-2 같은 번호의 *MAT_ADD_EROSION 이 앞에 있다 — 구조 재질을 베낀다(예전 덧붙임 카드)",
+         lambda b: first(b, "*MAT_ADD_EROSION\n         1\n"), "mid: 1", "*MAT_ELASTIC"),
+        ("C-3 *MAT_ELASTIC_TITLE 재질 — 제목 줄을 건너 찾아 베낀다(예전 못 찾아 0 물성 빈 재질)",
+         lambda b: b.replace("*MAT_ELASTIC\n", "*MAT_ELASTIC_TITLE\nSTEEL\n", 1), "mid: 1", "*MAT_ELASTIC_TITLE"),
+    ]
+    for k, (name, edit, mid, want) in enumerate(cases):
+        d = fresh(tmp, "c%d" % k)
+        box(binary, d, yaml=BOX.replace("mid: 1", mid))
+        p = os.path.join(d, "box.k")
+        body = open(p, encoding="utf-8").read()
+        open(p, "w", encoding="utf-8").write(edit(body))
+        open(os.path.join(d, "i.yaml"), "w").write(iga)
+        rc, out = run(binary, d, "assemble", "i.yaml")
+        kw, midf, ro = iga_material(os.path.join(d, "o_iga_p1.k"))
+        check(name, rc == 0 and kw == want and ro.strip().lower().startswith("7.85"), (rc, kw, midf, ro, out[-300:]))
+    # 자리가 늘어나는 새 MID(9 → 10) — MID 칸을 칸 폭 그대로 바꾼다(예전엔 한 글자 밀려 RO 칸이 깨졌다)
+    d = fresh(tmp, "c3")
+    box(binary, d, yaml=BOX.replace("mid: 1", "mid: 9"))
+    open(os.path.join(d, "i.yaml"), "w").write(iga)
+    rc, out = run(binary, d, "assemble", "i.yaml")
+    kw, midf, ro = iga_material(os.path.join(d, "o_iga_p1.k"))
+    check("C-4 MID 9 → 새 MID 10 — MID 칸 `        10` · RO 칸 그대로(예전 한 글자 밀렸다)",
+          rc == 0 and midf == "        10" and ro.strip().lower().startswith("7.85"), (rc, kw, repr(midf), repr(ro), out[-300:]))
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -346,6 +400,7 @@ def main():
         part_d(binary, tmp)
         part_a(binary, tmp)
         part_b(binary, tmp)
+        part_c(binary, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()
