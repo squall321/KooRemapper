@@ -376,7 +376,7 @@ r_tolerance: 0.5
 )KRH"}},
      {"KooRemapper cnrb2solid cnrb.yaml"},
      {"examples/cnrb2solid/bolt_simple.k"},
-     {"입력 모델에 원형으로 배치된 *CONSTRAINED_NODAL_RIGID_BODY 가 있어야 한다. 헤드는 head_offset_r·head_thickness·head_position"}},
+     {"입력 모델에 원형으로 배치된 *CONSTRAINED_NODAL_RIGID_BODY 가 있어야 한다. 헤드는 head_offset_r·head_thickness·head_position", "주 덱의 첫 *END 앞만 읽는다(CNRB · 절점 · 세트) — 그 뒤의(읽히지 않는) CNRB 는 바꾸지 않고 그 자리에 둔다"}},
     {"merge", "표면·재메시", "적층 파트들을 하나의 균질화 재질 층으로 병합 (voigt/reuss/vrh)", "병합 균질화 homogenize", "KooRemapper merge <config.yaml>",
      {{"merge.yaml", R"KRH(model: examples/merge/three_layer.k
 output: three_layer_merged.k

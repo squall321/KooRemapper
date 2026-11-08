@@ -870,10 +870,13 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
     cs_widthOverflowCount = 0;
     cs_widthOverflowMax = 0;
 
-    // Build lookup structures
-    auto allNodes  = cs_parseNodes(lines);
-    auto nodeSets  = cs_parseNodeSets(lines);
-    auto cnrbs     = cs_parseCnrbs(lines);
+    // Build lookup structures — ★주 덱의 첫 *END 앞만 읽는다(LS-DYNA 는 거기서 멈춘다). 덱 전체를 읽어, 첫 *END 뒤의 읽히지 않는
+    //   CNRB 를 산 솔리드로 바꿔 첫 *END 앞에 넣고 그 PNODE 를 *NODE 에서 지웠다(2026-11-08 재검토 TCN_dead). 줄 차례는 앞부분이라 그대로다
+    const size_t liveEnd = KooRemapper::deckscan::firstEndLine(lines);
+    const std::vector<std::string> live(lines.begin(), lines.begin() + static_cast<std::ptrdiff_t>(liveEnd));
+    auto allNodes  = cs_parseNodes(live);
+    auto nodeSets  = cs_parseNodeSets(live);
+    auto cnrbs     = cs_parseCnrbs(live);
 
     if (cnrbs.empty()) {
         console.println("[cnrb2solid] No *CONSTRAINED_NODAL_RIGID_BODY found.");
@@ -925,9 +928,9 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
     for (auto& rng : removeRanges)
         for (size_t i = rng.first; i < rng.second; ++i) rm[i] = true;
 
-    // --- Remove PNODE lines from *NODE section ---
+    // --- Remove PNODE lines from *NODE section (첫 *END 앞만 — 그 뒤 줄은 그대로 둔다) ---
     bool inNodeSection = false;
-    for (size_t i = 0; i < lines.size(); ++i) {
+    for (size_t i = 0; i < liveEnd; ++i) {
         if (rm[i]) continue;
         std::string tr = cs_trim(lines[i]);
         if (tr.empty()) continue;
@@ -1054,8 +1057,9 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     //   냈다(실측). 고쳐 쓰는 op 은 주 덱만 고치므로 펼치라고 말한다.
     if (!flat.active()) {
         auto hasCnrb = [](const std::vector<std::string>& L) {
-            for (const auto& l : L) {
-                const std::string t = cs_trim(l);
+            const size_t end = KooRemapper::deckscan::firstEndLine(L);   // 첫 *END 뒤는 읽히지 않는다(죽은 CNRB 는 세지 않는다)
+            for (size_t i = 0; i < end; ++i) {
+                const std::string t = cs_trim(L[i]);
                 if (t.size() > 1 && t[0] == '*') {
                     std::string up = t;
                     for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));

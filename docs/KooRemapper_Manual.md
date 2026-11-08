@@ -4194,6 +4194,10 @@ KooRemapper cnrb2solid <config.yaml>
 
 **근거**: pyKooCAE `surface_remesh.md`, `docs/cnrb2solid_concept.md`, `examples/cnrb2solid/*.yaml`. 재료값(E/PR/RHO)은 변환 없이 그대로 쓰이므로 모델 단위계와 일치시켜야 한다.
 
+★주 덱의 **첫** `*END` 앞만 읽는다(CNRB · 절점 · 절점 세트) — LS-DYNA 는 거기서 읽기를 멈춘다. 그 뒤의 CNRB 는 바꾸지 않고 그 자리에
+둔다(2026-11-08 전엔 덱 전체를 읽어 첫 `*END` 뒤의 읽히지 않던 CNRB 를 산 솔리드 · 접촉으로 바꿔 첫 `*END` 앞에 넣고 그 PNODE 를
+`*NODE` 에서 지웠다 · 회귀 `test_end_insert_once.py` cnrb2solid-dead · live_dead). 새 카드는 첫 `*END` 앞에 한 번 넣는다(§3.1(k)).
+
 ---
 
 ### 43.4 hfdamp — 고주파 댐핑

@@ -17,6 +17,7 @@
     · 단독 squeeze 의 덧붙임(dynain `*INCLUDE` · `*MAT_ADD_THERMAL_EXPANSION` · `*INITIAL_TEMPERATURE_NODE` · DR · `*CONTROL_TERMINATION` ·
       `*DATABASE_BINARY_D3DRLF`) · map 의 prestress 훅(`*INCLUDE <dynain>`) — `*END` 마다 넣었다. 메시 쓰기가 첫 `*END` 뒤를 남기게 된 뒤로
       `*END` 가 둘인 덱에 두 벌이 나갔다(2026-11-08 재검토). 이제 공용 `deckscan` 으로 첫 `*END` 앞에 한 번.
+    · cnrb2solid — 덱 전체를 읽어 첫 `*END` 뒤의(읽히지 않는) CNRB 를 산 솔리드로 바꿨다(그 PNODE 도 지웠다). 이제 첫 `*END` 앞만 읽는다.
 
 무엇을 보나.
   `*END` 가 둘인 덱 — 넣은 카드 수가 `*END` 하나인 덱과 같고, 넣은 카드가 다 첫 `*END` 앞에 있다(contact · boundary · rbe) ·
@@ -191,6 +192,48 @@ def main():
                   rc2 == 0 and n2 == n1 and before2 and len(ends2) == 2, (rc2, n2, before2, ends2, t2[-300:]))
             check("%s-3 *END 가 없는 덱 — 덧붙임을 끝에 붙이고 *END 를 쓴다" % name,
                   rc0 == 0 and n0 == n1 and before0 and len(ends0) == 1, (rc0, n0, before0, ends0, t0[-300:]))
+
+        # cnrb2solid — 첫 *END 뒤의 CNRB 는 읽히지 않는다: 바꾸지 않고(PNODE 도 그대로) 그 자리에 둔다(2026-11-08 재검토 TCN_dead)
+        print("[cnrb2solid — 첫 *END 뒤의 죽은 CNRB]")
+
+        def node_lines(Ls):
+            """첫 *END 앞 *NODE 블록의 데이터 줄 수."""
+            n, on = 0, False
+            for l in Ls:
+                if l.startswith("*"):
+                    if l.upper().startswith("*END"):
+                        break
+                    on = l.upper().split()[0] == "*NODE"
+                    continue
+                if on and l.strip() and not l.lstrip().startswith("$"):
+                    n += 1
+            return n
+        bl = bolt.splitlines()
+        c0 = next(i for i, l in enumerate(bl) if l.upper().startswith("*CONSTRAINED_NODAL_RIGID_BODY"))
+        c1 = next(i for i in range(c0 + 1, len(bl)) if bl[i].startswith("*"))
+        cnrb_blk, rest = bl[c0:c1], bl[:c0] + bl[c1:]
+        e0 = next(i for i, l in enumerate(rest) if l.upper().startswith("*END"))
+        dead_only = rest[:e0 + 1] + cnrb_blk + ["*END"]
+        live_dead = bl[:next(i for i, l in enumerate(bl) if l.upper().startswith("*END")) + 1] + \
+            [cnrb_blk[0], cnrb_blk[1]] + [cnrb_blk[2].replace(cnrb_blk[2][:10], "%10d" % 777, 1)] + cnrb_blk[3:] + ["*END"]
+        for tag, deck_lines, want_solids in (("dead", dead_only, 0), ("live_dead", live_dead, 1)):
+            write(os.path.join(d, "cn_%s.k" % tag), "\n".join(deck_lines) + "\n")
+            write(os.path.join(d, "cn_%s.yaml" % tag), "model: cn_%s.k\noutput: cn_%s_out.k\nE: 200000.0\nPR: 0.3\nRHO: 7.85e-9\n"
+                                                         "radius_scale: 0.999\nnum_circum_nodes: 8\ninner_radius_ratio: 0.3\n"
+                                                         "axis_direction: auto\nz_tolerance: 0.1\nr_tolerance: 0.5\n" % (tag, tag))
+            rc, text = run(binary, d, "cnrb2solid", "cn_%s.yaml" % tag)
+            L = lines_of(os.path.join(d, "cn_%s_out.k" % tag))
+            fe = first_end(L)
+            solids = [i for i in kw_rows(L, "*ELEMENT_SOLID") if i < fe]
+            cn_after = [i for i in kw_rows(L, "*CONSTRAINED_NODAL_RIGID_BODY") if i > fe]
+            src_nodes, out_nodes = node_lines(deck_lines), node_lines(L)
+            if tag == "dead":
+                check("cnrb2solid-dead ★첫 *END 뒤의 CNRB 만 있는 덱 — 바꾸지 않는다(솔리드 0 · PNODE 그대로 · CNRB 는 첫 *END 뒤에 그대로)",
+                      rc == 0 and not solids and out_nodes == src_nodes and len(cn_after) == 1, (rc, solids, src_nodes, out_nodes, cn_after, text[-300:]))
+            else:
+                check("cnrb2solid-live_dead ★산 CNRB 만 바꾸고 첫 *END 뒤의 CNRB(PID 777)는 그 자리에 둔다",
+                      rc == 0 and len(solids) == want_solids and len(cn_after) == 1 and "       777" in L[cn_after[0] + 2],
+                      (rc, solids, cn_after, text[-300:]))
 
         # map(KFileWriter) — 첫 *END 뒤의 카드는 산출에서도 첫 *END 뒤에 남는다(읽히지 않던 것을 살리지 않는다)
         print("[map — 메시 쓰기(KFileWriter)]")
