@@ -1902,10 +1902,10 @@ static int runMain(int argc, char* argv[]) {
             std::string alignLow = bboxAlignMode;
             for (auto& c : alignLow) c = (char)std::tolower((unsigned char)c);
             // 앞처리 평판 임시 파일 — flip_input 이나 bbox_align: source 가 평판을 바꾸면 runMapping 이 쓴다
-            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".__preproc_flat.k");
+            if (flipInX || flipInY || flipInZ || alignLow == "source") writes.push_back(outputPath + ".kr_tmp_preproc_flat.k");
             const bool chain = yamlMode && pre_enabled && !pre_output.empty();
             if (chain) {
-                if (flipX || flipY || flipZ) writes.push_back(outputPath + ".__flipped_ref.k");
+                if (flipX || flipY || flipZ) writes.push_back(outputPath + ".kr_tmp_flipped_ref.k");
                 // ★고리 prestress 가 쓸 이름은 재료가 있는지에 달렸다 — runPrestress 와 같은 판정을 map 이 쓰기 **전에** 한다(2026-11-07).
                 //   예전엔 재료가 없을 때 CSV(prestress.output 그 자리)가 map 산출을 덮는 것을 map 이 산출을 쓴 뒤에야 보았다.
                 //   재료가 있으면 메시 사본이 map 산출 그 자리인 것은 문서의 쓰임이다(foo.k + foo.dynain)
@@ -2002,7 +2002,7 @@ static int runMain(int argc, char* argv[]) {
             }
             bool needFlipRef = (flipX || flipY || flipZ);
             if (needFlipRef) {
-                tempRefPath = outputPath + ".__flipped_ref.k";
+                tempRefPath = outputPath + ".kr_tmp_flipped_ref.k";   // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다(2026-11-08)
                 std::cout << "\n";
                 console.info("Generating flip-aligned reference for prestress: "
                              + tempRefPath);

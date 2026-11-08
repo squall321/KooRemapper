@@ -56,7 +56,7 @@ op("map", "메시 매핑", "평면 상세 메시를 굽힌 구조화 HEX8 참조
           "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다.",
           "  재료가 없으면(E · nu 없음 · 기준에 K-파일 재료 없음) 고리는 prestress.output 자리에 CSV 만 쓴다 — 그것이 map 산출과",
           "  겹치는 것도 map 이 쓰기 전에 거절한다(2026-11-07)",
-          "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.__preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리",
+          "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.kr_tmp_preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리",
           "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다",
           "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일",
           "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)"])
@@ -373,9 +373,9 @@ warn_min_jac: 0.15
           "  못 풀면(내부 절점 · 인클루드 안 · 자유형식 줄) 덱을 쓰지 않고 rc 1 · 그 줄을 짚는다(`info --strict` 와 같은 칸 표)",
           "`preview: true` — gmsh 없이 그 카드를 미리 짚는다(표면 = gmsh 에 달림 · 내부 = 멈춘다). 덱을 쓰지 않는다",
           "  표면 절점이면 `boundary_nodes: fixed` 가 짝을 찾은 원래 번호를 지킨다",
-          "output · 임시 파일(<줄기>__mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —",
+          "output · 임시 파일(<줄기>.kr_tmp_mf.stl/.geo/.msh/.log)이 model · 그 인클루드 · 설정과 같은 파일이면 gmsh 를 돌리기 전에 rc 1 —",
           "  예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 산출을 지우며 모델을 지웠다(2026-11-07)",
-          "  polish: true 면 polish 임시 파일(<줄기>__pol<회차>_<덩어리>.stl/.geo/.msh/.log) 꼴의 입력이 산출 폴더에 있어도 rc 1"])
+          "  polish: true 면 polish 임시 파일(<줄기>.kr_tmp_pol<회차>_<덩어리>.stl/.geo/.msh/.log) 꼴의 입력이 산출 폴더에 있어도 rc 1"])
 op("cnrb2solid", "표면·재메시", "CNRB(절점 강체) 볼트를 HEX8 솔리드 원통 + tied 접촉으로 변환", "볼트 bolt cnrb 원통",
    "KooRemapper cnrb2solid <config.yaml>",
    needs=["examples/cnrb2solid/bolt_simple.k"],

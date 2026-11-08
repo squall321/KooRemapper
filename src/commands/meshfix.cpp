@@ -2054,7 +2054,8 @@ static bool polishMesh(
             for (auto& f:bndFaces) for (int ni:f) bndNodeIds.insert(ni);
 
             // Temp file names include iter+component index
-            std::string tag="__pol"+std::to_string(iter)+"_"+std::to_string(ci);
+            // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다(죽은 잡이 남겨도 · 2026-11-08)
+            std::string tag=".kr_tmp_pol"+std::to_string(iter)+"_"+std::to_string(ci);
             auto pp=[&](const std::string& ext){
                 return (fs::path(workDir)/(stem+tag+ext)).string();
             };
@@ -2288,7 +2289,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     // .geo 문자열에는 " 를 escape 할 방법이 없다 — 임시 파일 이름에서만 뺀다(출력 이름은 그대로)
     for (auto& c : stem) if (c == '"') c = '_';
     auto tempPath = [&](const std::string& ext) {
-        return (outDir / (stem + "__mf" + ext)).string();
+        return (outDir / (stem + ".kr_tmp_mf" + ext)).string();   // `.kr_tmp_` 표지 — 플랫폼이 산출로 올리지 않는다(2026-11-08)
     };
     std::string stlPath = tempPath(".stl");
     std::string geoPath = tempPath(".geo");
@@ -2301,11 +2302,11 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath},
                                           KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
         return 1;
-    // ★polish 의 임시 파일 `<줄기>__pol<회차>_<덩어리>.{stl,geo,msh,log}`(Windows 는 `.log.bat` 도 — 쓴 뒤 지운다)은 회차 · 덩어리 수가
+    // ★polish 의 임시 파일 `<줄기>.kr_tmp_pol<회차>_<덩어리>.{stl,geo,msh,log}`(Windows 는 `.log.bat` 도 — 쓴 뒤 지운다)은 회차 · 덩어리 수가
     //   gmsh 를 돌려 봐야 정해진다 — 그 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있으면 쓰기 전에 거절한다(2026-11-07)
     if (!cfg.preview && cfg.polish) {
         auto polishTemp = [&](const std::string& name) {
-            const std::string head = stem + "__pol";
+            const std::string head = stem + ".kr_tmp_pol";
             if (name.compare(0, head.size(), head) != 0) return false;
             size_t i = head.size();
             auto digits = [&]() { const size_t a = i; while (i < name.size() && std::isdigit((unsigned char)name[i])) ++i; return i > a; };
@@ -2319,7 +2320,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
             const fs::path ip(in.path);
             const std::string dir = ip.parent_path().empty() ? std::string(".") : ip.parent_path().string();
             if (!polishTemp(ip.filename().string()) || !KooRemapper::include_closure::sameFile(dir, outDir.string())) continue;
-            console.error("[meshfix] polish 의 임시 파일 이름(" + stem + "__pol<회차>_<덩어리>.stl · .geo · .msh · .log)이 읽는 파일 「" +
+            console.error("[meshfix] polish 의 임시 파일 이름(" + stem + ".kr_tmp_pol<회차>_<덩어리>.stl · .geo · .msh · .log)이 읽는 파일 「" +
                           in.path + "」(" + in.role + ") 과 같은 꼴이다 — polish 가 그 파일을 덮고 지운다(아무 파일도 쓰지 않았다)");
             console.info("[meshfix] output 이름(줄기)을 바꾸거나 그 입력의 이름을 바꿔라");
             return 1;

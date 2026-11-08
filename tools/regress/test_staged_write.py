@@ -32,6 +32,10 @@
   F 제자리 쓰기로 넘어간 뒤의 임시 파일 — 잡은 뒤 폴더가 읽기 전용이 되면 이름 바꾸기가 EACCES 라 그 파일에 제자리로 쓰는데, 같은 까닭으로
     임시 파일을 못 지워 꽉 찬 채 rc 0 · 말없이 남았다(여섯째 검토 S11). 이제 0 바이트로 비우고 [WARN] 로 말하며, 폴더에 쓸 수 있게 된
     다음 실행이 지운다.
+  T 임시 파일 이름 표지 — 플랫폼은 `.kr_tmp_` 가 든 파일만 산출로 올리지 않는다. map 의 앞처리 평판(`.__preproc_flat.k`) · 뒤집은 기준
+    (`.__flipped_ref.k`) · 펼친 덱(`.kr_flat_`) · meshfix 의 gmsh 왕복(`__mf.*`) · polish(`__pol<회차>_<덩어리>.*`)는 표지가 없어 SIGKILL 된
+    잡이 남기면 산출로 올라갔다(여섯째 검토 — runner 의 걸러내기). 이름에 표지를 붙였다 — strace 로 실행이 만들었다 지운 파일을 모아
+    모두 `.kr_tmp_` 를 지녔는지 본다(strace 가 없으면 건너뛴다).
   W 쓰기 오류 — 쓰기 · 닫기 결과를 보지 않아 디스크가 차거나 파일 크기 상한(RLIMIT_FSIZE · SIGXFSZ 무시 — ENOSPC · EDQUOT 의
     대역)에 걸려 잘린 덱을 rc 0 · ok 로 바꿔 넣었다(여섯째 검토 S2 — extract-parts 는 `*NODE` 가운데서 끊긴 덱 · 이월 적용은 마지막
     새 섹션을 잃은 덱). 이제 바꿔 넣지 않고 rc 1 · 보고가 그 오류를 말한다. 바로 쓰는 op(DeckWriter · writeOutput)도 rc 1.
@@ -814,6 +818,80 @@ def sec_f(binary):
               rc2 == 0 and not [n for n in os.listdir(o) if ".kr_tmp_" in n], (rc2, os.listdir(o), said2[-300:]))
 
 
+# ── T 임시 파일 이름 표지 ────────────────────────────────────────────────────
+def traced(binary, d, args, env=None):
+    """strace 로 돌려 이 실행이 d 아래에 만들었다가 끝에 없는 파일(임시 파일)을 모은다 — (rc, 말, 임시 파일 이름들)."""
+    import re
+    trace = d.rstrip("/") + ".strace"
+    p = subprocess.run(["strace", "-f", "-qq", "-o", trace, "-e", "trace=open,openat,creat", binary, *args], cwd=d,
+                       capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace", env=env)
+    made = set()
+    for line in open(trace, encoding="utf-8", errors="replace"):
+        m = re.search(r'\b(open|openat|creat)\((?:AT_FDCWD, )?"([^"]+)"(?:, ([A-Z_|]+))?', line)
+        if not m or re.search(r"= -1 ", line):
+            continue
+        if m.group(1) != "creat" and "O_CREAT" not in (m.group(3) or ""):
+            continue
+        made.add(os.path.normpath(m.group(2) if m.group(2).startswith("/") else os.path.join(d, m.group(2))))
+    os.remove(trace)
+    gone = sorted(os.path.basename(x) for x in made if x.startswith(os.path.normpath(d) + os.sep) and not os.path.exists(x))
+    return p.returncode, p.stdout + p.stderr, gone
+
+
+def sec_t(binary):
+    print("[T] 임시 파일 이름 표지 — 실행이 만들었다 지운 파일은 모두 .kr_tmp_ 를 지닌다(플랫폼이 산출로 올리지 않는다)")
+    if not shutil.which("strace"):
+        check("T — strace 가 없다(건너뜀)", True)
+        return
+    gmsh = os.environ.get("KOOREMAPPER_GMSH") or os.environ.get("KOOREMAPPER_TEST_GMSH")
+    cases = []
+    # map — bbox_align: source(앞처리 평판) · flip_x(뒤집은 기준)이 prestress 고리와
+    d = os.path.join(TMP, "T_map")
+    os.makedirs(d)
+    run(binary, d, "generate", "--dim-i", "10", "--dim-j", "4", "arc", "demo")
+    flat = open(os.path.join(d, "demo_flat_fine.k"), encoding="utf-8").read().splitlines()
+    sec, out = "", []
+    for ln in flat:   # x 를 0.5% 늘린 평판(크기를 맞추는 갈래가 돈다) — 재료 카드는 그대로
+        if ln.startswith("*"):
+            sec = ln.strip().upper()
+        if sec == "*NODE" and not ln.startswith("*") and not ln.startswith("$") and len(ln) >= 56:
+            ln = ln[:8] + "%16.9e" % (float(ln[8:24]) * 1.005) + ln[24:]
+        out.append(ln)
+    write(os.path.join(d, "flat_s.k"), "\n".join(out) + "\n")
+    write(os.path.join(d, "src.yaml"), "bent: demo_bent.k\nflat: flat_s.k\noutput: m1.k\nbbox_align: source\nbbox_align_max_drift: 50\n"
+                                       "prestress:\n  enabled: true\n  output: m1.dynain\n  E: 210000.0\n  nu: 0.3\n")
+    write(os.path.join(d, "flip.yaml"), "bent: demo_bent.k\nflat: demo_flat_fine.k\noutput: m2.k\nflip_x: true\n"
+                                        "prestress:\n  enabled: true\n  output: m2.dynain\n  E: 210000.0\n  nu: 0.3\n")
+    cases += [("map bbox_align: source", d, ("map", "src.yaml"), "kr_tmp_preproc_flat", None),
+              ("map flip_x 고리", d, ("map", "flip.yaml"), "kr_tmp_flipped_ref", None)]
+    # 펼친 덱 — elform 의 flatten_includes
+    d = os.path.join(TMP, "T_flat")
+    os.makedirs(d)
+    write(os.path.join(d, "box.yaml"), "output: box.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 4\nny: 2\nnz: 1\nrho: 7.85e-9\nE: 210000.0\n"
+                                       "nu: 0.3\nmid: 1\nsecid: 1\npid: 1\npart_title: PLATE\n")
+    run(binary, d, "generate", "box", "box.yaml")
+    body = [l for l in open(os.path.join(d, "box.k"), encoding="utf-8").read().splitlines() if l.strip().upper() not in ("*KEYWORD", "*END")]
+    write(os.path.join(d, "body.k"), "\n".join(body) + "\n")
+    write(os.path.join(d, "main.k"), "*KEYWORD\n*INCLUDE\nbody.k\n*END\n")
+    write(os.path.join(d, "el.yaml"), "base_model: main.k\noutput: el\nflatten_includes: true\noperations:\n  - type: elform\n    target_elform: 2\n")
+    cases.append(("elform flatten_includes", d, ("elform", "el.yaml"), "kr_tmp_flat_", None))
+    # meshfix — gmsh 왕복 · polish
+    if gmsh and os.path.exists(gmsh):
+        env = dict(os.environ, KOOREMAPPER_GMSH=gmsh)
+        for tag, extra in (("meshfix", ""), ("meshfix polish", "polish: true\n")):
+            d = os.path.join(TMP, "T_" + tag.replace(" ", "_"))
+            os.makedirs(d)
+            shutil.copy(os.path.join(REPO, "examples", "mesh", "tetramesh.k"), d)
+            write(os.path.join(d, "mf.yaml"), "model: tetramesh.k\noutput: mf_out.k\npid: 1\n" + extra)
+            cases.append((tag, d, ("meshfix", "mf.yaml"), "kr_tmp_pol" if extra else "kr_tmp_mf", env))
+    else:
+        check("T meshfix — gmsh 가 없다(KOOREMAPPER_GMSH · 건너뜀)", True)
+    for tag, d, args, want, env in cases:
+        rc, said, gone = traced(binary, d, args, env)
+        check("T %s — rc 0 · 만들었다 지운 파일 %d 개가 모두 .kr_tmp_ 를 지닌다(%s 가 그 가운데 있다)" % (tag, len(gone), want),
+              rc == 0 and gone and all(".kr_tmp_" in n for n in gone) and any(want in n for n in gone), (rc, gone[:6], said[-300:]))
+
+
 # ── W 쓰기 오류 ──────────────────────────────────────────────────────────────
 def run_fsize(binary, d, args, limit):
     """파일 크기 상한(SIGXFSZ 무시 — 넘는 쓰기가 EFBIG 로 짧게 끝난다)으로 돌린다."""
@@ -906,6 +984,7 @@ def main():
         sec_w(binary)
         sec_d(binary)
         sec_f(binary)
+        sec_t(binary)
     finally:
         for w, ds, _ in os.walk(TMP):   # 읽기 전용으로 둔 폴더도 지운다
             for x in ds:

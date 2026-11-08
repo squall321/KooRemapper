@@ -737,9 +737,10 @@ async def _execute(job_id: str) -> None:
             # 산출로 올리지 않는다(HWAX 답신 ② 덧붙임, 10-23 결정).
             if base.startswith(".nfs"):
                 continue
-            # 바이너리가 바꿔 넣기 전에 쓰는 임시 파일(`*.kr_tmp_*` — extract-parts · apply_carryover_plan 의 공용 staged_write)과 그
-            # 잠금 파일은 산출이 아니다. 취소(SIGTERM → SIGKILL) · 시간 초과(SIGKILL)된 잡이 반쯤 쓴 채 남길 수 있다 — 다음 실행이 주인
-            # 프로세스가 없는 것을 지운다(3차 검토 TPLAT, 11-08 — 그때까지 반쯤 쓴 덱이 산출로 올라갔다).
+            # 바이너리의 임시 파일(`*.kr_tmp_*`)은 산출이 아니다 — 바꿔 넣기 전의 산출 · 보고와 그 잠금 파일(extract-parts ·
+            # apply_carryover_plan 의 공용 staged_write), map 의 앞처리 평판 · 뒤집은 기준, flatten_includes 의 펼친 덱, meshfix 의 gmsh
+            # 왕복 · polish 파일이 다 이 표지를 지닌다(11-08 — 이름을 맞춰 규칙 하나로 덮는다). 취소(SIGTERM → SIGKILL) · 시간 초과
+            # (SIGKILL)된 잡이 반쯤 쓴 채 남길 수 있다(3차 검토 TPLAT · 여섯째 검토 — 그때까지 반쯤 쓴 덱이 산출로 올라갔다).
             if ".kr_tmp_" in base:
                 continue
             fid = await _register_file(

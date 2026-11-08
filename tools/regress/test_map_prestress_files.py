@@ -13,7 +13,7 @@
 무엇을 보나.
   P — prestress 의 메시 사본 · CSV 가 `<output 에서 파일 이름의 확장자를 뗀 이름>.k` · `.csv` 로 나가고, 폴더 이름의 점이나
       `./` 의 점을 확장자로 보지 않는다.
-  B — `bbox_align: source` 로 크기를 바꾸면 고리 prestress 의 기준이 `<output>.__preproc_flat.k` 이고(끝나면 지운다), 평판의
+  B — `bbox_align: source` 로 크기를 바꾸면 고리 prestress 의 기준이 `<output>.kr_tmp_preproc_flat.k` 이고(끝나면 지운다), 평판의
       K-파일 재료는 예전처럼 그대로 쓴다. 대조 — bbox_align 이 없으면 기준은 평판 그대로다.
 
 usage: test_map_prestress_files.py <KooRemapper 바이너리>
@@ -103,11 +103,11 @@ def map_bbox_source(binary, root):
     with open(os.path.join(d, "b1.yaml"), "w") as f:
         f.write(base % ("m1", src, "m1", en))
     rc, out = run(binary, d, "map", "b1.yaml")
-    check("B-1 source 로 크기를 바꾸면 고리 기준이 m1.k.__preproc_flat.k (예전엔 크기를 맞추기 전 flat_s.k)",
-          rc == 0 and "Applied scale to detail flat" in out and "Reference (flat): m1.k.__preproc_flat.k" in out,
+    check("B-1 source 로 크기를 바꾸면 고리 기준이 m1.k.kr_tmp_preproc_flat.k (예전엔 크기를 맞추기 전 flat_s.k)",
+          rc == 0 and "Applied scale to detail flat" in out and "Reference (flat): m1.k.kr_tmp_preproc_flat.k" in out,
           (rc, [l for l in out.splitlines() if "Reference" in l or "scale" in l.lower()]))
     check("B-2   └ 임시 파일은 끝나면 지운다 · dynain 이 나온다",
-          not exists(d, "m1.k.__preproc_flat.k") and exists(d, "m1.dynain"), sorted(os.listdir(d)))
+          not exists(d, "m1.k.kr_tmp_preproc_flat.k") and exists(d, "m1.dynain"), sorted(os.listdir(d)))
     with open(os.path.join(d, "b2.yaml"), "w") as f:
         f.write(base % ("m2", src, "m2", ""))
     rc, out = run(binary, d, "map", "b2.yaml")
@@ -119,38 +119,38 @@ def map_bbox_source(binary, root):
     check("B-4 대조 — bbox_align 이 없으면 기준은 평판 그대로(flat_s.k)",
           rc == 0 and "Reference (flat): flat_s.k" in out, (rc, out[-300:]))
     # 쓰기 관문 — source 가 쓰는 임시 파일도 쓸 파일이다: 그 이름의 입력(flat)이 있으면 덮기 전에 거절한다
-    shutil.copyfile(os.path.join(d, "flat_s.k"), os.path.join(d, "o.k.__preproc_flat.k"))
-    before = open(os.path.join(d, "o.k.__preproc_flat.k"), "rb").read()
+    shutil.copyfile(os.path.join(d, "flat_s.k"), os.path.join(d, "o.k.kr_tmp_preproc_flat.k"))
+    before = open(os.path.join(d, "o.k.kr_tmp_preproc_flat.k"), "rb").read()
     with open(os.path.join(d, "b5.yaml"), "w") as f:
-        f.write(base.replace("flat: flat_s.k", "flat: o.k.__preproc_flat.k") % ("o", src, "o", en))
+        f.write(base.replace("flat: flat_s.k", "flat: o.k.kr_tmp_preproc_flat.k") % ("o", src, "o", en))
     rc, out = run(binary, d, "map", "b5.yaml")
     check("B-5 ★source 의 임시 파일 이름이 flat 이면 → rc 1 「같은 파일」 · flat 바이트 그대로 · 산출 없음",
-          rc == 1 and "같은 파일" in out and open(os.path.join(d, "o.k.__preproc_flat.k"), "rb").read() == before
+          rc == 1 and "같은 파일" in out and open(os.path.join(d, "o.k.kr_tmp_preproc_flat.k"), "rb").read() == before
           and not exists(d, "o.k"), (rc, out[-300:]))
 
     print("[C] 실패해도 이 실행의 임시 파일을 남기지 않는다")
     os.makedirs(os.path.join(d, "outdir"))
     rc, out = run(binary, d, "map", "--bbox-align", "source", "--bbox-align-max-drift", "50",
                   "demo_bent.k", "flat_s.k", "outdir")
-    check("C-1 ★앞처리 평판을 쓴 뒤 산출 쓰기가 실패해도(output 이 폴더) outdir.__preproc_flat.k 를 남기지 않는다",
-          rc == 1 and "Applied scale to detail flat" in out and not exists(d, "outdir.__preproc_flat.k"),
+    check("C-1 ★앞처리 평판을 쓴 뒤 산출 쓰기가 실패해도(output 이 폴더) outdir.kr_tmp_preproc_flat.k 를 남기지 않는다",
+          rc == 1 and "Applied scale to detail flat" in out and not exists(d, "outdir.kr_tmp_preproc_flat.k"),
           (rc, sorted(os.listdir(d)), out[-300:]))
     with open(os.path.join(d, "c2.yaml"), "w") as f:
         f.write((base % ("c2", src, "c2", en)).replace("  enabled: true\n", "  enabled: true\n  strain_type: bogus\n"))
     rc, out = run(binary, d, "map", "c2.yaml")
-    check("C-2 ★고리가 map 뒤에 멈춰도(strain_type 오타) c2.k.__preproc_flat.k 를 남기지 않는다",
-          rc == 1 and "strain_type" in out and not exists(d, "c2.k.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    check("C-2 ★고리가 map 뒤에 멈춰도(strain_type 오타) c2.k.kr_tmp_preproc_flat.k 를 남기지 않는다",
+          rc == 1 and "strain_type" in out and not exists(d, "c2.k.kr_tmp_preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
     # flip_input 도 같은 임시 파일을 쓴다(고치기 전에도 썼다 — 고치기 전 바이너리로도 남는 것이 보인다)
     os.makedirs(os.path.join(d, "outdir2"))
     rc, out = run(binary, d, "map", "--flip-input-z", "demo_bent.k", "flat_s.k", "outdir2")
-    check("C-3 ★flip_input 의 앞처리 평판도 산출 쓰기가 실패하면 지운다(outdir2.__preproc_flat.k)",
-          rc == 1 and not exists(d, "outdir2.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    check("C-3 ★flip_input 의 앞처리 평판도 산출 쓰기가 실패하면 지운다(outdir2.kr_tmp_preproc_flat.k)",
+          rc == 1 and not exists(d, "outdir2.kr_tmp_preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
     with open(os.path.join(d, "c4.yaml"), "w") as f:
         f.write((base % ("c4", "flip_input_z: true\n", "c4", en)).replace("  enabled: true\n",
                                                                          "  enabled: true\n  strain_type: bogus\n"))
     rc, out = run(binary, d, "map", "c4.yaml")
-    check("C-4 ★flip_input 고리가 map 뒤에 멈춰도 c4.k.__preproc_flat.k 를 남기지 않는다",
-          rc == 1 and not exists(d, "c4.k.__preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
+    check("C-4 ★flip_input 고리가 map 뒤에 멈춰도 c4.k.kr_tmp_preproc_flat.k 를 남기지 않는다",
+          rc == 1 and not exists(d, "c4.k.kr_tmp_preproc_flat.k"), (rc, sorted(os.listdir(d)), out[-300:]))
 
     print("[M] 고리의 재료 없음 CSV 가 map 산출을 덮는 것은 map 이 쓰기 전에 막는다")
     scaled_flat_with_material(os.path.join(d, "demo_flat_fine.k"), os.path.join(d, "flat_m.k"), 1.0)

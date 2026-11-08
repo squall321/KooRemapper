@@ -445,7 +445,7 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   [§6](#6-prestress--초기-응력변형률-계산)의 쓰임이라 막지 않습니다. dynain · CSV 가 map 산출을 덮는 것과 사본이 `bent` ·
   `flat` 을 덮는 것은 막습니다 — 재료가 없어 CSV 가 `prestress.output` 자리에 갈 때도 map 이 쓰기 전에 봅니다.
 - **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
-  (`flatten_includes` 의 `.<이름>.kr_flat_….k` 등).
+  (`flatten_includes` 의 `.<이름>.kr_tmp_flat_….k` 등).
 - 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
 - 회귀 `tools/regress/test_output_guard_ops.py` — op 마다 모델 · 인클루드 · 설정 · 다른 입력 · 하드/심볼릭 링크 · `../` 철자는
   거절, 대조 · 다른 폴더의 같은 이름 · 상관없는 기존 파일은 그대로 도는지 봅니다.
@@ -492,6 +492,15 @@ dynain · IGA) · `DynainWriter` · 메시 쓰기(`KFileWriter`) · 펼친 덱(`
 돌리세요. 예전엔 결과를 보지 않아 잘린 덱(`*NODE` 가운데서 끊긴 덱 · 마지막 섹션을 잃은 덱)을 rc 0 · ok 보고로 냈습니다(여섯째 검토
 S2 · 회귀 `tools/regress/test_staged_write.py` W).
 
+#### (m) 쓰다 지우는 임시 파일의 이름에는 `.kr_tmp_` 가 든다 (2026-11-08)
+
+바이너리가 쓰다가 끝에 지우는 파일은 모두 이름에 `.kr_tmp_` 를 지닙니다 — 바꿔 넣기 전의 산출 · 보고와 그 잠금 파일(`extract-parts` ·
+`apply_carryover_plan`), `map` 의 앞처리 평판(`<output>.kr_tmp_preproc_flat.k`) · 뒤집은 기준(`<output>.kr_tmp_flipped_ref.k`),
+`flatten_includes` 의 펼친 덱(`.<줄기>.kr_tmp_flat_….k`), `meshfix` 의 gmsh 왕복(`<줄기>.kr_tmp_mf.*`) · polish
+(`<줄기>.kr_tmp_pol<회차>_<덩어리>.*`). 플랫폼은 그 표지가 든 파일을 잡 산출로 올리지 않습니다 — 취소 · 시간 초과(SIGKILL)된 잡이
+남겨도 세션 파일 목록에 뜨지 않습니다. 예전 이름(`.__preproc_flat.k` · `.__flipped_ref.k` · `.kr_flat_` · `__mf.*` · `__pol…`)은 표지가
+없어 산출로 올라갔습니다(여섯째 검토 · 회귀 `test_staged_write.py` T · `test_job_launcher.py`).
+
 ---
 
 ## 4. map — HEX8 구조화 메시 매핑
@@ -501,7 +510,7 @@ S2 · 회귀 `tools/regress/test_staged_write.py` W).
 덱을 **고쳐 쓰는** op 은 주 덱만 고친다(인클루드 안의 카드를 고쳐 쓸 길이 없다). 그래서 대상이 인클루드 안에만 있으면
 **종료 코드 1** 로 멈추고 이 키를 안내한다. `flatten_includes: true` 를 주면 인클루드 닫힘을 **펼쳐** — 맨 `*INCLUDE` 카드를 그
 파일의 본문으로 바꾸고(LS-DYNA 가 읽는 차례 · 중첩도 같다) 인클루드 파일의 `*KEYWORD` 줄은 뺀다 — 고친 덱을 `*INCLUDE` 없는
-**한 파일**로 낸다. 펼친 덱은 주 덱 옆 임시 파일(`.<이름>.kr_flat_….k`)로 읽고 op 이 끝나면 지운다(상대 경로 기준이 같다).
+**한 파일**로 낸다. 펼친 덱은 주 덱 옆 임시 파일(`.<이름>.kr_tmp_flat_….k`)로 읽고 op 이 끝나면 지운다(상대 경로 기준이 같다).
 
 ```yaml
 model: master.k            # *INCLUDE mesh.k · bc.k …
@@ -565,8 +574,8 @@ $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 - prestress 고리의 기준 — 앞처리한 평판(`bbox_align: source` · `flip_input_*`)과 뒤집은 기준(`flip_x/y/z`)도 평판의 `*PART` ·
   `*SECTION` · `*MAT` 카드를 그대로 싣습니다. 그래서 `prestress.E`·`nu` 없이도 뒤집든 말든 평판의 K-파일 재료로 응력을 냅니다
   (2026-11-07 · 사용자 결정 「뒤집어도 재질을 싣는다」 — 예전엔 뒤집은 기준이 메시만 실어 고리가 조용히 변형률만 냈습니다).
-- 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.__preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
-  뒤집은 기준(`<output>.__flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
+- 이 실행이 만든 임시 파일 — 앞처리 평판(`<output>.kr_tmp_preproc_flat.k` · `flip_input_*` 나 `bbox_align: source` 가 평판을 바꿀 때)과
+  뒤집은 기준(`<output>.kr_tmp_flipped_ref.k` · prestress 고리의 `flip_x/y/z`) — 은 성공이든 실패든 끝에 지웁니다(2026-11-07 전에는 앞처리
   평판을 쓴 뒤 산출 쓰기가 실패하거나 고리가 map 뒤에 멈추면 남았습니다).
 
 ---
@@ -3846,10 +3855,10 @@ KooRemapper.exe meshfix <config.yaml>
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper meshfix cfg/meshfix.yaml` 은 `cfg/` 에서 읽고 `cfg/` 에 씁니다
 > (예전에는 작업 폴더 기준이었습니다). `tetremesh`([§43.8](#438-tetremesh--tet4-로컬-재메시))도 같습니다.
 
-> **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>__mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
+> **쓰기 관문**(2026-11-07): `output` · 임시 파일(`<줄기>.kr_tmp_mf.stl`·`.geo`·`.msh`·`.log`)이 `model` · 그 인클루드 · 설정과 같은
 > 파일이면 gmsh 를 돌리기 전에 **종료 코드 1** 입니다([§3.1(j)](#31-yaml-공통-규칙-모든-op)). 예전에는 `output == model` 이면
 > 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠습니다**. `preview: true` 는 아무것도 쓰지 않아 보지 않습니다.
-> `polish: true` 면 polish 의 임시 파일(`<줄기>__pol<회차>_<덩어리>.stl`·`.geo`·`.msh`·`.log` — 회차 · 덩어리 수는 gmsh 를 돌려 봐야
+> `polish: true` 면 polish 의 임시 파일(`<줄기>.kr_tmp_pol<회차>_<덩어리>.stl`·`.geo`·`.msh`·`.log` — 회차 · 덩어리 수는 gmsh 를 돌려 봐야
 > 정해진다) 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있어도 gmsh 전에 거절합니다(polish 가 그 파일을 덮고 지운다).
 
 ```yaml
@@ -6201,7 +6210,7 @@ output 이면 설정을, 빈 폴더면 폴더를 지웠다 · 11-07 밤 실측).
 - 회귀 `tools/regress/test_apply_carryover_plan.py`(판 1 · 101항 — K 출력 규칙 · L StepForge 권고 · 보 ELBOW · WARPAGE) · `tools/regress/test_apply_carryover_plan_v2.py`(판 2 · 88항 — 실물 둘 ·
   진리값 판을 판 2 로 · 칸 표 · 덱 자리 · §10.5 새 셸 섹션 · 인클루드 · refused_transform · 적대적 검토 고침 R-1~R-8 · S StepForge 권고 — R-8 은 gdb 로
   적용 직전에 멈춰 파일을 바꾼다 · gdb 로 멈추지 못하면 SKIP) · 단위 `tests/test_CarryoverPlan.cpp`.
-- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자 · W 쓰기 오류 · D 매달린 링크 · F 제자리 쓰기 뒤의 임시 파일) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
+- 쓰기 규칙(extract-parts 와 공용 도우미 `staged_write`) — 회귀 `tools/regress/test_staged_write.py`(E 긴 이름 · K 죽은 실행 · O 산출 자리 꼴 · C 바꿔 넣기 차례 · 잠금 · M 말 · U extract-parts 보고 글자 · W 쓰기 오류 · D 매달린 링크 · F 제자리 쓰기 뒤의 임시 파일 · T 임시 파일 이름 표지) · 단위 `tests/test_StagedWrite.cpp` · `tests/test_Utf8.cpp`.
 - 인클루드 파일 안의 고칠 자리는 고치지 않는다(거절 — 사용자 결정 11-07). 그 파트를 고치려면 닫힘을 펼친 한 덱으로 계획을 다시 받아야 한다.
 - 절점 두께 카드로 두께를 옮기는 일 · 요소마다 두께를 싣는 PID 의 새 섹션은 받지 않는다(그쪽도 조각으로 물러선다 · §10.7).
 
