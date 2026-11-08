@@ -98,4 +98,8 @@
 - SIGKILL 이 남긴 임시 파일은 같은 output · 같은 호스트 표지의 다음 실행만 치운다(HWAX 실행기 · pid 이름공간) · Windows 만의 것(meshfix `__mf.log.bat` · prestress `pre.K`).
 - battery 탭이 셀 모서리를 걸치면 경고 없이 좁힌다 · 옵션 카드 절점은 아직 토큰 읽기 · '모르는' 절점은 되읽기에서 빠진다 · cnrb2solid 파서의 들여 쓴 `*`.
 - 이상한 열 재질 철자(`*MAT_T1` · `T19` · `T001`) · `--strict` 가 TMID 참조를 안 본다 · extract-parts 가 `*MAT_ADD_THERMAL_EXPANSION` 을 버린다 · 섹션 묶음 셈의 메모리.
+- rbe 의 CNRB 번호 · matdb 의 감쇠 세트 번호(MID + 800000)가 공용 커서를 안 쓴다(같은 실행의 다른 번호와 겹칠 수 있다) · `ma_setIdsIn` 이 `cur_scanMaxSetId` 와 중복.
+- battery Card A 의 SBOPT 를 정수 칸에 `3.000` 으로 쓴다(LS-PrePost 는 3 — LS-DYNA 확인 못 함, 라이선스 만료) · 카탈로그 `contact.soft` 「늘 1」(자기 접촉은 2).
+- `batteryTakenSpans` 가 큰 덱에서 `ecBuildIndex` 로 잠깐 메모리를 쓴다 · 덱 · 보고가 아닌 쓰기(`writeStrainCSV` · battery · cclip · generate 곁 파일)는 쓰기 오류를 안 본다.
+- `/dev/zero` 출력 되읽기 · 잘린 map · 보고 파일 경로는 회귀가 못 잰다(파일 크기 한도가 큰 출력 뒤에 걸리지 않는다).
 - (11-08 고쳐서 목록에서 뺐다) extract-parts 되읽기의 TMID(`28ef41e`) · matdb `thermal: true` 의 같은 TMID(`89031cc`).
