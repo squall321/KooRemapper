@@ -451,11 +451,24 @@ static std::string ma_batteryOutput(const std::string& opOutput, const std::stri
 
 // 주 덱에 적을 `*INCLUDE` 이름 — 솔버와 include_closure 는 **주 덱 폴더** 기준으로 읽는다(Vol_I 181591). YAML 에 절대 경로로
 // 적은 값(`written`)이면 적은 그대로 둔다. 상대로 적은 값은 YAML 폴더가 절대 경로여도(플랫폼은 설정을 절대 경로로 준다) 상대 이름이다
+// ★그 이름은 주 덱이 **실제로 놓인** 폴더에서 풀린다 — 커널은 `..` 를 링크가 가리키는 실제 폴더의 부모로 푼다(2026-11-08 · 6차
+//   검토 G8). 글자 셈(relpathOf)은 링크를 풀지 않아, 주 덱 폴더가 링크(`output: link/out` · link → deep/x/real)면 `../cfg/bt.k` 가
+//   deep/x/cfg 의 없는 파일을 가리켰다. 글자 셈이 실제로 그 덱에 닿으면 그대로 두고(링크 아래로 내려가는 이름은 그대로 산다),
+//   아니면 두 쪽을 실제 경로(weakly_canonical)로 펴고 다시 센다
 static std::string ma_includeName(const std::string& path, const std::string& deckDir, const std::string& written) {
     const bool writtenAbs = !written.empty() && (written[0] == '/' || written[0] == '\\' ||
                                                  (written.size() >= 2 && written[1] == ':'));
     if (path.empty() || writtenAbs) return path;
-    return util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
+    const std::string lexical = util::relpathOf(path, deckDir);   // 이월 적용의 인클루드 목록과 같은 셈(util/RelPath.h)
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path realDir = fs::weakly_canonical(fs::absolute(deckDir.empty() ? fs::path(".") : fs::path(deckDir), ec), ec);
+    if (ec) return lexical;
+    const fs::path realDeck = fs::weakly_canonical(fs::absolute(path, ec), ec);
+    if (ec) return lexical;
+    const fs::path viaLexical = fs::weakly_canonical(realDir / lexical, ec);
+    if (!ec && viaLexical == realDeck) return lexical;
+    return util::relpathOf(realDeck.string(), realDir.string());
 }
 
 // 줄들이 정의하는 번호의 최대값 — battery 덱을 얹을 때 공용 바닥(`idMaxima`)에 없는 족을 센다(2026-11-08): 열 재질(TMID —

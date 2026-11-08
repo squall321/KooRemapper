@@ -4220,7 +4220,10 @@ KooRemapper battery <config.yaml>
 > `output` 은 **assemble YAML 의 폴더** 기준이고, 주 덱이 battery 덱을 끌어오는 `*INCLUDE` 는 **주 덱 폴더 기준 이름**으로 적힙니다
 > (`config: sub/bat.yaml` → `sub/bt_tier0_phase1.k`, `output: out/model` 이면 `../bt_tier0_phase1.k` — 절대 경로로 적은 battery
 > `output` 만 적은 그대로). 예전에는 둘 다 작업 폴더 기준이라 `KooRemapper assemble cfg/a.yaml` 이 battery 덱을 작업 폴더에 쓰고
-> cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다.
+> cfg/ 의 주 덱에는 솔버가 찾지 못하는 이름을 적었습니다. 그 이름은 솔버처럼 주 덱이 **실제로 놓인** 폴더에서 셉니다 — 주 덱 폴더가
+> 심볼릭 링크(또는 그 아래)라 글자 이름의 `../` 가 다른 곳에 닿으면 두 쪽을 실제 경로로 펴서 다시 셉니다(`output: link/out` · link →
+> deep/x/real 이면 `../../../cfg/bt_….k`). 글자 이름이 실제로 그 덱에 닿으면(링크 아래로 내려가는 이름 등) 그대로 둡니다. 2026-11-08
+> 전엔 글자로만 세어 `../cfg/bt_….k` 가 deep/x/cfg 의 없는 파일을 가리켰습니다.
 >
 > **`assemble` 안의 battery 번호(2026-11-08)**: battery 덱의 번호를 **족마다 기존 모델의 최대값 위로** 옮겨 얹습니다 — 절점 · 요소
 > (모든 요소 족 · 스칼라 절점까지 센 공용 바닥) · 파트 · 섹션 · 재질 · 열 재질(TMID) · 모래시계(HGID) · 세트(종류를 한 통으로) ·
