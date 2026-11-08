@@ -741,7 +741,7 @@ void forEachNonGridElementCard(const std::vector<std::string>& lines,
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
         const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
+        if (deckscan::isKeywordLine(l)) {   // 1열 규칙(리더와 같다) — 들여쓴 `*` 줄은 앞 블록의 데이터다
             flush();
             in = false;
             remaining = 0;
@@ -841,7 +841,7 @@ int scalarNodeMaxIdFile(const std::string& path) {
         if (!l.empty() && l.back() == '\r') l.pop_back();
         const size_t g = l.find_first_not_of(" \t");
         if (g == std::string::npos) continue;
-        if (l[g] == '*') {
+        if (deckscan::isKeywordLine(l)) {   // 1열 규칙(리더와 같다)
             const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
             if (!kwSeen && kw == "*KEYWORD") {
                 const int w = keywordCardDeckWidth(l);
@@ -868,7 +868,7 @@ int scalarNodeMaxId(const std::vector<std::string>& lines) {
     for (const auto& l : lines) {
         const size_t g = l.find_first_not_of(" \t");
         if (g == std::string::npos) continue;
-        if (l[g] == '*') {
+        if (deckscan::isKeywordLine(l)) {   // 1열 규칙(리더와 같다)
             in = isScalarNodeKeyword(deckscan::kwBare(deckscan::keywordToken(l)));
             fw = keywordFieldWidth(l, deckFw);
             continue;

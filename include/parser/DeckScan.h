@@ -19,6 +19,7 @@
 #include "parser/ElementCardLayout.h"
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,6 +36,13 @@ using KooRemapper::cards::upper;
 
 // ── 키워드 줄 ────────────────────────────────────────────────────────────────
 
+// 키워드 줄 — 리더(`KFileReader::isKeywordLine`)와 LS-DYNA 의 규칙 그대로: **1열이 `*`** 이고 그다음이 글자다(「키워드 앞 `*` 는 1열」 ·
+// Vol_I 17940). 들여쓴 `*` 줄 · `*` 뒤가 글자가 아닌 줄은 키워드가 아니라 앞 블록의 데이터다 — `*COMMENT` 글 속의 「  *END」 가 덱을
+// 끝내지 않고 「  *NODE」 가 블록을 열지 않는다. 덱을 걷는 공용 걸음(닫힘 · 훑기 · 덧붙이는 자리 · 메시 쓰기)은 이것 하나를 쓴다(2026-11-08)
+inline bool isKeywordLine(const std::string& l) {
+    return l.size() > 1 && l[0] == '*' && std::isalpha(static_cast<unsigned char>(l[1])) != 0;
+}
+
 inline std::string keywordToken(const std::string& line) {
     size_t a = line.find_first_not_of(" \t");
     if (a == std::string::npos) return "";
@@ -49,10 +57,11 @@ inline std::string kwBare(const std::string& tok) {
     return t;
 }
 
+// 데이터 줄 — 빈 줄 · `$` 주석 · 키워드 줄(`isKeywordLine` — 1열 규칙)이 아닌 줄. 들여쓴 `*` 줄은 데이터다(리더와 같다)
 inline bool isDataLine(const std::string& l) {
     size_t g = l.find_first_not_of(" \t\r\n");
     if (g == std::string::npos) return false;
-    return l[g] != '$' && l[g] != '*';
+    return l[g] != '$' && !isKeywordLine(l);
 }
 
 // ── 덧붙이는 자리 — 주 덱의 첫 `*END` ──────────────────────────────────────────
@@ -66,7 +75,7 @@ inline bool isDataLine(const std::string& l) {
 // 들여쓴 줄도 `*END` 로 보아 `*COMMENT` 글 속의 「  *END」 앞에 카드를 넣었다 — 그 줄이 넣은 블록의 데이터가 됐다(2026-11-08 재검토)
 inline size_t firstEndLine(const std::vector<std::string>& lines) {
     for (size_t i = 0; i < lines.size(); ++i)
-        if (!lines[i].empty() && lines[i][0] == '*' && kwBare(keywordToken(lines[i])) == "*END") return i;
+        if (isKeywordLine(lines[i]) && kwBare(keywordToken(lines[i])) == "*END") return i;
     return lines.size();
 }
 

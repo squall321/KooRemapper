@@ -445,10 +445,17 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄은 해석에 들지 않습니다). 덱을 고쳐 쓰는 op 이 덧붙이는 카드
 (접촉 · SPC · 구속 · `*DATABASE_*` · 감쇠 · CNRB 를 바꾼 솔리드 · 배터리 `*INCLUDE` · `squeeze` 의 dynain `*INCLUDE` · 열팽창 · DR 카드 ·
 `map` prestress 의 `*INCLUDE` …)는 그 앞에 **한 번** 넣고, `*END` 가 없으면 덱 끝에 붙입니다. 메시를 다시 쓰는 op(`map` · `shellmap` ·
-`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다. 그 `*END` 는 **1열이 `*`** 인 키워드 줄만입니다(「키워드 앞
-`*` 는 1열」 · Vol_I 17940 · 리더 `KFileReader` 와 같은 규칙 — 공용 첫 `*END` 찾기 `deckscan::firstEndLine` 을 쓰는 덧붙임(contact ·
-boundary · rbe · battery · database · hfdamp · cnrb2solid · squeeze · map prestress)과 메시 쓰기). 들여쓴 `  *END`(`*COMMENT` 글 속 등)는
-끝이 아니라 앞 블록의 데이터입니다.
+`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다.
+
+★키워드 줄은 **1열이 `*`** 이고 그다음이 글자인 줄뿐입니다(「키워드 앞 `*` 는 1열」 · Vol_I 17940 · 리더 `KFileReader` 와 같은 규칙).
+들여쓴 `  *END` · `  *INCLUDE` · `  *NODE`(`*COMMENT` 글 속 등)는 끝도 인클루드도 블록도 아니라 앞 블록의 데이터입니다. 덱을 걷는
+공용 걸음이 다 이 술어 하나(`deckscan::isKeywordLine`)를 씁니다(2026-11-08).
+
+| 걸음 | 쓰는 op |
+|---|---|
+| 첫 `*END` 앞 덧붙임(`deckscan::firstEndLine` · `kw_insertBeforeEnd`) | contact · boundary · rbe · battery · database · hfdamp · cnrb2solid · squeeze · map prestress · relax · stabilize · implicit · modal · ale · optimize · cclip · 단독 matswap · cnrb2spring · meshfix · assemble 의 쓰기 · matswap · matdb · load |
+| 「`*END` 에서 멈춤」 · 인클루드 따라가기 | 인클루드 닫힘(`include_closure` — 거의 모든 op) · cleanup-nodes · extract-parts 훑기 · 이월 조각 · 새 섹션 파일 읽기 · 「읽지 않은 `*INCLUDE`」 경고(`include_scan`) |
+| 블록 가르기 | 메시 쓰기(KFileWriter — map · shellmap · squeeze) · assemble 의 쓰기 · 죽은 참조 걸음(restack · merge · cnrb2spring) · cnrb2spring 읽기 · 보 족 걸음 |
 
 - **왜** — 셋째 묶음 전엔 `*END` 마다 넣는 op(assemble 의 contact · boundary · rbe · 단독 database · cnrb2solid)이 `*END` 가 둘인
   덱에 같은 카드를 두 벌 냈고, 마지막 `*END` 앞에 넣는 op(battery · hfdamp · 단독 contact)은 LS-DYNA 가 읽지 않는 자리에 넣었으며,
@@ -457,8 +464,13 @@ boundary · rbe · battery · database · hfdamp · cnrb2solid · squeeze · map
   `*MAT_ADD_THERMAL_EXPANSION` · `*INITIAL_TEMPERATURE_NODE` · `*CONTROL_*` · `*DATABASE_BINARY_D3DRLF`)과 `map` prestress 훅의
   `*INCLUDE` 는 `*END` 마다 넣어, 메시 쓰기가 첫 `*END` 뒤를 남기게 된 뒤로 `*END` 가 둘인 덱에 두 벌이 나갔습니다(2026-11-08 재검토).
   첫 `*END` 찾기와 메시 쓰기는 들여쓴 `  *END` 도 끝으로 보아 `*COMMENT` 글 속의 그 줄 앞에 카드를 넣었고(그 줄이 넣은 블록의 데이터가
-  됐다) 메시 쓰기는 거기서 `*END` 를 쓰고 원본 `*END` 를 또 베꼈습니다(같은 재검토).
+  됐다) 메시 쓰기는 거기서 `*END` 를 쓰고 원본 `*END` 를 또 베꼈습니다(같은 재검토). 그 밖의 덧붙임(`kw_insertBeforeEnd` 를 쓰는
+  relax · stabilize · implicit · modal · ale · optimize · cclip · 단독 matswap · cnrb2spring · meshfix · assemble 의 쓰기 · matswap · matdb)도
+  그랬고, 인클루드 닫힘 · cleanup-nodes · extract-parts 훑기 · 이월 조각은 글 속의 「  *END」 에서 덱을 끝냈으며 「  *INCLUDE」 를 따라가
+  없는 파일로 거절했습니다(cnrb2spring 은 그것을 「읽지 않은 인클루드」 로 세어 rc 1 — 같은 날 둘째 손질).
 - 회귀 `tools/regress/test_end_insert_once.py` — op 마다 `*END` 하나 · 둘 · 없음의 덱으로 카드 수와 자리를 봅니다.
+  `tools/regress/test_column1_keywords.py` — 위 표의 걸음마다 대표 op(20 가지)를 맨 앞에 들여쓴 키워드 줄만 든 `*COMMENT` 를 끼운 덱으로 돌려, 산출에서 그
+  블록을 빼면 그대로 덱의 산출과 바이트까지 같은지 봅니다(보통 덱은 고치기 전 바이너리와 바이트까지 같다 — 쓴 시각 머리줄만 다르다).
 
 ---
 

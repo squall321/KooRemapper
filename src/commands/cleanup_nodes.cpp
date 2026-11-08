@@ -143,8 +143,7 @@ void scanSectionsStream(std::istream& in, SectionMap& sm) {
     std::string line, kw;
     int dataIdx = 0;
     while (std::getline(in, line)) {
-        size_t g = line.find_first_not_of(" \t\r\n");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다) — 들여쓴 `*` 줄은 데이터다
             kw = keywordToken(line);
             dataIdx = 0;
             if (kw == "*END") return;   // 그 파일은 여기서 끝난다(Vol_I 179654) — 정본 닫힘과 같은 규칙
@@ -231,7 +230,7 @@ void scanRefsStream(std::istream& in, bool isMain, const Opts& o,
 
     while (std::getline(in, line)) {
         size_t g = line.find_first_not_of(" \t\r\n");
-        const bool isKw = (g != std::string::npos && line[g] == '*');
+        const bool isKw = isKeywordLine(line);   // 1열 규칙(리더와 같다) — `*COMMENT` 글 속의 「  *END」 가 덱을 끝내지 않는다
 
         if (isKw) {
             endElementCard();
@@ -538,8 +537,7 @@ void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& 
     int fw = deckFw;
     bool node = false;
     while (std::getline(in, line)) {
-        size_t g = line.find_first_not_of(" \t\r\n");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             kw = kwBare(keywordToken(line));
             if (kw == "*KEYWORD") {
                 int w = KooRemapper::keywordCardDeckWidth(line);
@@ -613,8 +611,7 @@ bool rewriteDeck(const Opts& o, const Scan& sc, const std::vector<int>& del,
 
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();   // DeckWriter 가 되붙인다
-        size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             flushSet();
             kw = kwBare(keywordToken(line));
             if (kw == "*KEYWORD") {

@@ -1738,20 +1738,18 @@ struct RsBlock {
 std::vector<RsBlock> rsCollectBlocks(const std::vector<std::string>& rawLines) {
     std::vector<RsBlock> out;
     for (size_t i = 0; i < rawLines.size(); ++i) {
-        size_t g = rawLines[i].find_first_not_of(" \t");
-        if (g == std::string::npos || rawLines[i][g] != '*') continue;
+        // 1열 규칙(리더와 같다) — 들여쓴 `*` 줄(`*COMMENT` 글 속의 「  *INCLUDE」)은 블록을 열지 않는다(2026-11-08)
+        if (!deckscan::isKeywordLine(rawLines[i])) continue;
         RsBlock b;
         b.kwLine = i;
-        std::string up = rawLines[i].substr(g);
+        std::string up = rawLines[i];
         while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t')) up.pop_back();
         for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         b.kw = up;
         for (size_t j = i + 1; j < rawLines.size(); ++j) {
+            if (deckscan::isKeywordLine(rawLines[j])) break;
             size_t h = rawLines[j].find_first_not_of(" \t");
-            if (h != std::string::npos) {
-                if (rawLines[j][h] == '*') break;
-                if (rawLines[j][h] == '$') continue;   // 주석은 LS-DYNA 도 건너뛴다
-            }
+            if (h != std::string::npos && rawLines[j][h] == '$') continue;   // 주석은 LS-DYNA 도 건너뛴다
             // 공백뿐인 줄도 데이터 줄이다 — *SET_..._TITLE 의 제목 줄은 비어 있을 수 있고,
             // 버리면 SID 줄을 제목으로, 첫 구성원 줄을 SID 로 읽어 블록이 통째로 한 줄 밀린다.
             b.data.push_back(j);
@@ -3385,7 +3383,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
             for (size_t li = b.kwLine + 1; li < rawLines_.size(); ++li) {
                 const std::string& ln = rawLines_[li];
                 const size_t g = ln.find_first_not_of(" \t");
-                if (g != std::string::npos && ln[g] == '*') break;
+                if (deckscan::isKeywordLine(ln)) break;   // 1열 규칙(리더와 같다)
                 if (g != std::string::npos && ln[g] == '$') continue;
                 if (g == std::string::npos && cardLeft == 0) continue;
                 bool any = false;
@@ -5502,9 +5500,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     bool hasTermination = false;
     if (dynamicRelaxation_) {
         for (const auto& rawLine : rawLines_) {
+            if (!deckscan::isKeywordLine(rawLine)) continue;   // 1열 규칙(리더와 같다)
             std::string upper = rawLine;
-            size_t s = upper.find_first_not_of(" \t");
-            if (s != std::string::npos) upper = upper.substr(s);
             std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
             if (upper.substr(0, 32) == "*CONTROL_DYNAMIC_RELAXATION") hasDR = true;
             if (upper.substr(0, 22) == "*CONTROL_TERMINATION") hasTermination = true;
@@ -5601,7 +5598,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
         // Skip old section data (comment + data lines) until next keyword
         if (skippingReplacedSection) {
-            if (!trimmed.empty() && trimmed[0] == '*' && !isCommentLine(line)) {
+            if (deckscan::isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
                 skippingReplacedSection = false;
                 // Fall through to process this keyword line normally
             } else {
@@ -5609,8 +5606,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             }
         }
 
-        // Detect keyword transitions
-        if (!trimmed.empty() && trimmed[0] == '*' && !isCommentLine(line)) {
+        // Detect keyword transitions — 1열 규칙(리더와 같다 — 들여쓴 「  *END」 · 「  *NODE」(`*COMMENT` 글 속)는 앞 블록의 데이터다 · 2026-11-08)
+        if (deckscan::isKeywordLine(line)) {
             // Before leaving current section, insert added content
             if (currentSection == Section::NODE && !nodesInserted) {
                 for (const auto& an : addedNodes_) {
@@ -6162,9 +6159,8 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         {
             size_t nl = body.find('\n');
             std::string first = (nl == std::string::npos) ? body : body.substr(0, nl);
-            size_t g = first.find_first_not_of(" \t");
-            if (g != std::string::npos && first[g] == '*') {
-                std::string up = first.substr(g);
+            if (deckscan::isKeywordLine(first)) {   // 1열 규칙(리더와 같다)
+                std::string up = first;
                 for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                 if (up.rfind("*KEYWORD", 0) == 0 && nl != std::string::npos) ins = nl + 1;
             }
@@ -12641,18 +12637,9 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         }
         resolvedCards = std::move(filtered);
     }
-    std::vector<std::string> newLines;
-    bool inserted = false;
-    for (const auto& ln : rawLines_) {
-        if (!inserted && mw_upper(mw_trim(ln)) == "*END") {
-            for (const auto& c : resolvedCards) newLines.push_back(c);
-            inserted = true;
-        }
-        newLines.push_back(ln);
-    }
-    if (!inserted)
-        for (const auto& c : resolvedCards) newLines.push_back(c);
-    rawLines_ = std::move(newLines);
+    // 첫 *END 앞(없으면 끝) — 공용 첫 *END 찾기(1열 규칙 · 들여쓴 「  *END」 는 끝이 아니다 · 2026-11-08)
+    rawLines_.insert(rawLines_.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(rawLines_)),
+                     resolvedCards.begin(), resolvedCards.end());
 
     infoMessages.push_back("[matswap] Done: " + std::to_string(targetPids.size()) + " part(s) swapped");
     return true;
@@ -13934,23 +13921,9 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     }
     rawLines_ = std::move(cleanLines);
 
-    // 9. Insert new cards before *END
-    std::vector<std::string> newLines;
-    newLines.reserve(rawLines_.size() + insertCards.size());
-    bool inserted = false;
-    for (auto& ln : rawLines_) {
-        if (!inserted) {
-            std::string u = mw_upper(mw_trim(ln));
-            if (u == "*END") {
-                for (auto& c : insertCards) newLines.push_back(c);
-                inserted = true;
-            }
-        }
-        newLines.push_back(ln);
-    }
-    if (!inserted)
-        for (auto& c : insertCards) newLines.push_back(c);
-    rawLines_ = std::move(newLines);
+    // 9. Insert new cards before the first *END(없으면 끝) — 공용 첫 *END 찾기(1열 규칙 · 2026-11-08)
+    rawLines_.insert(rawLines_.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(rawLines_)),
+                     insertCards.begin(), insertCards.end());
 
     infoMessages.push_back("[matdb] Replaced " + std::to_string(structCount) + " structural MAT cards");
     if (thermalCount > 0)
@@ -14607,37 +14580,9 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
                   << " SF=" << sf << "\n";
     }
 
-    // 8. Insert all blocks before *END
+    // 8. Insert all blocks before the first *END(없으면 끝) — 공용 첫 *END 찾기(1열 규칙 · 2026-11-08)
     if (!insertBlocks.empty()) {
-        std::vector<std::string> newLines;
-        newLines.reserve(rawLines_.size() + insertBlocks.size() * 10);
-        bool inserted = false;
-        for (const auto& line : rawLines_) {
-            std::string up = line;
-            for (auto& c : up) c = (char)std::toupper((unsigned char)c);
-            while (!up.empty() && (up.back() == ' ' || up.back() == '\r')) up.pop_back();
-            if (!inserted && up == "*END") {
-                for (const auto& block : insertBlocks) {
-                    std::istringstream bs(block);
-                    std::string bline;
-                    while (std::getline(bs, bline)) {
-                        newLines.push_back(bline);
-                    }
-                }
-                inserted = true;
-            }
-            newLines.push_back(line);
-        }
-        if (!inserted) {
-            for (const auto& block : insertBlocks) {
-                std::istringstream bs(block);
-                std::string bline;
-                while (std::getline(bs, bline)) {
-                    newLines.push_back(bline);
-                }
-            }
-        }
-        rawLines_ = std::move(newLines);
+        deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
     }
 
     infoMessages.push_back("[load] Applied " + std::to_string(loadCount) + " load case(s)");

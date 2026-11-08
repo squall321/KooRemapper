@@ -1483,8 +1483,7 @@ static std::vector<NodeRefHit> refsToNodes(const std::string& model, const std::
         for (std::string ln; std::getline(in, ln);) {
             ++no;
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
-            const size_t g = ln.find_first_not_of(" \t");
-            if (g != std::string::npos && ln[g] == '*') {
+            if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다)
                 const std::string kw = KooRemapper::deckscan::kwBare(KooRemapper::deckscan::keywordToken(ln));
                 if (isMain && kw == "*KEYWORD" && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
                     deckFw = KooRemapper::deckFieldWidth({ln});
@@ -1835,12 +1834,10 @@ static bool spliceMesh(const std::string& modelPath,
     };
     for (size_t li = 0; li < rawLines.size(); ++li) {
         const std::string& line = rawLines[li];
-        // Keyword detection
-        std::string trimmed = line;
-        size_t p = trimmed.find_first_not_of(" \t");
+        // Keyword detection — 1열 규칙(리더와 같다 — 들여쓴 「  *END」 는 끝이 아니라 앞 블록의 데이터다 · 2026-11-08)
         std::string up;
-        if (p!=std::string::npos && trimmed[p]=='*') {
-            up = trimmed.substr(p);
+        if (KooRemapper::deckscan::isKeywordLine(line)) {
+            up = line;
             for (auto& c : up) c=(char)std::toupper((unsigned char)c);
         }
 
@@ -1886,7 +1883,7 @@ static bool spliceMesh(const std::string& modelPath,
                 const int eid = parseFirstInt(line);
                 const bool drop = (eid > 0 && removeElems.count(eid) > 0);
                 if (nodeLi < rawLines.size() && rawLines[nodeLi].find_first_not_of(" \t") != std::string::npos
-                    && rawLines[nodeLi][rawLines[nodeLi].find_first_not_of(" \t")] != '*') {
+                    && !KooRemapper::deckscan::isKeywordLine(rawLines[nodeLi])) {
                     // 헤더 + 노드 줄을 한 카드로 처리한다
                     if (!drop) { out << line << "\n"; out << rawLines[nodeLi] << "\n"; }
                     li = nodeLi;            // 노드 줄을 소비했다

@@ -208,7 +208,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
         while (!line.empty() && line.back() == '\r') line.pop_back();
         ++lineNo;
         size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다) — 들여쓴 `*` 줄은 데이터다
             flush();
             kw = kwBare(keywordToken(line));
             if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(Vol_I 179654 — 닫힘과 같다)
@@ -292,8 +292,7 @@ void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std:
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();
         ++lineNo;
-        const size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             kw = kwBare(keywordToken(line));
             if (kw == "*END") break;
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
@@ -373,7 +372,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     while (std::getline(in, line)) {
         ++lineNo;
         size_t g = line.find_first_not_of(" \t\r\n");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             remaining = 0;
             kw = kwBare(keywordToken(line));
             if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(닫힘과 같다)
@@ -1147,7 +1146,7 @@ struct Writer {
             curPath = &path;       // 인클루드를 펼치고 돌아오면 다음 줄에서 다시 맞춘다
             curLine = ++ln;
             size_t g = line.find_first_not_of(" \t");
-            if (g != std::string::npos && line[g] == '*') {
+            if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다) — 패스 1 훑기와 같은 키워드 줄
                 // 인클루드 안의 `*KEYWORD`·`*END` 는 펼친 덱에 두 번 나오면 안 된다.
                 std::string k2 = kwBare(keywordToken(line));
                 if (depth > 0 && (k2 == "*KEYWORD" || k2 == "*END")) {
@@ -1232,7 +1231,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
         while (!line.empty() && line.back() == '\r') line.pop_back();
         ++vln;
         size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
+        if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다) — 들여쓴 `*` 줄은 데이터다
             kw = kwBare(keywordToken(line));
             fw = KooRemapper::keywordFieldWidth(line, idx.fieldWidth);
             remaining = 0;

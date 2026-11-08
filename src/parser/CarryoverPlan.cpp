@@ -1023,7 +1023,7 @@ bool scanFragment(const std::vector<std::string>& in, FragmentScan& s, std::vect
             continue;
         }
         const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
+        if (deckscan::isKeywordLine(l)) {   // 1열 규칙(리더와 같다 — 들여쓴 `*` 줄은 데이터다)
             if (head.on) { bad(i, "두 줄 꼴 솔리드 카드의 절점 줄이 없다"); head.on = false; }
             flush();
             const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));

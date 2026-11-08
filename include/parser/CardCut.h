@@ -11,10 +11,8 @@
 namespace KooRemapper {
 namespace cardcut {
 
-inline bool isKeywordLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] == '*';
-}
+// 키워드 줄 — 공용 1열 규칙(`deckscan::isKeywordLine` · 리더와 같다 · 2026-11-08). 들여쓴 `*` 줄은 앞 블록의 데이터다
+inline bool isKeywordLine(const std::string& l) { return deckscan::isKeywordLine(l); }
 inline bool isCommentLine(const std::string& l) {
     const size_t g = l.find_first_not_of(" \t");
     return g != std::string::npos && l[g] == '$';

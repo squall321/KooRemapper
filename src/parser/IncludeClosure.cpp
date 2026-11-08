@@ -204,7 +204,7 @@ std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i) {
     std::vector<NameAt> out;
     while (i < lines.size()) {
         const std::string t = trimBoth(lines[i]);
-        if (!t.empty() && t[0] == '*') break;               // 다음 키워드가 끝낸다(179253)
+        if (deckscan::isKeywordLine(lines[i])) break;       // 다음 키워드가 끝낸다(179253 · 1열 규칙 — 들여쓴 `*` 줄은 이름 줄이다)
         if (t.empty() || t[0] == '$') { ++i; continue; }
         NameAt n;
         n.line = i;
@@ -213,7 +213,7 @@ std::vector<NameAt> namesFrom(const std::vector<std::string>& lines, size_t i) {
         for (int k = 1; k < 3 && part.size() >= 2 && part.compare(part.size() - 2, 2, " +") == 0
                         && i + 1 < lines.size(); ++k) {
             const std::string next = trimBoth(lines[i + 1]);
-            if (!next.empty() && next[0] == '*') break;
+            if (deckscan::isKeywordLine(lines[i + 1])) break;
             n.name += part.substr(0, part.size() - 2);
             part = next;
             ++i;

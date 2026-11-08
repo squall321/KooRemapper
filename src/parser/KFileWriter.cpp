@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙
 #include "parser/ElementCardLayout.h"
 #include "parser/KFileWriter.h"
 #include <sstream>
@@ -36,12 +37,9 @@ bool startsWithKeyword(const std::string& line, const char* keyword) {
     return next == ' ' || next == '\t' || next == '_' || next == '\r';
 }
 
-// 키워드 줄 — 리더(`KFileReader::isKeywordLine`)와 같은 규칙: 1열이 `*` 이고 그다음이 글자(LS-DYNA 「키워드 앞 `*` 는 1열」 ·
-// Vol_I 17940). 들여쓴 `*` 줄은 앞 블록의 데이터다 — 예전엔 들여쓴 `  *END` 를 끝으로 보아 거기서 `*END` 를 쓰고 원본의 `*END` 를
-// 또 베꼈다(`*END` 가 둘 · 2026-11-08 재검토)
-bool isReaderKeywordLine(const std::string& line) {
-    return line.size() > 1 && line[0] == '*' && std::isalpha(static_cast<unsigned char>(line[1]));
-}
+// 키워드 줄은 리더와 같은 규칙(`deckscan::isKeywordLine` — 1열 `*` + 글자 · Vol_I 17940). 들여쓴 `*` 줄은 앞 블록의 데이터다 —
+// 예전엔 들여쓴 `  *END` 를 끝으로 보아 거기서 `*END` 를 쓰고 원본의 `*END` 를 또 베꼈다(`*END` 가 둘 · 2026-11-08 재검토)
+using deckscan::isKeywordLine;
 
 // Uppercased keyword token of a '*' line: "*ELEMENT_SHELL_TITLE" out of
 // "  *element_shell_title   $ comment".
@@ -177,7 +175,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
                     ++p;
                 }
                 if (p >= line.size()) continue;
-                if (isReaderKeywordLine(line)) {
+                if (isKeywordLine(line)) {
                     inVerbatimElem = isVerbatimElementKeyword(keywordToken(line, 0));
                     continue;
                 }
@@ -205,7 +203,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         for (const std::string& line : srcLines) {
             if (afterEnd) { out << line << "\n"; continue; }
             // Detect start of a new keyword block — 리더와 같은 키워드 줄(1열 `*` + 글자)만
-            const bool isKeyword = isReaderKeywordLine(line);
+            const bool isKeyword = isKeywordLine(line);
 
             if (isKeyword) {
                 // Exiting the previous skip block (if any).

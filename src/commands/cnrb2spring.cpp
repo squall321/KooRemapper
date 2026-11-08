@@ -1,4 +1,5 @@
 // CNRB 체결점 하나를 Side A/B 두 강체로 쪼개고 그 사이를 제로길이 discrete beam(ELFORM=6) 하나로 잇는 op
+#include "parser/DeckScan.h"      // isKeywordLine — 리더와 같은 1열 키워드 규칙
 #include "parser/ElementCardLayout.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IncludeClosure.h"   // FlatDeck — flatten_includes(2026-10-17)
@@ -58,6 +59,9 @@ static std::vector<std::string> cg_splitWS(const std::string& s) {
 }
 
 // 키워드 줄의 첫 토큰(대문자) — '*ELEMENT_SHELL   $ 주석' 같은 줄에서 키워드만 뽑는다
+// 키워드 줄 — 리더 · LS-DYNA 와 같은 1열 규칙(`deckscan::isKeywordLine` · Vol_I 17940). 들여쓴 `*` 줄은 앞 블록의 데이터다(2026-11-08)
+static bool cg_isKeyword(const std::string& line) { return KooRemapper::deckscan::isKeywordLine(line); }
+
 static std::string cg_keyword(const std::string& line) {
     auto t = cg_splitWS(line);
     return t.empty() ? std::string() : cg_upper(t[0]);
@@ -180,7 +184,7 @@ static std::map<int, CgVec3> cg_parseNodes(const std::vector<std::string>& lines
     for (const auto& ln : lines) {
         std::string tr = cg_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') { inNode = (cg_keyword(tr) == "*NODE"); continue; }
+        if (cg_isKeyword(ln)) { inNode = (cg_keyword(tr) == "*NODE"); continue; }
         if (!inNode || tr[0] == '$') continue;
         auto t = cg_splitWS(ln);
         int nid = 0; CgVec3 p;
@@ -209,7 +213,7 @@ static std::map<int, CgSetDef> cg_parseNodeSets(const std::vector<std::string>& 
     std::map<int, CgSetDef> sets;
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string tr = cg_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') continue;
+        if (!cg_isKeyword(lines[i])) continue;
         std::string up = cg_keyword(tr);
         if (up.rfind("*SET_NODE", 0) != 0) continue;
         bool supported = (up == "*SET_NODE_LIST" || up == "*SET_NODE_LIST_TITLE" ||
@@ -224,7 +228,7 @@ static std::map<int, CgSetDef> cg_parseNodeSets(const std::vector<std::string>& 
         size_t j = i + 1;
         for (; j < lines.size(); ++j) {
             std::string jt = cg_trim(lines[j]);
-            if (!jt.empty() && jt[0] == '*') break;
+            if (cg_isKeyword(lines[j])) break;
             if (jt.empty() || jt[0] == '$') continue;
             if (!titleSkipped) {
                 titleSkipped = true;
@@ -250,7 +254,7 @@ static std::vector<CgCnrbDef> cg_parseCnrbs(const std::vector<std::string>& line
     std::vector<CgCnrbDef> out;
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string tr = cg_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') continue;
+        if (!cg_isKeyword(lines[i])) continue;
         std::string up = cg_keyword(tr);
         if (up.rfind("*CONSTRAINED_NODAL_RIGID_BODY", 0) != 0) continue;
 
@@ -262,7 +266,7 @@ static std::vector<CgCnrbDef> cg_parseCnrbs(const std::vector<std::string>& line
         size_t j = i + 1;
         for (; j < lines.size(); ++j) {
             std::string jt = cg_trim(lines[j]);
-            if (!jt.empty() && jt[0] == '*') break;
+            if (cg_isKeyword(lines[j])) break;
             if (jt.empty() || jt[0] == '$') continue;
             if (!titleSkipped) {
                 titleSkipped = true;
@@ -322,7 +326,7 @@ static std::map<int, std::set<int>> cg_parseElementOwners(const std::vector<std:
     for (const auto& ln : lines) {
         std::string tr = cg_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (cg_isKeyword(ln)) {
             std::string up = cg_keyword(tr);
             inElem = (up.rfind("*ELEMENT_SOLID", 0) == 0 || up.rfind("*ELEMENT_SHELL", 0) == 0 ||
                       up.rfind("*ELEMENT_TSHELL", 0) == 0 || up.rfind("*ELEMENT_BEAM", 0) == 0);
@@ -382,7 +386,7 @@ static CgUsedIds cg_scanUsedIds(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = cg_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (cg_isKeyword(ln)) {
             std::string up = cg_keyword(tr);
             firstDataTaken = false;
             pendingElem = 0;
@@ -482,7 +486,7 @@ static void cg_scanDeadSids(const std::vector<std::string>& lines,
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string tr = cg_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0] == '*') { kw = cg_keyword(tr); firstData = true; continue; }
+        if (cg_isKeyword(lines[i])) { kw = cg_keyword(tr); firstData = true; continue; }
         if (kw.empty() || tr[0] == '$') continue;
         if (!cg_looksLikeDataLine(lines[i])) continue;
         bool isFirst = firstData;
@@ -788,7 +792,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         for (const auto& ln : lines) {
             std::string tr = cg_trim(ln);
             if (tr.empty()) continue;
-            if (tr[0] == '*') { kw = cg_keyword(tr); continue; }
+            if (cg_isKeyword(ln)) { kw = cg_keyword(tr); continue; }
             if (tr[0] == '$' || tr.find(',') == std::string::npos) continue;
             if (kw == "*NODE" || kw.rfind("*ELEMENT_", 0) == 0 || kw.rfind("*SET_NODE", 0) == 0 ||
                 kw.rfind("*CONSTRAINED_NODAL_RIGID_BODY", 0) == 0) {
@@ -1208,7 +1212,8 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
     bool headDone = head.empty(), endDone = false;
     for (const auto& ln : work) {
         if (ln == REMOVED) continue;
-        std::string up = cg_upper(cg_trim(ln));
+        // 1열 키워드 줄만 — 들여쓴 「  *END」(`*COMMENT` 글 속)는 끝이 아니다(2026-11-08)
+        std::string up = cg_isKeyword(ln) ? cg_upper(cg_trim(ln)) : std::string();
         if (!endDone && up == "*END") {
             for (const auto& l : pre) out.push_back(l);
             for (const auto& l : ins) out.push_back(l);

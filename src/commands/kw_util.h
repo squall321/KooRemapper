@@ -15,6 +15,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "parser/DeckScan.h"   // isKeywordLine · firstEndLine — 리더와 같은 1열 키워드 규칙
+
 // Knowledge graph (lat.md):
 //   @lat: [[modules/commands]]
 
@@ -35,6 +37,10 @@ inline std::string kw_upper(const std::string& s) {
                    [](unsigned char c){ return (char)std::toupper(c); });
     return r;
 }
+
+// 키워드 줄 — 리더 · LS-DYNA 와 같은 1열 규칙(`*` 가 1열 · 그다음 글자 — Vol_I 17940 · `deckscan::isKeywordLine`). 들여쓴 `*` 줄은
+// 앞 블록의 데이터다(`*COMMENT` 글 속의 「  *END」 가 덱을 끝내지 않는다 · 2026-11-08). 아래 걸음은 다 이것으로 키워드를 가른다
+inline bool kw_isKeyword(const std::string& line) { return KooRemapper::deckscan::isKeywordLine(line); }
 
 // Split a line into 10-character fixed-width tokens (trimmed)
 // ⚠ LS-DYNA 규칙 — 줄에 쉼표가 있으면 **자유 형식**이다(칸 폭이 아니라 쉼표로 가른다). 예전엔 10칸으로만 잘라
@@ -133,11 +139,10 @@ inline std::vector<std::string> kw_removeKeyword(
     std::string kwUp = kw_upper(keyword);
     for (int i = 0; i < (int)lines.size(); ) {
         std::string up = kw_upper(kw_trim(lines[i]));
-        if (up.rfind(kwUp, 0) != 0) { ++i; continue; }
+        if (!kw_isKeyword(lines[i]) || up.rfind(kwUp, 0) != 0) { ++i; continue; }
         int end = i + 1;
         while (end < (int)lines.size()) {
-            std::string et = kw_trim(lines[end]);
-            if (!et.empty() && et[0] == '*') break;
+            if (kw_isKeyword(lines[end])) break;
             ++end;
         }
         for (int k = i; k < end; ++k) rm[k] = true;
@@ -155,13 +160,13 @@ inline int kw_removeDrCurves(std::vector<std::string>& lines) {
     std::vector<bool> rm(lines.size(), false);
     for (int i = 0; i < (int)lines.size(); ) {
         std::string up = kw_upper(kw_trim(lines[i]));
-        if (up.rfind("*DEFINE_CURVE", 0) != 0) { ++i; continue; }
+        if (!kw_isKeyword(lines[i]) || up.rfind("*DEFINE_CURVE", 0) != 0) { ++i; continue; }
         bool hasTitle = (up.find("_TITLE") != std::string::npos);
         int titlesLeft = hasTitle ? 1 : 0; int sidr = -1;
         for (int j = i+1; j < (int)lines.size(); ++j) {
             std::string jt = kw_trim(lines[j]);
+            if (kw_isKeyword(lines[j])) break;
             if (jt.empty() || jt[0]=='$') continue;
-            if (jt[0]=='*') break;
             if (titlesLeft-- > 0) continue;
             auto toks = kw_tok10(lines[j]);
             if (toks.size() >= 2) { try { sidr = std::stoi(toks[1]); } catch(...){} }
@@ -170,8 +175,7 @@ inline int kw_removeDrCurves(std::vector<std::string>& lines) {
         if (sidr != 1) { ++i; continue; }
         int end = i+1;
         while (end < (int)lines.size()) {
-            std::string et = kw_trim(lines[end]);
-            if (!et.empty() && et[0]=='*') break;
+            if (kw_isKeyword(lines[end])) break;
             ++end;
         }
         for (int k = i; k < end; ++k) rm[k] = true;
@@ -183,20 +187,11 @@ inline int kw_removeDrCurves(std::vector<std::string>& lines) {
     return removed;
 }
 
-// Insert content lines before *END (or append if *END not found)
+// Insert content lines before the first *END (or append if *END not found) — 공용 첫 *END 찾기(1열 규칙 · `deckscan::firstEndLine`).
+// 예전엔 들여쓴 「  *END」(`*COMMENT` 글 속)도 끝으로 보아 그 앞에 넣었다 — 그 줄이 넣은 블록의 데이터가 됐다(2026-11-08)
 inline void kw_insertBeforeEnd(std::vector<std::string>& lines,
                                 const std::string& content) {
-    std::vector<std::string> newLines;
-    std::istringstream iss(content);
-    std::string ln;
-    while (std::getline(iss, ln)) newLines.push_back(ln);
-    for (int i = 0; i < (int)lines.size(); ++i) {
-        if (kw_upper(kw_trim(lines[i])) == "*END") {
-            lines.insert(lines.begin()+i, newLines.begin(), newLines.end());
-            return;
-        }
-    }
-    for (const auto& l : newLines) lines.push_back(l);
+    KooRemapper::deckscan::insertBeforeFirstEnd(lines, {content});
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +205,7 @@ inline double kw_readEndtime(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (kw_isKeyword(ln)) {
             std::string up = kw_upper(tr);
             inTerm = (up.rfind("*CONTROL_TERMINATION", 0) == 0);
             if (inTerm) found = true;
@@ -232,7 +227,7 @@ inline bool kw_modifyTermination(std::vector<std::string>& lines, double endtime
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (kw_isKeyword(ln)) {
             std::string up = kw_upper(tr);
             inTerm = (up.rfind("*CONTROL_TERMINATION", 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -255,7 +250,7 @@ inline bool kw_modifyTimestep(std::vector<std::string>& lines,
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (kw_isKeyword(ln)) {
             std::string up = kw_upper(tr);
             inTs = (up.rfind("*CONTROL_TIMESTEP", 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -278,7 +273,7 @@ inline void kw_checkShellElform(std::vector<std::string>& lines, bool fix,
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (kw_isKeyword(ln)) {
             std::string up = kw_upper(tr);
             inShell = (up.rfind("*SECTION_SHELL", 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -314,7 +309,7 @@ inline int kw_patchControlField(std::vector<std::string>& lines,
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (kw_isKeyword(ln)) {
             std::string up = kw_upper(tr);
             inBlock = (up.rfind(keyword, 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -338,7 +333,7 @@ inline int kw_patchControlField(std::vector<std::string>& lines,
 inline bool kw_hasKeyword(const std::vector<std::string>& lines, const std::string& keyword) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
-        if (!tr.empty() && tr[0] == '*') {
+        if (kw_isKeyword(ln)) {
             if (kw_upper(tr).rfind(keyword, 0) == 0) return true;
         }
     }

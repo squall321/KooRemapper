@@ -403,17 +403,10 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
                         " HGID=" + std::to_string(newHgid));
     }
 
-    // 10. Insert resolved bundle cards just before *END
-    std::vector<std::string> output;
-    bool inserted = false;
-    for (const auto& ln : modelLines) {
-        if (!inserted && kw_upper(kw_trim(ln))=="*END") {
-            for (const auto& c : resolvedCards) output.push_back(c);
-            inserted = true;
-        }
-        output.push_back(ln);
-    }
-    if (!inserted) for (const auto& c : resolvedCards) output.push_back(c);
+    // 10. Insert resolved bundle cards just before the first *END — 공용 첫 *END 찾기(1열 규칙 · 들여쓴 「  *END」 는 끝이 아니다)
+    std::vector<std::string> output = modelLines;
+    output.insert(output.begin() + static_cast<std::ptrdiff_t>(KooRemapper::deckscan::firstEndLine(output)),
+                  resolvedCards.begin(), resolvedCards.end());
 
     // 11. Write output file
     {

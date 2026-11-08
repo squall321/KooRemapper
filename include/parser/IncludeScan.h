@@ -1,6 +1,8 @@
 // 덱이 *INCLUDE 로 나뉘어 있나 — ID 발행자가 "못 본 것이 있다" 고 말할 수 있게 하는 공용 스캐너
 #pragma once
 
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙
+
 #include <cctype>
 #include <fstream>
 #include <string>
@@ -39,9 +41,9 @@ inline Unread scan(const std::vector<std::string>& lines, size_t maxNames = 8) {
     Unread out;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& raw = lines[i];
-        const size_t g = raw.find_first_not_of(" \t");
-        if (g == std::string::npos || raw[g] != '*') continue;
-        std::string up = raw.substr(g);
+        // 1열 규칙(리더와 같다 — 2026-11-08) — 들여쓴 「  *INCLUDE」(`*COMMENT` 글 속)는 카드가 아니다
+        if (!deckscan::isKeywordLine(raw)) continue;
+        std::string up = raw;
         while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t'))
             up.pop_back();
         for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -54,8 +56,8 @@ inline Unread scan(const std::vector<std::string>& lines, size_t maxNames = 8) {
             const std::string& d = lines[j];
             const size_t h = d.find_first_not_of(" \t\r");
             if (h == std::string::npos) continue;          // 빈 줄
+            if (deckscan::isKeywordLine(d)) break;         // 이름 없이 다음 키워드가 왔다
             if (d[h] == '$') continue;                     // 주석
-            if (d[h] == '*') break;                        // 이름 없이 다음 키워드가 왔다
             std::string nm = d.substr(h);
             while (!nm.empty() && (nm.back() == '\r' || nm.back() == ' ' || nm.back() == '\t'))
                 nm.pop_back();
@@ -78,9 +80,8 @@ inline Unread scanFile(const std::string& path, size_t maxNames = 8) {
     size_t idx = 0;
     bool wantName = false;
     while (std::getline(fh, raw)) {
-        const size_t g = raw.find_first_not_of(" \t");
-        if (g != std::string::npos && raw[g] == '*') {
-            std::string up = raw.substr(g);
+        if (deckscan::isKeywordLine(raw)) {   // 1열 규칙(리더와 같다)
+            std::string up = raw;
             while (!up.empty() && (up.back() == '\r' || up.back() == ' ' || up.back() == '\t'))
                 up.pop_back();
             for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
