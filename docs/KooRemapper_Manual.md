@@ -400,6 +400,11 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
   `matswap`(단독 · assemble) · `cclip` · `ale` · `cnrb2solid` · `cnrb2spring`(고정 번호대 겹침 — TMID 로 거짓 겹침을 내던 것을 고쳤고 쌓인
   MID 와의 진짜 겹침을 잡는다) · `matdb` 의 `match_part`. assemble 의 `matswap` · `matdb` 는 같은 실행의 앞 op 이 낸 번호도 피합니다
   (예전엔 offset 뒤의 matswap 이 MID 2 · SECID 2 를 또 냈다). 회귀 `tools/regress/test_material_id_family.py`.
+- 세트 번호를 제 훑기로 내는 `load` · `boundary` · `rbe` · `contact`(assemble 안)도 낸 번호만큼 공용 세트 커서를 올립니다(2026-11-08) —
+  예전엔 올리지 않아, 커서로 세트를 내는 뒤 처리(`offset` 의 tied 셸 층 등)가 `load` 의 `*SET_SEGMENT 1` 을 다시 냈습니다.
+- assemble 의 `battery` 는 새 번호를 내는 것이 아니라 지은 덱을 **끌어오는** 것이라 규칙이 다릅니다 — 덱의 번호가 기존 모델과 실제로
+  겹치는 족만 옮깁니다(겹치면 최대값 위로, 그게 칸 상한을 넘으면 빈자리로 · 겹치지 않으면 그대로 — [§43.1](#431-battery--배터리-셀-생성) ·
+  2026-11-08).
 - 인클루드를 다 읽었으면 조용합니다. 못 읽은 이름이나 따라가지 않은 `*INCLUDE_*`(`_TRANSFORM` 등)가 있으면
   **한 번** 경고하고 종료 코드는 그대로 0 입니다.
   ```
