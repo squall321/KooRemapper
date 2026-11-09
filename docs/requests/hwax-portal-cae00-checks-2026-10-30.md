@@ -119,7 +119,11 @@ SP 키트 2026-10-21 판(규칙 16 · 시험장 8단계 자동 시험) 받기 ·
 | 스모크(dev 실측 11-08) | `mcp_server/deckops_smoke.py` · `mcp_server/allops_smoke.py` | 29/29 · 64/64(외부 잡 하나 건너뜀) |
 
 클러스터 전처리 이미지(SmartTwinPreprocessor.sif)의 스테이징 사본도 `c5f74c18` 로 바꿨다(`scripts/stage-to-appt313.sh`) — 구워야 클러스터의 연산이
-이번 고침을 쓴다. 굽기는 sudo 가 드는 사람 몫이다(`docs/infra/appt313-bake-hook.md`). 다음 판으로 미룬 기존 결함 목록은 KooRemapper
+이번 고침을 쓴다. **11-09 00:48 UTC 구웠다** — 구운 SIF `da892a35f730cc134a60a2b6e66fb4542572ae9a4f0fba766c8fdd6b674dd279`(1,615,933,440 B)가 빌드
+자리 · KooSlurm `compute-node-images` · `/opt/apptainers` · Drive `ApptainerImages:SmartTwinPreprocessor/SmartTwinPreprocessor.sif` 넷 다 같고 그 안의
+KooRemapper 가 `c5f74c18` 이다(실측). 같은 굽기의 Drive tar 는 `SmartTwinPreprocessor_20261109_v135.tar.gz`(1,379,306,561 B — pyKooCAE 묶음
+`/opt/SmartTwinPreprocessor` 만 담고 KooRemapper 는 원래 안 든다). v134(11-08 23:01)는 스테이징 앞에 구운 판이라 옛 `15d013ec` 다. 계산 노드
+(node001 · 002 · viz)는 down 이라 노드 사본은 아직이다 — 살아나면 `deploy_compute_images.sh`. 다음 판으로 미룬 기존 결함 목록은 KooRemapper
 `docs/01-plan/features/seatbelt-aux-walkers-1107.plan.md` 「다음 판으로 미룬 것」.
 
 ## 2. cae00 — 후처리 예약(7-1) 설정
