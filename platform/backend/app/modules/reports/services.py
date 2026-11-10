@@ -21,6 +21,7 @@ import json
 
 from app.models import SOURCE_SELF, ImpactCase, ImpactReport, OntoObject, OntoRelation, Session, SessionFile
 from app.reports import analyze, blockstore, cad_bundle, onto_package, parser, render_result
+from app.modules.reports import bridges
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
 from app.shared import storage
@@ -1362,7 +1363,10 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
 
     - 짝 — 꾸러미가 적은 HTML 지문이 리포트 원본 HTML 과 같아야 하고, 종류가 같아야 하고, 런 키가 리포트 각도와 맞아야 한다.
     - 캠페인 수준만 행으로(campaign · part · contact · load_path · finding · hotspot). 런 · 파트 응답의 정본은 impact_cases 다.
-    - 다시 실으면 그 리포트의 행 · 선을 통째로 바꾼다(정본은 리포트, 꾸러미는 거기서 다시 만든다). 같은 바이트면 그대로 둔다(멱등).
+    - 다시 실으면 그 리포트의 행 · 선을 통째로 바꾼다(정본은 리포트, 꾸러미는 거기서 다시 만든다) — 코어 다리의 **사람 선만 남긴다**.
+      같은 바이트면 행은 그대로 둔다(멱등).
+    - 끝에 코어 다리(`bridges` — cae_part → part · cae_finding → failure_mode · cae_campaign → analysis_method, core-link SRC-08)를
+      지금 거울로 다시 짓는다(같은 바이트여도). 셈은 요약의 `bridges` 에 — 다리가 깨져도 꾸러미는 실린다(`bridges.error`).
     - 꾸러미 파일은 리포트 세션에 둔다 — 하중 전달(런 × 접촉)은 거기에만 있다. 지문별 자리라 저장이 깨지면 이번 파일만 걷어 내고
       옛 행 · 옛 파일이 남는다. 옛 파일은 새 행이 커밋된 뒤에 지운다.
     """
@@ -1376,7 +1380,8 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     sha = hashlib.sha256(raw).hexdigest()
     prior = report.ontology if isinstance(report.ontology, dict) else None
     if prior and prior.get("sha256") == sha:
-        return {**prior, "already": True}
+        # 행은 그대로 — 다리만 지금 거울 · 별칭으로 다시 짓는다(거울이 바뀐 뒤 다시 붙이면 규칙 선이 맞춰진다)
+        return {**prior, "bridges": await bridges.rebuild_after_attach(db, report), "already": True}
     src = await db.get(SessionFile, report.source_file_id) if report.source_file_id is not None else None
     case_keys = set((await db.execute(
         select(ImpactCase.case_key).where(ImpactCase.report_id == report.id))).scalars())
@@ -1391,7 +1396,8 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     stored = await sess_svc.add_uploaded_file(
         db, session, filename=f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}", raw=raw, kind="generated")
     try:
-        await db.execute(delete(OntoRelation).where(OntoRelation.report_id == report.id))
+        # 사람이 이은 다리 선만 남긴다 — 가리키던 해석 객체가 새 꾸러미에 없으면 「끊긴 사람 선」 으로 보인다(지우지 않는다)
+        await db.execute(delete(OntoRelation).where(OntoRelation.report_id == report.id, ~bridges.keep_on_reattach()))
         await db.execute(delete(OntoObject).where(OntoObject.report_id == report.id))
         db.add_all([OntoObject(type_slug=r["type_slug"], key=r["key"], label=r["label"], status="active",
                                properties=r["properties"], source=SOURCE_SELF, report_id=report.id)
@@ -1418,6 +1424,7 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     summary = dict(report.ontology)
     for f in old_files:
         await sess_svc.delete_file(db, f)
+    summary["bridges"] = await bridges.rebuild_after_attach(db, report)
     return {**summary, "already": False}
 
 
@@ -1455,8 +1462,8 @@ def _num(v):
 
 
 async def ontology_view(db: AsyncSession, report: ImpactReport) -> dict:
-    """리포트 하나의 해석 온톨로지 — 캠페인 · 파트 판정(위험한 것부터) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중.
-    실은 적이 없으면 `loaded: false` 와 까닭(꾸러미를 붙이는 길)을 준다."""
+    """리포트 하나의 해석 온톨로지 — 캠페인 · 파트 판정(위험한 것부터) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중 ·
+    코어 다리(`bridges` — 규칙 · 사람 선, 끊긴 사람 선, 후보, 못 붙인 것). 실은 적이 없으면 `loaded: false` 와 까닭(꾸러미를 붙이는 길)을 준다."""
     rid = report.id
     if not isinstance(report.ontology, dict):
         return {"report_id": rid, "loaded": False,
@@ -1503,7 +1510,8 @@ async def ontology_view(db: AsyncSession, report: ImpactReport) -> dict:
     return {"report_id": rid, "loaded": True, "summary": report.ontology,
             "campaign": item(camp[0]) if camp else None,
             "parts": parts, "load_paths": paths, "contacts": contacts, "findings": findings,
-            "hotspots": [item(o) for o in by.get("cae_hotspot", [])]}
+            "hotspots": [item(o) for o in by.get("cae_hotspot", [])],
+            "bridges": await bridges.view(db, report, rows=rows, edges=edges)}
 
 
 async def find_cae_rows(db: AsyncSession, user_id: int, *, type_slug: str, is_admin: bool = False,

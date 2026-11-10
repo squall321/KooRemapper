@@ -321,8 +321,23 @@ async def main():
                     cae2 = S._data(await s.call_tool("report_cae", {"report_id": rid})) or {}
                     chk("report_cae — 실은 뒤 파트 판정(위험한 것부터) · 하중 경로가 온다",
                         cae2.get("loaded") is True and cae2.get("parts") and cae2.get("load_paths"), str(cae2)[:300])
+                    # 코어 다리(SRC-08) — 세기만 하지 않고 값으로: 셈의 단위가 맞물리고, 거울이 비면 까닭을 말한다
+                    bc = got.get("bridges") or {}
+                    bv = cae2.get("bridges") or {}
+                    n_obj = sum(t.get("objects", 0) for t in (bc.get("by_type") or {}).values())
+                    chk("attach_cae_package — 코어 다리 셈이 온다(선이 없는 객체 = 후보 + 못 붙임 + 이름 없음 · 거울이 비면 까닭)",
+                        isinstance(bc.get("mirror"), dict) and n_obj > 0
+                        and bc["candidates"] + bc["unmatched"] + bc["unnamed"] <= n_obj
+                        and (any(bc["mirror"].values()) or (bc["rule"] == bc["candidates"] == 0 and bc.get("notes"))), bc)
+                    chk("report_cae — 코어 다리(선 · 끊긴 사람 선 · 후보 · 규칙 글)가 붙인 셈과 같은 수로 온다",
+                        isinstance(bv.get("lines"), list) and isinstance(bv.get("candidates"), list) and bv.get("rule")
+                        and isinstance(bv.get("stale"), list)
+                        and sum(1 for ln in bv["lines"] if ln.get("basis") == "rule") == (bv.get("counts") or {}).get("rule")
+                        == bc.get("rule") and len(bv["candidates"]) == bc.get("candidates"), str(bv)[:300])
                     again = S._data(await s.call_tool("attach_cae_package", {"report_id": rid, "path": str(cd / CAE_REAL.name)}))
-                    chk("같은 꾸러미를 다시 실으면 바꾸는 것이 없다 (멱등)", isinstance(again, dict) and again.get("already") is True, again)
+                    chk("같은 꾸러미를 다시 실으면 행은 그대로(멱등) — 다리만 지금 거울로 다시 짓는다",
+                        isinstance(again, dict) and again.get("already") is True
+                        and (again.get("bridges") or {}).get("rule") == bc.get("rule"), again)
                     mine = S._data(await s.call_tool("find_cae_load_paths", {"kind": "impact", "limit": 500})) or {}
                     chk("find_cae_load_paths — 이 리포트의 하중 경로가 리포트를 건너 질의에 나온다",
                         any(i.get("report_id") == rid for i in mine.get("items") or []), str(mine)[:300])

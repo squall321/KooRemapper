@@ -519,4 +519,4 @@ async def _attach_package(db, client: KooSlurmClient, sid: str, rid: str, entry:
         await db.rollback()
         return {"state": "failed", "why": f"꾸러미를 싣다 깨졌다 — {type(exc).__name__}: {exc}"}
     return {"state": "loaded", "sha256": summary["sha256"], "rows": summary["counts"]["loaded"],
-            "warnings": summary.get("warnings") or []}
+            "warnings": summary.get("warnings") or [], "bridges": summary.get("bridges")}

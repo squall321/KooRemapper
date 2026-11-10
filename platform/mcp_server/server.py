@@ -1034,10 +1034,13 @@ async def attach_cae_package(
     하중 경로 · 소견 · 응력 집중). 런 · 파트 응답은 리포트의 케이스(impact_cases)가 정본이라 행으로 싣지 않는다. 소유자만.
 
     받아들인 어휘 판 · 짝 HTML 지문(꾸러미의 source.html 이 이 리포트 원본 HTML 과 같아야 한다) · 종류 · 런 키가 맞아야 한다 —
-    하나라도 어긋나면 아무것도 바뀌지 않는다. 같은 꾸러미는 멱등, 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 리포트를 번들(.zip)로
-    올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다. 후처리 예약(postprocess) 반입도 귀환 매니페스트에 꾸러미가 있으면
-    저절로 싣는다(잡의 external_ref.ontology.state).
-    Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent."""
+    하나라도 어긋나면 아무것도 바뀌지 않는다. 같은 꾸러미는 행을 그대로 두고(멱등), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다.
+    붙일 때마다(같은 꾸러미여도) **코어 다리**를 지금 거울로 다시 짓는다 — 해석 파트 → 코어 부품(maps_to) · 소견 → 고장모드(indicates) ·
+    캠페인 → 해석 방법(follows_method). 이름이 코어 객체 하나와 글자 그대로 맞을 때만 선(rule)이고 나머지는 후보다. 사람이 이은 선은
+    다시 붙여도 남는다. 결과 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선(stale) 수와 후보 · 못 붙인 객체 수(코어 거울에 그 타입이 없으면
+    notes 가 까닭을 말한다). 리포트를 번들(.zip)로 올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다. 후처리 예약(postprocess)
+    반입도 귀환 매니페스트에 꾸러미가 있으면 저절로 싣는다(잡의 external_ref.ontology.state).
+    Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent rows; rebuilds core bridges."""
     import os as _os
     if not _os.path.isfile(path):
         raise RuntimeError(f"path not found on the MCP host: {path}")
@@ -1051,9 +1054,13 @@ async def attach_cae_package(
 @mcp.tool()
 async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
     """리포트 하나의 해석 온톨로지 — 캠페인(단위계 · 낙하 높이 · 충돌 속도 …) · **파트 판정 위험한 것부터**(최소 안전율 · 최악 응력과
-    그 런의 각도 · 위치 identity) · **하중 경로 충격량 큰 것부터**(파트 쌍 · 맞닿은 비율) · 접촉(양쪽 파트) · 소견 · 응력 집중.
-    실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
-    One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings."""
+    그 런의 각도 · 위치 identity) · **하중 경로 충격량 큰 것부터**(파트 쌍 · 맞닿은 비율) · 접촉(양쪽 파트) · 소견 · 응력 집중 ·
+    **코어 다리**(`bridges` — 파트 → 코어 부품 maps_to · 소견 → 고장모드 indicates · 캠페인 → 해석 방법 follows_method). bridges 는
+    `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나) · `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 —
+    지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key · 까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) ·
+    `counts` · `rule`(맞추는 규칙 글) · `drift`(붙인 뒤 거울이 바뀌어 저장된 규칙 선이 지금 셈과 다를 때만). 실은 적이 없으면
+    `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
+    One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings, core bridges."""
     return await _get(ctx, f"/reports/{report_id}/cae")
 
 

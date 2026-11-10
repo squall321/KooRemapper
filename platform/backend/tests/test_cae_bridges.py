@@ -1,0 +1,439 @@
+# 해석 객체 → 코어 다리(core-link SRC-08) 시험 — 정확 일치만 규칙 선 · 후보 · 사람 선 보존 · 끊긴 사람 선 · 타입 검사 · 가시성
+"""실제 dev DB 에 사용자 · 세션 · 리포트(각도 둘)를 만들고 실물 v14 꾸러미 픽스처(`fixtures/cae_package_v14_min.json` — 파트 23 · 소견 22 ·
+캠페인 1)를 싣는다. 코어 거울은 이 시험이 잠깐 넣는 허브 행(part · failure_mode · analysis_method)과 우리 별칭 · 옛 key 다 — 정해진
+key 로 넣고 앞뒤에 지운다(dev 거울에는 이 세 타입이 없다 — 받을 타입 기본값 밖).
+
+거울 픽스처가 v14 에 낳는 것(손으로 셈 — 아래 EXPECT).
+  파트  규칙 6 — part/2(옛 key) · part/3(이름) · part/18(허브 별칭) · part/20(우리 별칭) · part/21(key) · part/23(그만 씀이어도 정확은 잇는다)
+        후보 7 — part/1(같은 이름 둘) · part/4(구분기호만 다름) · part/12 · part/13(「pkg\\pkg1」 을 품는다) · part/16 · part/17 · part/19(SUBPKG)
+        못 붙임 10 — 사라진 행(Geom\\솔리드)과 그만 쓴 후보(SUBPBA)는 보지 않는다
+  소견  규칙 1(finding/3 — 제목이 이름과 같다) · 후보 1(finding/18 — 「Motor」 를 품는다) · 못 붙임 20
+  캠페인 규칙 1(drop_all_angle — 우리 별칭)
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import pytest
+import ulid
+from sqlalchemy import delete, select
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from app.models import (SOURCE_HUB, ImpactCase, ImpactReport, OntoAlias, OntoObject, OntoPreviousKey, OntoRelation,
+                        Session, SessionFile, User)
+from app.modules.reports import bridges as br
+from app.modules.reports import services as svc
+from app.reports import onto_package as op
+from app.shared import security
+
+ON_SESSION_LOOP = pytest.mark.asyncio(loop_scope="session")     # DB 픽스처와 같은 루프 — 순수 시험에는 달지 않는다
+FIX = Path(__file__).with_name("fixtures") / "cae_package_v14_min.json"
+TAG = "cae-bridge-test"         # 우리 별칭 행의 note — 이 시험이 넣은 것만 지운다
+
+# (type, key, label, status, deleted, aliases)
+MIRROR = [
+    ("part", "cbt:pcb", "PCB\\PCB", "active", False, None),
+    ("part", "Display\\Display", "디스플레이", "active", False, None),
+    ("part", "cbt:motor", "모터", "active", False, ["PKG\\Motor"]),
+    ("part", "cbt:bond", "본드", "active", False, None),
+    ("part", "cbt:wall", "벽", "active", False, None),
+    ("part", "cbt:metal-a", "Front\\Metal", "active", False, None),
+    ("part", "cbt:metal-b", "Front\\Metal", "active", False, None),
+    ("part", "cbt:pkg1", "pkg\\pkg 1", "active", False, None),
+    ("part", "cbt:subpkg", "SUBPKG", "active", False, None),
+    ("part", "cbt:geom", "Geom\\솔리드", "active", True, None),
+    ("part", "cbt:part23", "Part 23", "deprecated", False, None),
+    ("part", "cbt:subpba", "SUBPBA", "deprecated", False, None),
+    ("failure_mode", "cbt:fm-shock", "Part 2 (Front\\Wall): peak 0.65 MG", "active", False, None),
+    ("failure_mode", "cbt:fm-motor", "Motor", "active", False, None),
+    ("analysis_method", "cbt:am-drop", "낙하 해석", "active", False, None),
+]
+EXTRA = [("part", "cbt:geom2")]           # 시험 도중 넣는 행
+ALIASES = [("part", "Bond\\Bond", "cbt:bond"), ("analysis_method", "drop_all_angle", "cbt:am-drop")]
+PREVIOUS = [("part", "Front\\Wall", "cbt:wall")]
+
+EXPECT = {"rule": 8, "human": 0, "stale": 0, "candidates": 8, "unmatched": 30, "unnamed": 0}
+EXPECT_BY = {"cae_campaign": {"objects": 1, "rule": 1, "human": 0, "stale": 0, "candidates": 0, "unmatched": 0, "unnamed": 0},
+             "cae_part": {"objects": 23, "rule": 6, "human": 0, "stale": 0, "candidates": 7, "unmatched": 10, "unnamed": 0},
+             "cae_finding": {"objects": 22, "rule": 1, "human": 0, "stale": 0, "candidates": 1, "unmatched": 20, "unnamed": 0}}
+RULES = {"campaign": ("follows_method", "cbt:am-drop", "alias"), "part/2": ("maps_to", "cbt:wall", "previous_key"),
+         "part/3": ("maps_to", "cbt:pcb", "label"), "part/18": ("maps_to", "cbt:motor", "hub_alias"),
+         "part/20": ("maps_to", "cbt:bond", "alias"), "part/21": ("maps_to", "Display\\Display", "key"),
+         "part/23": ("maps_to", "cbt:part23", "label"), "finding/3": ("indicates", "cbt:fm-shock", "label")}
+CANDIDATES = {"part/1": ["cbt:metal-a", "cbt:metal-b"], "part/4": ["cbt:pkg1"], "part/12": ["cbt:pkg1"],
+              "part/13": ["cbt:pkg1"], "part/16": ["cbt:subpkg"], "part/17": ["cbt:subpkg"], "part/19": ["cbt:subpkg"],
+              "finding/18": ["cbt:fm-motor"]}
+
+
+def _pkg() -> dict:
+    return json.loads(FIX.read_text(encoding="utf-8"))
+
+
+def _raw(pkg: dict) -> bytes:
+    return json.dumps(pkg, ensure_ascii=False).encode("utf-8")
+
+
+def _without_finding(pkg: dict, key: str) -> dict:
+    """소견 하나를 뺀 꾸러미 — 소견은 아무 칸도 가리키지 않으므로 그 행과 finding_about 줄만 빼면 검사를 통과한다."""
+    pkg["objects"] = [o for o in pkg["objects"] if not (o["type"] == "cae_finding" and o["key"] == key)]
+    pkg["relations"] = [r for r in pkg["relations"] if r["src"] != ["cae_finding", key]]
+    return pkg
+
+
+async def _clean_mirror(db) -> None:
+    for t, k in [(m[0], m[1]) for m in MIRROR] + EXTRA:
+        await db.execute(delete(OntoObject).where(OntoObject.type_slug == t, OntoObject.key == k,
+                                                  OntoObject.report_id.is_(None)))
+    await db.execute(delete(OntoAlias).where(OntoAlias.note == TAG))
+    for t, old, _ in PREVIOUS:
+        await db.execute(delete(OntoPreviousKey).where(OntoPreviousKey.type_slug == t, OntoPreviousKey.old_key == old))
+    await db.commit()
+
+
+async def _mirror(db) -> None:
+    await _clean_mirror(db)
+    for t, k, label, st, gone, aliases in MIRROR:
+        db.add(OntoObject(type_slug=t, key=k, label=label, status=st, deleted=gone, source=SOURCE_HUB, report_id=None,
+                          properties={"aliases": aliases} if aliases else {}))
+    for t, alias, key in ALIASES:
+        db.add(OntoAlias(type_slug=t, alias=alias, key=key, source="manual", confirmed_by="test", note=TAG))
+    for t, old, key in PREVIOUS:
+        db.add(OntoPreviousKey(type_slug=t, old_key=old, key=key))
+    await db.commit()
+
+
+async def _make(db, *, admin: bool = False, with_report: bool = True, shared: str | None = None):
+    u = User(email=f"cbt_{ulid.new().str}@kooremapper.test", password_hash=security.hash_password("x"),
+             is_active=True, is_system_admin=admin)
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    if not with_report:
+        return u, None
+    pkg = _pkg()
+    s = Session(id=ulid.new().str, user_id=u.id, name="cbt", storage_path=f"{u.id}/cbt")
+    db.add(s)
+    await db.flush()
+    html = SessionFile(session_id=s.id, filename="report.html", rel_path=f"{u.id}/cbt/report.html", kind="input",
+                       size_bytes=1, sha256=pkg["source"]["html"]["sha256"])
+    db.add(html)
+    await db.flush()
+    rep = ImpactReport(id=ulid.new().str, session_id=s.id, user_id=u.id, kind="sphere", n_cases=2,
+                       source_file_id=html.id, label="다리 시험", shared_affiliation=shared)
+    db.add(rep)
+    await db.flush()
+    for o in pkg["objects"]:
+        if o["type"] == "cae_run":
+            db.add(ImpactCase(report_id=rep.id, case_key=o["properties"]["case_key"],
+                              identity={"angle": {"name": o["label"]}}))
+    await db.commit()
+    return u, rep
+
+
+async def _drop(db, *users):
+    for u in users:
+        if u is not None:
+            await db.execute(delete(User).where(User.id == u.id))
+    await db.commit()
+
+
+@pytest.fixture
+async def mirror(db):
+    await _mirror(db)
+    try:
+        yield
+    finally:
+        await _clean_mirror(db)
+
+
+async def _lines(db, rid: str) -> dict[tuple[str, str], OntoRelation]:
+    rows = (await db.execute(select(OntoRelation).where(
+        OntoRelation.report_id == rid, OntoRelation.relation.in_(br.relations())))).scalars().all()
+    return {(r.src_key.removeprefix(f"{rid}/"), r.dst_key): r for r in rows}
+
+
+def _flat(counts: dict) -> dict:
+    return {k: counts[k] for k in EXPECT}
+
+
+# ── 순수 — 정확 · 후보 규칙 ────────────────────────────────────────────────────────────────
+
+def _pool(**kw) -> br._Pool:
+    p = br._Pool()
+    for key, label in kw.get("objs", {}).items():
+        p.labels[key] = label
+        for how, text in (("key", key), ("label", label)):
+            p.exact.setdefault(text, {}).setdefault(key, how)
+            p.names.append((key, br.normalize(text), how))
+    p.ours.update(kw.get("ours", {}))
+    return p
+
+
+def test_exact_is_the_task_link_rule_strip_only():
+    """「정확」 은 과제 잇기(resolve_task)와 같다 — 앞뒤 공백만 걷는다. 대소문자 · 구분기호가 다르면 정확이 아니라 후보다."""
+    p = _pool(objs={"Q1": "PCB Main"})
+    assert br.match(p, "  PCB Main ")["verdict"] == "rule"
+    got = br.match(p, "pcb-main")
+    assert got["verdict"] == "candidates" and got["options"][0]["key"] == "Q1"
+    assert got["options"][0]["why"] == br._WHY_SAME["label"]
+
+
+def test_our_alias_wins_over_a_hub_side_match():
+    p = _pool(objs={"Q1": "Bracket", "Q2": "브래킷"}, ours={"Bracket": "Q2"})
+    got = br.match(p, "Bracket")
+    assert (got["verdict"], got["key"], got["matched_by"]) == ("rule", "Q2", "alias")
+
+
+def test_several_exact_matches_are_candidates_not_a_line():
+    p = _pool(objs={"Q1": "Frame", "Q2": "Frame"})
+    got = br.match(p, "Frame")
+    assert got["verdict"] == "candidates" and "key" not in got
+    assert [(o["key"], o["why"]) for o in got["options"]] == [("Q1", br._WHY_MANY), ("Q2", br._WHY_MANY)]
+
+
+def test_containment_needs_two_characters_and_ranks_longer_first():
+    p = _pool(objs={"Q1": "A", "Q2": "PKG", "Q3": "SUBPKG"})
+    got = br.match(p, "PKG\\SUBPKG2")
+    assert [o["key"] for o in got["options"]] == ["Q3", "Q2"], "길게 품은 것이 먼저 · 한 글자는 아무 글에나 걸려 보지 않는다"
+    assert br.match(p, "")["verdict"] == "unnamed" and br.match(p, None)["verdict"] == "unnamed"
+    assert br.match(p, "ZZZ")["verdict"] == "unmatched"
+
+
+def test_candidates_are_capped_with_the_rest_counted():
+    p = _pool(objs={f"Q{i}": f"Frame{i}" for i in range(8)})
+    got = br.match(p, "frame")
+    assert len(got["options"]) == br.CANDIDATES_PER_OBJECT and got["more"] == 8 - br.CANDIDATES_PER_OBJECT
+
+
+def test_the_code_names_one_property_per_bridge_and_the_vocabulary_has_it():
+    """끝 타입 · 카디널리티는 정의 파일에서 읽는다 — 코드는 부르는 칸만 정하고, 그 칸은 해석 어휘(모든 받아들인 판)에 있어야 한다."""
+    got = br.bridges()
+    assert {t: (b.relation, b.dst_type, b.cardinality) for t, b in got.items()} == {
+        "cae_campaign": ("follows_method", "analysis_method", "many_to_one"),
+        "cae_part": ("maps_to", "part", "many_to_one"),
+        "cae_finding": ("indicates", "failure_mode", "many_to_many")}
+    for sha in op.ACCEPTED:
+        types = {t["slug"]: {p["key"] for p in t["properties"]} for t in op.vocabulary(sha)["types"]}
+        for t, b in got.items():
+            assert b.name_prop in types[t], (sha[:12], t, b.name_prop)
+
+
+# ── 붙이기 — 실물 v14 와 거울 픽스처 ───────────────────────────────────────────────────────
+
+@ON_SESSION_LOOP
+async def test_attaching_v14_draws_exact_lines_and_lists_candidates(db, mirror):
+    u, rep = await _make(db)
+    try:
+        got = await svc.attach_ontology(db, rep, FIX.read_bytes(), filename="report.ontology.json")
+        b = got["bridges"]
+        assert _flat(b) == EXPECT and b["by_type"] == EXPECT_BY, b
+        assert b["mirror"] == {"analysis_method": 1, "part": 11, "failure_mode": 2} and not b["notes"]
+        assert _flat(rep.ontology["bridges"]) == EXPECT, "리포트 요약(ontology)에도 같은 셈"
+
+        lines = await _lines(db, rep.id)
+        assert {k[0]: (r.relation, k[1], r.properties["matched_by"]) for k, r in lines.items()} == RULES
+        assert all(r.properties["basis"] == "rule" and r.source == "dynaforge" for r in lines.values())
+        assert lines[("part/18", "cbt:motor")].properties["matched_text"] == "PKG\\Motor"
+        assert not [k for k in lines if k[0] == "part/1"], "같은 이름이 둘이면 선이 아니라 후보다"
+
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert {c["src_key"]: [o["key"] for o in c["options"]] for c in view["candidates"]} == CANDIDATES
+        one = next(c for c in view["candidates"] if c["src_key"] == "part/1")
+        assert {o["why"] for o in one["options"]} == {br._WHY_MANY} and one["name"] == "Front\\Metal"
+        assert view["unmatched"]["cae_part"] == ["part/5", "part/6", "part/7", "part/8", "part/9", "part/10", "part/11",
+                                                 "part/14", "part/15", "part/22"]
+        assert len(view["unmatched"]["cae_finding"]) == 20 and view["stale"] == [] and "drift" not in view
+        assert [ln["src_key"] for ln in view["lines"]] == ["campaign", "part/2", "part/3", "part/18", "part/20", "part/21",
+                                                           "part/23", "finding/3"]
+        ln = next(x for x in view["lines"] if x["src_key"] == "part/3")
+        assert (ln["dst_label"], ln["dst_active"], ln["src_label"], ln["basis"]) == ("PCB\\PCB", True, "PCB\\PCB", "rule")
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_an_empty_mirror_says_why_nothing_links(db):
+    """dev 처럼 세 타입을 받지 않은 박스 — 못 붙였다고만 하지 않고 까닭(받을 타입)을 말한다."""
+    await _clean_mirror(db)
+    u, rep = await _make(db)
+    try:
+        got = (await svc.attach_ontology(db, rep, FIX.read_bytes()))["bridges"]
+        if any(got["mirror"].values()):
+            pytest.skip(f"dev 거울에 다리 끝 타입이 있다 — {got['mirror']}")
+        assert got["rule"] == got["candidates"] == 0 and got["unmatched"] == 46
+        assert len(got["notes"]) == 3 and all("KOORM_SP_CORE_TYPES" in n for n in got["notes"])
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_reattaching_keeps_human_lines_and_redraws_rule_lines(db, mirror):
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        a = await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="owner@x", note="같은 이름 둘 중 앞")
+        f = await br.confirm(db, rep, src_key="finding/18", dst_key="cbt:fm-motor", by="owner@x")
+        o = await br.confirm(db, rep, src_key="part/3", dst_key="cbt:subpkg", by="owner@x")
+        await db.commit()
+        assert a["ok"] and f["ok"] and o["ok"] and o["replaced_rule"] == ["cbt:pcb"], o
+        assert _flat(o["bridges"]) == {**EXPECT, "rule": 7, "human": 3, "candidates": 6}, "part/3 은 사람이 이겼다(다대일)"
+        before = await _lines(db, rep.id)
+        human_ids = {k: r.id for k, r in before.items() if r.properties["basis"] == "human"}
+        assert set(human_ids) == {("part/1", "cbt:metal-a"), ("finding/18", "cbt:fm-motor"), ("part/3", "cbt:subpkg")}
+        assert ("part/3", "cbt:pcb") not in before
+
+        # 거울이 바뀐다 — key 로 잇던 부품이 사라지고, 사라졌던 이름이 새 행으로 온다
+        gone = (await db.execute(select(OntoObject).where(OntoObject.type_slug == "part",
+                                                         OntoObject.key == "Display\\Display"))).scalar_one()
+        gone.deleted = True
+        db.add(OntoObject(type_slug="part", key="cbt:geom2", label="Geom\\솔리드", status="active", source=SOURCE_HUB))
+        await db.commit()
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert view["drift"]["add"] == [{"relation": "maps_to", "src_key": "part/22", "dst_key": "cbt:geom2"}]
+        assert view["drift"]["drop"] == [{"relation": "maps_to", "src_key": "part/21", "dst_key": "Display\\Display"}]
+
+        same = await svc.attach_ontology(db, rep, FIX.read_bytes())       # 같은 바이트 — 행은 그대로, 다리는 다시
+        want = {**EXPECT, "rule": 7, "human": 3, "candidates": 6}
+        assert same["already"] is True and _flat(same["bridges"]) == want, same["bridges"]
+        pkg = _pkg()
+        pkg["_note"] = str(pkg.get("_note") or "") + " (다시 낸 판)"
+        again = await svc.attach_ontology(db, rep, _raw(pkg))              # 다른 바이트 — 행을 통째로 바꾼다
+        assert again["already"] is False and _flat(again["bridges"]) == want, again["bridges"]
+
+        after = await _lines(db, rep.id)
+        assert {k: r.id for k, r in after.items() if r.properties["basis"] == "human"} == human_ids, "사람 선은 그 행 그대로"
+        kept = after[("part/1", "cbt:metal-a")].properties
+        assert (kept["decided_by"], kept["note"], kept["src_label"]) == ("owner@x", "같은 이름 둘 중 앞", "Front\\Metal")
+        assert ("part/22", "cbt:geom2") in after and ("part/21", "Display\\Display") not in after, "규칙 선은 다시 지었다"
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert "drift" not in view and view["stale"] == []
+        assert {x["src_key"] for x in view["lines"] if x["basis"] == "human"} == {"part/1", "part/3", "finding/18"}
+        assert not [c for c in view["candidates"] if c["src_key"] in ("part/1", "finding/18")], "사람 선이 있으면 후보를 안 낸다"
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_a_human_line_whose_object_disappears_is_kept_as_stale(db, mirror):
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        got = await br.confirm(db, rep, src_key="finding/22", dst_key="cbt:fm-shock", by="owner@x")   # 후보가 아니어도 타입이 맞으면
+        await db.commit()
+        assert got["ok"] and got["line"]["basis"] == "human"
+        title = next(o["label"] for o in _pkg()["objects"] if o["key"] == "finding/22")
+
+        res = await svc.attach_ontology(db, rep, _raw(_without_finding(_pkg(), "finding/22")))
+        assert res["counts"]["loaded"]["cae_finding"] == 21
+        assert (res["bridges"]["stale"], res["bridges"]["human"]) == (1, 0), res["bridges"]
+        assert res["bridges"]["by_type"]["cae_finding"]["stale"] == 1
+        assert ("finding/22", "cbt:fm-shock") in await _lines(db, rep.id), "끊긴 사람 선은 지우지 않는다"
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert [(s["src_key"], s["dst_key"], s["basis"], s["src_label"]) for s in view["stale"]] == [
+            ("finding/22", "cbt:fm-shock", "human", title)], "사라진 객체의 이름은 확정 때 남긴 것으로 보인다"
+        assert not [x for x in view["lines"] if x["src_key"] == "finding/22"]
+
+        gone = await br.remove(db, rep, src_key="finding/22", dst_key="cbt:fm-shock")
+        await db.commit()
+        assert gone["ok"] and gone["was_stale"] is True and gone["bridges"]["stale"] == 0
+        assert ("finding/22", "cbt:fm-shock") not in await _lines(db, rep.id)
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_types_and_conflicts_are_refused(db, mirror):
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+
+        async def refused(**kw) -> tuple[int, str, str]:
+            got = await br.confirm(db, rep, by="owner@x", **kw)
+            await db.commit()           # 거절은 아무것도 안 바꾼다 — 잠금만 푼다(되감으면 행 객체가 만료돼 async 에서 못 읽는다)
+            assert not got["ok"], got
+            return got["status"], got["error"], got["detail"]
+
+        st, err, why = await refused(src_key="part/5", dst_key="cbt:fm-shock")
+        assert (st, err) == (422, "wrong_type") and "failure_mode" in why and "part 에만" in why
+        assert (await refused(src_key="part/5", dst_key="cbt:pcb", dst_type="failure_mode"))[:2] == (422, "wrong_type")
+        assert (await refused(src_key="part/5", dst_key="cbt:pcb", relation="indicates"))[:2] == (422, "wrong_relation")
+        st, err, why = await refused(src_key="contact/172", dst_key="cbt:pcb")
+        assert (st, err) == (422, "no_bridge") and "maps_to" in why
+        assert (await refused(src_key="part/999", dst_key="cbt:pcb"))[:2] == (404, "not_found")
+        assert (await refused(src_key="part/5", dst_key="cbt:nope"))[:2] == (422, "not_in_mirror")
+        assert (await refused(src_key="part/5", dst_key="cbt:geom"))[:2] == (422, "inactive")
+
+        assert (await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o"))["ok"]
+        await db.commit()
+        st, err, _ = await refused(src_key="part/1", dst_key="cbt:metal-b")
+        assert (st, err) == (409, "already_bound"), "다대일 — 한 파트에 사람 선 하나(먼저 지운다)"
+        again = await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o")
+        assert again["ok"] and again["already"] is True
+        # 다대다 — 소견 하나에 사람 선 둘, 규칙 선과도 함께 선다
+        assert (await br.confirm(db, rep, src_key="finding/3", dst_key="cbt:fm-motor", by="o"))["ok"]
+        assert (await br.confirm(db, rep, src_key="finding/18", dst_key="cbt:fm-motor", by="o"))["ok"]
+        both = await br.confirm(db, rep, src_key="finding/18", dst_key="cbt:fm-shock", by="o")
+        await db.commit()
+        assert both["ok"] and both["bridges"]["human"] == 4
+        lines = await _lines(db, rep.id)
+        assert lines[("finding/3", "cbt:fm-shock")].properties["basis"] == "rule", "다대다는 규칙 선이 사람 선 곁에 남는다"
+        # 규칙 선과 같은 짝을 확정하면 그 선이 사람 선으로 오른다
+        up = await br.confirm(db, rep, src_key=f"{rep.id}/part/2", dst_key="cbt:wall", by="o")
+        await db.commit()
+        assert up["ok"] and up["promoted_rule"] is True
+        assert (await _lines(db, rep.id))[("part/2", "cbt:wall")].properties["basis"] == "human"
+
+        no = await br.remove(db, rep, src_key="part/3", dst_key="cbt:pcb")
+        assert (no["status"], no["error"]) == (409, "rule_line"), "규칙 선은 지우지 않는다"
+        assert (await br.remove(db, rep, src_key="part/3", dst_key="cbt:nope"))["status"] == 404
+        await db.commit()
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_deleting_the_report_takes_its_human_lines_with_it(db, mirror):
+    """사람 선도 리포트의 것이다 — 리포트를 지우면 FK 로 함께 사라진다(지운 리포트를 가리키는 선이 남지 않는다 — 0019 의 교훈)."""
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o")
+        await db.commit()
+        rid = rep.id
+        assert len(await _lines(db, rid)) == 9
+        await db.execute(delete(ImpactReport).where(ImpactReport.id == rid))
+        await db.commit()
+        assert await _lines(db, rid) == {}
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_bridge_lines_stay_out_of_the_public_ontology_views(db, mirror):
+    """일반 보기(로그인한 누구나)의 코어 객체 선에 리포트의 다리 선이 새지 않는다 — 리포트 가시성(10-31 결정)."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    stranger, _ = await _make(db, with_report=False)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o")
+        await db.commit()
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: stranger
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True}
+        async with httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            for key in ("cbt:pcb", "cbt:metal-a"):
+                got = (await c.get(f"/api/v1/ontology/objects/part/{key}")).json()["data"]
+                assert got["object"]["key"] == key and got["in"] == [], got["in"]
+    finally:
+        await _drop(db, u, stranger)

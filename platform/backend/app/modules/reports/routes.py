@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import User
-from app.modules.reports import services as svc
+from app.modules.reports import bridges, services as svc
 from app.modules.reports.schemas import CaseRead, ReportListItem, ReportRead
 from app.modules.sessions import services as sess_svc
 from app.shared.auth import get_current_user
@@ -259,7 +259,8 @@ async def report_intake(
             # 후처리 꾸러미(같은 이름 줄기) — 실패해도 리포트 반입은 막지 않고 까닭을 돌려준다(사용자 결정 10-31 (가))
             try:
                 got = await svc.attach_ontology(db, report, bundle_onto["data"], filename=bundle_onto["name"])
-                onto_summary = {"ok": True, "loaded": got["counts"]["loaded"], "warnings": got["warnings"]}
+                onto_summary = {"ok": True, "loaded": got["counts"]["loaded"], "warnings": got["warnings"],
+                                "bridges": got.get("bridges")}
             except OntoPackageError as exc:
                 onto_summary = {"ok": False, "why": str(exc)}
     except ValueError as exc:
@@ -876,7 +877,8 @@ async def attach_ontology(
 ):
     """후처리 온톨로지 꾸러미(`<리포트 이름>.ontology.json`, `dynaforge.onto_package`)를 리포트에 싣는다 — 캠페인 수준만 행으로
     (사용자 결정 10-31 (가)). 소유자만. 받아들인 어휘 판 · 짝 HTML 지문 · 종류 · 런 키에 안 맞으면 422 — 아무것도 바꾸지 않는다.
-    같은 바이트는 멱등, 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다."""
+    같은 바이트는 행을 그대로 둔다(멱등), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 어느 쪽이든 끝에 코어 다리(core-link SRC-08)를
+    지금 거울로 다시 짓는다 — 응답 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선 수와 후보 · 못 붙인 객체 수(사람 선은 다시 붙여도 남는다)."""
     r = await _require_owned_report(db, user, report_id)
     raw, name = await _read_upload(file, what="온톨로지 꾸러미")
     try:
@@ -884,9 +886,10 @@ async def attach_ontology(
     except OntoPackageError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"온톨로지 꾸러미를 받지 않았다: {exc}")
     loaded = summary["counts"]["loaded"]
-    msg = ("이미 실은 꾸러미다 — 바꾼 것이 없다" if summary["already"]
+    msg = ("이미 실은 꾸러미다 — 행은 그대로 둔다" if summary["already"]
            else "해석 온톨로지를 실었다 — " + " · ".join(f"{t.removeprefix('cae_')} {n}" for t, n in loaded.items() if n))
-    return ok(summary, message=msg)
+    brief = bridges.brief(summary.get("bridges"))
+    return ok(summary, message=f"{msg} · {brief}" if brief else msg)
 
 
 @router.get("/reports/{report_id}/cae")

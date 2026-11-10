@@ -123,10 +123,16 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 후처리(KooD3plotReader)가 리포트 옆에 내는 `<리포트 이름>.ontology.json`(어휘 정본 `platform/core/ontology/dynaforge-cae.json`)을 싣고 묻는다.
 **캠페인 수준만 행으로** 싣는다(사용자 결정 10-31) — 런 · 파트 응답은 리포트 케이스가 정본이다. 리포트 행은 **리포트 가시성**을 따른다.
 
+**코어 다리**(core-link SRC-08 — 정의는 `platform/core/ontology/dynaforge-core.json`) — 해석 파트 → 코어 부품 `maps_to`(다대일 · StepForge 와
+같은 이름) · 소견 → 고장모드 `indicates`(다대다) · 캠페인 → 해석 방법 `follows_method`(다대일). 부르는 칸은 파트 `name` · 소견 `title` ·
+캠페인 `scenario_kind`. 그 글이 코어 거울 객체의 key · 이름 · 별칭(우리 별칭 표가 먼저)과 **글자 그대로**(앞뒤 공백만 걷고 — 과제 잇기의
+「정확」 과 같다) 맞고 그런 객체가 **하나뿐**일 때만 규칙 선(`basis: rule`)을 긋는다. 여럿 · 구분기호만 다름 · 품음은 후보로만 낸다.
+사람 선(`basis: human`)은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 `stale` 로 보인다. 선은 리포트 가시성을 따른다.
+
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |
-| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 번들 반입은 같은 이름 줄기를, 후처리 예약(postprocess) 반입은 귀환 매니페스트의 꾸러미를 저절로 |
-| `report_cae` | report_id | GET /reports/{id}/cae | 리포트 하나 — 파트 판정(위험한 것부터 · 최악 런 각도) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중. 안 실었으면 `loaded:false` |
+| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 같은 꾸러미는 행을 그대로 둔다. 붙일 때마다 **코어 다리**(maps_to · indicates · follows_method)를 지금 거울로 다시 짓는다 — 결과 `bridges`(규칙 · 사람 · 끊긴 사람 선 수 · 후보 · 못 붙인 수). 번들 반입은 같은 이름 줄기를, 후처리 예약(postprocess) 반입은 귀환 매니페스트의 꾸러미를 저절로 |
+| `report_cae` | report_id | GET /reports/{id}/cae | 리포트 하나 — 파트 판정(위험한 것부터 · 최악 런 각도) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중 · **코어 다리** `bridges`(선 rule · human · 끊긴 사람 선 stale · 후보 · 못 붙인 것 · 셈). 안 실었으면 `loaded:false` |
 | `find_cae_parts` | min_severity?·max_safety_factor?·project?·kind?·limit? | GET /cae/parts | 리포트를 건너 파트 판정 — 위험한 순으로 매긴 뒤 자른다. 읽을 수 있는 리포트의 것만 |
 | `find_cae_load_paths` | sort?·min_engage_ratio?·project?·kind?·limit? | GET /cae/load-paths | 리포트를 건너 하중 경로(파트 쌍) — 충격량 · 맞닿은 비율 … 큰 것부터 |
 

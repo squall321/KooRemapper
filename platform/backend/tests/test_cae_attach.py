@@ -69,8 +69,11 @@ async def _drop(db, *users):
 
 
 async def _rows(db, rid: str) -> tuple[int, int]:
+    """꾸러미에서 나온 행 · 선 수 — 코어 다리 선(SRC-08, 거울 내용에 따라 생긴다)은 test_cae_bridges 가 따로 센다."""
+    from app.modules.reports import bridges
     n_obj = (await db.execute(select(func.count()).select_from(OntoObject).where(OntoObject.report_id == rid))).scalar_one()
-    n_rel = (await db.execute(select(func.count()).select_from(OntoRelation).where(OntoRelation.report_id == rid))).scalar_one()
+    n_rel = (await db.execute(select(func.count()).select_from(OntoRelation).where(
+        OntoRelation.report_id == rid, OntoRelation.relation.not_in(bridges.relations())))).scalar_one()
     return n_obj, n_rel
 
 
