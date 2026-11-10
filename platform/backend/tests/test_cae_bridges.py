@@ -437,3 +437,108 @@ async def test_bridge_lines_stay_out_of_the_public_ontology_views(db, mirror):
                 assert got["object"]["key"] == key and got["in"] == [], got["in"]
     finally:
         await _drop(db, u, stranger)
+
+
+# ── REST — 사람 선 확정 · 지우기(리포트 주인 · 시스템 관리자, 사용자 결정 11-10) ─────────────────────
+
+AFF = "CAEG"
+SECRET = "cbt-gateway-secret"
+
+
+def _aff_headers(email: str) -> dict:
+    """게이트웨이가 찍은 소속 증명(app/shared/affiliation.py 의 v1 꼴) — 같은 소속 읽기 사용자를 만든다."""
+    import hashlib
+    import hmac
+    import time
+    exp = int(time.time()) + 600
+    sig = hmac.new(SECRET.encode(), f"v1|{email.strip().lower()}|{AFF}|{exp}".encode(), hashlib.sha256).hexdigest()
+    return {"X-Heax-User-Affiliation": AFF, "X-Heax-Aff-Proof": f"v1.{exp}.{sig}"}
+
+
+def _client(app):
+    import httpx
+    from httpx import ASGITransport
+    return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://t")
+
+
+@ON_SESSION_LOOP
+async def test_only_the_owner_and_a_system_admin_confirm_or_delete(db, mirror, monkeypatch):
+    from app.config import settings
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    monkeypatch.setattr(settings, "heax_gateway_secret", SECRET)
+    owner, rep = await _make(db, shared=AFF)
+    reader, _ = await _make(db, with_report=False)
+    stranger, _ = await _make(db, with_report=False)
+    admin, _ = await _make(db, admin=True, with_report=False)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        app = create_app()
+        url = f"/api/v1/reports/{rep.id}/cae/bridges"
+        pick = {"src_key": "part/1", "dst_key": "cbt:metal-a", "dst_type": "part", "note": "앞의 것"}
+        async with _client(app) as c:
+            app.dependency_overrides[get_current_user] = lambda: reader
+            seen = await c.get(f"/api/v1/reports/{rep.id}/cae", headers=_aff_headers(reader.email))
+            assert seen.status_code == 200 and seen.json()["data"]["bridges"]["candidates"], "같은 소속은 다리 후보를 본다"
+            r = await c.post(url, json=pick, headers=_aff_headers(reader.email))
+            assert r.status_code == 403 and "리포트 주인과 시스템 관리자" in r.json()["message"], r.text
+            app.dependency_overrides[get_current_user] = lambda: stranger
+            assert (await c.post(url, json=pick)).status_code == 404, \
+                "소속이 다른(증명 없는) 사람 — 읽지도 못하니 리포트가 있다는 것도 알리지 않는다"
+
+            app.dependency_overrides[get_current_user] = lambda: owner
+            r = await c.post(url, json=pick)
+            assert r.status_code == 200, r.text
+            got = r.json()["data"]
+            assert got["line"]["basis"] == "human" and got["line"]["decided_by"] == owner.email and got["bridges"]["human"] == 1
+
+            app.dependency_overrides[get_current_user] = lambda: reader
+            r = await c.delete(url, params={"src_key": "part/1", "dst_key": "cbt:metal-a"}, headers=_aff_headers(reader.email))
+            assert r.status_code == 403, r.text
+            app.dependency_overrides[get_current_user] = lambda: admin
+            r = await c.delete(url, params={"src_key": "part/1", "dst_key": "cbt:metal-a"})
+            assert r.status_code == 200 and r.json()["data"]["bridges"]["human"] == 0, r.text
+            r = await c.post(url, json={"src_key": "part/4", "dst_key": "cbt:pkg1"})
+            assert r.status_code == 200 and r.json()["data"]["line"]["decided_by"] == admin.email, "관리자는 남의 리포트에도"
+        lines = await _lines(db, rep.id)
+        assert ("part/1", "cbt:metal-a") not in lines and lines[("part/4", "cbt:pkg1")].properties["basis"] == "human"
+    finally:
+        await _drop(db, owner, reader, stranger, admin)
+
+
+@ON_SESSION_LOOP
+async def test_rest_refusals_carry_their_status_and_reason(db, mirror):
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    owner, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: owner
+        url = f"/api/v1/reports/{rep.id}/cae/bridges"
+        async with _client(app) as c:
+            async def post(**body):
+                r = await c.post(url, json=body)
+                return r.status_code, r.json().get("message") or ""
+            st, why = await post(src_key="part/5", dst_key="cbt:fm-shock")
+            assert st == 422 and why.startswith("wrong_type") and "part 에만" in why
+            assert (await post(src_key="part/5", dst_key="cbt:pcb", dst_type="analysis_method"))[0] == 422
+            assert (await post(src_key="contact/172", dst_key="cbt:pcb"))[1].startswith("no_bridge")
+            assert (await post(src_key="part/999", dst_key="cbt:pcb"))[0] == 404
+            assert (await post(src_key="campaign", dst_key="cbt:am-drop", relation="follows_method"))[0] == 200
+            assert (await post(src_key="part/1", dst_key="cbt:metal-a"))[0] == 200
+            st, why = await post(src_key="part/1", dst_key="cbt:metal-b")
+            assert st == 409 and why.startswith("already_bound")
+            r = await c.delete(url, params={"src_key": "part/3", "dst_key": "cbt:pcb"})
+            assert r.status_code == 409 and r.json()["message"].startswith("rule_line")
+            assert (await c.delete(url, params={"src_key": "part/3", "dst_key": "cbt:zzz"})).status_code == 404
+            # 꾸러미를 안 실은 리포트에는 확정할 것이 없다
+            bare = ImpactReport(id=ulid.new().str, session_id=rep.session_id, user_id=owner.id, kind="sphere", n_cases=0)
+            db.add(bare)
+            await db.commit()
+            r = await c.post(f"/api/v1/reports/{bare.id}/cae/bridges", json={"src_key": "part/1", "dst_key": "cbt:pcb"})
+            assert r.status_code == 409 and "꾸러미부터" in r.json()["message"]
+    finally:
+        await _drop(db, owner)

@@ -92,6 +92,9 @@ _PARITY = [
      "note": "리포트 상세 「해석 온톨로지」(파트 판정 · 하중 경로 · 꾸러미 붙이기) · report_cae · attach_cae_package"},
     {"feature": "해석 온톨로지 질의(리포트를 건너)", "web": False, "mcp": True,
      "note": "find_cae_parts · find_cae_load_paths(REST /cae/parts · /cae/load-paths) — 웹 화면은 아직 없다"},
+    {"feature": "해석 온톨로지 코어 다리(cae → 코어 · 사람 선 확정)", "web": False, "mcp": True,
+     "note": "보기는 report_cae 의 bridges(선 · 끊긴 사람 선 · 후보) — 확정 · 지우기는 REST POST · DELETE /reports/{id}/cae/bridges"
+             "(리포트 주인 · 시스템 관리자). 웹 화면은 아직 없다"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,

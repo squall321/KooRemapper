@@ -128,6 +128,9 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 캠페인 `scenario_kind`. 그 글이 코어 거울 객체의 key · 이름 · 별칭(우리 별칭 표가 먼저)과 **글자 그대로**(앞뒤 공백만 걷고 — 과제 잇기의
 「정확」 과 같다) 맞고 그런 객체가 **하나뿐**일 때만 규칙 선(`basis: rule`)을 긋는다. 여럿 · 구분기호만 다름 · 품음은 후보로만 낸다.
 사람 선(`basis: human`)은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 `stale` 로 보인다. 선은 리포트 가시성을 따른다.
+사람 선 확정 · 지우기는 MCP 도구가 아니라 REST 다 — `POST /reports/{id}/cae/bridges`(본문 `src_key` · `dst_key` · `dst_type?` · `relation?` ·
+`note?`) · `DELETE /reports/{id}/cae/bridges?src_key=&dst_key=`. 리포트 주인과 시스템 관리자만(같은 소속 읽기 사용자는 403, 못 읽는 사람은 404).
+타입이 다르면(cae_part 는 part 에만) 422, 다대일 다리에 다른 사람 선이 있으면 409, 규칙 선은 지우지 않는다(409).
 
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |

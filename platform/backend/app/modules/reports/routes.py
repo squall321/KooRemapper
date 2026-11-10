@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import User
+from app.models import ImpactReport, User
 from app.modules.reports import bridges, services as svc
 from app.modules.reports.schemas import CaseRead, ReportListItem, ReportRead
 from app.modules.sessions import services as sess_svc
@@ -903,6 +903,94 @@ async def report_ontology(
     접촉(양쪽 파트) · 소견 · 응력 집중. 리포트를 읽을 수 있는 사람만(소유 · 같은 소속). 안 실었으면 `loaded: false` 와 까닭."""
     r = await _require_report(db, user, report_id, request)
     return ok(await svc.ontology_view(db, r))
+
+
+# ── 코어 다리의 사람 선(core-link SRC-08) — 확정 · 지우기는 리포트 주인과 시스템 관리자(사용자 결정 11-10) ───────────────
+
+class BridgeIn(BaseModel):
+    src_key: str = Field(min_length=1, max_length=300,
+                         description="해석 객체 key — report_cae 의 key(예 part/3 · finding/2 · campaign)")
+    dst_key: str = Field(min_length=1, max_length=300,
+                         description="코어 객체 key — 후보(candidates)의 key 또는 ontology_find 로 찾은 것")
+    dst_type: str = Field(default="", max_length=80,
+                          description="주면 다리의 끝 타입과 맞는지 본다(part · failure_mode · analysis_method)")
+    relation: str = Field(default="", max_length=80,
+                          description="주면 다리 이름과 맞는지 본다(maps_to · indicates · follows_method)")
+    note: str = Field(default="", max_length=2000)
+
+
+async def _require_bridge_editor(db, user, report_id, request: Request) -> ImpactReport:
+    """사람 선을 확정 · 지우는 관문 — 리포트 주인과 시스템 관리자(사용자 결정 11-10 — 꾸러미를 붙이는 사람과 같은 자리).
+
+    읽을 수 있는데(같은 소속) 주인이 아니면 **403** 으로 무엇이 막혔는지 말한다. 읽지도 못하면 404 다 — 리포트가 있다는 것도
+    알리지 않는다(다른 리포트 길과 같다). 관리자는 리포트 읽기 공유와 상관없이 된다.
+    """
+    if user.is_system_admin:
+        r = await db.get(ImpactReport, report_id)
+        if r is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
+        return r
+    r = await _require_report(db, user, report_id, request)
+    if r.user_id != user.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "코어 다리의 사람 선을 확정하거나 지우는 것은 리포트 주인과 시스템 관리자만 할 수 있습니다 — "
+                            "리포트 주인에게 부탁하세요(보기는 report_cae 의 bridges).")
+    return r
+
+
+def _refused(got: dict) -> HTTPException:
+    return HTTPException(got["status"], f"{got['error']}: {got['detail']}")
+
+
+@router.post("/reports/{report_id}/cae/bridges")
+async def confirm_cae_bridge(
+    request: Request,
+    report_id: str,
+    body: BridgeIn,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """코어 다리의 **사람 선**을 긋는다 — 해석 파트 → 코어 부품(maps_to) · 소견 → 고장모드(indicates) · 캠페인 → 해석 방법(follows_method).
+    후보(report_cae 의 bridges.candidates)의 짝이든, 타입이 맞는 아무 짝이든 된다. 사람 선은 꾸러미를 다시 붙여도 남는다.
+
+    리포트 주인과 시스템 관리자만(같은 소속 읽기 사용자는 403). 거절 — 해석 객체 없음 404 · 다리가 없는 타입 · 끝 타입이 다름(cae_part 는
+    part 에만) · 거울에 없음 · 허브에서 사용 안 함 422 · 다대일(파트 · 캠페인)인데 다른 사람 선이 이미 있음 409(먼저 지운다).
+    같은 짝의 규칙 선은 사람 선으로 오르고, 다대일이면 그 객체의 다른 규칙 선은 빠진다(사람이 이긴다). 응답 `bridges` 는 다시 지은 셈."""
+    r = await _require_bridge_editor(db, user, report_id, request)
+    if not isinstance(r.ontology, dict):
+        raise HTTPException(status.HTTP_409_CONFLICT, "이 리포트에 실은 해석 온톨로지가 없다 — 꾸러미부터 붙인다(POST /reports/{id}/cae)")
+    got = await bridges.confirm(db, r, src_key=body.src_key, dst_key=body.dst_key, dst_type=body.dst_type,
+                                relation=body.relation, by=user.email, note=body.note)
+    if not got.get("ok"):
+        raise _refused(got)
+    await db.commit()
+    line = got["line"]
+    msg = (f"이미 이은 사람 선이다 — {line['src_key']} → {line['dst_key']}" if got.get("already")
+           else f"사람 선을 확정했다 — {line['src_key']} → {line['dst_key']}"
+           + (" (규칙 선을 사람 선으로 올렸다)" if got.get("promoted_rule") else "")
+           + (f" (규칙 선 {', '.join(got['replaced_rule'])} 는 빠졌다)" if got.get("replaced_rule") else ""))
+    return ok(got, message=msg)
+
+
+@router.delete("/reports/{report_id}/cae/bridges")
+async def remove_cae_bridge(
+    request: Request,
+    report_id: str,
+    src_key: str = Query(min_length=1, max_length=300, description="해석 객체 key(예 part/3) — 끊긴 사람 선(stale)도 된다"),
+    dst_key: str = Query(min_length=1, max_length=300, description="코어 객체 key"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """코어 다리의 **사람 선**을 지운다 — 끊긴 사람 선(가리키던 해석 객체가 다시 반입에서 사라진 것)도 지운다. 리포트 주인과 시스템 관리자만.
+    규칙 선은 지우지 않는다(409 — 다시 지으면 다시 선다). 지운 뒤 다리를 다시 짓는다 — 그 짝이 정확히 맞으면 규칙 선으로 다시 선다."""
+    r = await _require_bridge_editor(db, user, report_id, request)
+    got = await bridges.remove(db, r, src_key=src_key, dst_key=dst_key)
+    if not got.get("ok"):
+        raise _refused(got)
+    await db.commit()
+    was = got["was"]
+    return ok(got, message=f"사람 선을 지웠다 — {was['src_key']} → {was['dst_key']}"
+                           + (" (끊긴 사람 선)" if got.get("was_stale") else ""))
 
 
 @router.get("/cae/parts")

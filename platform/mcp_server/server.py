@@ -1058,8 +1058,9 @@ async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     **코어 다리**(`bridges` — 파트 → 코어 부품 maps_to · 소견 → 고장모드 indicates · 캠페인 → 해석 방법 follows_method). bridges 는
     `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나) · `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 —
     지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key · 까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) ·
-    `counts` · `rule`(맞추는 규칙 글) · `drift`(붙인 뒤 거울이 바뀌어 저장된 규칙 선이 지금 셈과 다를 때만). 실은 적이 없으면
-    `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
+    `counts` · `rule`(맞추는 규칙 글) · `drift`(붙인 뒤 거울이 바뀌어 저장된 규칙 선이 지금 셈과 다를 때만). 후보를 사람 선으로
+    확정하거나 사람 선을 지우는 것은 MCP 도구가 아니라 REST 다 — POST · DELETE /reports/{id}/cae/bridges(리포트 주인 · 시스템 관리자).
+    실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
     One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings, core bridges."""
     return await _get(ctx, f"/reports/{report_id}/cae")
 
