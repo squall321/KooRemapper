@@ -449,8 +449,8 @@ async def remove(db, report: ImpactReport, *, src_key: str, dst_key: str) -> dic
     if line is None:
         return _refuse(404, "not_found", f"{_rel(rid, key)} → {dst_key!r} 다리 선이 없다")
     if _basis(line) != HUMAN:
-        return _refuse(409, "rule_line", "규칙 선은 지우지 않는다 — 다시 지으면 다시 선다. 다른 짝을 사람 선으로 확정하면 다대일 "
-                       "다리(파트 · 캠페인)에서는 그것이 이기고, 이름 · 별칭이 바뀌면 다음 다시 짓기에서 빠진다")
+        return _refuse(409, "rule_line", "규칙 선은 지우지 않는다 — 다시 지으면 다시 선다. 다대일 다리(파트 · 캠페인)는 다른 짝을 "
+                       "사람 선으로 확정하면 그것이 이긴다. 다대다(소견)의 규칙 선을 걷는 길은 아직 없다")
     obj = (await db.execute(select(OntoObject.key, OntoObject.label).where(
         OntoObject.report_id == rid, OntoObject.key == key))).first()
     was = _line(rid, line, {key: obj.label} if obj is not None else {}, {})
