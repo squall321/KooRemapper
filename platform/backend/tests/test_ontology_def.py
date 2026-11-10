@@ -13,6 +13,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import json
+
 import pytest
 
 from app.runner.ontology_def import (CARDINALITIES, DATA_TYPES, EXTERNAL_TYPES, load,
@@ -20,16 +22,64 @@ from app.runner.ontology_def import (CARDINALITIES, DATA_TYPES, EXTERNAL_TYPES, 
 
 ROOT = Path(__file__).resolve().parents[3]
 OURS = ROOT / "platform" / "core" / "ontology" / "dynaforge-core.json"
+CAE = OURS.with_name("dynaforge-cae.json")      # 해석 어휘 — 생산 쪽과 바이트 사본(고치지 않는다). 다리의 출발 타입이 여기 있다
 HUB = ROOT / "external" / "StandardPlatform" / "pipeline" / "core"
+
+
+def _cae_types() -> set[str]:
+    return {t["slug"] for t in json.loads(CAE.read_text(encoding="utf-8"))["types"]}
 
 
 # ── ① 우리 정의 ────────────────────────────────────────────────────────────
 
 def test_our_definition_passes_cleanly():
-    doc, rep = load(OURS)
+    """다리(cae_* → 코어)의 출발 타입은 해석 어휘 파일에 있다 — 두 파일을 함께 아는 눈으로 본다(합친 검사는 test_cae_package)."""
+    doc, rep = load(OURS, known_types=set(EXTERNAL_TYPES) | _cae_types())
     assert rep.ok, rep.faults
     assert not rep.notes, f"모르는 키가 남았다: {rep.notes}"
     assert [t["slug"] for t in doc["types"]] == ["dev_revision"]
+
+
+def test_alone_the_bridges_point_at_types_this_file_does_not_define():
+    """판별력 — 해석 어휘를 모르는 눈에는 다리 출발 타입이 「아는 타입이 아니다」 로 걸린다(검사를 건너뛴 것이 아니다)."""
+    _, rep = load(OURS)
+    assert not rep.ok
+    assert {f.split(":")[0] for f in rep.faults} == {"relation_types/maps_to", "relation_types/indicates",
+                                                      "relation_types/follows_method"}, rep.faults
+    assert all("cae_" in f for f in rep.faults), rep.faults
+
+
+# ── 코어와 잇기 SRC-08 — 해석 객체 → 코어 다리 셋(사용자 결정 Q-5 · 이름 11-10) ─────────
+
+BRIDGES = {"maps_to": ("cae_part", "part", "many_to_one"),
+           "indicates": ("cae_finding", "failure_mode", "many_to_many"),
+           "follows_method": ("cae_campaign", "analysis_method", "many_to_one")}
+
+
+def test_the_three_bridges_and_their_cardinalities():
+    """★`maps_to` 는 StepForge 의 part_role → part 와 같은 이름이다 — 한 질의(maps_to → part)로 두 앱을 묻는다."""
+    doc, _ = load(OURS)
+    rels = {r["slug"]: r for r in doc["relation_types"]}
+    got = {s: (r["src_type_slugs"], r["dst_type_slugs"], r["cardinality"]) for s, r in rels.items() if s in BRIDGES}
+    assert got == {s: ([src], [dst], card) for s, (src, dst, card) in BRIDGES.items()}
+    for slug in BRIDGES:
+        r = rels[slug]
+        assert r["acyclic"] is False and r["transitive"] is False, "끝 타입이 겹치지 않는다 — 막을 순환이 없다"
+        assert r["description"] and r["inverse_label"], slug
+        basis = next(p for p in r["properties"] if p["key"] == "basis")
+        assert basis["enum_options"] == ["rule", "human"] and basis["required"] is True, slug
+    for end in ("part", "failure_mode", "analysis_method"):
+        assert end in EXTERNAL_TYPES, f"{end} 는 허브 거울이다 — 우리 정의 파일에 타입을 만들지 않는다"
+        assert end not in {t["slug"] for t in doc["types"]}
+
+
+def test_the_bridge_sources_are_in_the_cae_vocabulary_which_we_do_not_edit():
+    """다리는 자체 정의에 둔다 — 정본 해석 어휘(생산 쪽과 바이트 사본)에는 코어로 가는 관계가 없다."""
+    cae = json.loads(CAE.read_text(encoding="utf-8"))
+    assert {src for src, _, _ in BRIDGES.values()} <= _cae_types()
+    assert not set(BRIDGES) & {r["slug"] for r in cae["relation_types"]}
+    hub_ends = {"part", "failure_mode", "analysis_method"}
+    assert not [r["slug"] for r in cae["relation_types"] if set(r.get("dst_type_slugs") or []) & hub_ends]
 
 
 def test_the_revision_type_carries_what_the_plan_says():
@@ -148,6 +198,16 @@ def _doc(**kw):
     (_doc(relation_types=[{"slug": "r", "label": "R", "inverse_label": "역",
                            "src_type_slugs": ["a"], "dst_type_slugs": ["a"]}]),
      "영원히 돈다"),
+    # 관계에 붙는 칸도 타입 칸과 같은 눈으로(SRC-08 다리의 basis 등)
+    (_doc(relation_types=[{"slug": "r", "label": "R", "inverse_label": "역", "properties": [
+        {"key": "x", "label": "X", "data_type": "말도안되는종류"}]}]), "data_type"),
+    (_doc(relation_types=[{"slug": "r", "label": "R", "inverse_label": "역", "properties": [
+        {"key": "x", "label": "X", "data_type": "enum"}]}]), "enum_options"),
+    (_doc(relation_types=[{"slug": "r", "label": "R", "inverse_label": "역", "properties": [
+        {"key": "x", "label": "X", "data_type": "text"}, {"key": "x", "label": "또 X", "data_type": "text"}]}]),
+     "두 번 나온다"),
+    (_doc(relation_types=[{"slug": "r", "label": "R", "inverse_label": "역", "properties": ["basis"]}]),
+     "표(객체)가 아닌"),
 ])
 def test_the_validator_actually_catches_each_fault(doc, says):
     rep = validate(doc)

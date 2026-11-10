@@ -11,7 +11,8 @@
                "properties":[{key,label,data_type,ref_type_slug?,required?,multi?,
                               enum_options?,unit?,help?,inverse_label?,pattern?}]}],
      "relation_types":[{slug,label,inverse_label,description,cardinality,
-                        transitive?,acyclic?,src_type_slugs?,dst_type_slugs?}]}
+                        transitive?,acyclic?,src_type_slugs?,dst_type_slugs?,
+                        properties?(타입의 칸과 같은 꼴 — 선에 붙는 값)}]}
 
 ⚠ **`cardinality` 는 정의 파일에만 있다** — 코어 API 의 `CoreRelationKindOut` 에는 없다.
 그래서 받은 관계 종류는 그 칸이 비고, 자체 정의에서만 채워진다.
@@ -42,6 +43,7 @@ CARDINALITIES = frozenset({"one_to_one", "one_to_many", "many_to_one", "many_to_
 # (SP 의 `kind_class=system` · `object_links` 와 같은 자리).
 EXTERNAL_TYPES = frozenset({
     "plm_project", "plm_task", "plm_model", "plm_test_site",   # 허브 거울
+    "part", "failure_mode", "analysis_method",                 # 허브 거울 — 해석 객체 → 코어 다리의 끝(core-link SRC-08)
     "impact_report", "session", "workspace", "user",           # 우리 1급 표 · 포탈 정본
 })
 
@@ -134,33 +136,7 @@ def validate(doc: Any, *, known_types: set[str] | None = None) -> Report:
             if not unknown.startswith("_"):
                 rep.note(where, f"모르는 키 {unknown!r}(무시한다 — 흠이 아니다)")
 
-        prop_keys = [str(p.get("key")) for p in (t.get("properties") or [])
-                     if isinstance(p, dict)]
-        for dup in _dupes(prop_keys):
-            rep.fault(f"{where}.{dup}", "속성 key 가 두 번 나온다")
-
-        for p in t.get("properties") or []:
-            key = str(p.get("key") or "")
-            pw = f"{where}.{key or '(이름 없음)'}"
-            if not key:
-                rep.fault(pw, "key 가 없다")
-            if not p.get("label"):
-                rep.fault(pw, "label 이 없다")
-            dt = str(p.get("data_type") or "")
-            if dt not in DATA_TYPES:
-                rep.fault(pw, f"data_type 이 {dt!r} — 폼이 그릴 방법이 없다")
-            if dt == "object_ref":
-                ref = str(p.get("ref_type_slug") or "")
-                if not ref:
-                    rep.fault(pw, "object_ref 인데 ref_type_slug 가 없다 — 무엇을 고를지 모른다")
-                elif ref not in pool:
-                    rep.fault(pw, f"ref_type_slug {ref!r} 가 아는 타입이 아니다")
-            if dt == "enum" and "enum_options" not in p:
-                # SP 는 빈 목록을 두고 "허브의 사내 확장이 채운다" 고 적는다 — 빈 것은 허용,
-                # **칸이 아예 없는 것**은 흠이다(폼이 고를 것이 없는 선택 상자를 그린다).
-                rep.fault(pw, "enum 인데 enum_options 칸이 없다")
-            for unknown in sorted(set(p) - _PROP_KNOWN):
-                rep.note(pw, f"모르는 키 {unknown!r}(무시한다)")
+        _check_properties(rep, where, t.get("properties"), pool)
 
     for r in rels:
         slug = str(r.get("slug") or "")
@@ -193,8 +169,44 @@ def validate(doc: Any, *, known_types: set[str] | None = None) -> Report:
         for unknown in sorted(set(r) - _REL_KNOWN):
             if not unknown.startswith("_"):
                 rep.note(where, f"모르는 키 {unknown!r}(무시한다)")
+        # 관계 자체에 붙는 칸(선의 근거 등)도 타입 칸과 같은 눈으로 — SP 가져오기는 같은 꼴로 읽고 모르는 키를 거절한다
+        _check_properties(rep, where, r.get("properties"), pool)
 
     return rep
+
+
+def _check_properties(rep: Report, where: str, props: Any, pool: set[str]) -> None:
+    """칸 목록 하나(타입의 칸 · 관계의 칸)를 검사한다 — 두 자리가 같은 꼴(SP `PROPERTY_FIELDS`)이다."""
+    if props is not None and not isinstance(props, list):
+        rep.fault(where, "properties 가 목록이 아니다")
+        return
+    if any(not isinstance(p, dict) for p in props or []):
+        rep.fault(where, "properties 에 표(객체)가 아닌 항목이 있다")       # SP 가져오기도 모양부터 거절한다
+    props = [p for p in (props or []) if isinstance(p, dict)]
+    for dup in _dupes([str(p.get("key")) for p in props]):
+        rep.fault(f"{where}.{dup}", "속성 key 가 두 번 나온다")
+    for p in props:
+        key = str(p.get("key") or "")
+        pw = f"{where}.{key or '(이름 없음)'}"
+        if not key:
+            rep.fault(pw, "key 가 없다")
+        if not p.get("label"):
+            rep.fault(pw, "label 이 없다")
+        dt = str(p.get("data_type") or "")
+        if dt not in DATA_TYPES:
+            rep.fault(pw, f"data_type 이 {dt!r} — 폼이 그릴 방법이 없다")
+        if dt == "object_ref":
+            ref = str(p.get("ref_type_slug") or "")
+            if not ref:
+                rep.fault(pw, "object_ref 인데 ref_type_slug 가 없다 — 무엇을 고를지 모른다")
+            elif ref not in pool:
+                rep.fault(pw, f"ref_type_slug {ref!r} 가 아는 타입이 아니다")
+        if dt == "enum" and "enum_options" not in p:
+            # SP 는 빈 목록을 두고 "허브의 사내 확장이 채운다" 고 적는다 — 빈 것은 허용,
+            # **칸이 아예 없는 것**은 흠이다(폼이 고를 것이 없는 선택 상자를 그린다).
+            rep.fault(pw, "enum 인데 enum_options 칸이 없다")
+        for unknown in sorted(set(p) - _PROP_KNOWN):
+            rep.note(pw, f"모르는 키 {unknown!r}(무시한다)")
 
 
 def load(path: str | Path, *, known_types: set[str] | None = None) -> tuple[dict, Report]:
