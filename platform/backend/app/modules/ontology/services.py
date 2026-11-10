@@ -416,19 +416,26 @@ def hub_aliases(obj: OntoObject) -> list[str]:
     return [str(a) for a in raw if str(a or "").strip()] if isinstance(raw, list) else []
 
 
-async def task_candidates(db, free: str, *, limit: int = 5) -> list[dict]:
+async def _live_tasks(db) -> list[OntoObject]:
+    return (await db.execute(
+        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
+                                 OntoObject.deleted.is_(False)))).scalars().all()
+
+
+async def task_candidates(db, free: str, *, limit: int = 5,
+                          rows: list[OntoObject] | None = None) -> list[dict]:
     """붙일 만한 과제 **후보와 근거**. 고르지 않는다.
 
     근거를 함께 내는 것이 요점이다 — 근거 없는 후보 목록은 사람이 검증할 수 없고,
     검증할 수 없는 목록은 결국 맨 위를 누르게 된다.
+    `rows` 는 이미 읽은 과제 행(계획이 문자열마다 과제 전부를 다시 읽지 않게 넘긴다). 비우면 여기서 읽는다.
     """
     free = (free or "").strip()
     if not free:
         return []
     norm = normalize(free)
-    rows = (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.deleted.is_(False)))).scalars().all()
+    if rows is None:
+        rows = await _live_tasks(db)
     out: list[dict] = []
     for t in rows:
         if t.status == "deprecated":
@@ -548,12 +555,15 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
     `scope` 는 볼 리포트를 좁히는 조건(`ImpactReport` 에 거는 WHERE)이다. 비우면 전부다. 일반 사용자에게는 라우트가
     리포트 검색과 같은 술어(소유 · 같은 소속)를 넘긴다 — 목록도 수도 그 사람이 읽을 수 있는 리포트만으로 센다(SRC-10).
     """
-    stmt = select(ImpactReport)
+    # 칸 셋만 읽는다 — 리포트 행 통째(parts · findings · summary …)는 수천 건이면 수백 MB 이고, 받기마다 도는 자동 잇기
+    # (SRC-09 — `auto_link_tasks`)가 이 길로 전부를 본다. 행은 `report_free_task` 가 읽는 칸(eng_meta · project_name)을 다 가졌다.
+    stmt = select(ImpactReport.id, ImpactReport.eng_meta, ImpactReport.project_name)
     if scope is not None:
         stmt = stmt.where(scope)
-    reps = (await db.execute(stmt)).scalars().all()
-    groups: dict[str, list[ImpactReport]] = {}
+    reps = (await db.execute(stmt)).all()
+    groups: dict[str, list] = {}
     no_name: list[str] = []
+    tasks: list[OntoObject] | None = None   # 후보를 볼 과제 행 — 못 푼 문자열이 처음 나올 때 한 번만 읽는다
     for r in reps:
         free = report_free_task(r)
         if not free:
@@ -578,7 +588,9 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
         if key:
             entry["verdict"] = "links"
         else:
-            cands = await task_candidates(db, free)
+            if tasks is None:
+                tasks = await _live_tasks(db)
+            cands = await task_candidates(db, free, rows=tasks)
             entry["candidates"] = cands
             entry["verdict"] = "proposal" if cands else "unmatched"
         plan.append(entry)
