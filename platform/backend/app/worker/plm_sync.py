@@ -71,11 +71,33 @@ async def _close_run(run_id: int, got: dict) -> None:
         run.result = str(got.get("result") or "failed")
         run.revision = got.get("revision")
         run.counts = {"types": got.get("types") or {}, "relations": got.get("relations") or {},
-                      "skipped": got.get("skipped") or [], "reflected": got.get("reflected")}
+                      "skipped": got.get("skipped") or [], "reflected": got.get("reflected"),
+                      "task_links": got.get("task_links")}
         run.problems = list(got.get("problems") or [])
         run.notes = list(got.get("notes") or [])
         run.error = got.get("error")
         await db.commit()
+
+
+async def _link_tasks(db) -> dict:
+    """받은 것을 **커밋한 뒤에** 과제 잇기(붙는 것만 · 리포트 전부 — SRC-09). 깨져도 받은 것은 남고 `error` 로 돌려준다.
+
+    커밋이 받기 잠금(트랜잭션 잠금)을 풀었으므로 새 트랜잭션에서 다시 건다 — 잇기도 층 2 쓰기다(개정 · 리포트 선). 그새 다른
+    받기 · 합친 과제 옮기기가 쥐었으면 건너뛴다(다음 받기가 전부를 다시 본다).
+    """
+    from app.modules.ontology import services as onto
+    try:
+        if not await try_lock(db):
+            await db.rollback()
+            return {"scope": "all", "skipped": "busy",
+                    "detail": "다른 받기 · 합친 과제 옮기기가 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"}
+        got = await onto.auto_link_tasks(db)
+        await db.commit()
+        return got
+    except Exception as exc:                           # noqa: BLE001 — 잇기 결함이 받기를 무르게 하면 안 된다
+        await db.rollback()
+        logger.exception("plm task links failed")
+        return {"scope": "all", "error": f"{type(exc).__name__}: {exc}"[:500]}
 
 
 async def full_due(now: datetime | None = None) -> bool:
@@ -134,6 +156,14 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
                 logger.exception("plm sync failed")
                 got = {"ok": False, "result": "failed", "error": "exception",
                        "detail": f"{type(exc).__name__}: {exc}"}
+            # SRC-09 — 받은 것이 굳은 뒤(멈춘 실행도 받은 타입이 있으면) 과제 잇기. 결과는 실행 기록의 counts.task_links 에 남고,
+            # 깨지면 받은 것은 그대로 두고 「확인 필요」 로 알린다(층 2 반영 실패와 같은 자세).
+            if got.get("types"):
+                links = got["task_links"] = await _link_tasks(db)
+                if links.get("error"):
+                    got["problems"] = [*(got.get("problems") or []), f"과제 잇기 실패 — {links['error']}"]
+                    if got.get("result") == "ok":
+                        got["result"] = "needs_check"
             await _close_run(run_id, got)
             got["run_id"] = run_id
     except Exception as exc:                           # noqa: BLE001 — 잠금 · 기록을 못 열었다
@@ -147,4 +177,9 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
         logger.info("plm sync ok — 판 %s · %s", got.get("revision"), counts)
     else:
         logger.warning("plm sync %s — %s", got.get("result"), got.get("error") or got.get("problems"))
+    links = got.get("task_links") or {}
+    if "linked" in links:
+        logger.info("plm task links — 이음 %s · 후보 %s · 못 붙임 %s · 이름 없음 %s · 이미 %s · 사람 판 %s",
+                    links["linked"], links["candidates"], links["unmatched"], links["reports_without_a_name"],
+                    links["already"], links["kept_manual"])
     return got

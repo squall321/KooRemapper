@@ -461,6 +461,12 @@ async def _fetch_and_ingest(db, job: Job, ref: dict, client: KooSlurmClient, ver
     _succeed(job, report, now)
     if verdict["warnings"]:
         job.warnings = [*(job.warnings or []), *verdict["warnings"]]
+    # 반입 뒤 과제 잇기(SRC-09 — `ingest_report` 가 굳힌 뒤에 돌았다). 원장에 남기고, 깨졌으면 경고로만 — 잡은 성공 그대로다.
+    links = getattr(report, "auto_task_links", None)
+    if links is not None:
+        job.external_ref = {**(job.external_ref or {}), "task_links": links}
+        if links.get("error"):
+            job.warnings = [*(job.warnings or []), f"과제 잇기를 못 했다 — {links['error']} (리포트는 반입됐다)"]
     logger.info("postprocess job %s ingested %s → report %s", job.id, ref["job_key"], report.id)
 
     # 리포트 곁의 해석 온톨로지 꾸러미 — 반입 · 잡 성공을 **먼저 굳힌 뒤** 싣는다. 싣기가 깨지면 attach_ontology 가 세션을

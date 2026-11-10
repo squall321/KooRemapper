@@ -944,7 +944,9 @@ async def ingest_report(
 
     선택 동반물 — scenario_content: 시뮬 조건 scenario.json 텍스트(조건 요약 + template
     으로 세션 내 K파일 자동매칭 → 한 K에 여러 결과를 매달 수 있다), kfile_id: 원본
-    K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1)."""
+    K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1).
+    응답의 `task_links` — 반입 뒤 과제 잇기 결과다(과제명 · 과제코드 · 별칭이 글자 그대로 맞고 dev_rev 가 있으면 개정에 이어진다
+    — `linked`. 후보 · 못 붙임은 세기만 한다). 깨졌으면 `error` 가 오고 반입은 그대로다."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
@@ -1818,6 +1820,8 @@ async def ontology_sync_state(ctx: Context) -> dict:
     `last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 등) · `failed` 실패(`error`).
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
+    `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
+    못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
     받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
     return await _get(ctx, "/ontology/sync")
 
@@ -1858,6 +1862,8 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
+    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 확정한 판에 이어진 리포트는 옮기지 않는다) — 그래서
+    `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
     a regular user's plan and counts cover only the reports they can read (scope=readable), a system admin sees all."""
     # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가

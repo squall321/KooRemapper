@@ -333,6 +333,9 @@ async def ingest_report(
     await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)
+    # SRC-09 — 반입을 굳힌 **뒤에** 과제 잇기(붙는 것만 · 이 리포트만). 깨져도 반입은 그대로고, 결과는 부르는 쪽이 응답 · 잡 경고에 싣는다.
+    from app.modules.ontology import services as onto
+    report.auto_task_links = await onto.link_after_import(db, report)
     if report.kind == "sphere":
         # 곁파일은 상세 질의의 빠른 길일 뿐이다 — 못 써도 반입은 성공이고, 첫 상세 질의가 다시 만든다.
         try:

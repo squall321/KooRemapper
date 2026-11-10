@@ -292,9 +292,14 @@ async def drop_alias(
 
 
 def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
+    counts = dict(r.counts or {})
+    if not who:
+        # 과제 잇기 수(SRC-09)는 **리포트 전부**를 센 것이다 — 관리자에게만 싣는다(리포트 수치가 새지 않게, 일반 보기에서
+        # cae_* 를 뺀 10-31 결정 · SRC-10 의 「읽을 수 있는 리포트만」 과 같은 까닭). 일반 사용자는 plan_task_links 로 자기 것을 본다.
+        counts.pop("task_links", None)
     out = {"id": r.id, "started_at": r.started_at, "finished_at": r.finished_at, "mode": r.mode,
            "allow_shrink": r.allow_shrink, "trigger": r.trigger, "result": r.result, "revision": r.revision,
-           "counts": r.counts or {}, "problems": r.problems or [], "notes": r.notes or [], "error": r.error}
+           "counts": counts, "problems": r.problems or [], "notes": r.notes or [], "error": r.error}
     if who:
         out["requested_by"] = r.requested_by     # 누른 사람은 관리 화면에만 — 읽기 창구는 누구나 본다
     return out
@@ -324,13 +329,14 @@ async def _object_states(db) -> dict[str, dict[str, int]]:
 
 @router.get("/ontology/sync")
 async def sync_state(
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """받기 상태 — 타입별 시계 · 마지막 실행(결과 셋과 「확인 필요」 사유) · 정의 판 · 타입별 건수.
 
     읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
-    수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
+    수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 적용 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
+    마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
     """
     from app.worker import plm_sync
     rows = (await db.execute(select(OntoSyncState)
@@ -348,7 +354,7 @@ async def sync_state(
                    "objects": counts.get(r.type_slug, 0)} for r in rows],
         "objects_by_type": counts,
         "object_states": states,
-        "last_run": _run_out(last, who=False) if last else None,
+        "last_run": _run_out(last, who=user.is_system_admin) if last else None,
         "catalog": ({"revision": cat.revision, "received_at": cat.received_at,
                      "system": (cat.body or {}).get("system"),
                      "types": len((cat.body or {}).get("types") or [])} if cat else None),

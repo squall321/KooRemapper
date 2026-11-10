@@ -161,7 +161,8 @@ async def ingest_report(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     return ok(
-        ReportRead.model_validate(report).model_dump(),
+        # 반입 뒤 과제 잇기 결과(SRC-09) — 이은 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 `error`(반입은 그대로다)
+        {**ReportRead.model_validate(report).model_dump(), "task_links": getattr(report, "auto_task_links", None)},
         message=f"{report.kind} 리포트 인제스트 완료 ({report.n_cases} 케이스)",
         status_code=201,
     )
@@ -270,7 +271,8 @@ async def report_intake(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     payload = {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
                "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
-               "source_kfile_id": report.source_kfile_id}
+               "source_kfile_id": report.source_kfile_id,
+               "task_links": getattr(report, "auto_task_links", None)}   # 반입 뒤 과제 잇기(SRC-09)
     if bundle_info:
         payload["bundle"] = bundle_info
     if media_summary:

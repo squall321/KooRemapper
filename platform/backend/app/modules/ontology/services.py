@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,8 @@ from sqlalchemy import and_, or_, select, update
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
                         OntoObject, OntoPreviousKey, OntoRelation)
 from app.reports.datahub import DataHubError, parse_stage
+
+logger = logging.getLogger("koorm.ontology")
 
 TYPE_REVISION = "dev_revision"
 TYPE_TASK = "plm_task"
@@ -664,6 +667,109 @@ async def apply_task_links(db, *, only: list[str] | None = None,
             else:
                 done["refused"].append({"report": rid, "why": got.get("error")})
     return done
+
+
+# ── 과거 붙이기 자동 (SRC-09) ──────────────────────────────────────────────
+# 위 적용은 관리자 버튼이다. 받기(`plm_sync`) 뒤와 리포트 반입 뒤에는 「붙는 것」 만 **스스로** 잇는다 — 인제스트 때 잇기
+# (`link_from_eng_meta`)는 수동 메타 글자 그대로만 보므로, 뒤에 들어온 과제명 · 과제코드 · 별칭으로 늦게 풀리는 리포트가 남는다.
+
+SOURCE_RULE = "rule"        # 자동 잇기가 만든 개정의 `rev_source` — 정확 일치만 `rule` 로 잇는다(코어와 잇기 뼈대 규칙)
+_REFUSED_KEEP = 20          # 실행 기록에 남기는 거절 줄 상한 — 같은 결함이 수천 줄로 불어나지 않게
+
+
+async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
+    """계획 중 **붙는 것만** 스스로 잇는다(SRC-09). 후보 · 못 붙인 것은 **세기만** 한다 — 짐작으로 잇지 않는다.
+
+    「붙는 것」 은 계획의 `links` 다 — 과제명 · 과제코드 · 옛 과제명 · 우리 별칭 · 하나뿐인 허브 별칭이 **글자 그대로** 같은 것
+    (`resolve_task`). 리포트마다 넷으로 가른다.
+      `linked`          이었다(새로 · 기계가 이은 다른 판에서 옮김) — `rev_source=rule`
+      `already`         이미 그 판에 이어져 있다 — 쓰지 않는다(두 번째 실행은 아무것도 쓰지 않는다)
+      `kept_manual`     ★사람이 정한 판(`rev_source=manual`)에 이어져 있다 — 옮기지 않는다. `set_revision` 의 manual 보호는
+                        개정 칸만 지키고 리포트 선은 옮기므로 여기서 먼저 거른다
+      `skipped_no_code` 과제는 풀렸는데 개정 코드가 없다 — 만들어 내지 않는다
+    `report_ids` 를 주면 그 리포트만(반입 뒤 — 반입은 과제 · 별칭을 바꾸지 않아 다른 리포트의 판정은 그대로다), 비우면 전부
+    (받기 뒤 — 과제 · 별칭이 바뀌면 어느 리포트든 새로 풀릴 수 있고, 지난번에 못 이은 것도 다시 본다). 잠금 · 커밋은 부르는 쪽.
+
+    수의 단위 — `linked` · `already` · `kept_manual` · `skipped_no_code` · `reports` · `reports_without_a_name` 은 리포트,
+    `candidates` · `unmatched` 는 자유 문자열이다(미리 보기 `counts` 의 `proposal` · `unmatched` 와 같은 단위).
+    """
+    scope = None if report_ids is None else ImpactReport.id.in_(list(report_ids))
+    planned = await plan_task_links(db, scope=scope)
+    c = planned["counts"]
+    out: dict[str, Any] = {"scope": "all" if report_ids is None else "reports", "reports": c["reports"],
+                           "linked": 0, "already": 0, "kept_manual": 0, "skipped_no_code": 0, "refused": [],
+                           "candidates": c["proposal"], "unmatched": c["unmatched"],
+                           "reports_without_a_name": c["reports_without_a_name"]}
+    target = {rid: e["task_key"] for e in planned["plan"] if e["verdict"] == "links" for rid in e["reports"]}
+    if not target:
+        return out
+    ids = sorted(target)
+    codes = {rid: str(((em or {}).get("dev_revision") or {}).get("code") or "").strip()
+             for rid, em in (await db.execute(select(ImpactReport.id, ImpactReport.eng_meta)
+                                              .where(ImpactReport.id.in_(ids)))).all()}
+    now: dict[str, set[str]] = {}
+    for src, dst in (await db.execute(select(OntoRelation.src_key, OntoRelation.dst_key).where(
+            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+            OntoRelation.src_key.in_(ids), OntoRelation.deleted.is_(False)))).all():
+        now.setdefault(src, set()).add(dst)
+    held = sorted({k for keys in now.values() for k in keys})
+    manual: set[str] = set()
+    if held:
+        manual = {k for k, props in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
+            OntoObject.type_slug == TYPE_REVISION, OntoObject.key.in_(held)))).all()
+            if (props or {}).get("rev_source") == "manual"}
+    for rid in ids:
+        code = codes.get(rid, "")
+        if not code:
+            out["skipped_no_code"] += 1
+            continue
+        key = revision_key(target[rid], code)
+        have = now.get(rid, set())
+        if have == {key}:
+            out["already"] += 1
+            continue
+        if (have - {key}) & manual:
+            out["kept_manual"] += 1
+            continue
+        rep = await db.get(ImpactReport, rid)
+        if rep is None:
+            continue
+        got = await set_revision(db, rep, task_key=target[rid], code=code, source=SOURCE_RULE)
+        if got.get("ok"):
+            out["linked"] += 1
+        elif len(out["refused"]) < _REFUSED_KEEP:
+            out["refused"].append({"report": rid, "why": got.get("error")})
+    return out
+
+
+async def link_after_import(db, report: ImpactReport) -> dict:
+    """반입 뒤 과제 잇기 — 반입을 **커밋한 뒤에** 그 리포트만 본다(SRC-09). 업로드 · 번들 · 7-1 반입이 모두 `ingest_report` 를
+    지나므로 거기서 한 번 부른다.
+
+    ★실패가 반입을 되돌리지 않는다 — 저장점 안에서 돌고, 깨지면 그 저장점만 되감고 `{"error": …}` 를 돌려준다(부르는 쪽이
+    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기)을 걸고, 쥐고 있으면 건너뛰고 그렇게 말한다
+    (받기 뒤 자동 잇기가 전부를 본다).
+    """
+    from app.worker import plm_sync
+
+    rid = report.id
+    try:
+        if not await plm_sync.try_lock(db):
+            await db.commit()          # 잠금 질의로 연 트랜잭션만 닫는다 — rollback 은 리포트 행을 만료시킨다
+            return {"scope": "reports", "skipped": "busy",
+                    "detail": "받기 · 합친 과제 옮기기가 잠금을 쥐고 있어 건너뛰었다 — 받기 뒤 자동 잇기가 이 리포트까지 본다"}
+        async with db.begin_nested():
+            got = await auto_link_tasks(db, report_ids=[rid])
+        await db.commit()
+        return got
+    except Exception as exc:           # noqa: BLE001 — 잇기 하나가 반입을 무르게 하면 안 된다
+        logger.exception("과제 잇기 실패 — report %s", rid)
+        try:
+            await db.commit()          # 저장점은 이미 되감겼다 — 잠금만 푼다
+        except Exception:              # noqa: BLE001
+            await db.rollback()
+            await db.refresh(report)   # rollback 은 모든 행을 만료시킨다 — 부르는 쪽이 리포트를 계속 읽는다
+        return {"scope": "reports", "error": f"{type(exc).__name__}: {exc}"[:500]}
 
 
 # ── 되돌리기 ───────────────────────────────────────────────────────────────
