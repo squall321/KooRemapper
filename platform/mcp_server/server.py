@@ -1819,6 +1819,10 @@ async def ontology_sync_state(ctx: Context) -> dict:
     '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요(사유는
     `last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 등) · `failed` 실패(`error`).
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
+    ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
+    `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
+    마지막으로 받았을 때 그대로다. 맨 위 `problems` 는 지금 상태에서 본 문제(멈춘 타입 등)다 — 비어 있지 않으면 `last_run.result`
+    가 `ok` 여도 다 받고 있는 것이 아니다. 받을 타입을 넓히는 것은 박스 설정(KOORM_SP_CORE_TYPES)이다.
     `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
     `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
     못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.

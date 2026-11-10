@@ -267,7 +267,11 @@ export interface OntologySyncOut {
   /** 허브 주소 · 토큰 · 간격이 다 있나(받기 자체가 켜졌나) */
   enabled: boolean
   types: { type_slug: string; objects_as_of: string | null; relations_as_of: string | null; last_run_at: string | null
-           last_status: string | null; last_error: string | null; objects: number }[]
+           last_status: string | null; last_error: string | null; objects: number
+           /** 멈춘 타입(SRC-11) — 받을 타입 밖(not_in_list)이거나 카탈로그에 없어(not_published) 더 받지 않는다 */
+           stopped?: boolean; stopped_why?: string | null }[]
+  /** 지금 상태에서 본 문제(멈춘 타입 등) — 마지막 실행의 problems 와 따로다 */
+  problems?: string[]
   object_states: Record<string, ObjectCounts>
   last_run: SyncRun | null
   catalog: { revision: string; received_at: string; system: string | null; types: number } | null

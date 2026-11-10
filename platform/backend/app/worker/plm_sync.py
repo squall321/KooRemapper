@@ -43,6 +43,25 @@ def wanted_types() -> list[str] | None:
     return raw or None
 
 
+def stopped_types(slugs, *, opened: set[str] | None) -> dict[str, str]:
+    """거울에 있는데 **더 받지 않는** 타입 → 까닭(SRC-11). 받기는 받을 타입만 돌므로 나머지는 마지막으로 받은 그대로 멈춘다.
+
+      `not_in_list`    받을 타입(`KOORM_SP_CORE_TYPES`) 밖이다 — 넓히는 것은 박스 설정이다(포털 BOX-01)
+      `not_published`  받을 타입이 「공개된 것 전부」(빈 설정)인데 마지막 카탈로그(`opened`)에 없다 — 허브가 공개를 거뒀거나 바꿨다
+    ★11-09 실측 — 32 타입이 10-28 에 받은 그대로였는데 타입 줄의 상태는 그때의 `ok` 로 보였다. 상태 칸은 마지막 실행의 기록이라
+    고치지 않고, 이 표시를 따로 붙인다.
+    """
+    wanted = wanted_types()
+    out: dict[str, str] = {}
+    for slug in slugs:
+        if wanted is not None:
+            if slug not in wanted:
+                out[slug] = "not_in_list"
+        elif opened is not None and slug not in opened:
+            out[slug] = "not_published"
+    return out
+
+
 # 규칙 14 — 두 실행이 겹치지 않게(워커 주기와 관리자 버튼은 다른 프로세스다). 트랜잭션 advisory 잠금이라 커밋 ·
 # 실패 때 저절로 풀린다 — 세션 잠금은 풀에서 연결이 바뀌면 다른 연결로 풀려 남는다.
 LOCK_NAME = "dynaforge.sp_core_sync"

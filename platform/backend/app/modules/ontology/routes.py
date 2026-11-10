@@ -337,6 +337,10 @@ async def sync_state(
     읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
     수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 적용 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
     마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
+
+    ★멈춘 타입(SRC-11) — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖인데 거울에 남은 타입은 타입 줄에 `stopped`
+    (+ `stopped_why`)를 달고 `problems` 에 한 줄 싣는다. 타입 줄의 `last_status` 는 마지막으로 받았을 때의 기록이라 그대로 둔다 —
+    11-09 에 32 타입이 10-28 에 멈춘 채 `ok` 로 보였다. `problems` 는 지금 상태에서 본 것이고 `last_run.problems` 는 그 실행의 것이다.
     """
     from app.worker import plm_sync
     rows = (await db.execute(select(OntoSyncState)
@@ -345,13 +349,20 @@ async def sync_state(
     counts = {slug: c["total"] for slug, c in states.items()}
     last = (await db.execute(select(OntoSyncRun).order_by(OntoSyncRun.id.desc()).limit(1))).scalar_one_or_none()
     cat = (await db.execute(select(OntoCatalog).order_by(OntoCatalog.id.desc()).limit(1))).scalar_one_or_none()
+    opened = ({str(t.get("slug")) for t in ((cat.body or {}).get("types") or []) if t.get("slug")}
+              if cat else None)
+    stopped = plm_sync.stopped_types([r.type_slug for r in rows], opened=opened)
     return ok({
         "enabled": plm_sync.enabled(),
+        "receive_types": plm_sync.wanted_types(),
         "types": [{"type_slug": r.type_slug, "objects_as_of": r.objects_as_of,
                    "relations_as_of": r.relations_as_of,
                    "catalog_revision": r.catalog_revision, "last_run_at": r.last_run_at,
                    "last_status": r.last_status, "last_error": r.last_error,
-                   "objects": counts.get(r.type_slug, 0)} for r in rows],
+                   "objects": counts.get(r.type_slug, 0),
+                   "stopped": r.type_slug in stopped, "stopped_why": stopped.get(r.type_slug)} for r in rows],
+        "stopped_types": sorted(stopped),
+        "problems": _stopped_problems(stopped, rows, cat),
         "objects_by_type": counts,
         "object_states": states,
         "last_run": _run_out(last, who=user.is_system_admin) if last else None,
@@ -361,6 +372,29 @@ async def sync_state(
         "full_every_days": settings.sp_core_full_every_days,
         "merged_waiting": len(await svc.merged_tasks(db)),
     })
+
+
+def _stopped_problems(stopped: dict[str, str], rows: list[OntoSyncState], cat: OntoCatalog | None) -> list[str]:
+    """멈춘 타입을 까닭별로 한 줄씩 — 이름(앞 12개) · 마지막으로 받은 때 · 고칠 곳."""
+    at = {r.type_slug: r.last_run_at for r in rows}
+    out = []
+    for why, head, fix in (
+            ("not_in_list", f"받을 타입(KOORM_SP_CORE_TYPES={settings.sp_core_types or ''}) 밖이라 더 받지 않는다",
+             "받으려면 박스 설정 KOORM_SP_CORE_TYPES 에 넣는다(비우면 공개된 것 전부)"),
+            ("not_published", f"허브 카탈로그(판 {cat.revision if cat else '?'})에 없어 더 받지 않는다",
+             "허브가 공개를 거뒀거나 바꿨다 — 허브 관리자에게 확인한다")):
+        slugs = sorted(s for s, w in stopped.items() if w == why)
+        if not slugs:
+            continue
+        names = " · ".join(slugs[:12]) + (f" 외 {len(slugs) - 12}개" if len(slugs) > 12 else "")
+        seen = sorted(a for a in (at.get(s) for s in slugs) if a is not None)
+        when = ""
+        if seen:
+            when = f" — 마지막으로 받은 때 {seen[0]:%Y-%m-%d}"
+            if seen[-1].date() != seen[0].date():
+                when += f" ~ {seen[-1]:%Y-%m-%d}"
+        out.append(f"멈춘 타입 {len(slugs)}개 — {head}(거울의 건수 · 상태는 그때 그대로다): {names}{when}. {fix}")
+    return out
 
 
 @admin.get("/ontology/sync/runs")

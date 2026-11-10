@@ -111,6 +111,13 @@ export function OntologySyncCard() {
               </div>
             )}
 
+            {/* 지금 상태에서 본 문제(멈춘 타입 — SRC-11). 마지막 실행이 정상이어도 받지 않는 타입이 있으면 여기 뜬다 */}
+            {!!s.problems?.length && (
+              <div className="rounded border border-warning/50 bg-warning/5 px-2 py-1.5 space-y-0.5 text-xs">
+                {s.problems.map((p, i) => <div key={i} className="text-fg">{p}</div>)}
+              </div>
+            )}
+
             {/* 타입별 건수 — 사라진 것도 지우지 않았으므로 「사용 안 함」 으로 센다 */}
             {!!s.types.length && (
               <div className="overflow-x-auto">
@@ -135,7 +142,8 @@ export function OntologySyncCard() {
                           <td className="pr-3 text-right mono">{c?.deprecated ?? 0}</td>
                           <td className="pr-3 text-right mono">{c?.inactive ?? 0}</td>
                           <td className="pr-3">
-                            {t.last_status === 'skipped' ? <span className="text-warning" title={t.last_error ?? ''}>공개 안 됨</span>
+                            {t.stopped ? <span className="text-warning" title={`마지막으로 받았을 때 ${t.last_status ?? '—'} — 더 받지 않는다`}>멈춤</span>
+                              : t.last_status === 'skipped' ? <span className="text-warning" title={t.last_error ?? ''}>공개 안 됨</span>
                               : t.last_status === 'error' ? <span className="text-danger" title={t.last_error ?? ''}>오류</span>
                               : t.last_status ?? '—'}
                           </td>
