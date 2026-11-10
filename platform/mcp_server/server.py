@@ -1853,10 +1853,13 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
-    """과거 리포트의 자유 문자열 과제를 정본에 붙이는 **계획**(시스템 관리자).
-    ★**아무것도 쓰지 않는다.** `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
+    """과거 리포트의 자유 문자열 과제를 정본에 붙이는 **계획** — 로그인한 누구나 부른다.
+    ★**아무것도 쓰지 않는다**(미리 보기다). `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
-    / A dry plan for attaching legacy free-text task names. Writes nothing."""
+    ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
+    전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
+    / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
+    a regular user's plan and counts cover only the reports they can read (scope=readable), a system admin sees all."""
     # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가
     #   **422 로 거절한다**(실측 — 기본 호출이 그래서 깨져 있었다). 키를 아예 뺀다.
     return await _get(ctx, "/ontology/task-links", {"limit": limit} if limit > 0 else None)

@@ -4,12 +4,13 @@
 
 권한 —
   읽기            로그인한 누구나(과제·개정은 전사 공용 축이다)
+  과거 붙이기 계획  로그인한 누구나 — 단 **읽을 수 있는 리포트만**(소유 · 같은 소속, 시스템 관리자는 전부 — SRC-10)
   리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세)
-  과거 붙이기·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
+  과거 붙이기 적용·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from app.models import (OntoAlias, OntoCatalog, OntoObject, OntoPreviousKey, Ont
                         OntoRelationType, OntoSyncRun, OntoSyncState, OntoType, User)
 from app.modules.ontology import services as svc
 from app.modules.reports import services as rsvc
+from app.shared.affiliation import verified_affiliation
 from app.shared.auth import get_current_user, require_system_admin
 from app.shared.features import ontology_state
 from app.shared.responses import ok
@@ -198,19 +200,33 @@ async def unlink_report_revision(
     return ok(got, message="개정 연결을 끊었습니다.")
 
 
-# ── 과거 붙이기 · 별칭 · 수신 (관리자) ────────────────────────────────────
+# ── 과거 붙이기 계획 (읽기 — 읽을 수 있는 리포트만) ──────────────────────
+
+@router.get("/ontology/task-links")
+async def plan_links(
+    request: Request,
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """★**계획이다 — 아무것도 쓰지 않는다.** 붙는 것·후보·못 붙인 것을 갈라서 준다.
+
+    로그인한 누구나 읽는다(SRC-10, 11-10). ★일반 사용자에게는 **읽을 수 있는 리포트만**(소유 · 같은 소속 — 리포트 검색과
+    같은 술어) 들고, 수도 그것으로 센다 — 리포트 수치가 새지 않게(일반 보기에서 `cae_*` 를 뺀 10-31 결정과 같은 까닭, 사용자
+    결정 11-10). 시스템 관리자는 전부다. `scope` 가 어느 쪽인지 말한다(`all` · `readable`). 적용(POST …/apply)은 관리자 그대로다.
+    """
+    scope = None
+    if not user.is_system_admin:
+        aff = verified_affiliation(request.headers, user.email, settings.heax_gateway_secret)
+        scope = rsvc._readable_scope(user.id, aff)      # 리포트 검색 · 상세와 같은 술어 — 두 벌로 두면 갈린다
+    got = await svc.plan_task_links(db, limit=limit, scope=scope)
+    return ok({"scope": "all" if scope is None else "readable", **got})
+
+
+# ── 과거 붙이기 적용 · 별칭 · 수신 (관리자) ───────────────────────────────
 
 admin = APIRouter(tags=["ontology"],
                   dependencies=[Depends(require_ontology), Depends(require_system_admin)])
-
-
-@admin.get("/ontology/task-links")
-async def plan_links(
-    limit: int | None = Query(default=None, ge=1, le=2000),
-    db: AsyncSession = Depends(get_db),
-):
-    """★**계획이다 — 아무것도 쓰지 않는다.** 붙는 것·후보·못 붙인 것을 갈라서 준다."""
-    return ok(await svc.plan_task_links(db, limit=limit))
 
 
 class ApplyLinks(BaseModel):

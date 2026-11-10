@@ -539,13 +539,19 @@ def report_free_task(report: ImpactReport) -> str:
     return str(em.get("project") or report.project_name or "").strip()
 
 
-async def plan_task_links(db, *, limit: int | None = None) -> dict:
+async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
     """★**계획이다 — 아무것도 쓰지 않는다.**
 
     자유 문자열별로 묶어서 「붙는 것」·「후보가 있는 것」·「못 붙인 것」 을 가른다.
     못 붙인 것을 **목록으로 돌려주는 것이 요점**이다 — 조용히 건너뛰면 "다 붙었다" 로 읽힌다.
+
+    `scope` 는 볼 리포트를 좁히는 조건(`ImpactReport` 에 거는 WHERE)이다. 비우면 전부다. 일반 사용자에게는 라우트가
+    리포트 검색과 같은 술어(소유 · 같은 소속)를 넘긴다 — 목록도 수도 그 사람이 읽을 수 있는 리포트만으로 센다(SRC-10).
     """
-    reps = (await db.execute(select(ImpactReport))).scalars().all()
+    stmt = select(ImpactReport)
+    if scope is not None:
+        stmt = stmt.where(scope)
+    reps = (await db.execute(stmt)).scalars().all()
     groups: dict[str, list[ImpactReport]] = {}
     no_name: list[str] = []
     for r in reps:

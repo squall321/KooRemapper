@@ -71,8 +71,7 @@ def test_the_route_exists(method, path):
 # ── ② 관문 ────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("method,path", [
-    ("GET", f"{P}/ontology/task-links"),
-    ("POST", f"{P}/ontology/task-links/apply"),
+    ("POST", f"{P}/ontology/task-links/apply"),            # 계획(GET)은 SRC-10 으로 열렸다 — 적용은 그대로 관리자
     ("GET", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/aliases"),
     ("POST", f"{P}/ontology/sync"),
@@ -91,6 +90,7 @@ def test_the_whole_fleet_paths_need_a_system_admin(method, path):
     ("GET", f"{P}/ontology/tasks"),
     ("GET", f"{P}/ontology/tasks/{{task_key:path}}/revisions"),
     ("GET", f"{P}/ontology/sync"),                         # KR-17 — 읽기는 로그인한 사용자 누구나
+    ("GET", f"{P}/ontology/task-links"),                   # SRC-10 — 계획(쓰지 않음)은 누구나, 단 읽을 수 있는 리포트만
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
     ("GET", f"{P}/ontology/types"),                        # 보기는 읽기 전용 — 로그인한 누구나
@@ -139,3 +139,8 @@ def test_the_gate_check_actually_discriminates():
     # KR-17 — GET sync 읽기 길에는 관리자 관문이 없어야 한다
     sync_read = _dep_names(_routes()[("GET", f"{P}/ontology/sync")])
     assert require_system_admin.__name__ not in sync_read, sorted(sync_read)
+    # SRC-10 — 계획은 열리고 적용은 닫혀 있다(같은 경로 앞머리라 한쪽만 옮겨졌는지 둘 다 본다)
+    plan = _dep_names(_routes()[("GET", f"{P}/ontology/task-links")])
+    apply = _dep_names(_routes()[("POST", f"{P}/ontology/task-links/apply")])
+    assert require_system_admin.__name__ not in plan, sorted(plan)
+    assert require_system_admin.__name__ in apply, sorted(apply)

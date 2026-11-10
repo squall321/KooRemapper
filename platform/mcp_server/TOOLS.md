@@ -112,7 +112,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `unlink_report_revision` | report_id | DELETE /reports/{id}/revision | 연결을 끊는다. **개정 객체는 남는다**(다른 리포트가 달려 있거나 줄의 가운데일 수 있다) |
 | `confirm_task_alias` | alias, task_key, note? | POST /ontology/aliases | 자유 문자열을 정본 과제에 붙인다(관리자). 한 문자열은 **한 과제만** 가리킨다 |
 | `remove_task_alias` | alias | DELETE /ontology/aliases | 별칭을 뗀다(관리자). **이미 이어 둔 개정은 안 건드린다** |
-| `plan_task_links` | limit? | GET /ontology/task-links | 과거 붙이기 **계획**(관리자) — 아무것도 쓰지 않는다. 붙는 것·후보·못 붙인 것을 가른다 |
+| `plan_task_links` | limit? | GET /ontology/task-links | 과거 붙이기 **계획**(로그인한 누구나 — SRC-10) — 아무것도 쓰지 않는다. 붙는 것·후보·못 붙인 것을 가른다. ★일반 사용자는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`), 시스템 관리자는 전부(`scope: all`). 적용(`POST /ontology/task-links/apply`)은 관리자만(403) |
 | `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(읽기는 로그인한 사용자 누구나 — KR-17). 마지막 실행 결과는 셋(`ok` · `needs_check` + 사유 · `failed`) · 정의 판 · 타입별 건수 · 옮길 합쳐진 과제 수. 타입의 `skipped` 는 **공개 안 된 타입**이라 건너뛴 것. 받기 실행은 관리자 화면에만 |
 | `ontology_types` | — | GET /ontology/types | 받은 타입 정의(칸 · 관계)와 타입별 건수(활성 · 그만 씀 · 사용 안 함) — 읽기 전용 |
 | `ontology_find` | type_slug, q?·state?·limit?·offset? | GET /ontology/objects | 받은 한 타입의 객체 — 사라진 것도 `active:false` 로 함께(지우지 않는다) |
