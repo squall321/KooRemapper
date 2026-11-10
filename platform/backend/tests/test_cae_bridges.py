@@ -396,6 +396,23 @@ async def test_types_and_conflicts_are_refused(db, mirror):
 
 
 @ON_SESSION_LOOP
+async def test_a_broken_bridge_view_does_not_take_the_cae_view_down(db, monkeypatch):
+    """다리 보기가 깨져도 파트 판정 · 하중 경로는 선다 — 붙이기가 다리 실패에 안 무너지는 것과 같은 자세."""
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+
+        async def broken(*a, **kw):
+            raise RuntimeError("거울 행 꼴이 이상하다")
+        monkeypatch.setattr(br, "view", broken)
+        view = await svc.ontology_view(db, rep)
+        assert view["loaded"] and len(view["parts"]) == 23 and view["load_paths"]
+        assert view["bridges"] == {"error": "RuntimeError: 거울 행 꼴이 이상하다"}
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
 async def test_deleting_the_report_takes_its_human_lines_with_it(db, mirror):
     """사람 선도 리포트의 것이다 — 리포트를 지우면 FK 로 함께 사라진다(지운 리포트를 가리키는 선이 남지 않는다 — 0019 의 교훈)."""
     u, rep = await _make(db)
