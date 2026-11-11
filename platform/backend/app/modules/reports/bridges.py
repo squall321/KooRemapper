@@ -11,8 +11,10 @@
 **정확**은 과제 잇기(`ontology.services.resolve_task`)와 같은 규칙이다 — 앞뒤 공백만 걷고 글자 그대로 견준다(대소문자 · 구분기호
 그대로). 앱 안에 「정확」 이 하나다. 견주는 코어 쪽 글은 거울 행(허브가 준 것 · 사라지지 않은 것)의 key · 이름(label) · 허브 별칭
 (`properties.aliases`) · 허브가 바꾼 옛 key(`onto_previous_keys`)와 우리 별칭 표(`onto_aliases`, 그 코어 타입)다.
-  ★우리 별칭이 먼저다 — 사람이 붙인 기록이라, 허브 쪽 일치가 달라도 조용히 바꾸지 않는다(`resolve_task` 의 우리 별칭 > 허브 별칭).
-  그 밖의 일치는 **코어 객체 하나**로 모일 때만 규칙 선이다. 여럿이면 후보다.
+  ★이 칸들이 모두 **코어 객체 하나**로 모일 때만 규칙 선이다. 칸끼리 엇갈리면(우리 별칭은 X 인데 다른 객체 Y 의 key · 이름 ·
+  허브 별칭이 같은 글) 어느 쪽도 정하지 않고 둘 다 후보로 낸다 — 예전에는 우리 별칭이 먼저라 X 로 그었다(검토 11-11 — 과제 잇기도
+  같은 규칙으로 바뀐다). 여러 칸이 같은 객체를 가리키면 맞은 칸(`matched_by`)은 우리 별칭 > key > 이름 > 허브 별칭 > 옛 key 차례로
+  하나를 적는다.
 
 **후보**(짐작 — 선이 아니다)는 과제 후보(`task_candidates`)와 같은 정규화(`normalize` — 대소문자 · 공백 · 구분기호를 지운다)로 본다.
   ① 글자 그대로 맞는 코어 객체가 여럿 ② 정규화하면 같다 ③ 정규화한 한쪽이 다른 쪽을 품는다(짧은 쪽이 두 글자 이상).
@@ -49,9 +51,9 @@ NAME_PROP = {"cae_campaign": "scenario_kind", "cae_part": "name", "cae_finding":
 RULE, HUMAN = "rule", "human"
 CANDIDATES_PER_OBJECT = 5
 MIN_CONTAINED = 2           # 품는 쪽 후보 — 짧은 쪽이 이보다 짧으면 아무 글에나 걸린다
-RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 코어 객체의 key · 이름 · 별칭(우리 별칭 표가 먼저)과 "
-             "글자 그대로(앞뒤 공백만 걷고) 같고 그런 객체가 하나뿐일 때. 후보 = 여럿이 맞음 · 구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 "
-             "품음 — 선이 아니고 사람이 고른다. 사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale 로 보인다. counts 는 지금 "
+RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key · "
+             "우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 후보 = 여럿이 맞음(칸끼리 엇갈림 포함) · "
+             "구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 객체는 안 낸다). 사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale 로 보인다. counts 는 지금 "
              "거울로 센 것이다 — 저장된 규칙 선과 다르면 drift 가 말한다(다시 붙이면 맞춰진다).")
 
 _WHY_SAME = {"key": "key 가 구분기호 · 대소문자만 다르다", "label": "이름이 구분기호 · 대소문자만 다르다",
@@ -61,6 +63,9 @@ _WHY_HOLDS = {"key": "해석 쪽 글이 코어 key 를 품고 있다", "label": 
 _WHY_HELD = {"key": "코어 key 가 해석 쪽 글을 품고 있다", "label": "코어 이름이 해석 쪽 글을 품고 있다",
              "hub_alias": "허브 별칭이 해석 쪽 글을 품고 있다", "alias": "우리 별칭이 해석 쪽 글을 품고 있다"}
 _WHY_MANY = "글자 그대로 맞는 코어 객체가 여럿이다"
+# 정확 일치의 칸 — 같은 객체를 여러 칸이 가리키면 맞은 칸은 이 차례로 하나를 적고, 여럿이 맞으면 후보 까닭에 칸 이름을 단다
+_EXACT_ORDER = ("alias", "key", "label", "hub_alias", "previous_key")
+_FIELD = {"alias": "우리 별칭", "key": "key", "label": "이름", "hub_alias": "허브 별칭", "previous_key": "옛 key"}
 
 
 @dataclass(frozen=True)
@@ -130,7 +135,7 @@ def _order(o: OntoObject) -> tuple:
 
 @dataclass
 class _Pool:
-    exact: dict[str, dict[str, str]] = field(default_factory=dict)     # 글 → {코어 key: 맞은 칸}
+    exact: dict[str, dict[str, set[str]]] = field(default_factory=dict)    # 글 → {코어 key: 맞은 칸들}
     ours: dict[str, str] = field(default_factory=dict)                 # 우리 별칭 → 코어 key(거울에 살아 있는 것만)
     names: list[tuple[str, str, str]] = field(default_factory=list)    # (코어 key, 정규화 글, 어디서) — 후보용
     labels: dict[str, str] = field(default_factory=dict)               # 살아 있는 코어 key → 이름
@@ -150,12 +155,12 @@ async def _pool(db, dst_type: str) -> _Pool:
         for how, text in (("key", o.key), ("label", o.label or ""), *(("hub_alias", a) for a in hub_aliases(o))):
             if not text:
                 continue
-            pool.exact.setdefault(text, {}).setdefault(o.key, how)
+            pool.exact.setdefault(text, {}).setdefault(o.key, set()).add(how)
             if o.key not in quiet and normalize(text):
                 pool.names.append((o.key, normalize(text), how))
     for old, new in (await renamed_keys(db, dst_type)).items():
         if new in pool.labels:
-            pool.exact.setdefault(old, {}).setdefault(new, "previous_key")
+            pool.exact.setdefault(old, {}).setdefault(new, set()).add("previous_key")
     for alias, key in (await db.execute(select(OntoAlias.alias, OntoAlias.key).where(
             OntoAlias.type_slug == dst_type))).all():
         if key in pool.labels:      # 거울에 없는 key 를 가리키는 별칭으로는 선을 긋지 않는다(끊긴 선이 된다)
@@ -170,14 +175,17 @@ def match(pool: _Pool, text: Any) -> dict:
     t = text.strip() if isinstance(text, str) else ""     # resolve_task 와 같은 「정확」 — 앞뒤 공백만 걷는다
     if not t:
         return {"verdict": "unnamed", "text": "", "options": []}
+    hits = {k: set(hows) for k, hows in pool.exact.get(t, {}).items()}
     if t in pool.ours:
-        return {"verdict": "rule", "key": pool.ours[t], "matched_by": "alias", "text": t, "options": []}
-    hits = pool.exact.get(t, {})
+        hits.setdefault(pool.ours[t], set()).add("alias")       # 우리 별칭도 칸 하나다 — 먼저가 아니다
     if len(hits) == 1:
-        (key, how), = hits.items()
-        return {"verdict": "rule", "key": key, "matched_by": how, "text": t, "options": []}
-    # 그만 씀은 여기서도 뺀다 — 후보는 새로 고르는 목록이다(10-30 결정 · 검토 11-11 P3). 여럿 맞음이라 규칙 선은 아니다.
-    best: dict[str, tuple[int, int, str]] = {k: (0, 0, _WHY_MANY) for k in hits if k not in pool.quiet}
+        (key, hows), = hits.items()
+        return {"verdict": "rule", "key": key, "matched_by": next(h for h in _EXACT_ORDER if h in hows), "text": t,
+                "options": []}
+    # 여럿 — 칸끼리 엇갈려도 여럿이다. 그만 씀은 여기서도 뺀다 — 후보는 새로 고르는 목록이다(10-30 결정 · 검토 11-11 P3).
+    best: dict[str, tuple[int, int, str]] = {
+        k: (0, 0, f"{_WHY_MANY}({' · '.join(_FIELD[h] for h in _EXACT_ORDER if h in hows)})")
+        for k, hows in hits.items() if k not in pool.quiet}
     n = normalize(t)
     for key, name, how in pool.names:
         if name == n:

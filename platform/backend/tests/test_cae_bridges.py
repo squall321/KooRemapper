@@ -173,7 +173,7 @@ def _pool(**kw) -> br._Pool:
     for key, label in kw.get("objs", {}).items():
         p.labels[key] = label
         for how, text in (("key", key), ("label", label)):
-            p.exact.setdefault(text, {}).setdefault(key, how)
+            p.exact.setdefault(text, {}).setdefault(key, set()).add(how)
             p.names.append((key, br.normalize(text), how))
     p.ours.update(kw.get("ours", {}))
     return p
@@ -188,17 +188,28 @@ def test_exact_is_the_task_link_rule_strip_only():
     assert got["options"][0]["why"] == br._WHY_SAME["label"]
 
 
-def test_our_alias_wins_over_a_hub_side_match():
+def test_exact_sources_that_disagree_are_candidates_not_a_line():
+    """우리 별칭은 Q2 인데 다른 객체 Q1 의 이름이 같은 글이면 「정확히 하나」 가 아니다 — 어느 쪽도 정하지 않고 둘 다 후보로 낸다.
+    별칭이 먼저라 Q2 로 긋던 것을 뒤집었다(검토 11-11 · 과제 잇기도 같은 규칙으로 바뀐다)."""
     p = _pool(objs={"Q1": "Bracket", "Q2": "브래킷"}, ours={"Bracket": "Q2"})
     got = br.match(p, "Bracket")
-    assert (got["verdict"], got["key"], got["matched_by"]) == ("rule", "Q2", "alias")
+    assert got["verdict"] == "candidates" and "key" not in got
+    assert [(o["key"], o["why"]) for o in got["options"]] == [("Q1", f"{br._WHY_MANY}(이름)"), ("Q2", f"{br._WHY_MANY}(우리 별칭)")]
+
+
+def test_exact_sources_that_agree_draw_one_line_named_by_the_strongest():
+    """여러 칸이 **같은** 객체를 가리키면 하나다 — 규칙 선이고, 맞은 칸은 우리 별칭 > key > 이름 > 허브 별칭 > 옛 key 차례로 하나를 적는다."""
+    p = _pool(objs={"Q1": "Bracket"}, ours={"Bracket": "Q1"})
+    got = br.match(p, "Bracket")
+    assert (got["verdict"], got["key"], got["matched_by"]) == ("rule", "Q1", "alias")
+    assert br.match(_pool(objs={"Q1": "Q1"}), "Q1")["matched_by"] == "key", "key 와 이름이 같은 글이면 key"
 
 
 def test_several_exact_matches_are_candidates_not_a_line():
     p = _pool(objs={"Q1": "Frame", "Q2": "Frame"})
     got = br.match(p, "Frame")
     assert got["verdict"] == "candidates" and "key" not in got
-    assert [(o["key"], o["why"]) for o in got["options"]] == [("Q1", br._WHY_MANY), ("Q2", br._WHY_MANY)]
+    assert [(o["key"], o["why"]) for o in got["options"]] == [("Q1", f"{br._WHY_MANY}(이름)"), ("Q2", f"{br._WHY_MANY}(이름)")]
 
 
 def test_containment_needs_two_characters_and_ranks_longer_first():
@@ -261,7 +272,7 @@ async def test_attaching_v14_draws_exact_lines_and_lists_candidates(db, mirror):
         view = (await svc.ontology_view(db, rep))["bridges"]
         assert {c["src_key"]: [o["key"] for o in c["options"]] for c in view["candidates"]} == CANDIDATES
         one = next(c for c in view["candidates"] if c["src_key"] == "part/1")
-        assert {o["why"] for o in one["options"]} == {br._WHY_MANY} and one["name"] == "Front\\Metal"
+        assert {o["why"] for o in one["options"]} == {f"{br._WHY_MANY}(이름)"} and one["name"] == "Front\\Metal"
         assert view["unmatched"]["cae_part"] == ["part/5", "part/6", "part/7", "part/8", "part/9", "part/10", "part/11",
                                                  "part/14", "part/15", "part/22"]
         assert len(view["unmatched"]["cae_finding"]) == 20 and view["stale"] == [] and "drift" not in view
