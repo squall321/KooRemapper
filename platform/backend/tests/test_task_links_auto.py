@@ -39,8 +39,15 @@ _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test
 needs_sphere = pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
 
 
+@pytest.fixture(autouse=True)
+def ontology_on(monkeypatch):
+    """반입 뒤 잇기는 과제·개정 기능이 켜져 있을 때만 돈다(라우트와 같은 판정). 이 박스는 허브 설정이 없어 꺼져 있다 — 켠다."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "1")
+
+
 def _tag() -> str:
-    return ulid.new().str[:8].lower()
+    return ulid.new().str.lower()          # 통째로 — 앞자리는 시각이라 잘라 쓰면 1초 안에 겹친다(시험 격리)
 
 
 async def _owner(db, *, admin: bool = False, commit: bool = False):
@@ -198,6 +205,73 @@ async def test_a_machine_link_moves_to_the_task_it_now_resolves_to(db):
         await db.rollback()
 
 
+async def test_someone_elses_confirm_does_not_freeze_my_machine_link(db):
+    """검토 R5 — 판의 rev_source 는 판 하나에 하나라 여러 리포트가 나눠 쓴다. 남이 자기 리포트를 같은 판에 손으로 확정해도
+    기계가 이은 내 리포트는 옮겨진다 — 사람 판인지는 **리포트마다**(선의 link_source) 가른다."""
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    try:
+        _, s1 = await _owner(db)
+        _, s2 = await _owner(db)
+        mine = await _rep(db, s1, project=code, code="dv1")
+        assert (await onto.link_from_eng_meta(db, mine))["ok"]                 # 기계 — 글자 그대로의 판
+        theirs = await _rep(db, s2, project=code, code="dv1")
+        assert (await onto.set_revision(db, theirs, task_key=code, code="dv1", decided_by="lee@x",
+                                        source="manual"))["ok"]                  # 남이 같은 판에 손으로
+        await _task(db, task, task_code=code)
+        got = await onto.auto_link_tasks(db, report_ids=[mine.id, theirs.id])
+        assert (got["linked"], got["kept_manual"]) == (1, 1), got
+        assert await _linked(db, mine.id) == [f"{task}@dv1"], "남의 확정 때문에 내 기계 선이 옛 판에 굳었다"
+        assert await _linked(db, theirs.id) == [f"{code}@dv1"], "사람이 확정한 리포트를 옮겼다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_machine_path_never_moves_or_restamps_a_link_a_person_made(db):
+    """기계 경로(여기선 인제스트 때 잇기)는 사람이 이 리포트를 확정한 선을 옮기지 않고(`kept_manual`), 같은 판을 다시 지나가도
+    선의 「사람이 이었다」 표시를 덮지 않는다."""
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.set_revision(db, r, task_key=task, code="dv1", decided_by="kim@x", source="manual"))["ok"]
+        assert (await onto.link_from_eng_meta(db, r))["ok"]                    # 같은 판 — 지나가기만
+        edge = (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_key == r.id)
+            .execution_options(populate_existing=True))).scalar_one()
+        assert (edge.properties["link_source"], edge.properties["linked_by"]) == ("manual", "kim@x"), edge.properties
+        r.eng_meta = {"project": task, "dev_revision": {"code": "dv2"}}        # 수동 메타가 다른 판을 말한다
+        await db.flush()
+        refused = await onto.link_from_eng_meta(db, r)
+        assert refused["ok"] is False and refused["error"] == "kept_manual", refused
+        assert await _linked(db, r.id) == [f"{task}@dv1"]
+        assert (await onto.linked_revision(db, r))["source"] == "manual"
+    finally:
+        await db.rollback()
+
+
+async def test_an_old_link_without_a_source_on_a_human_revision_is_kept(db):
+    """누가 이었나를 적지 않던 때의 옛 선은 그 판이 사람 판이면 사람 선으로 본다(조심 쪽) — 기계가 옮기지 않는다."""
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    try:
+        _, s = await _owner(db)
+        r = await _rep(db, s, project=code, code="dv1")
+        assert (await onto.set_revision(db, r, task_key=code, code="dv1", decided_by="kim@x", source="manual"))["ok"]
+        edge = (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_key == r.id))).scalar_one()
+        edge.properties = None                                                 # 옛 선 — 표시가 없다
+        await db.flush()
+        await _task(db, task, task_code=code)
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (got["kept_manual"], got["linked"]) == (1, 0), got
+        assert await _linked(db, r.id) == [f"{code}@dv1"]
+    finally:
+        await db.rollback()
+
+
 # ── ③ 반입 뒤 — 굳힌 뒤에 돌고, 깨져도 반입은 그대로 ────────────────────────────
 
 async def test_after_import_links_only_that_report_and_commits(db):
@@ -234,6 +308,24 @@ async def test_a_broken_link_report_keeps_the_report_and_says_why(db, monkeypatc
             assert await fresh.get(ImpactReport, r.id) is not None
     finally:
         await _drop(db, u, s)
+
+
+async def test_with_the_feature_off_the_import_does_not_link(db, monkeypatch):
+    """과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 반입 뒤 잇기를 하지 않고 그렇게 말한다 — 라우트가 거절하는 것과 같은 판정."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "0")
+    t = _tag()
+    task = f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        got = await onto.link_report(db, r)
+        assert got["skipped"] == "off" and "KOORM_ONTOLOGY=0" in got["detail"], got
+        assert await _linked(db, r.id) == [], "기능이 꺼져 있는데 이었다"
+    finally:
+        await _drop(db, u, s, keys=[task])
 
 
 async def test_a_busy_lock_skips_the_link_and_says_so(db):
@@ -384,6 +476,18 @@ async def test_a_receive_links_what_now_resolves_and_records_the_counts(db, hub_
         await _drop(db, u, s, keys=[task, code], runs=runs)
 
 
+async def test_a_busy_lock_after_a_receive_skips_the_link_and_logs_it(db, caplog):
+    """받기를 커밋한 뒤 다시 잠금을 걸 때 다른 받기 · 일괄 적용이 쥐고 있으면 건너뛰고 — 로그에 한 줄 남긴다(예전엔 말없이 건너뛰었다)."""
+    import logging
+    async with SessionLocal() as holder:
+        assert await plm_sync.try_lock(holder)
+        with caplog.at_level(logging.WARNING, logger="koorm.worker"):
+            got = await plm_sync._link_tasks(db)
+        await holder.rollback()
+    assert got["skipped"] == "busy", got
+    assert any("plm task links skipped" in r.getMessage() for r in caplog.records), caplog.text
+
+
 async def test_a_broken_link_after_a_receive_keeps_what_was_received(db, hub_on, monkeypatch):
     async def boom(_db, **_kw):
         raise RuntimeError("잇기 결함")
@@ -417,9 +521,11 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
     from app.modules.ontology.routes import require_ontology
     u, s = await _owner(db, commit=True)
     a, sa = await _owner(db, admin=True, commit=True)
-    run = OntoSyncRun(mode="normal", trigger="test", result="ok", counts={
+    run = OntoSyncRun(mode="normal", trigger="test", result="needs_check", counts={
         "types": {}, "task_links": {"scope": "all", "linked": 2, "candidates": 3, "unmatched": 4,
-                                    "reports_without_a_name": 5}})
+                                    "reports_without_a_name": 5},
+        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": []}},
+        problems=["과제 잇기 실패 — RuntimeError: 원문에 남의 리포트 01ABC"], error="exception: 원문")
     db.add(run)
     await db.commit()
     try:
@@ -436,6 +542,11 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
         assert p["id"] == b["id"] == run.id
         assert "task_links" not in p["counts"], "리포트 전부를 센 수가 일반 사용자에게 샜다"
         assert b["counts"]["task_links"]["linked"] == 2
+        # 예외 원문(사유 줄 · 오류 글)과 층 2 가 옮긴 리포트 수도 관리자에게만 — 일반 사용자는 「문제가 있었다」(수)까지만
+        assert (p["problems"], p["error"], p["problem_count"]) == ([], None, 1), p
+        assert "reports" not in p["counts"]["reflected"] and p["counts"]["reflected"]["renamed"] == 1, p["counts"]
+        assert (b["problems"][0].startswith("과제 잇기 실패"), b["error"], b["problem_count"]) == (True, "exception: 원문", 1)
+        assert b["counts"]["reflected"]["reports"] == 7
     finally:
         await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == run.id))
         await db.commit()
@@ -491,7 +602,7 @@ async def test_the_auto_link_and_the_admin_apply_skip_an_unlinked_report_and_the
         entry = plan["plan"][0]
         assert entry["verdict"] == "links" and entry["unlinked"] == [r.id], entry
         assert plan["counts"]["unlinked"] == 1, plan["counts"]
-        done = await onto.apply_task_links(db, only=[task], decided_by="boss@x")
+        done = await onto.apply_task_links(db, only=[task])
         assert (done["skipped_unlinked"], done["linked"]) == (1, 0), done
         assert await _linked(db, r.id) == [] and len(await _tombstones(db, r.id)) == 1, "일괄 적용이 사람의 끊음을 덮었다"
     finally:
@@ -570,6 +681,42 @@ async def test_a_metadata_edit_does_not_relink_an_unlinked_report(db):
         await _drop(db, u, s, keys=[task, other])
 
 
+async def test_a_metadata_edit_moves_only_a_machine_link_and_only_on_project_or_stage(db, monkeypatch):
+    """검토 R3 — 수동 메타 고침은 과제 · 개발단계가 바뀔 때만 선을 보고, 그때도 **기계가 이은** 선만 따라간다. 사람이 손으로
+    확정한 선은 그대로다. 설계안 · DOE 만 고치면 선을 아예 보지 않는다."""
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task, other = f"AL-{t}", f"AL2-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await _task(db, other)
+        await db.commit()
+        human = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.set_revision(db, human, task_key=task, code="pv1", decided_by="kim@x", source="manual"))["ok"]
+        machine = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, machine))["ok"]
+        await db.commit()
+
+        calls = []
+        real = onto.link_from_eng_meta
+
+        async def counted(sdb, rep):
+            calls.append(rep.id)
+            return await real(sdb, rep)
+
+        monkeypatch.setattr(onto, "link_from_eng_meta", counted)
+        human = await rsvc.update_report_meta(db, human, variation="A", doe="S1:c3")
+        assert calls == [], "설계안 · DOE 만 고쳤는데 선을 다시 봤다"
+        assert await _linked(db, human.id) == [f"{task}@pv1"]
+        human = await rsvc.update_report_meta(db, human, project=other)
+        assert await _linked(db, human.id) == [f"{task}@pv1"], "메타 고침이 사람이 확정한 판에서 리포트를 옮겼다"
+        machine = await rsvc.update_report_meta(db, machine, project=other)
+        assert await _linked(db, machine.id) == [f"{other}@dv1"], "기계가 이은 선이 바뀐 과제를 따라가지 않았다"
+    finally:
+        await _drop(db, u, s, keys=[task, other])
+
+
 async def test_a_receive_leaves_an_unlinked_report_unlinked_and_counts_it(db, hub_on, monkeypatch):
     t = _tag()
     task, code = f"AL-{t}", f"ALC-{t}"
@@ -642,3 +789,81 @@ async def test_the_unlink_routes_record_show_and_clear(db):
     finally:
         await _drop(db, o, so)
         await _drop(db, u, s, keys=[task])
+
+
+# ── ⑥ 관리자 일괄 적용 — 자동 잇기와 같은 길 · 같은 기계 출처(검토 반영 11-11) ─────────────────────────
+# 예전엔 manual 로 이어서 그새 끊은 기록을 지우고(R1) 주인이 확정한 판에서 옮기고(R4) 판에 관리자 이름을 찍었다.
+
+async def test_the_admin_apply_respects_an_unlink_that_lands_after_it_read_its_plan(db, monkeypatch):
+    """R1 — 적용이 계획을 읽은 직후 주인이 끊고 커밋해도, 적용은 그 끊음을 보고 건너뛴다(기록은 남는다)."""
+    t = _tag()
+    task = f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, r))["ok"]
+        await db.commit()
+        real = onto.plan_task_links
+        fired = []
+
+        async def plan_then_owner_unlinks(sdb, **kw):
+            got = await real(sdb, **kw)
+            if not fired:
+                fired.append(1)
+                async with SessionLocal() as other:
+                    rep = await other.get(ImpactReport, r.id)
+                    assert (await onto.unlink_revision(other, rep, by="kim@x"))["ok"]
+                    await other.commit()
+            return got
+
+        monkeypatch.setattr(onto, "plan_task_links", plan_then_owner_unlinks)
+        done = await onto.apply_task_links(db, only=[task])
+        await db.commit()
+        monkeypatch.undo()
+        assert fired and (done["skipped_unlinked"], done["linked"]) == (1, 0), done
+        assert await _linked(db, r.id) == [] and [m.dst_key for m in await _tombstones(db, r.id)] == [f"{task}@dv1"], \
+            "일괄 적용이 그새 끊은 기록을 지우고 다시 이었다"
+    finally:
+        await _drop(db, u, s, keys=[task])
+
+
+async def test_the_admin_apply_keeps_an_owner_confirmed_report_and_stamps_no_admin(db):
+    """R4 — 주인이 손으로 확정한 리포트는 일괄 적용이 옮기지 않고 `kept_manual` 로 센다. 이은 판에 관리자 이름이 없다."""
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        mine = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.set_revision(db, mine, task_key=task, code="pv1", decided_by="kim@x", source="manual"))["ok"]
+        other = await _rep(db, s, project=task, code="dv2")                     # 손대지 않은 리포트 — 이어져야 한다
+        done = await onto.apply_task_links(db, only=[task])
+        assert (done["kept_manual"], done["linked"], done["strings"]) == (1, 1, 1), done
+        assert await _linked(db, mine.id) == [f"{task}@pv1"], "일괄 적용이 사람이 확정한 판에서 옮겼다"
+        p = (await _rev(db, f"{task}@dv2")).properties
+        assert p["rev_source"] == onto.SOURCE_RULE and "decided_by" not in p, p
+        assert await _rev(db, f"{task}@dv1") is None, "옮기지도 않을 판을 만들었다"
+    finally:
+        await db.rollback()
+
+
+async def test_the_admin_apply_is_refused_while_a_receive_holds_the_lock(db):
+    """일괄 적용은 받기 뒤 자동 잇기와 같은 잠금을 건다 — 받는 중이면 409 busy(겹쳐 돌지 않는다)."""
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    a, sa = await _owner(db, admin=True, commit=True)
+    try:
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        async with SessionLocal() as holder:
+            assert await plm_sync.try_lock(holder)                              # 받는 중이다
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                         base_url="http://test") as c:
+                r = await c.post(f"{P}/ontology/task-links/apply", json={"only": ["없는-문자열"]},
+                                 headers={"authorization": f"Bearer {security.create_access_token(a.id)}"})
+            await holder.rollback()
+        assert r.status_code == 409 and "busy" in r.json()["message"], (r.status_code, r.text[:200])
+    finally:
+        await _drop(db, a, sa)

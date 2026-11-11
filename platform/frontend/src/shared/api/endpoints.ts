@@ -210,7 +210,8 @@ export interface ReportRevisionOut {
   resolved_task: string | null
   resolved_how: string | null
   /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
-  linked: { key: string; task: string; code: string } | null
+  /** source — 이 리포트의 선을 누가 이었나(manual · eng_meta · rule, 옛 선은 null) */
+  linked: { key: string; task: string; code: string; source?: string | null } | null
   /** 사람이 연결을 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다 */
   unlinked?: { by: string; at: string | null; was: string[] } | null
   task_state: TaskState | null
@@ -219,6 +220,8 @@ export interface ReportRevisionOut {
   mismatch: { kind: 'differs' | 'eng_meta_missing' | 'renamed' | 'merged'; linked: string; eng_meta?: string; said: string } | null
   candidates: RevisionCandidate[]
   task_candidates: TaskCandidate[]
+  /** 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 둔다 */
+  ambiguous?: boolean
 }
 export async function reportRevision(reportId: string, taskKey?: string): Promise<ReportRevisionOut> {
   const { data } = await api.get(`/reports/${reportId}/revision`, { params: { task_key: taskKey || undefined } })
@@ -237,9 +240,10 @@ export interface RevisionCompareRow extends RevisionRow {
   /** 앞 판 대비 변화. **양쪽에 값이 있을 때만** 온다. */
   d_worst_stress: number | null
 }
-export async function compareTaskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionCompareRow[]; note?: string }> {
+/** scope — readable 이면 리포트 줄 · 수치가 이 사람이 읽을 수 있는 리포트만으로 센 것이다(사용자 결정 11-11) */
+export async function compareTaskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionCompareRow[]; note?: string; scope?: 'all' | 'readable' }> {
   const { data } = await api.get(`/ontology/tasks/${encodeURIComponent(taskKey)}/compare`)
-  return unwrap<{ task: string; revisions: RevisionCompareRow[]; note?: string }>(data)
+  return unwrap<{ task: string; revisions: RevisionCompareRow[]; note?: string; scope?: 'all' | 'readable' }>(data)
 }
 export async function unlinkReportRevision(reportId: string): Promise<{ was: string[]; detail: string }> {
   const { data } = await api.delete(`/reports/${reportId}/revision`)
@@ -265,7 +269,9 @@ export interface SyncRun {
   result: 'running' | 'ok' | 'needs_check' | 'failed'
   revision: string | null
   counts: { types?: Record<string, Record<string, number>>; relations?: Record<string, Record<string, number>>; skipped?: string[] }
+  /** 사유 줄 · 오류 글은 시스템 관리자에게만 — 일반 사용자에게는 빈 목록 · null(사유 수는 problem_count) */
   problems: string[]
+  problem_count?: number
   notes: string[]
   error: string | null
   requested_by?: string
@@ -342,6 +348,8 @@ export interface OntoObjectOut {
   merged_into_now?: string | null
   out: OntoEdge[]
   in: OntoEdge[]
+  /** readable 이면 끝이 리포트인 선은 읽을 수 있는 리포트만 */
+  scope?: 'all' | 'readable'
   previous: string[]
 }
 export async function ontologyObject(type: string, key: string): Promise<OntoObjectOut> {

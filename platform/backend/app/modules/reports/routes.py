@@ -161,7 +161,7 @@ async def ingest_report(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     return ok(
-        # 반입 뒤 과제 잇기 결과(SRC-09) — 이은 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 `error`(반입은 그대로다)
+        # 반입 뒤 과제 잇기 결과(SRC-09) — 이은 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 `error`(반입은 그대로다) · 기능이 꺼져 있으면 `skipped: off`
         {**ReportRead.model_validate(report).model_dump(), "task_links": getattr(report, "auto_task_links", None)},
         message=f"{report.kind} 리포트 인제스트 완료 ({report.n_cases} 케이스)",
         status_code=201,

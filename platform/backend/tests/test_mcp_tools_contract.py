@@ -182,3 +182,52 @@ def test_the_cae_allowed_values_are_the_backend_constraints():
     assert c["CAE_PATH_SORTS"] == CAE_PATH_SORTS
     ranked = tuple(k for k in sorted(CAE_SEVERITY_RANK, key=CAE_SEVERITY_RANK.get, reverse=True) if k != "INFO")
     assert c["CAE_SEVERITIES"] == ranked, "판정은 높은 것부터 — 소견만 쓰는 INFO 는 파트 판정에 없다"
+
+
+# ── 경로 칸 감싸기(검토 반영 11-11) ──────────────────────────────────────────────
+# 예전엔 경로에 사용자 값을 그대로 넣어 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 이 뒤를 자르고, `..` 이 남의 길로
+# 갔다. 이제 경로의 사용자 값은 모두 `_seg(…)`(quote safe='' + 점 칸 감싸기)를 지난다.
+
+def test_every_path_f_string_wraps_its_values_in_seg():
+    """정적 — server.py 의 경로 f-문자열(`f"/…"`)에 든 값은 하나도 빠짐없이 `_seg(…)` 다(새 도구가 빠뜨리면 여기서 빨개진다)."""
+    bad, n = [], 0
+    for node in ast.walk(ast.parse(SERVER.read_text(encoding="utf-8"))):
+        if not (isinstance(node, ast.JoinedStr) and node.values and isinstance(node.values[0], ast.Constant)
+                and str(node.values[0].value).startswith("/")):
+            continue
+        for v in node.values:
+            if isinstance(v, ast.FormattedValue):
+                n += 1
+                call = v.value
+                if not (isinstance(call, ast.Call) and getattr(call.func, "id", "") == "_seg"):
+                    bad.append(ast.unparse(node))
+    assert n >= 80 and not bad, (n, bad)
+
+
+NASTY = ("01AB?x", "a/../../sessions/S1", "..", ".", "id#frag", "with space")
+PATHS = {   # 도구 → 백엔드가 받아야 할 경로(값 s 는 감싼 칸)
+    "report_summary": "/api/v1/reports/{s}",
+    "report_revision": "/api/v1/reports/{s}/revision",
+    "unlink_report_revision": "/api/v1/reports/{s}/revision",
+    "clear_report_unlink": "/api/v1/reports/{s}/revision/unlinked",
+    "report_case": "/api/v1/reports/{s}/cases/{s}",
+    "get_session": "/api/v1/sessions/{s}",
+    "task_revisions": "/api/v1/ontology/tasks/{s}/revisions",
+    "compare_task_revisions": "/api/v1/ontology/tasks/{s}/compare",
+    "ontology_object": "/api/v1/ontology/objects/{s}/{s}",
+    "recipe_get": "/api/v1/recipes/{s}",
+}
+
+
+@needs_mcp
+def test_nasty_ids_reach_the_backend_as_one_encoded_segment():
+    """`?` · `/` · `..` · `.` · `#` · 빈칸이 든 값이 경로 칸 **하나**로 그대로 간다 — 다른 길(리포트 지우기 · 남의 세션)로 새지 않는다."""
+    got = _probe("paths", *NASTY)
+    assert got["seg"] == {"01AB?x": "01AB%3Fx", "a/../../sessions/S1": "a%2F..%2F..%2Fsessions%2FS1", "..": "%2E%2E",
+                          ".": "%2E", "id#frag": "id%23frag", "with space": "with%20space"}, got["seg"]
+    assert set(got["calls"]) == set(PATHS), sorted(got["calls"])
+    for tool, per in got["calls"].items():
+        for v, rec in per.items():
+            want = PATHS[tool].format(s=got["seg"][v])
+            sent = [p for _, p in rec["seen"]]
+            assert sent and sent[0] == want, (tool, v, sent, rec["error"])

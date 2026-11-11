@@ -55,6 +55,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+async def lock_reports(db, ids) -> None:
+    """리포트 행을 id 차례로 잠근다(`SELECT … ORDER BY id FOR UPDATE`, 트랜잭션이 끝날 때 풀린다).
+
+    ★리포트 선(리포트 → 개정)을 고치는 **모든 길**이 다른 행을 건드리기 전에 이것부터 한다 — 사람 확정 · 끊기 · 끊은 기록 지우기 ·
+    인제스트 때 잇기 · 자동 잇기 · 관리자 일괄 적용 · 허브 이름 바뀜 옮기기. 잠금 차례가 하나(리포트 행 먼저, id 차례)라 서로
+    교착하지 않고, 잠근 뒤에 다시 읽으므로 겹친 쪽이 본 것을 덮지 않는다(검토 R11 · R7 · R2 — 받기 뒤 자동 잇기는 긴 트랜잭션이다).
+    DB 에 없는 리포트(시험의 손 객체)는 잠글 것이 없어 지나간다.
+    """
+    keys = sorted({str(i) for i in ids if i})
+    if keys:
+        await db.execute(select(ImpactReport.id).where(ImpactReport.id.in_(keys))
+                         .order_by(ImpactReport.id).with_for_update())
+
+
 # ── 후보 ───────────────────────────────────────────────────────────────────
 
 async def candidates(db, report: ImpactReport, *, task_key: str = "") -> list[dict]:
@@ -158,7 +172,8 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
 
     실패를 예외로 올리지 않는다 — `{"ok": False, "error": …}` 다(이 리포 규약).
     ★사람이 끊은 리포트(끊은 기록이 있다)는 기계 경로(`source` 가 manual 이 아닌 것)를 `unlinked` 로 거절하고, 사람이 잇는
-    것(manual)은 끊은 기록을 지우고 잇는다(11-11).
+    것(manual)은 끊은 기록을 지우고 잇는다(11-11). 사람이 **이 리포트를** 다른 판에 확정해 두었으면 기계 경로는 `kept_manual` 로
+    거절한다 — 리포트마다(선의 `link_source`) 가른다. 리포트 행을 먼저 잠그고 그 뒤에 읽는다(`lock_reports`).
     """
     task_key = (task_key or "").strip()
     code = (code or "").strip()
@@ -168,6 +183,9 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         rev = parse_stage(code)
     except DataHubError as exc:
         return {"ok": False, "error": "bad_code", "detail": str(exc)}
+    # 리포트 행을 먼저 잠그고 그 뒤에 읽는다 — 같은 리포트를 고치는 다른 길과 겹쳐도 선이 둘이 되거나(R11) 끊은 기록이 지워지지
+    # 않는다(R2). 받기 뒤 자동 잇기가 이 리포트를 쥐고 있으면 그것이 커밋할 때까지 기다린다.
+    await lock_reports(db, [report.id])
     # ★사람이 끊은 리포트(11-11) — 기계 경로(인제스트 때 잇기 · 수동 메타 고침 · 자동 잇기)는 **다시 잇지 않는다**. 이 자리에서
     #   막아야 앞으로 생길 자동 경로도 같은 규칙을 지난다. 사람이 손으로 이으면(manual) 아래에서 기록을 지운다.
     marks = await unlink_rows(db, report.id)
@@ -175,6 +193,19 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         return {"ok": False, "error": "unlinked",
                 "detail": "사람이 이 리포트의 개정 연결을 끊었다 — 기계는 다시 잇지 않는다"
                           "(손으로 다시 잇거나 끊은 기록을 지우면 다시 잇는다)"}
+    key = revision_key(task_key, code)
+    live = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key == str(report.id), OntoRelation.deleted.is_(False))
+        .execution_options(populate_existing=True))).scalars().all()
+    if source != "manual":
+        # ★사람이 **이 리포트를** 다른 판에 확정했으면 기계(인제스트 때 잇기 · 수동 메타 고침 · 자동 잇기 · 일괄 적용)는 옮기지
+        #   않는다 — 리포트마다 가른다(검토 R5: 남이 자기 리포트를 같은 판에 확정했다고 내 기계 선이 굳으면 안 된다).
+        others = [e for e in live if e.dst_key != key]
+        legacy = await _manual_revisions(db, [e.dst_key for e in others if not (e.properties or {}).get("link_source")])
+        if any(_human_link(e.properties, e.dst_key, legacy) for e in others):
+            return {"ok": False, "error": "kept_manual",
+                    "detail": "사람이 이 리포트를 다른 판에 확정했다 — 기계는 옮기지 않는다(사람이 다시 확정하거나 끊으면 바뀐다)"}
 
     # 과제 거울이 있으면 확인한다. **없다고 막지는 않는다** — 허브가 아직 없을 수 있고,
     # 그때 막으면 개정을 아예 못 붙인다. 대신 "확인 못 했다" 를 돌려준다.
@@ -183,7 +214,6 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
                                  OntoObject.key == task_key))).scalar_one_or_none()
     unverified = task is None
 
-    key = revision_key(task_key, code)
     if supersedes:
         if supersedes == key:
             return {"ok": False, "error": "self_supersede", "detail": "자기를 앞 판으로 둘 수 없다"}
@@ -240,13 +270,29 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
     if supersedes:
         await _edge(db, REL_SUPERSEDES, TYPE_REVISION, key, TYPE_REVISION, supersedes)
     # ★리포트 하나에 개정 하나(앞 계획 §7 ③) — 다른 판으로 다시 확정하면 옛 선을 뗀다. 안 떼면 같은 리포트가 두 판에
-    #   다 잡혀 판끼리 견준 숫자가 틀어진다(10-30 실측: dv1 → pv1 다시 확정 뒤 선 둘). 떼는 꼴은 `unlink_revision` 과 같다.
-    for old in (await db.execute(select(OntoRelation).where(
-            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
-            OntoRelation.src_key == str(report.id), OntoRelation.dst_key != key))).scalars().all():
-        await db.delete(old)
-    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다.
-    await _edge(db, REL_MEASURED, TYPE_REPORT, str(report.id), TYPE_REVISION, key)
+    #   다 잡혀 판끼리 견준 숫자가 틀어진다(10-30 실측: dv1 → pv1 다시 확정 뒤 선 둘). **살아 있는 선만** 뗀다 — 끊은 기록
+    #   (지운 표시를 단 선)은 위에서 사람이 이을 때만 지운다(R2).
+    for old in live:
+        if old.dst_key != key:
+            await db.delete(old)
+    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다. 선에 **누가 이었나**를 적는다(`link_source` —
+    # manual · eng_meta · rule, 사람이면 `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라
+    # 여러 리포트가 나눠 쓴다). 사람이 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
+    stamp: dict[str, Any] = {"link_source": source, "linked_at": _now()}
+    if source == "manual":
+        stamp["linked_by"] = decided_by or ""
+    row = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key == str(report.id), OntoRelation.dst_type == TYPE_REVISION,
+        OntoRelation.dst_key == key).execution_options(populate_existing=True))).scalar_one_or_none()
+    if row is None:
+        db.add(OntoRelation(relation=REL_MEASURED, src_type=TYPE_REPORT, src_key=str(report.id),
+                            dst_type=TYPE_REVISION, dst_key=key, source=SOURCE_SELF, properties=stamp, deleted=False))
+    elif row.deleted:
+        row.deleted, row.properties = False, stamp
+    elif source == "manual" or not _human_link(row.properties, key, await _manual_revisions(db, [key])):
+        row.properties = {**(row.properties or {}), **stamp}
+    await db.flush()
 
     return {"ok": True, "key": key, "rev_seq": props["rev_seq"],
             "task_unverified": unverified,
@@ -323,13 +369,19 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
         OntoObject.type_slug == TYPE_REVISION, OntoObject.key == edge.dst_key))).scalar_one_or_none()
     props = (rev.properties or {}) if rev is not None else {}
     return {"key": edge.dst_key, "task": str(props.get("task") or edge.dst_key.rsplit("@", 1)[0]),
-            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1]}
+            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1],
+            # 이 리포트의 선을 누가 이었나(manual · eng_meta · rule — 옛 선은 null). 판의 rev_source 와 다르다(판은 나눠 쓴다)
+            "source": (edge.properties or {}).get("link_source")}
 
 
 # ── 개정 줄 ────────────────────────────────────────────────────────────────
 
-async def history(db, task_key: str) -> list[dict]:
-    """한 과제의 개정 줄 — `rev_seq` 순으로, 각 판에 달린 리포트와 함께."""
+async def history(db, task_key: str, *, scope=None) -> list[dict]:
+    """한 과제의 개정 줄 — `rev_seq` 순으로, 각 판에 달린 리포트와 함께.
+
+    개정 자체는 전사 공용 축이라 다 보인다. ★그 안의 **리포트**는 `scope`(리포트 검색과 같은 술어 — 소유 · 같은 소속)로
+    거른다 — 읽지 못하는 리포트의 id 가 새지 않게(사용자 결정 11-11). 비우면 전부(시스템 관리자).
+    """
     revs = (await db.execute(
         select(OntoObject).where(OntoObject.type_slug == TYPE_REVISION,
                                  OntoObject.deleted.is_(False)))).scalars().all()
@@ -342,6 +394,9 @@ async def history(db, task_key: str) -> list[dict]:
                                    OntoRelation.dst_type == TYPE_REVISION,
                                    OntoRelation.dst_key.in_(keys),
                                    OntoRelation.deleted.is_(False)))).scalars().all()
+    if scope is not None and edges:
+        seen = await visible_reports(db, [e.src_key for e in edges], scope)
+        edges = [e for e in edges if e.src_key in seen]
     by_rev: dict[str, list[str]] = {}
     for e in edges:
         by_rev.setdefault(e.dst_key, []).append(e.src_key)
@@ -386,48 +441,79 @@ def normalize(text: str) -> str:
 async def resolve_task(db, free: str) -> tuple[str, str]:
     """자유 문자열 → (과제 key, 어떻게). 못 풀면 `("", "")`.
 
-    **짐작이 없는 길만** 여기서 푼다 —
+    **짐작이 없는 길만** 여기서 푼다(`exact_matches`) —
       `exact`        과제명(plm_task.key)과 글자 그대로 같다
       `task_code`    과제코드(`properties.task_code`)와 글자 그대로 같다
       `previous_key` 허브가 바꾼 옛 과제명이다(`onto_previous_keys` — 같은 과제다)
       `alias`        사람이 이 플랫폼에서 이미 붙인 기록이 있다
-      `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같고 그런 과제가 **하나뿐**이다(KR-01 다시, 10-30)
+      `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같다
+    ★원천이 **모두 같은 과제 하나**를 가리킬 때만 푼다(검토 반영 11-11). 둘이 엇갈리면(사람이 붙인 별칭과 나중에 온 같은 글자의
+      허브 과제 — R8), 과제코드 · 허브 별칭이 두 과제에 걸리면(R6), 이름(label)이 글자 그대로 같은 다른 과제가 있으면 풀지 않고
+      **후보**로 낸다(`candidates_for`) — 사람이 고른다. 예전엔 원천 차례로 먼저 걸린 것이 조용히 이겼다.
     ⚠ key 는 **과제명**이다(rootdesign plm_task.key). 과제코드는 `properties.task_code` 에 있다 —
       보고서에는 과제코드가 적혀 오므로 그 경로가 없으면 과제코드로는 영영 안 풀린다(KR-01, 2026-10-27).
-    ★우리 별칭이 허브 별칭보다 먼저다 — 허브가 나중에 같은 별칭을 다른 과제에 달아도 사람이 정한 것을 조용히 바꾸지 않는다.
     정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
+    """
+    return _pick(await exact_matches(db, free))
+
+
+# 글자 그대로 맞은 원천 → 후보에 보일 근거
+_EXACT_WHY = {"exact": "과제명이 글자 그대로 같다", "task_code": "과제코드가 글자 그대로 같다",
+              "previous_key": "허브가 바꾼 옛 과제명이다", "alias": "사람이 붙인 별칭이 가리킨다",
+              "hub_alias": "허브 별칭이 글자 그대로 같다", "label": "이름(label)이 글자 그대로 같다"}
+
+
+async def exact_matches(db, free: str) -> list[tuple[str, str]]:
+    """자유 문자열과 **글자 그대로** 맞는 과제 — `(과제 key, 원천)` 목록. 원천 차례(과제명 · 과제코드 · 옛 과제명 · 우리 별칭 ·
+    허브 별칭 · 이름), 같은 원천 안에서는 key 차례라 실행마다 같다(R6b — 예전 과제코드 고름은 차례 없는 `.first()` 였다).
+    `label` 은 이것만으로는 잇지 않는다 — 다른 원천과 엇갈리는지 볼 때만 쓴다(정확 일치의 원천이 아니었다).
     """
     free = (free or "").strip()
     if not free:
-        return "", ""
-    hit = (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.key == free,
-                                 OntoObject.deleted.is_(False)))).scalar_one_or_none()
-    if hit is not None:
-        return hit.key, "exact"
-    code_hit = (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.properties["task_code"].astext == free,
-                                 OntoObject.deleted.is_(False)))).scalars().first()
-    if code_hit is not None:
-        return code_hit.key, "task_code"
+        return []
+    live = (OntoObject.type_slug == TYPE_TASK, OntoObject.deleted.is_(False))
+    out: list[tuple[str, str]] = [(k, "exact") for k in (await db.execute(
+        select(OntoObject.key).where(*live, OntoObject.key == free))).scalars()]
+    out += [(k, "task_code") for k in (await db.execute(select(OntoObject.key).where(
+        *live, OntoObject.properties["task_code"].astext == free).order_by(OntoObject.key))).scalars()]
     now = await current_key(db, TYPE_TASK, free)
     if now != free and await task_exists(db, now):
-        return now, "previous_key"
-    al = (await db.execute(
-        select(OntoAlias).where(OntoAlias.type_slug == TYPE_TASK,
-                                OntoAlias.alias == free))).scalar_one_or_none()
+        out.append((now, "previous_key"))
+    al = (await db.execute(select(OntoAlias.key).where(
+        OntoAlias.type_slug == TYPE_TASK, OntoAlias.alias == free))).scalar_one_or_none()
     if al is not None:
-        return al.key, "alias"
-    named = [t.key for t in (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.properties["aliases"].contains([free]),
-                                 OntoObject.deleted.is_(False)))).scalars().all()
-             if free in hub_aliases(t)]
-    if len(named) == 1:
-        return named[0], "hub_alias"
-    return "", ""
+        out.append((al, "alias"))
+    out += [(t.key, "hub_alias") for t in (await db.execute(select(OntoObject).where(
+        *live, OntoObject.properties["aliases"].contains([free])).order_by(OntoObject.key))).scalars()
+        if free in hub_aliases(t)]
+    out += [(k, "label") for k in (await db.execute(select(OntoObject.key).where(
+        *live, OntoObject.label == free).order_by(OntoObject.key))).scalars()]
+    return out
+
+
+def _pick(found: list[tuple[str, str]]) -> tuple[str, str]:
+    """원천들이 과제 하나로 모이고 이름이 아닌 원천이 하나라도 있으면 그것(원천 차례 첫째) — 아니면 못 푼 것."""
+    linkers = [m for m in found if m[1] != "label"]
+    return linkers[0] if linkers and len({k for k, _ in found}) == 1 else ("", "")
+
+
+async def candidates_for(db, free: str, *, found: list[tuple[str, str]] | None = None,
+                         rows: list[OntoObject] | None = None) -> tuple[list[dict], bool]:
+    """못 푼 자유 문자열의 후보와 근거 — `(후보, 엇갈림)`. 글자 그대로 맞은 원천(엇갈려서 못 푼 것)을 먼저, 그다음 정규화해서
+    같아 보이는 것(`task_candidates`). 엇갈림(`ambiguous`)은 글자 그대로 맞은 과제가 둘 이상이라는 뜻이다 — 사람이 고른다."""
+    if found is None:
+        found = await exact_matches(db, free)
+    if rows is None:
+        rows = await _live_tasks(db)
+    labels = {t.key: t.label for t in rows}
+    out: list[dict] = []
+    for k, how in found:
+        if any(c["key"] == k for c in out):
+            continue
+        out.append({"key": k, "label": labels.get(k), "why": _EXACT_WHY[how], "rank": -1})
+    seen = {c["key"] for c in out}
+    out += [c for c in await task_candidates(db, free, rows=rows) if c["key"] not in seen]
+    return out, len({k for k, _ in found}) > 1
 
 
 def hub_aliases(obj: OntoObject) -> list[str]:
@@ -597,7 +683,8 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
     plan: list[dict] = []
     for free in sorted(groups):
         rows = groups[free]
-        key, how = await resolve_task(db, free)
+        found = await exact_matches(db, free)
+        key, how = _pick(found)
         codes = sorted({str((r.eng_meta or {}).get("dev_revision", {}).get("code") or "")
                         for r in rows} - {""})
         entry = {
@@ -614,8 +701,9 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
         else:
             if tasks is None:
                 tasks = await _live_tasks(db)
-            cands = await task_candidates(db, free, rows=tasks)
+            cands, ambiguous = await candidates_for(db, free, found=found, rows=tasks)
             entry["candidates"] = cands
+            entry["ambiguous"] = ambiguous      # 글자 그대로 맞은 과제가 둘 이상 — 잇지 않고 사람이 고른다(R8 · R6)
             entry["verdict"] = "proposal" if cands else "unmatched"
         plan.append(entry)
         if limit and len(plan) >= limit:
@@ -658,43 +746,20 @@ async def confirm_alias(db, *, alias: str, key: str, by: str = "", note: str = "
     return {"ok": True, "alias": alias, "key": key}
 
 
-async def apply_task_links(db, *, only: list[str] | None = None,
-                           decided_by: str = "") -> dict:
-    """계획 중 **붙는 것만** 실제로 잇는다(후보·못 붙인 것은 건드리지 않는다).
+async def apply_task_links(db, *, only: list[str] | None = None) -> dict:
+    """계획 중 **붙는 것만** 실제로 잇는다(후보·못 붙인 것은 건드리지 않는다) — 관리자 버튼(POST /ontology/task-links/apply).
 
-    `only` 를 주면 그 자유 문자열만. 각 리포트는 자기 `dev_revision` 코드로 이어진다 —
-    코드가 없는 리포트는 **과제만 알고 개정은 모르는 것**이므로 건너뛰고 그 수를 돌려준다.
-    ★사람이 끊은 리포트는 건너뛰고 센다(`skipped_unlinked`) — 일괄 적용은 사람의 손이지만 그 리포트를 보고 내린 판단이 아니다.
-    그 판단(끊음)을 덮으려면 리포트를 손으로 다시 잇거나 끊은 기록을 지운다(11-11).
+    `only` 를 주면 그 자유 문자열만. ★받기 뒤 자동 잇기와 **같은 길 · 같은 기계 출처**(`rule`)로 잇는다(검토 반영 11-11 — 예전엔
+    `manual` 이라 그새 끊은 기록을 지우고(R1) 주인이 확정한 판에서 옮기고(R4) 판에 관리자 이름을 찍었다). 버튼은 사람의 손이지만
+    리포트마다 본 판단이 아니다 — 그래서 사람이 끊은 리포트는 건너뛰고(`skipped_unlinked`), 사람이 손으로 확정한 리포트는
+    옮기지 않고(`kept_manual`), 판에 누가 정했다(`decided_by`)를 찍지 않는다. 결과는 자동 잇기와 같은 꼴에 고른 문자열 수(`strings`).
+    받기 잠금 · 커밋은 부르는 쪽(라우트 — 받는 중이면 409).
     """
     planned = await plan_task_links(db)
-    done = {"linked": 0, "skipped_no_code": 0, "skipped_unlinked": 0, "strings": 0, "refused": []}
-    for entry in planned["plan"]:
-        if entry["verdict"] != "links":
-            continue
-        if only is not None and entry["free"] not in only:
-            continue
-        done["strings"] += 1
-        task_key = entry["task_key"]
-        held = set(entry["unlinked"])
-        for rid in entry["reports"]:
-            if rid in held:
-                done["skipped_unlinked"] += 1
-                continue
-            rep = await db.get(ImpactReport, rid)
-            if rep is None:
-                continue
-            code = str((rep.eng_meta or {}).get("dev_revision", {}).get("code") or "")
-            if not code:
-                done["skipped_no_code"] += 1
-                continue
-            got = await set_revision(db, rep, task_key=task_key, code=code,
-                                     decided_by=decided_by, source="manual")
-            if got.get("ok"):
-                done["linked"] += 1
-            else:
-                done["refused"].append({"report": rid, "why": got.get("error")})
-    return done
+    picked = [e for e in planned["plan"] if e["verdict"] == "links" and (only is None or e["free"] in only)]
+    got = await auto_link_tasks(db, report_ids=sorted({rid for e in picked for rid in e["reports"]}))
+    got["strings"] = len(picked)
+    return got
 
 
 # ── 과거 붙이기 자동 (SRC-09) ──────────────────────────────────────────────
@@ -714,11 +779,13 @@ async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
                         지우면 풀린다
       `linked`          이었다(새로 · 기계가 이은 다른 판에서 옮김) — `rev_source=rule`
       `already`         이미 그 판에 이어져 있다 — 쓰지 않는다(두 번째 실행은 아무것도 쓰지 않는다)
-      `kept_manual`     ★사람이 정한 판(`rev_source=manual`)에 이어져 있다 — 옮기지 않는다. `set_revision` 의 manual 보호는
-                        개정 칸만 지키고 리포트 선은 옮기므로 여기서 먼저 거른다
+      `kept_manual`     ★사람이 **이 리포트를** 손으로 확정해 두었다(선의 `link_source=manual`) — 옮기지 않는다. 리포트마다
+                        가른다(남이 자기 리포트를 같은 판에 확정했다고 내 기계 선이 굳지 않는다 — 검토 R5). set_revision 도
+                        기계 출처면 같은 까닭으로 거절한다
       `skipped_no_code` 과제는 풀렸는데 개정 코드가 없다 — 만들어 내지 않는다
     `report_ids` 를 주면 그 리포트만(반입 뒤 — 반입은 과제 · 별칭을 바꾸지 않아 다른 리포트의 판정은 그대로다), 비우면 전부
-    (받기 뒤 — 과제 · 별칭이 바뀌면 어느 리포트든 새로 풀릴 수 있고, 지난번에 못 이은 것도 다시 본다). 잠금 · 커밋은 부르는 쪽.
+    (받기 뒤 — 과제 · 별칭이 바뀌면 어느 리포트든 새로 풀릴 수 있고, 지난번에 못 이은 것도 다시 본다). 받기 잠금 · 커밋은
+    부르는 쪽, 리포트 행 잠금은 여기서 — 쓸 리포트만 id 차례로 잠그고 잠근 뒤 상태를 다시 읽어 가른다(`lock_reports`).
 
     수의 단위 — `linked` · `already` · `kept_manual` · `skipped_no_code` · `skipped_unlinked` · `reports` ·
     `reports_without_a_name` 은 리포트, `candidates` · `unmatched` 는 자유 문자열이다(미리 보기 `counts` 의 `proposal` ·
@@ -733,50 +800,97 @@ async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
                            "candidates": c["proposal"], "unmatched": c["unmatched"],
                            "reports_without_a_name": c["reports_without_a_name"]}
     target = {rid: e["task_key"] for e in planned["plan"] if e["verdict"] == "links" for rid in e["reports"]}
-    held_by_person = {rid for e in planned["plan"] if e["verdict"] == "links" for rid in e["unlinked"]}
-    out["skipped_unlinked"] = len(held_by_person)
-    target = {rid: k for rid, k in target.items() if rid not in held_by_person}
+    free_of = {rid: e["free"] for e in planned["plan"] if e["verdict"] == "links" for rid in e["reports"]}
     if not target:
         return out
-    ids = sorted(target)
-    codes = {rid: str(((em or {}).get("dev_revision") or {}).get("code") or "").strip()
-             for rid, em in (await db.execute(select(ImpactReport.id, ImpactReport.eng_meta)
-                                              .where(ImpactReport.id.in_(ids)))).all()}
-    now: dict[str, set[str]] = {}
-    for src, dst in (await db.execute(select(OntoRelation.src_key, OntoRelation.dst_key).where(
-            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
-            OntoRelation.src_key.in_(ids), OntoRelation.deleted.is_(False)))).all():
-        now.setdefault(src, set()).add(dst)
-    held = sorted({k for keys in now.values() for k in keys})
-    manual: set[str] = set()
-    if held:
-        manual = {k for k, props in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
-            OntoObject.type_slug == TYPE_REVISION, OntoObject.key.in_(held)))).all()
-            if (props or {}).get("rev_source") == "manual"}
-    for rid in ids:
-        code = codes.get(rid, "")
-        if not code:
-            out["skipped_no_code"] += 1
+
+    def decide(rid: str, s: dict) -> str:
+        if s["marked"]:
+            return "skipped_unlinked"
+        if not s["code"]:
+            return "skipped_no_code"
+        key = revision_key(target[rid], s["code"])
+        if s["live"] == {key}:
+            return "already"
+        if s["human"] - {key}:
+            return "kept_manual"
+        return "write"
+
+    pending = []
+    for rid, s in (await _link_state(db, sorted(target))).items():
+        d = decide(rid, s)
+        if d == "write":
+            pending.append(rid)
+        else:
+            out[d] += 1
+    if not pending:
+        return out
+    # ★쓸 리포트 행만 id 차례로 먼저 잠그고(다른 모든 길과 같은 차례) **다시 읽는다** — 계획을 읽은 뒤 사람이 끊었거나 손으로
+    #   확정했거나 수동 메타를 고쳤으면 그것이 이긴다(검토 R1 · R2 · R11). 잠근 행은 이 트랜잭션이 끝날 때 풀린다.
+    await lock_reports(db, pending)
+    for rid, s in (await _link_state(db, pending)).items():
+        if s["free"] != free_of[rid]:               # 그새 수동 메타가 바뀌었다(또는 리포트가 지워졌다) — 다음 잇기가 본다
+            if len(out["refused"]) < _REFUSED_KEEP:
+                out["refused"].append({"report": rid, "why": "changed"})
             continue
-        key = revision_key(target[rid], code)
-        have = now.get(rid, set())
-        if have == {key}:
-            out["already"] += 1
-            continue
-        if (have - {key}) & manual:
-            out["kept_manual"] += 1
+        d = decide(rid, s)
+        if d != "write":
+            out[d] += 1
             continue
         rep = await db.get(ImpactReport, rid)
         if rep is None:
             continue
-        got = await set_revision(db, rep, task_key=target[rid], code=code, source=SOURCE_RULE)
+        got = await set_revision(db, rep, task_key=target[rid], code=s["code"], source=SOURCE_RULE)
         if got.get("ok"):
             out["linked"] += 1
-        elif got.get("error") == "unlinked":       # 계획을 읽은 뒤 사람이 끊었다 — set_revision 이 막았다
+        elif got.get("error") == "unlinked":       # set_revision 이 잠근 뒤 다시 본 끊은 기록 — 여기까지 올 일은 없다
             out["skipped_unlinked"] += 1
+        elif got.get("error") == "kept_manual":
+            out["kept_manual"] += 1
         elif len(out["refused"]) < _REFUSED_KEEP:
             out["refused"].append({"report": rid, "why": got.get("error")})
     return out
+
+
+async def _link_state(db, ids: list[str]) -> dict[str, dict]:
+    """리포트들의 **지금** 선 상태 — `{"free", "code", "live", "marked", "human"}`. 잠그기 전에 고를 때와 잠근 뒤 다시 볼 때
+    같은 함수를 쓴다(잠그기 전에 본 것으로 쓰지 않는다). `human` 은 사람이 정한 판으로 이어진 선의 판 key 들이다.
+    """
+    st = {rid: {"free": "", "code": "", "live": set(), "marked": False, "human": set()} for rid in ids}
+    if not ids:
+        return st
+    for row in (await db.execute(select(ImpactReport.id, ImpactReport.eng_meta, ImpactReport.project_name)
+                                 .where(ImpactReport.id.in_(ids)))).all():
+        st[row.id]["free"] = report_free_task(row)
+        st[row.id]["code"] = str(((row.eng_meta or {}).get("dev_revision") or {}).get("code") or "").strip()
+    edges = (await db.execute(select(OntoRelation.src_key, OntoRelation.dst_key, OntoRelation.properties).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key.in_(ids), OntoRelation.deleted.is_(False)))).all()
+    legacy = await _manual_revisions(db, [dst for _, dst, props in edges if not (props or {}).get("link_source")])
+    for src, dst, props in edges:
+        st[src]["live"].add(dst)
+        if _human_link(props, dst, legacy):         # 리포트마다 — 이 리포트의 선을 사람이 이었나(R5)
+            st[src]["human"].add(dst)
+    for rid in await unlinked_reports(db, ids):
+        st[rid]["marked"] = True
+    return st
+
+
+def _human_link(props: dict | None, key: str, legacy_manual: set[str]) -> bool:
+    """이 리포트 선을 사람이 이었나 — 선에 적힌 `link_source` 로 가른다. 적지 않던 때의 옛 선은 그 판이 사람 판이면 사람 선으로
+    본다(조심 쪽 — 사람이 정한 것일 수 있다)."""
+    src = (props or {}).get("link_source")
+    return src == "manual" if src else key in legacy_manual
+
+
+async def _manual_revisions(db, keys) -> set[str]:
+    """이 판 key 가운데 사람이 정한 판(`rev_source=manual`)."""
+    keys = sorted(set(keys))
+    if not keys:
+        return set()
+    return {k for k, props in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.key.in_(keys)))).all()
+        if (props or {}).get("rev_source") == "manual"}
 
 
 async def link_report(db, report: ImpactReport) -> dict:
@@ -784,12 +898,19 @@ async def link_report(db, report: ImpactReport) -> dict:
     `ingest_report` 를 지나므로 거기서 한 번)와 사람이 끊은 기록을 지운 뒤(11-11)에 부른다. 그 리포트만 본다.
 
     ★실패가 반입을 되돌리지 않는다 — 저장점 안에서 돌고, 깨지면 그 저장점만 되감고 `{"error": …}` 를 돌려준다(부르는 쪽이
-    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기)을 걸고, 쥐고 있으면 건너뛰고 그렇게 말한다
-    (받기 뒤 자동 잇기가 전부를 본다).
+    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기 · 관리자 일괄 적용)을 걸고, 쥐고 있으면 건너뛰고
+    그렇게 말한다(받기 뒤 자동 잇기가 전부를 본다). 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음 — 라우트와
+    같은 판정) 하지 않고 `skipped: off` 로 말한다.
     """
+    from app.shared.features import ontology_state
     from app.worker import plm_sync
 
     rid = report.id
+    st = ontology_state()
+    if not st["enabled"]:
+        # 기능이 꺼져 있으면 라우트처럼 하지 않는다(KOORM_ONTOLOGY=0 · 허브 설정 없음 — 검토 반영 11-11). 인제스트 때 잇기(수동 메타
+        # 글자 그대로 — `_link_revision`)는 이 스위치와 따로 예전대로 돈다.
+        return {"scope": "reports", "skipped": "off", "detail": f"과제·개정 기능이 꺼져 있다 — {st['reason']}"}
     try:
         if not await plm_sync.try_lock(db):
             await db.commit()          # 잠금 질의로 연 트랜잭션만 닫는다 — rollback 은 리포트 행을 만료시킨다
@@ -842,12 +963,16 @@ async def unlink_revision(db, report: ImpactReport, *, by: str = "") -> dict:
     ★선은 지우지 않고 **끊은 표시**(`deleted` + 끊은 사람 · 때)로 남긴다 — 이 표의 규약이고(끊은 선은 표시만 한다), 그것이
     「사람이 끊었다」 는 기록이다(사용자 결정 11-11). 기록이 있는 리포트는 기계(자동 잇기 · 인제스트 때 잇기 · 수동 메타 고침 ·
     관리자 일괄 적용)가 다시 잇지 않는다 — 사람이 손으로 다시 잇거나(`set_revision` manual) 기록을 지우면(`clear_unlink`) 풀린다.
+    리포트 행을 먼저 잠그고 그 뒤에 선을 읽는다 — 커밋 전인 자동 잇기와 겹치면 그것이 끝날 때까지 기다렸다가 **그때 이어진 선**을
+    끊는다(검토 R7 — 예전엔 다른 트랜잭션이 지운 선을 고치려다 500 이 났다). 잠근 뒤 이어진 선이 없으면 `not_linked` 다.
     """
+    await lock_reports(db, [report.id])
     edges = (await db.execute(
         select(OntoRelation).where(OntoRelation.relation == REL_MEASURED,
                                    OntoRelation.src_type == TYPE_REPORT,
                                    OntoRelation.src_key == str(report.id),
-                                   OntoRelation.deleted.is_(False)))).scalars().all()
+                                   OntoRelation.deleted.is_(False))
+        .execution_options(populate_existing=True))).scalars().all()
     if not edges:
         return {"ok": False, "error": "not_linked", "detail": "이어진 개정이 없다"}
     keys = sorted({e.dst_key for e in edges})
@@ -871,9 +996,10 @@ def _unlink_marks():
 
 
 async def unlink_rows(db, report_id: str) -> list[OntoRelation]:
-    """이 리포트의 끊은 기록(끊은 표시를 단 리포트 선)."""
+    """이 리포트의 끊은 기록(끊은 표시를 단 리포트 선) — 늘 새로 읽는다(잠근 뒤에 부르면 그때의 것이다)."""
     return (await db.execute(select(OntoRelation).where(
-        *_unlink_marks(), OntoRelation.src_key == str(report_id)))).scalars().all()
+        *_unlink_marks(), OntoRelation.src_key == str(report_id))
+        .execution_options(populate_existing=True))).scalars().all()
 
 
 async def unlinked_reports(db, ids=None) -> dict[str, dict]:
@@ -893,7 +1019,8 @@ async def unlinked_reports(db, ids=None) -> dict[str, dict]:
 
 async def clear_unlink(db, report: ImpactReport) -> dict:
     """사람이 끊은 기록을 지운다 — 이 리포트를 기계(자동 잇기 · 인제스트 때 잇기 · 수동 메타 고침)가 다시 볼 수 있게 된다.
-    없으면 **없다고 말한다**(조용히 성공하지 않는다)."""
+    없으면 **없다고 말한다**(조용히 성공하지 않는다). 리포트 행을 먼저 잠근다(다른 길과 같은 차례)."""
+    await lock_reports(db, [report.id])
     marks = await unlink_rows(db, report.id)
     if not marks:
         return {"ok": False, "error": "not_unlinked", "detail": "끊은 기록이 없다"}
@@ -906,7 +1033,15 @@ async def clear_unlink(db, report: ImpactReport) -> dict:
 
 # ── 개정 간 비교 ───────────────────────────────────────────────────────────
 
-async def compare(db, task_key: str) -> dict:
+async def visible_reports(db, ids, scope) -> set[str]:
+    """이 리포트 id 가운데 `scope`(리포트 검색과 같은 술어)로 읽을 수 있는 것. `scope` 가 비면 그대로 다(시스템 관리자)."""
+    ids = sorted({str(i) for i in ids if i})
+    if scope is None or not ids:
+        return set(ids)
+    return set((await db.execute(select(ImpactReport.id).where(ImpactReport.id.in_(ids), scope))).scalars())
+
+
+async def compare(db, task_key: str, *, scope=None) -> dict:
     """한 과제의 개정을 **나란히** 놓는다 — 그것이 이 기능의 목적이다.
 
     숫자는 **리포트에 이미 승격된 칸**(`worst_stress`·`worst_g`·`max_severity`·`n_cases`)을
@@ -915,8 +1050,10 @@ async def compare(db, task_key: str) -> dict:
     ★**판마다 리포트가 여럿일 수 있다.** 그때 하나를 골라 대표로 삼지 않는다 — 어느 것을
     골랐는지가 안 보이면 비교가 거짓이 된다. 최악값은 **그 판의 리포트 전부에서** 모으고,
     몇 건에서 모았는지를 함께 낸다.
+    ★리포트 줄 · 수치는 `scope` 로 읽을 수 있는 리포트만으로 센다(사용자 결정 11-11 — 판은 다 보이고, 읽지 못하는 리포트의
+    id · 최악값 · 심각도 · 케이스 수는 새지 않는다). 비우면 전부(시스템 관리자).
     """
-    line = await history(db, task_key)
+    line = await history(db, task_key, scope=scope)
     # ★모르는 과제와 '개정 없음' 을 가른다(KR-07). 단, **개정이 있으면 그 자체로 '아는' 과제다** —
     #   개정은 거울에 없는 자유 문자열 key 에도 붙을 수 있다(set_revision). 그래서 개정이 없을 때만
     #   거울 존재를 따진다: 거울에 있으면 '개정 없음', 없으면 unknown_task.
@@ -1098,22 +1235,40 @@ async def _repoint(db, old: str, new: str, *, incoming_only: bool) -> dict:
     return done
 
 
+async def _task_revisions(db, tasks: list[str]) -> list[OntoObject]:
+    """이 과제들에 매달린 살아 있는 우리 개정 행(key 차례)."""
+    want = set(tasks)
+    return sorted((r for r in (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF,
+        OntoObject.deleted.is_(False)))).scalars().all()
+        if str((r.properties or {}).get("task") or "") in want), key=lambda r: r.key)
+
+
+async def _reports_on(db, keys: list[str]) -> list[str]:
+    """이 개정들에 살아 있는 선으로 이어진 리포트 id."""
+    if not keys:
+        return []
+    return sorted(set((await db.execute(select(OntoRelation.src_key).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.dst_type == TYPE_REVISION, OntoRelation.dst_key.in_(keys),
+        OntoRelation.deleted.is_(False)))).scalars().all()))
+
+
 async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", reason: str = "") -> dict:
     """과제 A 에 매달린 **우리 것**(개정 · 별칭)을 과제 B 로 옮긴다 — 식별자 바뀜(저절로)과 합침(관리자)이 함께 쓴다.
 
     개정 key 는 `<과제>@<코드>` 라 과제가 바뀌면 key 도 바뀐다 — 같은 개정 행의 key 만 바꾸고 선의 끝을 따라 옮긴다.
     ★B 에 같은 코드 개정이 이미 있으면 A 쪽 리포트 선(`measured_at`)과 A 쪽을 앞 판으로 둔 선만 B 개정으로 옮기고,
     A 쪽 개정은 지우지 않고 비활성(`merged_into`)으로 둔다 — 지우면 되돌릴 수 없다. 옮긴 사람 · 까닭은 개정 칸에 남긴다.
+    옮길 선이 달린 리포트 행을 먼저 잠근다(다른 모든 길과 같은 차례 — `lock_reports`).
     """
     from_key, to_key = (from_key or "").strip(), (to_key or "").strip()
     done: dict[str, Any] = {"from": from_key, "to": to_key, "revisions": 0, "collapsed": 0,
                             "reports": 0, "edges": 0, "aliases": 0, "dropped": []}
     if not from_key or not to_key or from_key == to_key:
         return done
-    revs = [r for r in (await db.execute(select(OntoObject).where(
-        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF,
-        OntoObject.deleted.is_(False)))).scalars().all()
-        if str((r.properties or {}).get("task") or "") == from_key]
+    revs = await _task_revisions(db, [from_key])
+    await lock_reports(db, await _reports_on(db, [r.key for r in revs]))
     for rev in revs:
         props = dict(rev.properties or {})
         code = str(props.get("code") or rev.key.rsplit("@", 1)[-1])
@@ -1217,7 +1372,13 @@ async def reflect_after_sync(db) -> dict:
     """
     out: dict[str, Any] = {"renamed": 0, "revisions": 0, "collapsed": 0, "reports": 0, "aliases": 0,
                            "models": 0, "dropped": [], "merged_waiting": 0}
-    for old, new in sorted((await renamed_keys(db, TYPE_TASK)).items()):
+    renamed = sorted((await renamed_keys(db, TYPE_TASK)).items())
+    if renamed:
+        # 옮길 선이 달린 리포트 행을 **한꺼번에** 먼저 잠근다 — 과제마다 잠그면 앞 과제에서 쥔 행과 다음 과제의 리포트 잠금이
+        # 사람 확정과 엇갈릴 수 있다(잠금 차례 하나 — 리포트 행 먼저)
+        revs = await _task_revisions(db, [old for old, _ in renamed])
+        await lock_reports(db, await _reports_on(db, [r.key for r in revs]))
+    for old, new in renamed:
         got = await move_task_revisions(db, old, new, reason=MOVE_RENAME)
         if got["revisions"] or got["collapsed"] or got["aliases"]:
             out["renamed"] += 1

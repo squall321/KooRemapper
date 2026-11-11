@@ -67,7 +67,7 @@ async def world(db, monkeypatch):
     """주인 A(소속 AFF 로 하나 공유 · 하나 혼자) · 같은 소속 B · 남 C(자기 리포트 하나) · 관리자 D. 과제 하나는 정본에 있다."""
     from app.config import settings
     monkeypatch.setattr(settings, "heax_gateway_secret", SECRET)
-    tag = ulid.new().str[:8]
+    tag = ulid.new().str
     task = f"SRC10-{tag}"                       # 정본 과제명 — 이 문자열은 `links`
     db.add(OntoObject(type_slug="plm_task", key=task, label=task, source=SOURCE_HUB, properties={}))
     await db.commit()

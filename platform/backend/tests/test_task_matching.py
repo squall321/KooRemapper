@@ -3,7 +3,8 @@
 틀려도 그럴듯한 것이 가장 나쁘다. 그럴듯한 오류는 몇 달 뒤 결과를 비교할 때 발견되고,
 그때는 그 위에 결론이 얹혀 있다. 그래서 —
 
-  · 짐작이 없는 두 길(**글자 그대로 같다** · **사람이 이미 붙였다**)만 자동으로 붙는다
+  · 짐작이 없는 두 길(**글자 그대로 같다** · **사람이 이미 붙였다**)만 자동으로 붙는다 — 그 원천들이 **과제 하나로 모일
+    때만**이다. 엇갈리면(별칭과 같은 글자의 허브 과제 · 두 과제의 과제코드) 후보다(검토 R8 · R6, 11-11)
   · 정규화해서 같아 보이는 것은 **후보**다 — 근거와 함께 보이고 사람이 고른다
   · 아무 후보도 없으면 **「못 붙였다」 고 목록으로 말한다**(조용히 건너뛰면 "다 붙었다" 로 읽힌다)
 
@@ -30,7 +31,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 @pytest.fixture()
 def tag():
-    return ulid.new().str[:10]
+    return ulid.new().str          # 통째로 — 앞자리는 시각이라 잘라 쓰면 1초 안에 겹친다(시험 격리)
 
 
 async def _session(db):
@@ -146,6 +147,63 @@ async def test_a_deleted_task_is_not_resolved(db, tag):
         assert await onto.resolve_task(db, key) == ("", "")
     finally:
         await _wipe(db, keys=[key])
+
+
+async def test_sources_that_disagree_make_a_candidate_not_a_move(db, tag):
+    """검토 R8 — 사람이 「word 는 t1」 이라 별칭을 붙인 뒤 허브가 글자 그대로 word 라는 다른 과제를 내면, 어느 쪽도 조용히 이기지
+    않는다. 이미 이은 리포트는 그대로 두고, 계획은 엇갈림(`ambiguous`)과 두 후보(근거 포함)를 낸다."""
+    from app.models import ImpactReport as IR
+    t1, word = f"T1-{tag}", f"W-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, t1)
+        assert (await onto.confirm_alias(db, alias=word, key=t1, by="admin@x"))["ok"]
+        r = await _report(db, s, project=word, code="dv1")
+        await db.commit()
+        assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
+        await db.commit()
+        await _task(db, word)                                  # 허브가 나중에 같은 글자의 다른 과제를 낸다
+        await db.commit()
+        assert await onto.resolve_task(db, word) == ("", "")
+        e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+        assert e["verdict"] == "proposal" and e["ambiguous"] is True, e
+        assert [(c["key"], c["why"]) for c in e["candidates"][:2]] == \
+            [(word, "과제명이 글자 그대로 같다"), (t1, "사람이 붙인 별칭이 가리킨다")], e["candidates"]
+        again = await onto.auto_link_tasks(db, report_ids=[r.id])
+        await db.commit()
+        assert again["linked"] == 0, again
+        assert [x["reports"] for x in await onto.history(db, t1)] == [[r.id]], "같은 글자의 허브 과제가 사람의 별칭을 조용히 이겼다"
+        assert await onto.history(db, word) == []
+    finally:
+        await _wipe(db, u, s, keys=[t1, word])
+
+
+async def test_a_task_code_shared_by_two_tasks_is_a_stable_candidate(db, tag):
+    """검토 R6 · R6b — 과제코드가 두 과제에 걸리면 잇지 않고 후보로 낸다(허브 별칭과 같은 규칙 — 하나뿐일 때만). 후보 차례는
+    key 차례라 행을 고쳐도(물리 차례가 바뀌어도) 실행마다 같다."""
+    from app.models import ImpactReport as IR
+    a, b, code = f"A-{tag}", f"B-{tag}", f"C-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, b, task_code=code)                     # 나중 key 를 먼저 넣는다
+        await _task(db, a, task_code=code)
+        r = await _report(db, s, project=code, code="dv1")
+        await db.commit()
+        assert await onto.resolve_task(db, code) == ("", ""), "과제코드가 두 과제에 걸렸는데 하나를 골랐다"
+        orders = []
+        for i in range(3):
+            e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+            assert e["verdict"] == "proposal" and e["ambiguous"] is True, e
+            orders.append([c["key"] for c in e["candidates"][:2]])
+            row = (await db.execute(select(OntoObject).where(OntoObject.key == (a if i % 2 == 0 else b)))).scalar_one()
+            row.properties = {**(row.properties or {}), "touch": i}   # 받기가 행을 고친 것처럼 — 물리 차례가 바뀐다
+            await db.commit()
+        assert orders == [[a, b]] * 3, orders
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        await db.commit()
+        assert got["linked"] == 0 and await onto.history(db, a) == [] and await onto.history(db, b) == []
+    finally:
+        await _wipe(db, u, s, keys=[a, b, code])
 
 
 async def test_a_string_cannot_point_at_two_tasks(db, tag):
@@ -297,13 +355,15 @@ async def test_apply_links_only_what_resolves(db, tag):
         r_ok = await _report(db, s, project=key, code="dv1")
         await _report(db, s, project=f"없는과제{tag}", code="dv1")
         await db.commit()
-        done = await onto.apply_task_links(db, decided_by="koo.park")
+        # 이 시험의 문자열만 고른다 — 고르지 않으면 공유 dev DB 의 남의 리포트까지 잇는다(시험 격리)
+        done = await onto.apply_task_links(db, only=[key, f"없는과제{tag}"])
         await db.commit()
         assert done["linked"] == 1 and done["strings"] == 1
         line = await onto.history(db, key)
         assert [x["code"] for x in line] == ["dv1"]
         assert line[0]["reports"] == [r_ok.id]
-        assert line[0]["decided_by"] == "koo.park"
+        # 일괄 적용은 자동 잇기와 같은 기계 출처다 — 판에 관리자 이름을 찍지 않는다(검토 반영 11-11)
+        assert line[0]["rev_source"] == "rule" and line[0]["decided_by"] is None, line[0]
     finally:
         await _wipe(db, u, s, keys=[key])
 
@@ -316,7 +376,7 @@ async def test_a_report_without_a_code_is_counted_not_guessed(db, tag):
         await _task(db, key)
         await _report(db, s, project=key)          # 코드 없음
         await db.commit()
-        done = await onto.apply_task_links(db, decided_by="x")
+        done = await onto.apply_task_links(db, only=[key])      # 이 시험의 문자열만(시험 격리)
         await db.commit()
         assert done["linked"] == 0 and done["skipped_no_code"] == 1
         assert await onto.history(db, key) == []
@@ -333,7 +393,7 @@ async def test_apply_can_be_narrowed_to_chosen_strings(db, tag):
         await _report(db, s, project=a, code="dv1")
         await _report(db, s, project=b, code="dv1")
         await db.commit()
-        done = await onto.apply_task_links(db, only=[a], decided_by="x")
+        done = await onto.apply_task_links(db, only=[a])
         await db.commit()
         assert done["linked"] == 1
         assert await onto.history(db, a) and await onto.history(db, b) == []
@@ -347,14 +407,15 @@ async def test_an_alias_makes_the_next_report_link_by_itself(db, tag):
     u, s = await _session(db)
     try:
         await _task(db, key)
-        await _report(db, s, project="우리끼리부르는이름", code="dv1")
+        free = f"우리끼리부르는이름{tag}"           # 고정 글자면 겹쳐 도는 시험끼리 같은 별칭을 다툰다(시험 격리)
+        await _report(db, s, project=free, code="dv1")
         await db.commit()
         assert [e["verdict"] for e in (await onto.plan_task_links(db))["plan"]
-                if e["free"] == "우리끼리부르는이름"] == ["unmatched"]
-        await onto.confirm_alias(db, alias="우리끼리부르는이름", key=key, by="koo.park")
+                if e["free"] == free] == ["unmatched"]
+        await onto.confirm_alias(db, alias=free, key=key, by="koo.park")
         await db.commit()
         again = [e for e in (await onto.plan_task_links(db))["plan"]
-                 if e["free"] == "우리끼리부르는이름"][0]
+                 if e["free"] == free][0]
         assert again["verdict"] == "links" and again["how"] == "alias"
     finally:
         await _wipe(db, u, s, keys=[key])
