@@ -898,12 +898,19 @@ async def link_report(db, report: ImpactReport) -> dict:
     `ingest_report` 를 지나므로 거기서 한 번)와 사람이 끊은 기록을 지운 뒤(11-11)에 부른다. 그 리포트만 본다.
 
     ★실패가 반입을 되돌리지 않는다 — 저장점 안에서 돌고, 깨지면 그 저장점만 되감고 `{"error": …}` 를 돌려준다(부르는 쪽이
-    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기)을 걸고, 쥐고 있으면 건너뛰고 그렇게 말한다
-    (받기 뒤 자동 잇기가 전부를 본다).
+    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기 · 관리자 일괄 적용)을 걸고, 쥐고 있으면 건너뛰고
+    그렇게 말한다(받기 뒤 자동 잇기가 전부를 본다). 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음 — 라우트와
+    같은 판정) 하지 않고 `skipped: off` 로 말한다.
     """
+    from app.shared.features import ontology_state
     from app.worker import plm_sync
 
     rid = report.id
+    st = ontology_state()
+    if not st["enabled"]:
+        # 기능이 꺼져 있으면 라우트처럼 하지 않는다(KOORM_ONTOLOGY=0 · 허브 설정 없음 — 검토 반영 11-11). 인제스트 때 잇기(수동 메타
+        # 글자 그대로 — `_link_revision`)는 이 스위치와 따로 예전대로 돈다.
+        return {"scope": "reports", "skipped": "off", "detail": f"과제·개정 기능이 꺼져 있다 — {st['reason']}"}
     try:
         if not await plm_sync.try_lock(db):
             await db.commit()          # 잠금 질의로 연 트랜잭션만 닫는다 — rollback 은 리포트 행을 만료시킨다

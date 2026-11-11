@@ -957,7 +957,8 @@ async def ingest_report(
     으로 세션 내 K파일 자동매칭 → 한 K에 여러 결과를 매달 수 있다), kfile_id: 원본
     K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1).
     응답의 `task_links` — 반입 뒤 과제 잇기 결과다(과제명 · 과제코드 · 별칭이 글자 그대로 맞고 dev_rev 가 있으면 개정에 이어진다
-    — `linked`. 후보 · 못 붙임은 세기만 한다). 깨졌으면 `error` 가 오고 반입은 그대로다."""
+    — `linked`. 후보 · 못 붙임은 세기만 한다). 깨졌으면 `error` 가 오고 반입은 그대로다. 과제·개정 기능이 꺼져 있으면
+    `skipped: off` 다(잇지 않는다)."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),

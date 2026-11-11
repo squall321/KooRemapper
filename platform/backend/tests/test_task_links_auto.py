@@ -39,6 +39,13 @@ _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test
 needs_sphere = pytest.mark.skipif(not _SPHERE.exists(), reason="sphere 샘플 없음")
 
 
+@pytest.fixture(autouse=True)
+def ontology_on(monkeypatch):
+    """반입 뒤 잇기는 과제·개정 기능이 켜져 있을 때만 돈다(라우트와 같은 판정). 이 박스는 허브 설정이 없어 꺼져 있다 — 켠다."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "1")
+
+
 def _tag() -> str:
     return ulid.new().str[:8].lower()
 
@@ -301,6 +308,24 @@ async def test_a_broken_link_report_keeps_the_report_and_says_why(db, monkeypatc
             assert await fresh.get(ImpactReport, r.id) is not None
     finally:
         await _drop(db, u, s)
+
+
+async def test_with_the_feature_off_the_import_does_not_link(db, monkeypatch):
+    """과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 반입 뒤 잇기를 하지 않고 그렇게 말한다 — 라우트가 거절하는 것과 같은 판정."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "0")
+    t = _tag()
+    task = f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        got = await onto.link_report(db, r)
+        assert got["skipped"] == "off" and "KOORM_ONTOLOGY=0" in got["detail"], got
+        assert await _linked(db, r.id) == [], "기능이 꺼져 있는데 이었다"
+    finally:
+        await _drop(db, u, s, keys=[task])
 
 
 async def test_a_busy_lock_skips_the_link_and_says_so(db):
