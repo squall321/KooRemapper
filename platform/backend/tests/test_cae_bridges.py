@@ -52,14 +52,17 @@ MIRROR = [
     ("failure_mode", "cbt:fm-motor", "Motor", "active", False, None),
     ("analysis_method", "cbt:am-drop", "낙하 해석", "active", False, None),
 ]
-EXTRA = [("part", "cbt:geom2"), ("part", "cbt:frame-live"), ("part", "cbt:frame-old")]     # 시험 도중 넣는 행
+EXTRA = [("part", "cbt:geom2"), ("part", "cbt:frame-live"), ("part", "cbt:frame-old"), ("part", "cbt:battery")]  # 시험 도중 넣는 행
 ALIASES = [("part", "Bond\\Bond", "cbt:bond"), ("analysis_method", "drop_all_angle", "cbt:am-drop")]
 PREVIOUS = [("part", "Front\\Wall", "cbt:wall")]
 
-EXPECT = {"rule": 8, "human": 0, "stale": 0, "candidates": 8, "unmatched": 30, "unnamed": 0}
-EXPECT_BY = {"cae_campaign": {"objects": 1, "rule": 1, "human": 0, "stale": 0, "candidates": 0, "unmatched": 0, "unnamed": 0},
-             "cae_part": {"objects": 23, "rule": 6, "human": 0, "stale": 0, "candidates": 7, "unmatched": 10, "unnamed": 0},
-             "cae_finding": {"objects": 22, "rule": 1, "human": 0, "stale": 0, "candidates": 1, "unmatched": 20, "unnamed": 0}}
+EXPECT = {"rule": 8, "human": 0, "stale": 0, "renamed": 0, "candidates": 8, "unmatched": 30, "unnamed": 0}
+EXPECT_BY = {"cae_campaign": {"objects": 1, "rule": 1, "human": 0, "stale": 0, "renamed": 0, "candidates": 0, "unmatched": 0,
+                              "unnamed": 0},
+             "cae_part": {"objects": 23, "rule": 6, "human": 0, "stale": 0, "renamed": 0, "candidates": 7, "unmatched": 10,
+                          "unnamed": 0},
+             "cae_finding": {"objects": 22, "rule": 1, "human": 0, "stale": 0, "renamed": 0, "candidates": 1, "unmatched": 20,
+                             "unnamed": 0}}
 RULES = {"campaign": ("follows_method", "cbt:am-drop", "alias"), "part/2": ("maps_to", "cbt:wall", "previous_key"),
          "part/3": ("maps_to", "cbt:pcb", "label"), "part/18": ("maps_to", "cbt:motor", "hub_alias"),
          "part/20": ("maps_to", "cbt:bond", "alias"), "part/21": ("maps_to", "Display\\Display", "key"),
@@ -342,6 +345,41 @@ async def test_reattaching_keeps_human_lines_and_redraws_rule_lines(db, mirror):
         assert "drift" not in view and view["stale"] == []
         assert {x["src_key"] for x in view["lines"] if x["basis"] == "human"} == {"part/1", "part/3", "finding/18"}
         assert not [c for c in view["candidates"] if c["src_key"] in ("part/1", "finding/18")], "사람 선이 있으면 후보를 안 낸다"
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_a_human_line_whose_object_was_renamed_is_kept_and_shown_as_drift(db, mirror):
+    """같은 key 의 해석 객체 이름이 다시 반입에서 바뀌면(part/3 「PCB\\PCB」 → 「Battery\\Cell」) 사람 선은 남고 규칙은 그 파트를 그대로
+    건너뛰지만, 조용히 따라가지 않는다 — 확정 때 남긴 이름(src_label)과 지금 이름이 다르다고 셈 · 보기의 drift 에 낸다(검토 11-11 P7)."""
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        got = await br.confirm(db, rep, src_key="part/3", dst_key="cbt:subpkg", by="o")
+        await db.commit()
+        assert got["ok"] and got["line"]["src_label"] == "PCB\\PCB"
+        line_id = (await _lines(db, rep.id))[("part/3", "cbt:subpkg")].id
+        db.add(OntoObject(type_slug="part", key="cbt:battery", label="Battery\\Cell", status="active", source=SOURCE_HUB))
+        await db.commit()                     # 새 이름과 글자 그대로 맞는 코어 부품 — 규칙이 사람 선을 이기면 이리로 긋는다
+        pkg = _pkg()
+        for o in pkg["objects"]:
+            if o["type"] == "cae_part" and o["key"] == "part/3":
+                o["label"] = o["properties"]["name"] = "Battery\\Cell"
+        res = await svc.attach_ontology(db, rep, _raw(pkg))
+        b = res["bridges"]
+        assert (b["human"], b["renamed"], b["stale"]) == (1, 1, 0) and b["by_type"]["cae_part"]["renamed"] == 1, b
+        assert "이름 바뀐 사람 선 1" in br.brief(b)
+        lines = await _lines(db, rep.id)
+        assert lines[("part/3", "cbt:subpkg")].id == line_id, "사람 선은 그 행 그대로"
+        assert not [k for k in lines if k[0] == "part/3" and k[1] != "cbt:subpkg"], "사람 선이 이긴다 — 새 이름으로 규칙 선을 긋지 않는다"
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert view["drift"]["renamed"] == [{"relation": "maps_to", "src_key": "part/3", "dst_key": "cbt:subpkg",
+                                             "src_label_then": "PCB\\PCB", "src_label_now": "Battery\\Cell"}]
+        assert "add" not in view["drift"] and "drop" not in view["drift"] and view["drift"]["note"]
+        ln = next(x for x in view["lines"] if x["src_key"] == "part/3")
+        assert (ln["basis"], ln["src_label"], ln["renamed_from"]) == ("human", "Battery\\Cell", "PCB\\PCB")
+        assert view["stale"] == [] and view["counts"]["renamed"] == 1
     finally:
         await _drop(db, u)
 
