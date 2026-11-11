@@ -102,14 +102,15 @@ async def _link_tasks(db) -> dict:
     """받은 것을 **커밋한 뒤에** 과제 잇기(붙는 것만 · 리포트 전부 — SRC-09). 깨져도 받은 것은 남고 `error` 로 돌려준다.
 
     커밋이 받기 잠금(트랜잭션 잠금)을 풀었으므로 새 트랜잭션에서 다시 건다 — 잇기도 층 2 쓰기다(개정 · 리포트 선). 그새 다른
-    받기 · 합친 과제 옮기기가 쥐었으면 건너뛴다(다음 받기가 전부를 다시 본다).
+    받기 · 합친 과제 옮기기 · 관리자 일괄 적용이 쥐었으면 건너뛰고 로그에 한 줄 남긴다(다음 받기가 전부를 다시 본다).
     """
     from app.modules.ontology import services as onto
     try:
         if not await try_lock(db):
             await db.rollback()
+            logger.warning("plm task links skipped — 잠금을 다른 받기 · 합친 과제 옮기기 · 일괄 적용이 쥐었다(다음 받기가 잇는다)")
             return {"scope": "all", "skipped": "busy",
-                    "detail": "다른 받기 · 합친 과제 옮기기가 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"}
+                    "detail": "다른 받기 · 합친 과제 옮기기 · 일괄 적용이 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"}
         got = await onto.auto_link_tasks(db)
         await db.commit()
         return got

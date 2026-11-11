@@ -451,6 +451,18 @@ async def test_a_receive_links_what_now_resolves_and_records_the_counts(db, hub_
         await _drop(db, u, s, keys=[task, code], runs=runs)
 
 
+async def test_a_busy_lock_after_a_receive_skips_the_link_and_logs_it(db, caplog):
+    """받기를 커밋한 뒤 다시 잠금을 걸 때 다른 받기 · 일괄 적용이 쥐고 있으면 건너뛰고 — 로그에 한 줄 남긴다(예전엔 말없이 건너뛰었다)."""
+    import logging
+    async with SessionLocal() as holder:
+        assert await plm_sync.try_lock(holder)
+        with caplog.at_level(logging.WARNING, logger="koorm.worker"):
+            got = await plm_sync._link_tasks(db)
+        await holder.rollback()
+    assert got["skipped"] == "busy", got
+    assert any("plm task links skipped" in r.getMessage() for r in caplog.records), caplog.text
+
+
 async def test_a_broken_link_after_a_receive_keeps_what_was_received(db, hub_on, monkeypatch):
     async def boom(_db, **_kw):
         raise RuntimeError("잇기 결함")
