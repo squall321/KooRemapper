@@ -475,6 +475,31 @@ async def test_a_reattach_during_a_confirm_does_not_deadlock(db, mirror, monkeyp
 
 
 @ON_SESSION_LOOP
+async def test_a_confirm_does_not_write_back_a_summary_read_before_a_reattach(db, mirror):
+    """확정 요청이 리포트를 읽은 뒤 새 꾸러미가 붙고 다리까지 굳어도, 확정은 잠근 뒤 요약을 다시 읽고 쓴다 — 잠그기 전에 읽은 옛 요약
+    (꾸러미 지문 · 파일)으로 새 요약을 덮지 않는다(검토 11-11 P5)."""
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid = rep.id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        async with SessionLocal() as sb:
+            rb = await sb.get(ImpactReport, rid)                 # 확정 요청이 먼저 리포트를 읽었다(옛 요약)
+            pkg = _pkg()
+            pkg["_note"] = str(pkg.get("_note") or "") + " (확정 전에 새로 낸 판)"
+            new = await svc.attach_ontology(db, rep, _raw(pkg))  # 그사이 새 꾸러미가 붙고 다리까지 굳었다
+            got = await br.confirm(sb, rb, src_key="part/1", dst_key="cbt:metal-a", by="o")
+            await sb.commit()
+            assert got["ok"], got
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (new["sha256"], new["file_id"]), "확정이 새 꾸러미 요약을 옛 값으로 덮었다"
+        assert stored["bridges"]["human"] == 1
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
 async def test_two_confirms_on_one_many_to_one_part_leave_one_human_line(db, mirror, monkeypatch):
     """양성 대조(검토 P6) — 다대일 파트에 사람 선 둘이 겹쳐 들어와도 잠금이 줄 세워 하나만 서고 다른 하나는 already_bound 다."""
     import asyncio

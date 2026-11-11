@@ -269,6 +269,8 @@ async def rebuild(db, report: ImpactReport) -> dict:
     """그 리포트의 다리를 다시 짓는다 — 규칙 선은 걷고 지금 거울로 다시 긋고, 사람 선은 그대로 둔다. 셈은 리포트의
     `ontology.bridges` 에 남는다. **커밋은 부르는 쪽이 한다.**"""
     await lock_report(db, report.id)
+    # 잠근 뒤 요약을 다시 읽는다 — 잠그기 전에 읽은 객체로 쓰면 그사이 붙은 새 꾸러미의 요약(지문 · 파일)을 옛 값으로 덮었다(검토 11-11 P5)
+    await db.refresh(report, attribute_names=["ontology"])
     p = await plan(db, report)
     await db.execute(delete(OntoRelation).where(
         OntoRelation.report_id == report.id, OntoRelation.relation.in_(relations()),
