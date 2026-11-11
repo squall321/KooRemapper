@@ -211,6 +211,8 @@ export interface ReportRevisionOut {
   resolved_how: string | null
   /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
   linked: { key: string; task: string; code: string } | null
+  /** 사람이 연결을 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다 */
+  unlinked?: { by: string; at: string | null; was: string[] } | null
   task_state: TaskState | null
   /** 비어 있지 않으면 수동 메타와 이어진 개정이 **다르다**. 서버는 조용히 맞추지 않는다 —
    *  화면이 보여 주고 사람이 고른다. `renamed` · `merged` 는 잘못이 아니다(수동 메타가 옛 이름). */
@@ -242,6 +244,11 @@ export async function compareTaskRevisions(taskKey: string): Promise<{ task: str
 export async function unlinkReportRevision(reportId: string): Promise<{ was: string[]; detail: string }> {
   const { data } = await api.delete(`/reports/${reportId}/revision`)
   return unwrap<{ was: string[]; detail: string }>(data)
+}
+/** 사람이 끊은 기록을 지운다 — 지운 뒤 그 리포트의 자동 잇기를 한 번 돈다(task_links) */
+export async function clearReportUnlink(reportId: string): Promise<{ was: string[]; detail: string; task_links?: Record<string, unknown> }> {
+  const { data } = await api.delete(`/reports/${reportId}/revision/unlinked`)
+  return unwrap<{ was: string[]; detail: string; task_links?: Record<string, unknown> }>(data)
 }
 
 // 허브 받기 · 받은 것 보기(SP 받는 쪽 — 키트 2026-11-03). **고치는 길은 없다**(정본은 허브) — 쓰는 것은 받기 실행과

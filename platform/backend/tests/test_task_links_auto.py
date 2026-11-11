@@ -209,7 +209,7 @@ async def test_after_import_links_only_that_report_and_commits(db):
         await db.commit()
         r = await _rep(db, s, project=task, code="dv1", commit=True)
         other = await _rep(db, s, project=task, code="dv2", commit=True)   # 같은 과제의 다른 리포트 — 이번 반입이 아니다
-        got = await onto.link_after_import(db, r)
+        got = await onto.link_report(db, r)
         assert (got["scope"], got["reports"], got["linked"]) == ("reports", 1, 1), got
         async with SessionLocal() as fresh:                               # 다른 세션에서 보인다 = 굳었다
             assert await _linked(fresh, r.id) == [f"{task}@dv1"]
@@ -219,7 +219,7 @@ async def test_after_import_links_only_that_report_and_commits(db):
         await _drop(db, u, s, keys=[task])
 
 
-async def test_a_broken_link_after_import_keeps_the_report_and_says_why(db, monkeypatch):
+async def test_a_broken_link_report_keeps_the_report_and_says_why(db, monkeypatch):
     async def boom(_db, **_kw):
         raise RuntimeError("잇기 결함")
 
@@ -227,7 +227,7 @@ async def test_a_broken_link_after_import_keeps_the_report_and_says_why(db, monk
     u, s = await _owner(db, commit=True)
     try:
         r = await _rep(db, s, project=f"AL-{_tag()}", code="dv1", commit=True)
-        got = await onto.link_after_import(db, r)
+        got = await onto.link_report(db, r)
         assert "잇기 결함" in got["error"], got
         assert r.kind == "sphere" and r.id, "실패 뒤에도 부르는 쪽이 리포트를 읽는다"
         async with SessionLocal() as fresh:
@@ -242,7 +242,7 @@ async def test_a_busy_lock_skips_the_link_and_says_so(db):
         r = await _rep(db, s, project=f"AL-{_tag()}", code="dv1", commit=True)
         async with SessionLocal() as holder:
             assert await plm_sync.try_lock(holder)            # 받기가 도는 중이다
-            got = await onto.link_after_import(db, r)
+            got = await onto.link_report(db, r)
             await holder.rollback()
         assert got["skipped"] == "busy" and "받기 뒤" in got["detail"], got
         assert r.kind == "sphere"
@@ -441,3 +441,204 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
         await db.commit()
         await _drop(db, a, sa)
         await _drop(db, u, s)
+
+
+# ── ⑤ 사람이 끊은 것 — 기록이 이긴다(사용자 결정 11-11 「끊은 것을 기록해 자동이 건너뛴다」) ──────────────
+# 끊기는 선을 지우지 않고 끊은 표시(deleted + 끊은 사람 · 때)로 남긴다. 기계 경로(받기 뒤 · 반입 뒤 자동 잇기 · 관리자 일괄 적용 ·
+# 수동 메타 고침)는 그 리포트를 다시 잇지 않고 센다. 사람이 손으로 다시 잇거나 기록을 지우면 풀린다.
+
+async def _tombstones(db, rid: str) -> list[OntoRelation]:
+    return (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+        OntoRelation.src_key == rid, OntoRelation.deleted.is_(True))
+        .execution_options(populate_existing=True))).scalars().all()
+
+
+async def test_an_unlink_records_who_and_when_and_keeps_the_line_marked(db):
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
+        got = await onto.unlink_revision(db, r, by="kim@x")
+        assert got["ok"] and got["was"] == [f"{task}@dv1"] and got["unlinked_by"] == "kim@x", got
+        marks = await _tombstones(db, r.id)
+        assert [(m.dst_key, m.properties["unlinked_by"]) for m in marks] == [(f"{task}@dv1", "kim@x")], "끊은 선을 지웠다"
+        assert marks[0].properties.get(onto.UNLINK_MARK), "끊은 때가 없다"
+        assert await onto.linked_revision(db, r) is None and await _linked(db, r.id) == []
+        assert [x["reports"] for x in await onto.history(db, task)] == [[]], "끊은 리포트가 개정 줄에 남았다"
+        rec = (await onto.unlinked_reports(db, [r.id]))[r.id]
+        assert (rec["by"], rec["was"]) == ("kim@x", [f"{task}@dv1"]) and rec["at"]
+    finally:
+        await db.rollback()
+
+
+async def test_the_auto_link_and_the_admin_apply_skip_an_unlinked_report_and_the_preview_shows_it(db):
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
+        assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]
+
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (got["skipped_unlinked"], got["linked"], got["already"]) == (1, 0, 0), got
+        plan = await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id]))
+        entry = plan["plan"][0]
+        assert entry["verdict"] == "links" and entry["unlinked"] == [r.id], entry
+        assert plan["counts"]["unlinked"] == 1, plan["counts"]
+        done = await onto.apply_task_links(db, only=[task], decided_by="boss@x")
+        assert (done["skipped_unlinked"], done["linked"]) == (1, 0), done
+        assert await _linked(db, r.id) == [] and len(await _tombstones(db, r.id)) == 1, "일괄 적용이 사람의 끊음을 덮었다"
+    finally:
+        await db.rollback()
+
+
+async def test_relinking_by_hand_clears_the_record(db):
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
+        assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]
+        # 기계는 막힌다 — 인제스트 때 잇기(수동 메타 글자 그대로)도
+        refused = await onto.link_from_eng_meta(db, r)
+        assert refused["ok"] is False and refused["error"] == "unlinked", refused
+        # 사람이 손으로 같은 판에 다시 잇는다 — 기록이 지워지고, 되살린 선에 끊은 사람 · 때가 남지 않는다
+        assert (await onto.set_revision(db, r, task_key=task, code="dv1", decided_by="kim@x", source="manual"))["ok"]
+        assert await _tombstones(db, r.id) == [] and await onto.unlinked_reports(db, [r.id]) == {}
+        live = (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_key == r.id)
+            .execution_options(populate_existing=True))).scalars().all()
+        assert [(e.dst_key, e.deleted, (e.properties or {}).get(onto.UNLINK_MARK)) for e in live] == \
+            [(f"{task}@dv1", False, None)], [(e.dst_key, e.deleted, e.properties) for e in live]
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (got["skipped_unlinked"], got["already"]) == (0, 1), got
+    finally:
+        await db.rollback()
+
+
+async def test_clearing_the_record_makes_the_report_eligible_again(db):
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
+        assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]
+        cleared = await onto.clear_unlink(db, r)
+        assert cleared["ok"] and cleared["was"] == [f"{task}@dv1"], cleared
+        assert await _tombstones(db, r.id) == []
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (got["linked"], got["skipped_unlinked"]) == (1, 0), got
+        assert await _linked(db, r.id) == [f"{task}@dv1"]
+        again = await onto.clear_unlink(db, r)
+        assert again["ok"] is False and again["error"] == "not_unlinked", "없는 기록을 지운 척했다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_metadata_edit_does_not_relink_an_unlinked_report(db):
+    """열린 점 2 — 수동 메타 고침(PATCH)은 인제스트 때 잇기를 다시 부른다. 끊은 리포트는 다시 잇지 않고 메타만 저장한다."""
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task, other = f"AL-{t}", f"AL2-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await _task(db, other)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, r))["ok"]
+        await db.commit()
+        assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]
+        await db.commit()
+        r = await rsvc.update_report_meta(db, r, dev_rev="pv1")
+        assert r.eng_meta["dev_revision"]["code"] == "pv1", "메타 고침 자체는 저장된다"
+        r = await rsvc.update_report_meta(db, r, project=other)
+        assert r.eng_meta["project"] == other
+        assert await _linked(db, r.id) == [], "메타 고침이 끊은 리포트를 다시 이었다"
+        assert [m.dst_key for m in await _tombstones(db, r.id)] == [f"{task}@dv1"], "기록이 지워졌다"
+    finally:
+        await _drop(db, u, s, keys=[task, other])
+
+
+async def test_a_receive_leaves_an_unlinked_report_unlinked_and_counts_it(db, hub_on, monkeypatch):
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    u, s = await _owner(db, commit=True)
+    r = await _rep(db, s, project=code, code="dv1", commit=True)
+    real = onto.auto_link_tasks
+
+    async def mine_only(sdb, *, report_ids=None):
+        assert report_ids is None
+        return await real(sdb, report_ids=[r.id])
+
+    monkeypatch.setattr(plm_sync, "sync_all", _fake_receive(task, code))
+    monkeypatch.setattr(onto, "auto_link_tasks", mine_only)
+    runs: list[int] = []
+    try:
+        first = await plm_sync.sync_once(client=object())
+        runs.append(first["run_id"])
+        assert first["task_links"]["linked"] == 1, first["task_links"]
+        assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]       # 사람이 끊는다
+        await db.commit()
+        second = await plm_sync.sync_once(client=object())
+        runs.append(second["run_id"])
+        links = second["task_links"]
+        assert (links["skipped_unlinked"], links["linked"]) == (1, 0), links
+        assert second["result"] == "ok", "끊은 리포트를 건너뛴 것은 문제가 아니다"
+        assert await _linked(db, r.id) == [], "받기 뒤 자동 잇기가 사람이 끊은 리포트를 다시 이었다"
+        run = (await db.execute(select(OntoSyncRun).where(OntoSyncRun.id == second["run_id"])
+                                .execution_options(populate_existing=True))).scalar_one()
+        assert run.counts["task_links"]["skipped_unlinked"] == 1
+    finally:
+        await _drop(db, u, s, keys=[task, code], runs=runs)
+
+
+async def test_the_unlink_routes_record_show_and_clear(db):
+    """REST — 끊기는 끊은 사람(로그인한 소유자)을 적고, 개정 보기가 기록을 보이고, 기록 지우기는 소유자만 · 지운 뒤 바로 한 번 잇는다."""
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    task = f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    o, so = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, r))["ok"]
+        await db.commit()
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        mine = {"authorization": f"Bearer {security.create_access_token(u.id)}"}
+        theirs = {"authorization": f"Bearer {security.create_access_token(o.id)}"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            cut = await c.delete(f"{P}/reports/{r.id}/revision", headers=mine)
+            view = await c.get(f"{P}/reports/{r.id}/revision", headers=mine)
+            nope = await c.delete(f"{P}/reports/{r.id}/revision/unlinked", headers=theirs)
+            clear = await c.delete(f"{P}/reports/{r.id}/revision/unlinked", headers=mine)
+            after = await c.get(f"{P}/reports/{r.id}/revision", headers=mine)
+            twice = await c.delete(f"{P}/reports/{r.id}/revision/unlinked", headers=mine)
+        assert cut.status_code == 200 and cut.json()["data"]["unlinked_by"] == u.email, cut.text[:300]
+        v = view.json()["data"]
+        assert v["linked"] is None and v["unlinked"]["by"] == u.email and v["unlinked"]["was"] == [f"{task}@dv1"], v
+        assert nope.status_code == 404, "남의 리포트의 기록을 지웠다"
+        assert clear.status_code == 200, clear.text[:300]
+        cd = clear.json()["data"]
+        assert cd["was"] == [f"{task}@dv1"] and cd["task_links"]["linked"] == 1, cd
+        a = after.json()["data"]
+        assert a["unlinked"] is None and a["linked"]["key"] == f"{task}@dv1", a
+        assert twice.status_code == 409, "없는 기록을 지운 척했다"
+    finally:
+        await _drop(db, o, so)
+        await _drop(db, u, s, keys=[task])

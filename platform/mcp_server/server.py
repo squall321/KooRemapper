@@ -978,7 +978,9 @@ async def update_report_meta(
 ) -> dict:
     """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
     DOE·초점(focus 예 camera-detail)·원본 K파일 링크를 수동 설정한다(부분 갱신).
-    설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제."""
+    설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제.
+    과제·개발단계를 고치면 개정 연결도 따라가지만, ★사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는 메타만 저장하고
+    **다시 잇지 않는다** — 다시 잇게 하려면 `set_report_revision` 또는 `clear_report_unlink`."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
@@ -1792,6 +1794,7 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     누른다(저절로 옮기지 않는다 — 사용자 결정). `gone` 은 허브에서 사라짐(사용 안 함), `deprecated` 는 그만 씀.
     `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
     **버리지 않고** 보여 주는 것이다.
+    ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{report_id}/revision",
                       {"task_key": task_key} if task_key else None)
@@ -1806,7 +1809,7 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
     `code` 는 `pre|dv1..dvr|pv1..pvr|pra|mp` — dv/pv 는 차수 필수, pre/pra/mp 는 차수 금지.
     `supersedes` 는 앞 판의 개정 키(`<과제 key(과제명)>@<code>`)다 — 순환은 거절된다.
     ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
-    `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라.
+    `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라. 사람이 끊은 기록이 있으면 지운다.
     / Confirm the revision of a report. Survives re-ingest; do not guess."""
     return await _put(ctx, f"/reports/{report_id}/revision", {
         "task_key": task_key, "code": code, "model_key": model_key,
@@ -1825,7 +1828,7 @@ async def ontology_sync_state(ctx: Context) -> dict:
     가 `ok` 여도 다 받고 있는 것이 아니다. 받을 타입을 넓히는 것은 박스 설정(KOORM_SP_CORE_TYPES)이다.
     `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
     `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
-    못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
+    못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`) · 사람이 끊어 건너뜀(`skipped_unlinked`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
     받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
     return await _get(ctx, "/ontology/sync")
 
@@ -1868,6 +1871,7 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
     ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 확정한 판에 이어진 리포트는 옮기지 않는다) — 그래서
     `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
+    항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
     a regular user's plan and counts cover only the reports they can read (scope=readable), a system admin sees all."""
     # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가
@@ -1890,12 +1894,25 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def unlink_report_revision(report_id: str, ctx: Context) -> dict:
-    """리포트와 개정 사이의 **연결을 끊는다**(개정 객체는 남는다).
+    """리포트와 개정 사이의 **연결을 끊는다**(개정 객체는 남는다 · 리포트 소유자만).
 
     잘못 확정했을 때 쓴다. 객체를 안 지우는 이유는 그 판에 다른 리포트가 달려 있거나
     `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
-    / Unlink a report from its revision. The revision object stays."""
+    ★끊은 사람 · 때를 **기록한다** — 그 뒤로는 자동 잇기(허브 받기 뒤 · 리포트 반입 뒤 · 관리자 일괄 적용)도 수동 메타 고침
+    (update_report_meta)도 이 리포트를 다시 잇지 않는다. 다시 잇게 하려면 `set_report_revision`(손으로) 또는
+    `clear_report_unlink`(기록 지우기).
+    / Unlink a report from its revision and record who/when; automatic linking then leaves it alone."""
     return await _delete(ctx, f"/reports/{report_id}/revision")
+
+
+@mcp.tool()
+async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
+    """사람이 끊은 기록을 **지운다**(리포트 소유자만) — 그 리포트를 자동 잇기가 다시 본다.
+
+    지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다 — 과제명 · 과제코드 · 별칭이 글자 그대로 맞고 개정 코드가 있으면
+    지금 이어진다(`task_links`). 기록이 없으면 거절된다(조용히 성공하지 않는다). 기록은 `report_revision` 의 `unlinked` 로 본다.
+    / Clear the unlink record of a report (owner only) and run the automatic link for it once."""
+    return await _delete(ctx, f"/reports/{report_id}/revision/unlinked")
 
 
 @mcp.tool()

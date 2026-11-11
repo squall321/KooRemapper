@@ -127,7 +127,7 @@ async def test_a_regular_user_sees_only_the_reports_they_can_read(world):
     # ★수도 그것으로 센다 — 전사 수가 새면 안 된다
     assert owner["counts"]["reports"] == 2 and owner["counts"]["strings"] == 2
     assert mate["counts"] == {"reports": 1, "reports_without_a_name": 0, "strings": 1,
-                              "links": 1, "proposal": 0, "unmatched": 0}, mate["counts"]
+                              "links": 1, "proposal": 0, "unmatched": 0, "unlinked": 0}, mate["counts"]
     assert blind["counts"]["reports"] == 0 and blind["plan"] == []
     linked = [e for e in mate["plan"] if e["verdict"] == "links"]
     assert [e["task_key"] for e in linked] == [w["task"]] and linked[0]["how"] == "exact"

@@ -25,7 +25,7 @@ def _routes():
     out = {}
     for r in app.routes:
         path = getattr(r, "path", "")
-        if "/ontology" in path or path.endswith("/revision"):
+        if "/ontology" in path or path.endswith("/revision") or "/revision/" in path:
             for m in sorted(getattr(r, "methods", set()) - {"HEAD", "OPTIONS"}):
                 out[(m, path)] = r
     return out
@@ -49,6 +49,7 @@ def _dep_names(route) -> set:
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
     ("DELETE", f"{P}/reports/{{report_id}}/revision"),
+    ("DELETE", f"{P}/reports/{{report_id}}/revision/unlinked"),   # 11-11 — 사람이 끊은 기록 지우기
     ("GET", f"{P}/ontology/task-links"),
     ("POST", f"{P}/ontology/task-links/apply"),
     ("GET", f"{P}/ontology/aliases"),
@@ -93,6 +94,7 @@ def test_the_whole_fleet_paths_need_a_system_admin(method, path):
     ("GET", f"{P}/ontology/task-links"),                   # SRC-10 — 계획(쓰지 않음)은 누구나, 단 읽을 수 있는 리포트만
     ("GET", f"{P}/reports/{{report_id}}/revision"),
     ("PUT", f"{P}/reports/{{report_id}}/revision"),
+    ("DELETE", f"{P}/reports/{{report_id}}/revision/unlinked"),   # 소유자만 — 라우트가 소유를 본다(끊기 · 잇기와 같다)
     ("GET", f"{P}/ontology/types"),                        # 보기는 읽기 전용 — 로그인한 누구나
     ("GET", f"{P}/ontology/objects"),
     ("GET", f"{P}/ontology/objects/{{type_slug}}/{{key:path}}"),
@@ -120,7 +122,10 @@ def test_the_write_paths_are_only_our_own_things():
     #   되돌릴 길이 없으면 반쪽이고, `confirm_alias` 는 이미 "먼저 떼야 한다" 고 말하고
     #   있었다. 이 집합은 그대로 **과제를 쓰는 길이 안 생겼음**을 지킨다.
     #   10-30 합친 과제 옮기기가 늘었다 — 고치는 것은 **우리 개정 · 별칭**이지 허브 과제가 아니다(사용자 결정 「알리고 사람이 옮긴다」).
+    #   11-11 끊은 기록 지우기가 늘었다 — 우리 선(리포트 → 개정)의 끊은 표시를 지우는 것이다(사용자 결정 「끊은 것을 기록해
+    #   자동이 건너뛴다」).
     allowed = {f"{P}/reports/{{report_id}}/revision",      # PUT 확정 · DELETE 해제
+               f"{P}/reports/{{report_id}}/revision/unlinked",   # DELETE 끊은 기록 지우기
                f"{P}/ontology/task-links/apply",
                f"{P}/ontology/aliases",                    # POST 붙이기 · DELETE 떼기
                f"{P}/ontology/sync",

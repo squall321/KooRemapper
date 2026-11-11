@@ -5,7 +5,7 @@
 권한 —
   읽기            로그인한 누구나(과제·개정은 전사 공용 축이다)
   과거 붙이기 계획  로그인한 누구나 — 단 **읽을 수 있는 리포트만**(소유 · 같은 소속, 시스템 관리자는 전부 — SRC-10)
-  리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세)
+  리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세). 확정 · 끊기 · 끊은 기록 지우기
   과거 붙이기 적용·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
 """
 from __future__ import annotations
@@ -149,6 +149,8 @@ async def get_report_revision(
         "resolved_task": resolved or None,
         "resolved_how": how or None,
         "linked": linked,
+        # 사람이 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다({by, at, was})
+        "unlinked": (await svc.unlinked_reports(db, [rep.id])).get(rep.id),
         "task_state": await svc.task_state(db, about) if about else None,
         "mismatch": await svc.mismatch(db, rep),
         "candidates": await svc.candidates(db, rep, task_key=task_key or resolved or ""),
@@ -164,7 +166,7 @@ async def set_report_revision(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`)."""
+    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`). 끊은 기록이 있으면 지운다(11-11)."""
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
@@ -188,16 +190,41 @@ async def unlink_report_revision(
 
     확정하는 기능에 되돌리는 길이 없으면 반쪽이다. 객체를 지우지 않는 이유는 그 판에 다른
     리포트가 달려 있거나 `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
+    ★끊은 사람 · 때를 기록한다(사용자 결정 11-11) — 자동 잇기(받기 뒤 · 반입 뒤 · 관리자 일괄 적용)와 수동 메타 고침이 이
+    리포트를 다시 잇지 않는다. 손으로 다시 잇거나(PUT) 기록을 지우면(DELETE …/revision/unlinked) 풀린다.
     """
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
-    got = await svc.unlink_revision(db, rep)
+    got = await svc.unlink_revision(db, rep, by=user.email)
     if not got.get("ok"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
-    return ok(got, message="개정 연결을 끊었습니다.")
+    return ok(got, message="개정 연결을 끊었습니다 — 끊은 기록이 남아 자동 잇기가 다시 잇지 않습니다.")
+
+
+@router.delete("/reports/{report_id}/revision/unlinked")
+async def clear_report_unlink(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """사람이 끊은 기록을 **지운다**(11-11) — 그 리포트를 자동 잇기가 다시 본다. 소유자만(끊기 · 잇기와 같은 자세).
+
+    지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다(`task_links` — 붙는 것이면 지금 이어진다, 아니면 수만 센다).
+    기록이 없으면 409 — 조용히 성공하지 않는다.
+    """
+    rep = await rsvc.get_owned_report(db, user.id, report_id)
+    if rep is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
+    got = await svc.clear_unlink(db, rep)
+    if not got.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"{got.get('error')}: {got.get('detail') or ''}")
+    await db.commit()
+    got["task_links"] = await svc.link_report(db, rep)
+    return ok(got, message="끊은 기록을 지웠습니다.")
 
 
 # ── 과거 붙이기 계획 (읽기 — 읽을 수 있는 리포트만) ──────────────────────
