@@ -34,7 +34,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias, OntoObject, OntoRelation
 from app.modules.ontology.services import hub_aliases, normalize, renamed_keys
@@ -93,9 +94,18 @@ def relations() -> list[str]:
 
 
 def keep_on_reattach():
-    """다시 붙일 때 남기는 선 — 다리의 사람 선. 리포트의 나머지 선(꾸러미 선 · 규칙 선)은 걷는다."""
-    return and_(OntoRelation.relation.in_(relations()),
-                func.coalesce(OntoRelation.properties["basis"].astext, "") == HUMAN)
+    """다시 붙일 때 남기는 선 — 다리의 사람 선. 리포트의 나머지 선(꾸러미 선 · 규칙 선)은 걷는다.
+
+    ★붙이기의 본 트랜잭션 안에서 불린다 — 다리 정의 파일을 못 읽어도 붙이기를 깨지 않는다. 그때는 사람 표시(`basis: human`)만으로
+    남기고(사람 선을 잃지 않는다), 다리는 다시 짓기에서 따로 깨져 `bridges.error` 로 말한다(검토 11-11).
+    """
+    human = func.coalesce(OntoRelation.properties["basis"].astext, "") == HUMAN
+    try:
+        rels = relations()
+    except Exception:                       # noqa: BLE001 — 정의 파일 하나가 꾸러미 싣기를 막으면 안 된다
+        logger.exception("다리 정의를 못 읽었다 — 다시 붙일 때 사람 표시만으로 사람 선을 남긴다")
+        return human
+    return and_(OntoRelation.relation.in_(rels), human)
 
 
 def _basis(e: OntoRelation) -> str:
@@ -262,23 +272,36 @@ async def rebuild(db, report: ImpactReport) -> dict:
                              dst_key=r["dst_key"], source=SOURCE_SELF, deleted=False, report_id=report.id,
                              properties={"basis": RULE, "matched_by": r["matched_by"], "matched_text": r["matched_text"]})
                 for r in p["rules"]])
-    report.ontology = {**(report.ontology if isinstance(report.ontology, dict) else {}), "bridges": p["counts"]}
-    await db.flush()
+    onto = {**(report.ontology if isinstance(report.ontology, dict) else {}), "bridges": p["counts"]}
+    # 리포트 행은 ORM 으로 더럽히지 않고 문장으로 쓴다 — 저장점(rebuild_after_attach)이 되감기면 더럽혀진 객체는 만료되고,
+    # 부르는 쪽(번들 반입 · 7-1 스캔)이 그 객체를 async 에서 읽으면 깨진다. 쓴 뒤에 메모리 값만 맞춘다.
+    await db.execute(update(ImpactReport).where(ImpactReport.id == report.id).values(ontology=onto)
+                     .execution_options(synchronize_session=False))
+    set_committed_value(report, "ontology", onto)
     return p
 
 
 async def rebuild_after_attach(db, report: ImpactReport) -> dict:
     """꾸러미를 붙인 끝에 다리를 다시 짓고 커밋한다 — **깨져도 붙이기를 무르지 않는다**(행은 이미 커밋됐다).
-    셈 또는 `{"error": …}` — 실패하면 그 리포트에는 다리 셈이 없다(다음 붙이기가 다시 짓는다)."""
+
+    ★저장점(SAVEPOINT) 안에서 짓는다 — 깨지면 다리만 되감고 **부르는 쪽 세션은 되감지 않는다.** 예전에는 세션을 통째로 되감아
+    부르는 쪽 객체가 만료됐고, 번들 반입이 응답을 짓다 500 이 나고(리포트 · 꾸러미는 이미 굳은 뒤) 7-1 스캔이 다음 잡에서 멈췄다
+    (검토 11-11 P1 · P8). 셈 또는 `{"error": …}` — 실패해도 붙이기 결과는 그대로다(다음 붙이기가 다시 짓는다).
+    """
     rid = report.id
     try:
-        got = await rebuild(db, report)
-        await db.commit()
-        return got["counts"]
+        async with db.begin_nested():
+            got = await rebuild(db, report)
+        counts = got["counts"]
     except Exception as exc:                # noqa: BLE001 — 다리 하나가 실은 꾸러미를 무르게 하면 안 된다
         logger.exception("코어 다리 짓기 실패 — report %s", rid)
-        await db.rollback()
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        counts = {"error": f"{type(exc).__name__}: {exc}"}
+    try:
+        await db.commit()                   # 지은 다리(또는 아무것도)를 굳히고 리포트 행 잠금을 푼다 — 되감지 않는다
+    except Exception as exc:                # noqa: BLE001
+        logger.exception("코어 다리 커밋 실패 — report %s", rid)
+        counts = counts if counts.get("error") else {"error": f"{type(exc).__name__}: {exc}"}
+    return counts
 
 
 def brief(counts: dict | None) -> str:

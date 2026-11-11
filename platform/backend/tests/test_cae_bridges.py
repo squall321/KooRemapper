@@ -106,12 +106,16 @@ async def _mirror(db) -> None:
     await db.commit()
 
 
+_CREATED: list[int] = []      # 이 시험이 만든 사용자 id — 정리는 ORM 객체가 아니라 이 수로 한다(되감긴 세션의 객체는 만료돼 못 읽는다)
+
+
 async def _make(db, *, admin: bool = False, with_report: bool = True, shared: str | None = None):
     u = User(email=f"cbt_{ulid.new().str}@kooremapper.test", password_hash=security.hash_password("x"),
              is_active=True, is_system_admin=admin)
     db.add(u)
     await db.commit()
     await db.refresh(u)
+    _CREATED.append(u.id)
     if not with_report:
         return u, None
     pkg = _pkg()
@@ -135,9 +139,11 @@ async def _make(db, *, admin: bool = False, with_report: bool = True, shared: st
 
 
 async def _drop(db, *users):
-    for u in users:
-        if u is not None:
-            await db.execute(delete(User).where(User.id == u.id))
+    """만든 사용자를 지운다(세션 · 리포트 · 행 · 선은 FK 로 함께). 시험이 깨져 세션이 되감겼어도 지우도록 먼저 되감고 id 로 지운다."""
+    await db.rollback()
+    ids, _CREATED[:] = list(_CREATED), []
+    for uid in ids:
+        await db.execute(delete(User).where(User.id == uid))
     await db.commit()
 
 
@@ -559,3 +565,120 @@ async def test_rest_refusals_carry_their_status_and_reason(db, mirror):
             assert r.status_code == 409 and "꾸러미부터" in r.json()["message"]
     finally:
         await _drop(db, owner)
+
+
+# ── 다리가 깨져도 붙이는 길은 선다(검토 11-11 P1 · P2) — 다시 짓기가 부르는 쪽 세션을 되감지 않는다 ─────────────────
+
+SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
+
+
+def _bundle_for(html: bytes) -> bytes:
+    """sphere 샘플 HTML + 그 각도 키로 고친 v14 꾸러미를 한 묶음(zip)으로 — 번들 반입이 같은 이름 줄기의 꾸러미를 싣는다."""
+    import hashlib
+    import io
+    import zipfile
+
+    from app.reports import parser
+    keys = [c["case_key"] for c in parser.parse_html(html.decode("utf-8", "replace"), kind_hint="sphere")["cases"]]
+    pkg = _pkg()
+    pkg["source"]["html"] = {"file": "report.html", "sha256": hashlib.sha256(html).hexdigest()}
+    runs = iter(keys)
+    for o in pkg["objects"]:
+        if o["type"] == "cae_run":
+            o["properties"]["case_key"] = next(runs)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("report.html", html)
+        z.writestr("report.ontology.json", json.dumps(pkg))
+    return buf.getvalue()
+
+
+def _broken_plan(monkeypatch) -> None:
+    async def boom(*a, **kw):
+        raise RuntimeError("다리 계획이 깨졌다(시험)")
+    monkeypatch.setattr(br, "plan", boom)
+
+
+@ON_SESSION_LOOP
+@pytest.mark.skipif(not SPHERE.exists(), reason="sphere 샘플 없음")
+@pytest.mark.parametrize("broken", [False, True])
+async def test_bundle_intake_survives_a_bridge_failure(db, monkeypatch, broken):
+    """번들 반입은 꾸러미를 붙인 뒤 리포트 칸을 읽어 응답을 짓는다 — 다리가 세션을 되감으면 그 칸이 만료돼 500 이었다(P1)."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, _ = await _make(db, with_report=False)
+    try:
+        if broken:
+            _broken_plan(monkeypatch)
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post("/api/v1/reports/intake",
+                             files={"file": ("bundle.zip", _bundle_for(SPHERE.read_bytes()), "application/zip")})
+        assert r.status_code == 201, (r.status_code, r.text[:600])
+        onto = r.json()["data"]["ontology"]
+        assert onto["ok"] is True and onto["loaded"]["cae_part"] == 23
+        if broken:
+            assert onto["bridges"] == {"error": "RuntimeError: 다리 계획이 깨졌다(시험)"}
+        else:
+            assert {"rule", "human", "stale", "candidates", "unmatched", "unnamed"} <= set(onto["bridges"])
+        rid = r.json()["data"]["report_id"]
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert stored["counts"]["loaded"]["cae_part"] == 23, "꾸러미 행은 다리와 상관없이 굳었다"
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_rest_attach_survives_a_bridge_failure(db, monkeypatch):
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    try:
+        _broken_plan(monkeypatch)
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/reports/{rep.id}/cae",
+                             files={"file": ("report.ontology.json", FIX.read_bytes(), "application/json")})
+        assert r.status_code == 200, r.text[:400]
+        got = r.json()["data"]
+        assert got["bridges"] == {"error": "RuntimeError: 다리 계획이 깨졌다(시험)"} and got["counts"]["loaded"]["cae_part"] == 23
+        assert "코어 다리를 못 지었다" in r.json()["message"]
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_a_broken_bridge_definition_fails_only_the_bridges(db, mirror, monkeypatch):
+    """다리 정의(dynaforge-core.json)를 못 읽어도 꾸러미는 실리고, 다시 붙일 때 사람 선은 사람 표시만으로 남는다."""
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        assert (await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o"))["ok"]
+        await db.commit()
+
+        def unreadable():
+            raise ValueError("정의 파일을 못 읽었다(시험)")
+        monkeypatch.setattr(br, "bridges", unreadable)
+        pkg = _pkg()
+        pkg["_note"] = str(pkg.get("_note") or "") + " (정의가 깨진 뒤 다시 낸 판)"
+        got = await svc.attach_ontology(db, rep, _raw(pkg))
+        assert got["already"] is False and got["counts"]["loaded"]["cae_part"] == 23
+        assert got["bridges"] == {"error": "ValueError: 정의 파일을 못 읽었다(시험)"}
+        human = (await db.execute(select(OntoRelation).where(
+            OntoRelation.report_id == rep.id, OntoRelation.src_key == f"{rep.id}/part/1"))).scalars().all()
+        assert [(h.dst_key, h.properties["basis"]) for h in human] == [("cbt:metal-a", "human")], "사람 선은 남는다"
+        rule = (await db.execute(select(OntoRelation).where(
+            OntoRelation.report_id == rep.id, OntoRelation.properties["basis"].astext == "rule"))).scalars().all()
+        assert rule == [], "규칙 선은 꾸러미 선과 함께 걷혔고 다리가 깨져 다시 서지 않았다"
+    finally:
+        await _drop(db, u)
