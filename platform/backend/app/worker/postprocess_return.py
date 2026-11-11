@@ -230,25 +230,40 @@ async def poll_due(now: datetime | None = None) -> int:
     """기한이 된 예약을 하나씩 본다. 잡마다 따로 커밋한다 — 하나가 깨져도 나머지는 간다."""
     now = now or datetime.now(timezone.utc)
     async with SessionLocal() as db:
-        due = (await db.execute(
-            select(Job).where(Job.status == "running", Job.external_kind == KIND,
-                              Job.external_poll_at.is_not(None), Job.external_poll_at <= now)
+        ids = list((await db.execute(
+            select(Job.id).where(Job.status == "running", Job.external_kind == KIND,
+                                 Job.external_poll_at.is_not(None), Job.external_poll_at <= now)
             .order_by(Job.external_poll_at).limit(_POLL_BATCH)
-        )).scalars().all()
-        for job in due:
-            jid = job.id
+        )).scalars())
+        await _poll_jobs(db, ids, now)
+        return len(ids)
+
+
+async def _poll_jobs(db, ids: list[str], now: datetime) -> None:
+    """잡마다 따로 커밋한다 — 잡 하나가 깨지거나 세션을 되감아도 다음 잡을 본다.
+
+    ★스캔 때 읽은 잡 객체를 들고 돌지 않는다 — 앞 잡이 세션을 되감으면(반입의 유일 제약 · 꾸러미 싣기 깨짐 등) 그 객체가 모두
+    만료되고, async 에서 만료된 칸을 읽으면 다음 잡에서 스캔이 통째로 멈췄다(검토 11-11 P8). 그래서 **id 로 그때그때 다시 읽고**,
+    깨질 수 있는 일은 실패를 적는 일까지 모두 잡마다의 try 안에 둔다.
+    """
+    for jid in ids:
+        try:
+            job = await db.get(Job, jid)
+            if job is None:
+                continue
+            await poll_one(db, job, now)
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001 — 잡 하나의 실패가 스캔을 멈추면 나머지가 선다
+            logger.exception("postprocess job %s poll crashed", jid)
             try:
-                await poll_one(db, job, now)
-                await db.commit()
-            except Exception as exc:  # noqa: BLE001 — 잡 하나의 실패가 스캔을 멈추면 나머지가 선다
-                logger.exception("postprocess job %s poll crashed", jid)
                 await db.rollback()
                 j = await db.get(Job, jid)
                 if j is not None and j.status == "running":
                     _close(j, status="failed", now=now,
                            why=f"worker exception: {type(exc).__name__}: {exc}")
                     await db.commit()
-        return len(due)
+            except Exception:  # noqa: BLE001 — 실패를 적다 깨져도 다음 잡은 본다
+                logger.exception("postprocess job %s: 실패를 잡에 적지 못했다", jid)
 
 
 async def poll_one(db, job: Job, now: datetime) -> None:
