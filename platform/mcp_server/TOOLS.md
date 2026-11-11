@@ -125,18 +125,21 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 **캠페인 수준만 행으로** 싣는다(사용자 결정 10-31) — 런 · 파트 응답은 리포트 케이스가 정본이다. 리포트 행은 **리포트 가시성**을 따른다.
 
 **코어 다리**(core-link SRC-08 — 정의는 `platform/core/ontology/dynaforge-core.json`) — 해석 파트 → 코어 부품 `maps_to`(다대일 · StepForge 와
-같은 이름) · 소견 → 고장모드 `indicates`(다대다) · 캠페인 → 해석 방법 `follows_method`(다대일). 부르는 칸은 파트 `name` · 소견 `title` ·
-캠페인 `scenario_kind`. 그 글이 코어 거울 객체의 key · 이름 · 별칭(우리 별칭 표가 먼저)과 **글자 그대로**(앞뒤 공백만 걷고 — 과제 잇기의
-「정확」 과 같다) 맞고 그런 객체가 **하나뿐**일 때만 규칙 선(`basis: rule`)을 긋는다. 여럿 · 구분기호만 다름 · 품음은 후보로만 낸다.
-사람 선(`basis: human`)은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 `stale` 로 보인다. 선은 리포트 가시성을 따른다.
+**같은 정의** — 두 앱이 같은 블록을 바이트 그대로 싣고 한 질의로 두 앱을 묻는다) · 소견 → 고장모드 `indicates`(다대다) · 캠페인 → 해석 방법
+`follows_method`(다대일). 공유 블록의 설명은 앱 중립이라 아래가 DynaForge 쪽 규칙이다. 부르는 칸은 파트 `name` · 소견 `title` ·
+캠페인 `scenario_kind`. 그 글이 코어 거울 객체의 key · 이름 · 허브 별칭 · 옛 key · 우리 별칭과 **글자 그대로**(앞뒤 공백만 걷고 — 과제 잇기의
+「정확」 과 같다) 맞고 그 칸들이 모두 객체 **하나**를 가리킬 때만 규칙 선(`basis: rule`)을 긋는다. 여럿(칸끼리 엇갈림 — 우리 별칭은 X 인데
+다른 객체의 이름이 같은 글 — 포함) · 구분기호만 다름 · 품음은 후보로만 낸다(그만 쓴 객체는 후보에 안 낸다).
+사람 선(`basis: human`)은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 `stale`, 이름이 바뀌면 `drift.renamed`(셈 `renamed`)로 보인다.
+선은 리포트 가시성을 따른다.
 사람 선 확정 · 지우기는 MCP 도구가 아니라 REST 다 — `POST /reports/{id}/cae/bridges`(본문 `src_key` · `dst_key` · `dst_type?` · `relation?` ·
 `note?`) · `DELETE /reports/{id}/cae/bridges?src_key=&dst_key=`. 리포트 주인과 시스템 관리자만(같은 소속 읽기 사용자는 403, 못 읽는 사람은 404).
 타입이 다르면(cae_part 는 part 에만) 422, 다대일 다리에 다른 사람 선이 있으면 409, 규칙 선은 지우지 않는다(409).
 
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |
-| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 같은 꾸러미는 행을 그대로 둔다. 붙일 때마다 **코어 다리**(maps_to · indicates · follows_method)를 지금 거울로 다시 짓는다 — 결과 `bridges`(규칙 · 사람 · 끊긴 사람 선 수 · 후보 · 못 붙인 수). 번들 반입은 같은 이름 줄기를, 후처리 예약(postprocess) 반입은 귀환 매니페스트의 꾸러미를 저절로 |
-| `report_cae` | report_id | GET /reports/{id}/cae | 리포트 하나 — 파트 판정(위험한 것부터 · 최악 런 각도) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중 · **코어 다리** `bridges`(선 rule · human · 끊긴 사람 선 stale · 후보 · 못 붙인 것 · 셈). 안 실었으면 `loaded:false` |
+| `attach_cae_package` | report_id, path | POST /reports/{id}/cae | 꾸러미를 싣는다(소유자). 어휘 판 · 짝 HTML 지문 · 종류 · 런 키가 맞아야 — 아니면 아무것도 안 바뀐다. 같은 꾸러미는 행을 그대로 둔다. 붙일 때마다 **코어 다리**(maps_to · indicates · follows_method)를 지금 거울로 다시 짓는다 — 결과 `bridges`(규칙 · 사람 · 끊긴 사람 · 이름 바뀐 사람 선 수 · 후보 · 못 붙인 수). 번들 반입은 같은 이름 줄기를, 후처리 예약(postprocess) 반입은 귀환 매니페스트의 꾸러미를 저절로 |
+| `report_cae` | report_id | GET /reports/{id}/cae | 리포트 하나 — 파트 판정(위험한 것부터 · 최악 런 각도) · 하중 경로(충격량 큰 것부터) · 접촉 · 소견 · 응력 집중 · **코어 다리** `bridges`(선 rule · human · 끊긴 사람 선 stale · 이름 바뀐 사람 선 drift.renamed · 후보 · 못 붙인 것 · 셈). 안 실었으면 `loaded:false` |
 | `find_cae_parts` | min_severity?·max_safety_factor?·project?·kind?·limit? | GET /cae/parts | 리포트를 건너 파트 판정 — 위험한 순으로 매긴 뒤 자른다. 읽을 수 있는 리포트의 것만 |
 | `find_cae_load_paths` | sort?·min_engage_ratio?·project?·kind?·limit? | GET /cae/load-paths | 리포트를 건너 하중 경로(파트 쌍) — 충격량 · 맞닿은 비율 … 큰 것부터 |
 

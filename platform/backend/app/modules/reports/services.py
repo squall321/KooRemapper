@@ -1399,6 +1399,8 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     stored = await sess_svc.add_uploaded_file(
         db, session, filename=f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}", raw=raw, kind="generated")
     try:
+        # 다리 쓰기와 같은 차례로 리포트 행을 먼저 잠근다 — 사람 선 확정과 겹쳐도 교착이 없다(검토 11-11 P4)
+        await bridges.lock_report(db, report.id)
         # 사람이 이은 다리 선만 남긴다 — 가리키던 해석 객체가 새 꾸러미에 없으면 「끊긴 사람 선」 으로 보인다(지우지 않는다)
         await db.execute(delete(OntoRelation).where(OntoRelation.report_id == report.id, ~bridges.keep_on_reattach()))
         await db.execute(delete(OntoObject).where(OntoObject.report_id == report.id))

@@ -755,3 +755,62 @@ async def test_a_reservation_can_be_canceled_and_drops_its_token(db, owner, api,
     assert r.status_code == 200, r.text
     await db.refresh(job)
     assert job.status == "canceled"
+
+
+# ── 스캔이 잡 하나의 되감기 · 다리 실패에 멈추지 않는다(검토 11-11 P8) ──────────────────────────────────────
+
+@_aio
+async def test_one_job_rolling_back_does_not_stop_the_scan(db, owner, slurm, monkeypatch):
+    """앞 잡이 세션을 되감고 깨져도(스캔이 읽은 객체가 모두 만료돼도) 같은 스캔이 다음 잡을 본다 — 잡은 id 로 그때그때 다시 읽는다.
+    가짜 poll_one 은 이 시험의 잡만 건드린다 — 전체 스캔이라도 떠 있는 dev 의 진짜 예약은 바뀌지 않는다(slurm 은 구성 칸만 채운다)."""
+    u, s = owner
+    j1, j2 = await _reserved(db, u, s), await _reserved(db, u, s)
+    mine, seen = {j1.id, j2.id}, []
+
+    async def fake(dbx, job, now):
+        if job.id not in mine:
+            return
+        seen.append(job.id)
+        if len(seen) == 1:
+            await dbx.rollback()              # 앞 잡이 세션을 되감는다 — 스캔이 쥔 잡 객체가 모두 만료된다
+            raise RuntimeError("잡 하나가 깨졌다(시험)")
+        job.progress = 77
+    monkeypatch.setattr(pr, "poll_one", fake)
+    await pr.poll_due(now=FAR + timedelta(minutes=1))
+    assert sorted(seen) == sorted(mine), "앞 잡이 깨진 뒤 다음 잡을 못 봤다"
+    first, second = (await db.get(Job, seen[0])), (await db.get(Job, seen[1]))
+    await db.refresh(first)
+    await db.refresh(second)
+    assert first.status == "failed" and "잡 하나가 깨졌다" in (first.error_summary or ""), first.error_summary
+    assert (second.status, second.progress) == ("running", 77)
+
+
+@_aio
+@needs_sphere
+async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner, slurm, monkeypatch):
+    """7-1 반입이 꾸러미를 붙이다 코어 다리가 깨져도 반입 · 잡 성공은 그대로이고 같은 스캔의 다음 잡이 돈다. 스캔 고리(`_poll_jobs`)를
+    이 시험의 잡 id 로만 부른다 — 전체 스캔(`poll_due`)은 떠 있는 dev 의 진짜 예약까지 가짜 KooSlurm 으로 볼 수 있다."""
+    from app.database import SessionLocal
+    from app.modules.reports import bridges as br
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+    j1, j2 = await _reserved(db, u, s), await _reserved(db, u, s)
+
+    async def boom(*a, **kw):
+        raise RuntimeError("다리 계획이 깨졌다(시험)")
+    monkeypatch.setattr(br, "plan", boom)
+    async with SessionLocal() as scan:
+        await pr._poll_jobs(scan, [j1.id, j2.id], FAR + timedelta(minutes=1))
+    states = []
+    for jid in (j1.id, j2.id):
+        j = await db.get(Job, jid)
+        await db.refresh(j)
+        states.append((j.status, (j.external_ref or {}).get("ontology")))
+    assert [st for st, _ in states] == ["succeeded", "succeeded"], states
+    loaded = [o for _, o in states if o and o.get("state") == "loaded"]
+    assert len(loaded) == 1, states          # 둘째 잡은 같은 키 — 먼저 반입한 리포트를 알린다(7-2)
+    assert loaded[0]["bridges"] == {"error": "RuntimeError: 다리 계획이 깨졌다(시험)"} and loaded[0]["rows"]["cae_part"] == 23
