@@ -1138,3 +1138,47 @@ async def test_a_lost_commit_after_the_rebuild_rolls_back_and_rereads(db, monkey
         assert "error" not in (await svc.attach_ontology(db, rep, FIX.read_bytes()))["bridges"], "다음 붙이기는 다시 짓는다"
     finally:
         await _drop(db, u)
+
+
+# ── 이름 바뀐 사람 선은 부르는 이름으로 · 다시 확정하면 풀린다(검토 2차 11-11 항목 8) ───────────────────────────────
+
+@ON_SESSION_LOOP
+async def test_renamed_follows_the_name_the_rule_matches_on_and_a_reconfirm_clears_it(db, mirror):
+    """renamed 는 규칙이 견주는 칸(파트 name · 소견 title · 캠페인 scenario_kind)으로 센다 — 캠페인 이름(label)만 바뀌고 종류가 그대로면
+    같은 다리다. 같은 짝을 다시 확정하면 남긴 이름을 지금 것으로 맞춰(`relabeled`) 그 표시가 풀린다. 예전에는 label 로 견줘 캠페인 이름만
+    바뀌어도 renamed 였고, 다시 확정해도 남긴 이름을 안 고쳐 표시가 안 풀렸다."""
+    u, rep = await _make(db)
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        c = await br.confirm(db, rep, src_key="campaign", dst_key="cbt:am-drop", by="o")      # 규칙 선을 사람 선으로
+        f = await br.confirm(db, rep, src_key="finding/1", dst_key="cbt:fm-motor", by="o")
+        await db.commit()
+        assert c["ok"] and c["promoted_rule"] and f["ok"]
+        lines = await _lines(db, rep.id)
+        assert lines[("campaign", "cbt:am-drop")].properties["src_label"] == "drop_all_angle", "캠페인은 종류를 남긴다"
+        old_title = lines[("finding/1", "cbt:fm-motor")].properties["src_label"]
+        pkg = _pkg()
+        for o in pkg["objects"]:
+            if o["type"] == "cae_campaign":
+                o["label"] = "다른 캠페인 이름"                             # 이름만 — 종류(부르는 칸)는 그대로
+            if o["type"] == "cae_finding" and o["key"] == "finding/1":
+                o["label"] = o["properties"]["title"] = "다른 소견 제목"
+        b = (await svc.attach_ontology(db, rep, _raw(pkg)))["bridges"]
+        assert (b["renamed"], b["by_type"]["cae_campaign"]["renamed"], b["by_type"]["cae_finding"]["renamed"]) == (1, 0, 1), b
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert view["drift"]["renamed"] == [{"relation": "indicates", "src_key": "finding/1", "dst_key": "cbt:fm-motor",
+                                             "src_label_then": old_title, "src_label_now": "다른 소견 제목"}]
+
+        again = await br.confirm(db, rep, src_key="finding/1", dst_key="cbt:fm-motor", by="other@x")   # 사람이 「같은 것」 이라 한다
+        await db.commit()
+        assert again["ok"] and again["already"] and again["relabeled"] == {"was": old_title, "now": "다른 소견 제목"}, again
+        assert again["bridges"]["renamed"] == 0 and "renamed_from" not in again["line"]
+        kept = (await _lines(db, rep.id))[("finding/1", "cbt:fm-motor")].properties
+        assert (kept["src_label"], kept["decided_by"]) == ("다른 소견 제목", "other@x")
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert "drift" not in view and view["counts"]["renamed"] == 0
+        same = await br.confirm(db, rep, src_key="campaign", dst_key="cbt:am-drop", by="o")
+        await db.commit()
+        assert same["already"] and "relabeled" not in same, "이름이 그대로면 고칠 것이 없다"
+    finally:
+        await _drop(db, u)

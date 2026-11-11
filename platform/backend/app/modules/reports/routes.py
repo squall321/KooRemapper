@@ -974,8 +974,9 @@ async def confirm_cae_bridge(
 
     리포트 주인과 시스템 관리자만(같은 소속 읽기 사용자는 403). 거절 — 해석 객체 없음 404 · 다리가 없는 타입 · 끝 타입이 다름(cae_part 는
     part 에만) · 거울에 없음 · 허브에서 사용 안 함 422 · 다대일(파트 · 캠페인)인데 다른 사람 선이 이미 있음 409(먼저 지운다).
-    같은 짝의 규칙 선은 사람 선으로 오르고, 다대일이면 그 객체의 다른 규칙 선은 빠진다(사람이 이긴다). 리포트가 그사이 지워졌으면 404.
-    응답 `bridges` 는 다시 지은 셈."""
+    같은 짝의 규칙 선은 사람 선으로 오르고, 다대일이면 그 객체의 다른 규칙 선은 빠진다(사람이 이긴다). 같은 짝의 사람 선이 이미 있으면
+    `already` — 그 객체를 부르는 글이 확정 때와 달라졌으면(renamed) 지금 글로 맞추고 `relabeled`(was · now)를 준다. 리포트가 그사이
+    지워졌으면 404. 응답 `bridges` 는 다시 지은 셈."""
     r = await _require_bridge_editor(db, user, report_id, request)
     if not isinstance(r.ontology, dict):
         raise HTTPException(status.HTTP_409_CONFLICT, "이 리포트에 실은 해석 온톨로지가 없다 — 꾸러미부터 붙인다(POST /reports/{id}/cae)")
@@ -984,8 +985,9 @@ async def confirm_cae_bridge(
     if not got.get("ok"):
         raise _refused(got)
     await db.commit()
-    line = got["line"]
-    msg = (f"이미 이은 사람 선이다 — {line['src_key']} → {line['dst_key']}" if got.get("already")
+    line, re_ = got["line"], got.get("relabeled")
+    msg = (f"이미 이은 사람 선이다 — {line['src_key']} → {line['dst_key']}"
+           + (f" (부르는 이름을 지금 것으로 맞췄다 — 「{re_['was']}」 → 「{re_['now']}」)" if re_ else "") if got.get("already")
            else f"사람 선을 확정했다 — {line['src_key']} → {line['dst_key']}"
            + (" (규칙 선을 사람 선으로 올렸다)" if got.get("promoted_rule") else "")
            + (f" (규칙 선 {', '.join(got['replaced_rule'])} 는 빠졌다)" if got.get("replaced_rule") else ""))

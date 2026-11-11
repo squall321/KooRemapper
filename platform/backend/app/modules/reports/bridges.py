@@ -26,8 +26,10 @@
 **선은 리포트에 묶인다**(`report_id`) — 리포트를 지우면 함께 사라지고 읽기는 리포트 가시성을 따른다(10-31 결정 — 리포트 행은
 전사 보기에 내지 않는다). 규칙 선(`basis: rule`)은 다시 지을 때마다 걷고 다시 긋는다. 사람 선(`basis: human`)은 다시 붙여도
 지우지 않는다(`attach_ontology` 가 사람 선만 남기고 리포트의 선을 걷는다). 가리키던 해석 객체가 다시 반입에서 사라지면 지우지 않고
-「끊긴 사람 선」(stale)으로 보인다. 같은 key 인데 이름이 바뀌어 다시 반입되면(확정 때 남긴 `src_label` 과 다르면) 사람 선은 그대로 남고
-이기지만 조용히 따라가지 않는다 — 셈 `renamed` · 보기 `drift.renamed` 로 보인다(검토 11-11 P7). 다대일 다리(파트 · 캠페인)는 사람 선이
+「끊긴 사람 선」(stale)으로 보인다. 같은 key 인데 **부르는 이름**(위의 칸 — 파트 name · 소견 title · 캠페인 scenario_kind. 객체
+이름 label 이 아니다 — 캠페인 이름만 바뀌고 종류가 그대로면 같은 다리다)이 바뀌어 다시 반입되면(확정 때 남긴 `src_label` 과 다르면)
+사람 선은 그대로 남고 이기지만 조용히 따라가지 않는다 — 셈 `renamed` · 보기 `drift.renamed` 로 보인다(검토 11-11 P7 · 2차 항목 8).
+같은 짝을 다시 확정하면 남긴 이름을 지금 것으로 맞춰 그 표시가 풀린다. 다대일 다리(파트 · 캠페인)는 사람 선이
 있으면 규칙이 그 객체를 건너뛴다(사람이 이긴다).
 다대다 다리(소견)는 사람 선과 규칙 선이 함께 선다 — 다만 여럿이 맞아 갈리지 않은 것은 사람이 하나를 골랐어도 규칙이 나머지를 긋지 않는다.
 """
@@ -60,8 +62,9 @@ MIN_CONTAINED = 2           # 품는 쪽 후보 — 짧은 쪽이 이보다 짧�
 RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key · "
              "우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 후보 = 여럿이 맞음(칸끼리 엇갈림 포함) · "
              "구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 객체는 안 낸다). "
-             "사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale, 이름이 바뀌면 drift.renamed 로 보인다. counts 는 지금 "
-             "거울로 센 것이다 — 저장된 규칙 선과 다르면 drift 가 말한다(다시 붙이면 맞춰진다).")
+             "사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale, 그 해석 쪽 이름이 바뀌면 drift.renamed 로 보인다(같은 짝을 "
+             "다시 확정하면 지금 이름으로 맞춘다). counts 는 지금 거울로 센 것이다 — 저장된 규칙 선과 다르면 drift 가 말한다(다시 붙이면 "
+             "맞춰진다).")
 
 _WHY_SAME = {"key": "key 가 구분기호 · 대소문자만 다르다", "label": "이름이 구분기호 · 대소문자만 다르다",
              "hub_alias": "허브 별칭이 구분기호 · 대소문자만 다르다", "alias": "우리 별칭이 구분기호 · 대소문자만 다르다"}
@@ -162,6 +165,13 @@ def _natural(key: str) -> list:
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", key or "")]
 
 
+def _name(o: OntoObject, b: Bridge) -> str:
+    """해석 객체를 부르는 글 — 규칙이 견주는 칸(`NAME_PROP`) 그대로, 앞뒤 공백만 걷는다(`match` 의 「정확」 과 같다). 사람 선의
+    `src_label` 은 확정 때의 이 글이다 — 다시 반입해 이 글이 달라지면 renamed 다(객체 이름 label 이 아니다, 검토 2차 항목 8)."""
+    v = (o.properties or {}).get(b.name_prop)
+    return v.strip() if isinstance(v, str) else ""
+
+
 def _order(o: OntoObject) -> tuple:
     return list(NAME_PROP).index(o.type_slug) if o.type_slug in NAME_PROP else 9, _natural(o.key)
 
@@ -250,7 +260,7 @@ async def plan(db, report: ImpactReport, *, rows: list | None = None, edges: lis
     """그 리포트의 다리를 지금 거울로 셈한다 — **아무것도 쓰지 않는다.**
 
     셈(`counts`)의 단위 — rule · human · stale · renamed 는 **선** 수(human 은 가리키는 해석 객체가 있는 사람 선, stale 은 없는 것,
-    renamed 는 human 가운데 그 객체 이름이 확정 때 남긴 `src_label` 과 달라진 것), candidates · unmatched · unnamed 는
+    renamed 는 human 가운데 그 객체를 부르는 이름(`NAME_PROP`)이 확정 때 남긴 `src_label` 과 달라진 것), candidates · unmatched · unnamed 는
     **선이 없는 해석 객체** 수(후보가 있다 · 없다 · 부르는 칸이 비었다).
     """
     rid, bmap = report.id, bridges()
@@ -294,11 +304,12 @@ async def plan(db, report: ImpactReport, *, rows: list | None = None, edges: lis
     for e in stale:
         if e.src_type in by_type:
             by_type[e.src_type]["stale"] += 1
-    # 같은 key 인데 이름이 바뀐 해석 객체의 사람 선 — 남기고 이기지만 조용히 따라가지 않는다(검토 11-11 P7). 새 칸을 두지 않고
-    # 확정 때 남긴 이름(src_label)과 지금 이름을 견준다 — 남긴 이름이 없는 선은 견줄 수 없어 세지 않는다.
-    label_of = {o.key: o.label for o in objs}
+    # 같은 key 인데 부르는 이름이 바뀐 해석 객체의 사람 선 — 남기고 이기지만 조용히 따라가지 않는다(검토 11-11 P7). 새 칸을 두지 않고
+    # 확정 때 남긴 이름(src_label)과 지금 부르는 이름을 견준다 — 규칙이 견주는 칸이다(객체 이름 label 이 아니다 — 캠페인 이름만
+    # 바뀌고 종류가 그대로면 같은 다리다, 검토 2차 항목 8). 남긴 이름이 없는 선은 견줄 수 없어 세지 않는다.
+    called = {o.key: _name(o, bmap[o.type_slug]) for o in objs}
     renamed = [e for e in lines if _basis(e) == HUMAN and e.src_key in present
-               and (e.properties or {}).get("src_label") and (e.properties or {})["src_label"] != label_of[e.src_key]]
+               and (e.properties or {}).get("src_label") and (e.properties or {})["src_label"] != called[e.src_key]]
     for e in renamed:
         by_type[e.src_type]["renamed"] += 1
     mirror = {b.dst_type: len(pools[b.dst_type].labels) for b in bmap.values()}
@@ -307,7 +318,7 @@ async def plan(db, report: ImpactReport, *, rows: list | None = None, edges: lis
     counts = {**{s: sum(c[s] for c in by_type.values()) for s in _STATES}, "by_type": by_type, "mirror": mirror,
               "notes": notes, "computed_at": datetime.now(timezone.utc).isoformat()}
     return {"counts": counts, "rules": rules, "states": states, "stale": stale, "renamed": renamed, "lines": lines,
-            "pools": pools}
+            "pools": pools, "called": called}
 
 
 async def lock_report(db, rid: str) -> None:
@@ -422,7 +433,8 @@ async def _ends(db, lines: list, pools: dict) -> dict[tuple[str, str], tuple[str
     return out
 
 
-def _line(rid: str, e: OntoRelation, names: dict[str, str], ends: dict) -> dict:
+def _line(rid: str, e: OntoRelation, names: dict[str, str], ends: dict, called: dict[str, str] | None = None) -> dict:
+    """선 하나 — `names` 는 해석 객체 key → 이름(label, 보이기), `called` 는 key → 지금 부르는 이름(renamed 견주기)."""
     p = e.properties or {}
     lab, alive = ends.get((e.dst_type, e.dst_key), (None, False))
     out = {"relation": e.relation, "basis": p.get("basis") or RULE, "src_type": e.src_type, "src_key": _rel(rid, e.src_key),
@@ -431,8 +443,8 @@ def _line(rid: str, e: OntoRelation, names: dict[str, str], ends: dict) -> dict:
     for k in ("matched_by", "matched_text", "decided_by", "decided_at", "note"):
         if p.get(k):
             out[k] = p[k]
-    if out["basis"] == HUMAN and p.get("src_label") and e.src_key in names and names[e.src_key] != p["src_label"]:
-        out["renamed_from"] = p["src_label"]        # 확정 때 이름 — 지금 이름(src_label)과 다르다(drift.renamed)
+    if out["basis"] == HUMAN and p.get("src_label") and called and e.src_key in called and called[e.src_key] != p["src_label"]:
+        out["renamed_from"] = p["src_label"]        # 확정 때 부르던 이름 — 지금 부르는 이름과 다르다(drift.renamed)
     return out
 
 
@@ -440,7 +452,7 @@ async def view(db, report: ImpactReport, *, rows: list, edges: list) -> dict:
     """리포트 보기(`ontology_view`)의 `bridges` — 선(규칙 · 사람) · 끊긴 사람 선 · 후보 · 못 붙인 것 · 셈 · 규칙 글."""
     rid = report.id
     p = await plan(db, report, rows=rows, edges=edges)
-    names = {o.key: o.label for o in rows}
+    names, called = {o.key: o.label for o in rows}, p["called"]
     present = {s["obj"].key for s in p["states"]}
     ends = await _ends(db, p["lines"], p["pools"])
     live = sorted((e for e in p["lines"] if e.src_key in present),
@@ -449,8 +461,8 @@ async def view(db, report: ImpactReport, *, rows: list, edges: list) -> dict:
     out: dict[str, Any] = {
         "rule": RULE_TEXT,
         "counts": p["counts"],
-        "lines": [_line(rid, e, names, ends) for e in live],
-        "stale": [_line(rid, e, names, ends) for e in sorted(p["stale"], key=lambda e: _natural(e.src_key))],
+        "lines": [_line(rid, e, names, ends, called) for e in live],
+        "stale": [_line(rid, e, names, ends, called) for e in sorted(p["stale"], key=lambda e: _natural(e.src_key))],
         "candidates": [{"src_type": s["obj"].type_slug, "src_key": _rel(rid, s["obj"].key), "src_label": s["obj"].label,
                         "name": s["match"]["text"], "relation": s["bridge"].relation, "dst_type": s["bridge"].dst_type,
                         "options": s["match"]["options"], **({"more": s["match"]["more"]} if s["match"].get("more") else {})}
@@ -472,10 +484,11 @@ async def view(db, report: ImpactReport, *, rows: list, edges: list) -> dict:
                      "규칙 선을 다시 짓는다(사람 선은 그대로).")
     if p["renamed"]:
         drift["renamed"] = [{"relation": e.relation, "src_key": _rel(rid, e.src_key), "dst_key": e.dst_key,
-                             "src_label_then": (e.properties or {})["src_label"], "src_label_now": names.get(e.src_key)}
+                             "src_label_then": (e.properties or {})["src_label"], "src_label_now": called.get(e.src_key)}
                             for e in sorted(p["renamed"], key=lambda e: _natural(e.src_key))]
-        notes.append("다시 반입한 꾸러미에서 사람 선이 가리키는 해석 객체의 이름이 확정 때와 다르다 — 사람 선은 그대로 남고 규칙은 그 "
-                     "객체를 건너뛴다. 같은 것을 가리키는지 사람이 본다(아니면 그 사람 선을 지우고 다시 확정한다).")
+        notes.append("다시 반입한 꾸러미에서 사람 선이 가리키는 해석 객체를 부르는 이름(파트 name · 소견 title · 캠페인 "
+                     "scenario_kind)이 확정 때와 다르다 — 사람 선은 그대로 남고 규칙은 그 객체를 건너뛴다. 같은 것을 가리키는지 사람이 "
+                     "본다(같으면 같은 짝을 다시 확정해 지금 이름으로 맞추고, 아니면 그 사람 선을 지우고 다시 확정한다).")
     if drift:
         out["drift"] = {**drift, "note": " ".join(notes)}
     return out
@@ -501,6 +514,8 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     허브에서 사용 안 함(422 inactive) · 다대일인데 다른 사람 선이 이미 있다(409 already_bound — 먼저 지운다) · 리포트가 그사이
     지워졌다(404 report_gone).
     같은 짝의 규칙 선이 있으면 그 선을 사람 선으로 올린다. 다대일이면 그 객체의 다른 규칙 선은 다시 짓기에서 빠진다(사람이 이긴다).
+    같은 짝의 사람 선이 이미 있으면 `already` — 그 객체를 부르는 이름이 확정 때와 달라졌으면(renamed) 남긴 이름을 지금 것으로 맞추고
+    확정한 사람 · 때를 새로 적는다(`relabeled` — 사람이 「같은 것」 이라 했다, 검토 2차 항목 8).
     """
     rid, bmap = report.id, bridges()
     try:
@@ -540,17 +555,26 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     lines = (await db.execute(select(OntoRelation).where(
         OntoRelation.report_id == rid, OntoRelation.relation == b.relation, OntoRelation.src_key == key))).scalars().all()
     same = next((e for e in lines if e.dst_key == dst_key), None)
+    name, now = _name(obj, b), datetime.now(timezone.utc).isoformat()
+    end = {(b.dst_type, dst_key): (core.label, True)}
     if same is not None and _basis(same) == HUMAN:
-        return {"ok": True, "already": True, "line": _line(rid, same, {key: obj.label}, {(b.dst_type, dst_key): (core.label, True)}),
-                "bridges": (report.ontology or {}).get("bridges") if isinstance(report.ontology, dict) else None}
+        was = (same.properties or {}).get("src_label") or ""
+        if was == name:
+            return {"ok": True, "already": True, "line": _line(rid, same, {key: obj.label}, end, {key: name}),
+                    "bridges": (report.ontology or {}).get("bridges") if isinstance(report.ontology, dict) else None}
+        same.properties = {**(same.properties or {}), "src_label": name, "decided_by": by or "", "decided_at": now,
+                           **({"note": note} if note else {})}
+        await db.flush()
+        got = await rebuild(db, report)
+        return {"ok": True, "already": True, "relabeled": {"was": was, "now": name},
+                "line": _line(rid, same, {key: obj.label}, end, {key: name}), "bridges": got["counts"]}
     if b.single:
         bound = [e.dst_key for e in lines if _basis(e) == HUMAN and e.dst_key != dst_key]
         if bound:
             return _refuse(409, "already_bound", f"{_rel(rid, key)} 에는 사람 선이 이미 있다(→ {bound[0]}) — {b.relation} 는 "
                            "한 객체에 하나다. 먼저 그 선을 지운다", existing=bound[0])
     replaced = [e.dst_key for e in lines if b.single and _basis(e) != HUMAN and e.dst_key != dst_key]
-    props = {"basis": HUMAN, "decided_by": by or "", "decided_at": datetime.now(timezone.utc).isoformat(),
-             "src_label": obj.label, **({"note": note} if note else {})}
+    props = {"basis": HUMAN, "decided_by": by or "", "decided_at": now, "src_label": name, **({"note": note} if note else {})}
     if same is not None:
         same.properties = {**props, **{k: v for k, v in (same.properties or {}).items() if k in ("matched_by", "matched_text")}}
         line = same
@@ -561,7 +585,7 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     await db.flush()
     got = await rebuild(db, report)
     return {"ok": True, "already": False, "promoted_rule": same is not None, "replaced_rule": replaced,
-            "line": _line(rid, line, {key: obj.label}, {(b.dst_type, dst_key): (core.label, True)}), "bridges": got["counts"]}
+            "line": _line(rid, line, {key: obj.label}, end, {key: name}), "bridges": got["counts"]}
 
 
 async def remove(db, report: ImpactReport, *, src_key: str, dst_key: str) -> dict:

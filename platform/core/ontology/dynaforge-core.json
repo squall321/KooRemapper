@@ -197,7 +197,7 @@
         { "key": "matched_by", "label": "맞은 칸", "data_type": "enum", "enum_options": ["key", "label", "hub_alias", "previous_key", "alias"],
           "help": "rule 선이 코어 객체의 어느 칸과 글자 그대로 맞았나 — key · 이름(label) · 허브 별칭(properties.aliases) · 허브가 바꾼 옛 key · 우리 별칭 표. 여러 칸이 같은 객체를 가리키면 우리 별칭 > key > 이름 > 허브 별칭 > 옛 key 차례로 하나를 적는다." },
         { "key": "matched_text", "label": "맞은 글", "data_type": "text", "help": "규칙 선을 지은 해석 쪽 글(앞뒤 공백만 걷은 그대로)." },
-        { "key": "src_label", "label": "해석 객체 이름", "data_type": "text", "help": "사람 선을 확정할 때 해석 객체의 이름 — 다시 반입해 그 객체가 사라져도 무엇이었는지 보인다." },
+        { "key": "src_label", "label": "소견 제목(확정 때)", "data_type": "text", "help": "사람 선을 확정할 때 소견을 부르던 글(제목 title — 규칙이 견주는 칸). 다시 반입해 그 소견이 사라져도 무엇이었는지 보이고, 제목이 달라지면 이름 바뀐 사람 선(renamed)으로 센다." },
         { "key": "decided_by", "label": "확정한 사람", "data_type": "text" },
         { "key": "decided_at", "label": "확정 시각", "data_type": "datetime" },
         { "key": "note", "label": "비고", "data_type": "text_long" }
@@ -219,7 +219,7 @@
         { "key": "matched_by", "label": "맞은 칸", "data_type": "enum", "enum_options": ["key", "label", "hub_alias", "previous_key", "alias"],
           "help": "rule 선이 코어 객체의 어느 칸과 글자 그대로 맞았나 — key · 이름(label) · 허브 별칭(properties.aliases) · 허브가 바꾼 옛 key · 우리 별칭 표. 여러 칸이 같은 객체를 가리키면 우리 별칭 > key > 이름 > 허브 별칭 > 옛 key 차례로 하나를 적는다." },
         { "key": "matched_text", "label": "맞은 글", "data_type": "text", "help": "규칙 선을 지은 해석 쪽 글(앞뒤 공백만 걷은 그대로)." },
-        { "key": "src_label", "label": "해석 객체 이름", "data_type": "text", "help": "사람 선을 확정할 때 해석 객체의 이름 — 다시 반입해 그 객체가 사라져도 무엇이었는지 보인다." },
+        { "key": "src_label", "label": "해석 종류(확정 때)", "data_type": "text", "help": "사람 선을 확정할 때 캠페인을 부르던 글(해석 종류 scenario_kind — 규칙이 견주는 칸이다. 캠페인 이름이 아니다). 종류가 달라지면 이름 바뀐 사람 선(renamed)으로 센다." },
         { "key": "decided_by", "label": "확정한 사람", "data_type": "text" },
         { "key": "decided_at", "label": "확정 시각", "data_type": "datetime" },
         { "key": "note", "label": "비고", "data_type": "text_long" }

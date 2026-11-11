@@ -1076,10 +1076,11 @@ async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     follows_method). 규칙 — 부르는 칸(파트 name · 소견 title · 캠페인 scenario_kind)의 글이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key ·
     우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때만 규칙 선을 긋고 나머지는 후보다. 사람 선은
     꾸러미를 다시 붙여도 남고 다대일(파트 · 캠페인)에서는 규칙을 이긴다. bridges 는
-    `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나, 해석 객체 이름이 확정 때와 달라진 사람 선은 `renamed_from`) ·
+    `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나, 부르는 칸의 글이 확정 때와 달라진 사람 선은 `renamed_from`) ·
     `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 — 지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key ·
     까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) · `counts` · `rule`(맞추는 규칙 글) · `drift`(있을 때만 — 붙인 뒤 거울이
-    바뀌어 저장된 규칙 선이 지금 셈과 다르면 add · drop, 사람 선의 해석 객체 이름이 바뀌었으면 renamed — 사람 선은 그대로 이긴다). 후보를 사람 선으로
+    바뀌어 저장된 규칙 선이 지금 셈과 다르면 add · drop, 사람 선의 해석 객체를 부르는 칸의 글이 바뀌었으면 renamed — 캠페인 이름만
+    바뀐 것은 아니다 · 사람 선은 그대로 이기고 같은 짝을 다시 확정하면 지금 글로 맞춰 풀린다). 후보를 사람 선으로
     확정하거나 사람 선을 지우는 것은 MCP 도구가 아니라 REST 다 — POST · DELETE /reports/{id}/cae/bridges(리포트 주인 · 시스템 관리자).
     실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
     One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings, core bridges."""
