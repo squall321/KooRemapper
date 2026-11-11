@@ -1055,9 +1055,8 @@ async def test_a_write_queued_behind_a_report_delete_is_a_404_and_writes_nothing
             r = await asyncio.wait_for(tw, 30)
         assert r.status_code == 404 and "지워졌다" in r.json()["message"], (r.status_code, r.text[:400])
         assert await _count(db, ImpactReport, ImpactReport.id == rid) == 0
-        left = await _package_files(db, sid, rid)
-        assert set(left) <= set(before), f"쓰기가 꾸러미 파일을 남겼다: {sorted(set(left) - set(before))}"
-        assert len(_disk_files(uid, sid, rid)) <= len(before), "쓰기가 디스크 파일을 남겼다"
+        assert before and await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == [], \
+            "지운 리포트의 꾸러미 파일(행 · 디스크)이 남았다"
     finally:
         await _drop(db, u)
 
@@ -1226,4 +1225,32 @@ async def test_a_stray_alias_turns_an_exact_line_into_a_candidate(db, mirror):
                                                   OntoObject.report_id.is_(None)))
         await db.execute(delete(OntoPreviousKey).where(OntoPreviousKey.old_key == "cbt:holder-old"))
         await db.commit()
+        await _drop(db, u)
+
+
+# ── 리포트를 지우면 그 꾸러미 파일도(검토 2차 11-11) ─────────────────────────────────────────────────────
+
+@ON_SESSION_LOOP
+async def test_deleting_a_report_removes_its_package_files(db):
+    """꾸러미 파일(`ontology/<리포트 id>/…`)은 그 리포트의 것이다 — 리포트를 지우면 행 · 디스크가 함께 사라진다(예전에는 세션에 남았다).
+    같은 세션의 다른 리포트 꾸러미는 그대로다."""
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        other = ImpactReport(id=ulid.new().str, session_id=sid, user_id=uid, kind="sphere", n_cases=2,
+                             source_file_id=rep.source_file_id, label="곁 리포트")
+        db.add(other)
+        await db.flush()
+        for o in _pkg()["objects"]:
+            if o["type"] == "cae_run":
+                db.add(ImpactCase(report_id=other.id, case_key=o["properties"]["case_key"],
+                                  identity={"angle": {"name": o["label"]}}))
+        await db.commit()
+        await svc.attach_ontology(db, other, FIX.read_bytes())
+        assert len(await _package_files(db, sid, rid)) == 1 and len(_disk_files(uid, sid, rid)) == 1
+        await svc.delete_report(db, rep)
+        assert await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == []
+        assert len(await _package_files(db, sid, other.id)) == 1 and len(_disk_files(uid, sid, other.id)) == 1
+    finally:
         await _drop(db, u)

@@ -1215,6 +1215,13 @@ async def scatter(db: AsyncSession, report: ImpactReport, *, metric: str = "peak
 async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
     # 원본 HTML + scenario.json SessionFile 도 함께 정리(있으면). K파일은 모델
     # 자산이라 남긴다(다른 리포트가 참조 가능).
+    # 해석 온톨로지 꾸러미 파일(`ontology/<리포트 id>/…`)도 이 리포트의 것이라 함께 지운다 — 예전에는 세션에 남았다(검토 2차 11-11).
+    # 리포트 행을 먼저 잠근다 — 커밋 전인 꾸러미 붙이기가 있으면 그것이 굳은 뒤에 파일을 읽어 그 파일까지 지우고, 그 뒤에 온 붙이기는
+    # 잠글 행이 없어 404 다(`bridges.lock_report`). 이미 지워졌으면 할 일이 없다.
+    try:
+        await bridges.lock_report(db, report.id)
+    except bridges.ReportGone:
+        return
     for fid in (report.source_file_id, report.scenario_file_id):
         if fid is None:
             continue
@@ -1226,6 +1233,14 @@ async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
             except OSError:
                 pass
             await db.delete(f)
+    for f in (await db.execute(select(SessionFile).where(
+            SessionFile.session_id == report.session_id,
+            SessionFile.filename.like(f"ontology/{report.id}/%")))).scalars().all():
+        try:
+            storage.abs_path(f.rel_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+        await db.delete(f)
     await db.delete(report)
     await db.commit()
 
