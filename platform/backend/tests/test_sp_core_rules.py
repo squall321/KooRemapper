@@ -1,6 +1,6 @@
 """SP 코어 수신(층 1) — 받는 쪽 규칙 열여섯을 **하나씩** 고정한다(가짜 허브, 망 없음).
 
-규칙의 정본은 StandardPlatform `backend/app/modules/coreapi/kit/01-AI-GUIDE.md` §5.6@ab41cff(키트 2026-11-03 판 — 규칙은 2026-10-21 판과 같다)다.
+규칙의 정본은 StandardPlatform `backend/app/modules/coreapi/kit/01-AI-GUIDE.md` §5.6@e2676ad(키트 2026-11-06 판 — 규칙은 2026-10-21 판과 같다)다.
 번호를 시험 이름에 그대로 달아 둔다 — 한 줄을 고칠 때 무엇을 깨는지 보이게. 여덟 단계를 통째로 겪게 하는 채점은
 `test_sp_testbed.py`(SP 시험장)가 하고, 여기는 규칙 하나하나와 **DynaForge 사정**(허브 선과 우리 선이 한 표에 산다)을 본다.
 

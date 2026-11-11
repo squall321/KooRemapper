@@ -1,5 +1,5 @@
 # SP 허브의 코어 API 로 기준정보(과제 · 개발모델 …)를 **받는** 쪽(층 1) — 받기만 하고 고치지 않는다
-"""출처: StandardPlatform `backend/app/modules/coreapi/kit/sp_core_pull.py`@ab41cff(키트 2026-11-03 판 — 받기는 2026-10-21 판과 같다)와 지시서
+"""출처: StandardPlatform `backend/app/modules/coreapi/kit/sp_core_pull.py`@e2676ad(키트 2026-11-06 판 — 받기는 2026-10-21 판과 같다 · 봉투 세 칸 · 선 참조 칸 key)와 지시서
 `kit/01-AI-GUIDE.md` §5. 그 키트는 `requests`+`sqlite3` 이다 — 여기서는 **httpx + SQLAlchemy** 로 옮겼다.
 
 **층 1 이다** — SP 규칙만 알고 이 플랫폼의 쓰임(개정 잇기 등)은 모른다. 반영은 층 2(`app/modules/ontology/services.py`)가
@@ -41,7 +41,7 @@ from app.models import (
     OntoType,
 )
 
-KIT_VERSION = "2026-11-03"
+KIT_VERSION = "2026-11-06"
 DEFAULT_TIMEOUT = 60.0
 # 규칙 11 — 연결 오류 · 429 · 5xx 는 2초 · 4초 뒤 다시(모두 세 번 시도). 시험은 (0, 0) 을 준다.
 RETRY_WAITS = (2.0, 4.0)

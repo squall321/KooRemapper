@@ -108,7 +108,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   (DETACHED_KINDS = file · document) — 받는 쪽에는 새 칸이 오지 않을 뿐이다. StepForge origin/main 도 1705f2c(가리킴 확인).
     #   11-08 1705f2c → de5ecf5(v0.4.76 · ls-remote 로 main 끝 확인) — 키트 판 그대로(2026-11-03), coreapi 는 diff 0 — 받는 쪽에 닿는 것이 없다.
     #   이번엔 우리가 먼저 올렸고 StepForge 가 따라왔다(그쪽 1d75f40 · origin/main f1d9932 — 서브모듈 가리킴 de5ecf5 확인).
+    #   11-11 de5ecf5 → e2676ad(v0.4.84 · ls-remote 로 main 끝 확인) — 키트 2026-11-06(봉투에 shapes · extra · periods · 선 참조 칸은 key).
+    #   받는 쪽은 규칙 6(모르는 칸도 담는다 · 참조 칸 값은 key 로 둔다)이라 판 표시만 바꿨다. StepForge 는 7744159(v0.4.83 — 키트 · coreapi 같음)라 알렸다.
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "de5ecf59197d6d30ed277434fdeff39a836ae3ae" in status, status
+    assert "e2676ad5daa979b90d8c4722fd2e871fbde90838" in status, status
