@@ -210,7 +210,8 @@ export interface ReportRevisionOut {
   resolved_task: string | null
   resolved_how: string | null
   /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
-  linked: { key: string; task: string; code: string } | null
+  /** source — 이 리포트의 선을 누가 이었나(manual · eng_meta · rule, 옛 선은 null) */
+  linked: { key: string; task: string; code: string; source?: string | null } | null
   /** 사람이 연결을 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다 */
   unlinked?: { by: string; at: string | null; was: string[] } | null
   task_state: TaskState | null

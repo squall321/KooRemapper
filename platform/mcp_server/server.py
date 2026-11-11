@@ -1803,6 +1803,8 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
     **버리지 않고** 보여 주는 것이다.
     ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
+    `linked.source` 는 이 리포트의 선을 누가 이었나다(manual 사람 · eng_meta 인제스트 때 잇기 · rule 자동 잇기, 옛 선은 null) —
+    사람이 이은 선은 기계가 옮기지 않는다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{report_id}/revision",
                       {"task_key": task_key} if task_key else None)
@@ -1877,7 +1879,7 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
-    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 확정한 판에 이어진 리포트는 옮기지 않는다) — 그래서
+    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
     `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
     항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;

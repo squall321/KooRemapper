@@ -172,7 +172,8 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
 
     실패를 예외로 올리지 않는다 — `{"ok": False, "error": …}` 다(이 리포 규약).
     ★사람이 끊은 리포트(끊은 기록이 있다)는 기계 경로(`source` 가 manual 이 아닌 것)를 `unlinked` 로 거절하고, 사람이 잇는
-    것(manual)은 끊은 기록을 지우고 잇는다(11-11).
+    것(manual)은 끊은 기록을 지우고 잇는다(11-11). 사람이 **이 리포트를** 다른 판에 확정해 두었으면 기계 경로는 `kept_manual` 로
+    거절한다 — 리포트마다(선의 `link_source`) 가른다. 리포트 행을 먼저 잠그고 그 뒤에 읽는다(`lock_reports`).
     """
     task_key = (task_key or "").strip()
     code = (code or "").strip()
@@ -192,6 +193,19 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         return {"ok": False, "error": "unlinked",
                 "detail": "사람이 이 리포트의 개정 연결을 끊었다 — 기계는 다시 잇지 않는다"
                           "(손으로 다시 잇거나 끊은 기록을 지우면 다시 잇는다)"}
+    key = revision_key(task_key, code)
+    live = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key == str(report.id), OntoRelation.deleted.is_(False))
+        .execution_options(populate_existing=True))).scalars().all()
+    if source != "manual":
+        # ★사람이 **이 리포트를** 다른 판에 확정했으면 기계(인제스트 때 잇기 · 수동 메타 고침 · 자동 잇기 · 일괄 적용)는 옮기지
+        #   않는다 — 리포트마다 가른다(검토 R5: 남이 자기 리포트를 같은 판에 확정했다고 내 기계 선이 굳으면 안 된다).
+        others = [e for e in live if e.dst_key != key]
+        legacy = await _manual_revisions(db, [e.dst_key for e in others if not (e.properties or {}).get("link_source")])
+        if any(_human_link(e.properties, e.dst_key, legacy) for e in others):
+            return {"ok": False, "error": "kept_manual",
+                    "detail": "사람이 이 리포트를 다른 판에 확정했다 — 기계는 옮기지 않는다(사람이 다시 확정하거나 끊으면 바뀐다)"}
 
     # 과제 거울이 있으면 확인한다. **없다고 막지는 않는다** — 허브가 아직 없을 수 있고,
     # 그때 막으면 개정을 아예 못 붙인다. 대신 "확인 못 했다" 를 돌려준다.
@@ -200,7 +214,6 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
                                  OntoObject.key == task_key))).scalar_one_or_none()
     unverified = task is None
 
-    key = revision_key(task_key, code)
     if supersedes:
         if supersedes == key:
             return {"ok": False, "error": "self_supersede", "detail": "자기를 앞 판으로 둘 수 없다"}
@@ -259,13 +272,27 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
     # ★리포트 하나에 개정 하나(앞 계획 §7 ③) — 다른 판으로 다시 확정하면 옛 선을 뗀다. 안 떼면 같은 리포트가 두 판에
     #   다 잡혀 판끼리 견준 숫자가 틀어진다(10-30 실측: dv1 → pv1 다시 확정 뒤 선 둘). **살아 있는 선만** 뗀다 — 끊은 기록
     #   (지운 표시를 단 선)은 위에서 사람이 이을 때만 지운다(R2).
-    for old in (await db.execute(select(OntoRelation).where(
-            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
-            OntoRelation.src_key == str(report.id), OntoRelation.dst_key != key,
-            OntoRelation.deleted.is_(False)).execution_options(populate_existing=True))).scalars().all():
-        await db.delete(old)
-    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다.
-    await _edge(db, REL_MEASURED, TYPE_REPORT, str(report.id), TYPE_REVISION, key)
+    for old in live:
+        if old.dst_key != key:
+            await db.delete(old)
+    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다. 선에 **누가 이었나**를 적는다(`link_source` —
+    # manual · eng_meta · rule, 사람이면 `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라
+    # 여러 리포트가 나눠 쓴다). 사람이 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
+    stamp: dict[str, Any] = {"link_source": source, "linked_at": _now()}
+    if source == "manual":
+        stamp["linked_by"] = decided_by or ""
+    row = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key == str(report.id), OntoRelation.dst_type == TYPE_REVISION,
+        OntoRelation.dst_key == key).execution_options(populate_existing=True))).scalar_one_or_none()
+    if row is None:
+        db.add(OntoRelation(relation=REL_MEASURED, src_type=TYPE_REPORT, src_key=str(report.id),
+                            dst_type=TYPE_REVISION, dst_key=key, source=SOURCE_SELF, properties=stamp, deleted=False))
+    elif row.deleted:
+        row.deleted, row.properties = False, stamp
+    elif source == "manual" or not _human_link(row.properties, key, await _manual_revisions(db, [key])):
+        row.properties = {**(row.properties or {}), **stamp}
+    await db.flush()
 
     return {"ok": True, "key": key, "rev_seq": props["rev_seq"],
             "task_unverified": unverified,
@@ -342,7 +369,9 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
         OntoObject.type_slug == TYPE_REVISION, OntoObject.key == edge.dst_key))).scalar_one_or_none()
     props = (rev.properties or {}) if rev is not None else {}
     return {"key": edge.dst_key, "task": str(props.get("task") or edge.dst_key.rsplit("@", 1)[0]),
-            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1]}
+            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1],
+            # 이 리포트의 선을 누가 이었나(manual · eng_meta · rule — 옛 선은 null). 판의 rev_source 와 다르다(판은 나눠 쓴다)
+            "source": (edge.properties or {}).get("link_source")}
 
 
 # ── 개정 줄 ────────────────────────────────────────────────────────────────
@@ -733,8 +762,9 @@ async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
                         지우면 풀린다
       `linked`          이었다(새로 · 기계가 이은 다른 판에서 옮김) — `rev_source=rule`
       `already`         이미 그 판에 이어져 있다 — 쓰지 않는다(두 번째 실행은 아무것도 쓰지 않는다)
-      `kept_manual`     ★사람이 정한 판(`rev_source=manual`)에 이어져 있다 — 옮기지 않는다. `set_revision` 의 manual 보호는
-                        개정 칸만 지키고 리포트 선은 옮기므로 여기서 먼저 거른다
+      `kept_manual`     ★사람이 **이 리포트를** 손으로 확정해 두었다(선의 `link_source=manual`) — 옮기지 않는다. 리포트마다
+                        가른다(남이 자기 리포트를 같은 판에 확정했다고 내 기계 선이 굳지 않는다 — 검토 R5). set_revision 도
+                        기계 출처면 같은 까닭으로 거절한다
       `skipped_no_code` 과제는 풀렸는데 개정 코드가 없다 — 만들어 내지 않는다
     `report_ids` 를 주면 그 리포트만(반입 뒤 — 반입은 과제 · 별칭을 바꾸지 않아 다른 리포트의 판정은 그대로다), 비우면 전부
     (받기 뒤 — 과제 · 별칭이 바뀌면 어느 리포트든 새로 풀릴 수 있고, 지난번에 못 이은 것도 다시 본다). 받기 잠금 · 커밋은
@@ -798,6 +828,8 @@ async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
             out["linked"] += 1
         elif got.get("error") == "unlinked":       # set_revision 이 잠근 뒤 다시 본 끊은 기록 — 여기까지 올 일은 없다
             out["skipped_unlinked"] += 1
+        elif got.get("error") == "kept_manual":
+            out["kept_manual"] += 1
         elif len(out["refused"]) < _REFUSED_KEEP:
             out["refused"].append({"report": rid, "why": got.get("error")})
     return out
@@ -814,20 +846,34 @@ async def _link_state(db, ids: list[str]) -> dict[str, dict]:
                                  .where(ImpactReport.id.in_(ids)))).all():
         st[row.id]["free"] = report_free_task(row)
         st[row.id]["code"] = str(((row.eng_meta or {}).get("dev_revision") or {}).get("code") or "").strip()
-    for src, dst in (await db.execute(select(OntoRelation.src_key, OntoRelation.dst_key).where(
-            OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
-            OntoRelation.src_key.in_(ids), OntoRelation.deleted.is_(False)))).all():
+    edges = (await db.execute(select(OntoRelation.src_key, OntoRelation.dst_key, OntoRelation.properties).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key.in_(ids), OntoRelation.deleted.is_(False)))).all()
+    legacy = await _manual_revisions(db, [dst for _, dst, props in edges if not (props or {}).get("link_source")])
+    for src, dst, props in edges:
         st[src]["live"].add(dst)
+        if _human_link(props, dst, legacy):         # 리포트마다 — 이 리포트의 선을 사람이 이었나(R5)
+            st[src]["human"].add(dst)
     for rid in await unlinked_reports(db, ids):
         st[rid]["marked"] = True
-    held = sorted({k for s in st.values() for k in s["live"]})
-    if held:
-        manual = {k for k, props in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
-            OntoObject.type_slug == TYPE_REVISION, OntoObject.key.in_(held)))).all()
-            if (props or {}).get("rev_source") == "manual"}
-        for s in st.values():
-            s["human"] = s["live"] & manual
     return st
+
+
+def _human_link(props: dict | None, key: str, legacy_manual: set[str]) -> bool:
+    """이 리포트 선을 사람이 이었나 — 선에 적힌 `link_source` 로 가른다. 적지 않던 때의 옛 선은 그 판이 사람 판이면 사람 선으로
+    본다(조심 쪽 — 사람이 정한 것일 수 있다)."""
+    src = (props or {}).get("link_source")
+    return src == "manual" if src else key in legacy_manual
+
+
+async def _manual_revisions(db, keys) -> set[str]:
+    """이 판 key 가운데 사람이 정한 판(`rev_source=manual`)."""
+    keys = sorted(set(keys))
+    if not keys:
+        return set()
+    return {k for k, props in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.key.in_(keys)))).all()
+        if (props or {}).get("rev_source") == "manual"}
 
 
 async def link_report(db, report: ImpactReport) -> dict:

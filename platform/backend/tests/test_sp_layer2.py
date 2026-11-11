@@ -434,7 +434,7 @@ async def test_the_panel_hears_of_a_merge_and_only_an_admin_moves_it(db):
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
             app.dependency_overrides[get_current_user] = lambda: owner
             d = (await c.get(f"{P}/reports/{rep.id}/revision")).json()["data"]
-            assert d["linked"] == {"key": f"{a}@dv1", "task": a, "code": "dv1"}, d
+            assert d["linked"] == {"key": f"{a}@dv1", "task": a, "code": "dv1", "source": "manual"}, d   # 선을 누가 이었나
             assert (d["task_state"]["state"], d["task_state"]["into"]) == ("merged", b), d["task_state"]
             refused = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
             assert refused.status_code == 403, refused.text[:200]      # 남의 리포트까지 옮기는 일 — 관리자만

@@ -198,6 +198,73 @@ async def test_a_machine_link_moves_to_the_task_it_now_resolves_to(db):
         await db.rollback()
 
 
+async def test_someone_elses_confirm_does_not_freeze_my_machine_link(db):
+    """검토 R5 — 판의 rev_source 는 판 하나에 하나라 여러 리포트가 나눠 쓴다. 남이 자기 리포트를 같은 판에 손으로 확정해도
+    기계가 이은 내 리포트는 옮겨진다 — 사람 판인지는 **리포트마다**(선의 link_source) 가른다."""
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    try:
+        _, s1 = await _owner(db)
+        _, s2 = await _owner(db)
+        mine = await _rep(db, s1, project=code, code="dv1")
+        assert (await onto.link_from_eng_meta(db, mine))["ok"]                 # 기계 — 글자 그대로의 판
+        theirs = await _rep(db, s2, project=code, code="dv1")
+        assert (await onto.set_revision(db, theirs, task_key=code, code="dv1", decided_by="lee@x",
+                                        source="manual"))["ok"]                  # 남이 같은 판에 손으로
+        await _task(db, task, task_code=code)
+        got = await onto.auto_link_tasks(db, report_ids=[mine.id, theirs.id])
+        assert (got["linked"], got["kept_manual"]) == (1, 1), got
+        assert await _linked(db, mine.id) == [f"{task}@dv1"], "남의 확정 때문에 내 기계 선이 옛 판에 굳었다"
+        assert await _linked(db, theirs.id) == [f"{code}@dv1"], "사람이 확정한 리포트를 옮겼다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_machine_path_never_moves_or_restamps_a_link_a_person_made(db):
+    """기계 경로(여기선 인제스트 때 잇기)는 사람이 이 리포트를 확정한 선을 옮기지 않고(`kept_manual`), 같은 판을 다시 지나가도
+    선의 「사람이 이었다」 표시를 덮지 않는다."""
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        r = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.set_revision(db, r, task_key=task, code="dv1", decided_by="kim@x", source="manual"))["ok"]
+        assert (await onto.link_from_eng_meta(db, r))["ok"]                    # 같은 판 — 지나가기만
+        edge = (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_key == r.id)
+            .execution_options(populate_existing=True))).scalar_one()
+        assert (edge.properties["link_source"], edge.properties["linked_by"]) == ("manual", "kim@x"), edge.properties
+        r.eng_meta = {"project": task, "dev_revision": {"code": "dv2"}}        # 수동 메타가 다른 판을 말한다
+        await db.flush()
+        refused = await onto.link_from_eng_meta(db, r)
+        assert refused["ok"] is False and refused["error"] == "kept_manual", refused
+        assert await _linked(db, r.id) == [f"{task}@dv1"]
+        assert (await onto.linked_revision(db, r))["source"] == "manual"
+    finally:
+        await db.rollback()
+
+
+async def test_an_old_link_without_a_source_on_a_human_revision_is_kept(db):
+    """누가 이었나를 적지 않던 때의 옛 선은 그 판이 사람 판이면 사람 선으로 본다(조심 쪽) — 기계가 옮기지 않는다."""
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    try:
+        _, s = await _owner(db)
+        r = await _rep(db, s, project=code, code="dv1")
+        assert (await onto.set_revision(db, r, task_key=code, code="dv1", decided_by="kim@x", source="manual"))["ok"]
+        edge = (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_key == r.id))).scalar_one()
+        edge.properties = None                                                 # 옛 선 — 표시가 없다
+        await db.flush()
+        await _task(db, task, task_code=code)
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (got["kept_manual"], got["linked"]) == (1, 0), got
+        assert await _linked(db, r.id) == [f"{code}@dv1"]
+    finally:
+        await db.rollback()
+
+
 # ── ③ 반입 뒤 — 굳힌 뒤에 돌고, 깨져도 반입은 그대로 ────────────────────────────
 
 async def test_after_import_links_only_that_report_and_commits(db):
