@@ -169,13 +169,24 @@ GIT_SHA="$(git_or rev-parse HEAD)"
 GIT_SUBJ="$(git_or log -1 --pretty=%s)"
 GIT_BRANCH="$(git_or rev-parse --abbrev-ref HEAD)"
 if [ "$GIT_BRANCH" = "HEAD" ]; then GIT_BRANCH="(detached HEAD)"; fi
-GIT_DESCRIBE="$(git_or describe --tags --always --dirty)"
+# `--dirty` 는 **추적하는 파일 전부**를 본다 — 이 리포는 툴 상태(.bkit/)가 추적되어 늘 바뀌므로 소스가 깨끗해도 `-dirty` 가 붙었다
+# (11-11 운영 KR-24). 소스 판정에서 .bkit/ 를 빼고, 빼고도 바뀐 것이 있을 때만 `-dirty` 를 붙인다.
+GIT_DESCRIBE="$(git_or describe --tags --always)"
+if [ -n "$GIT_DESCRIBE" ] && ! git diff --quiet HEAD -- . ':(exclude).bkit' 2>/dev/null; then GIT_DESCRIBE="${GIT_DESCRIBE}-dirty"; fi
 GIT_REMOTE="$(git_or config --get remote.origin.url)"
 # `dirty` 만 적으면 읽는 쪽이 **무엇이** 더러운지 모른다. 실제로 이 리포의 더러움은 대부분
 # 툴 상태(.bkit/)나 임시 폴더라 소스와 무관한데, 그것을 구분할 방법이 없으면 게시본을 의심하게
 # 된다. 어느 갈래가 더러운지 두 단계까지 적는다(소스가 섞였는지가 한눈에 보인다).
-_DIRT="$(git_or status --porcelain | awk '{ print $NF }' | cut -d/ -f1-2 | sort -u | head -8 | paste -sd' ' -)"
-if [ -n "$_DIRT" ]; then GIT_STATE="dirty — $_DIRT"; else GIT_STATE="clean"; fi
+# 셋으로 가른다 — 추적하는 소스의 변경(빌드에 들 수 있다) · 툴 상태 .bkit/(빌드와 무관) · 추적 안 하는 파일(빌드는 추적 소스만 쓴다 —
+# platform/infra 의 *.sif.bak-* 같은 백업이 여기 든다). `dirty` 는 첫째가 있을 때만이다(11-11 KR-24).
+_PORC="$(git_or status --porcelain)"
+_paths() { awk '{ print $NF }' | cut -d/ -f1-2 | sort -u | head -8 | paste -sd' ' -; }
+_SRC_DIRT="$(printf '%s\n' "$_PORC" | grep -v '^??' | grep -v ' \.bkit/' | grep -v '^$' | _paths)"
+_TOOL_DIRT="$(printf '%s\n' "$_PORC" | grep ' \.bkit/' | _paths)"
+_UNTRACKED="$(printf '%s\n' "$_PORC" | grep '^??' | grep -v ' \.bkit/' | _paths)"
+if [ -n "$_SRC_DIRT" ]; then GIT_STATE="dirty — $_SRC_DIRT"; else GIT_STATE="clean"; fi
+[ -n "$_TOOL_DIRT" ] && GIT_STATE="$GIT_STATE · 툴 상태(빌드와 무관): $_TOOL_DIRT"
+[ -n "$_UNTRACKED" ] && GIT_STATE="$GIT_STATE · 추적 안 하는 파일(빌드에 안 든다): $_UNTRACKED"
 
 BIN_MD5="$(md5sum "$BIN" | cut -d' ' -f1)"
 BIN_SHA="$(sha256sum "$BIN" | cut -d' ' -f1)"
