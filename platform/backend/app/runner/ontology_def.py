@@ -20,6 +20,14 @@
 **모르는 칸은 흠이 아니다**(수신 규칙 5 와 같은 자세) — 허브가 칸을 늘려도 우리가 안 깨진다.
 그래서 「모르는 키」 는 오류가 아니라 **알림**으로만 센다.
 
+우리 정의 파일 `platform/core/ontology/dynaforge-core.json` — DynaForge 자체 온톨로지(SP import 꼴 groups · types · relation_types).
+허브가 그대로 읽을 수 있어야 하고 우리 검증기가 허브의 plm-core.json 도 그대로 읽어야 한다. 과제 · 개발모델 · 프로젝트는 허브 것이라
+여기 정의하지 않는다(받아서 거울로 둔다) — 여기 있는 것은 우리 것뿐이다. 해석 객체(cae_*) → 코어 다리(maps_to · indicates ·
+follows_method)도 여기 둔다 — cae_* 타입은 생산 쪽과 바이트 사본인 정본 어휘(`dynaforge-cae.json` — 그쪽 `_version` · `_note` 를 싣고
+고치지 않는다)에 있다. maps_to 는 StepForge 와 같은 정의(블록 바이트 그대로 — 사용자 결정 11-11)다.
+  ★이 파일의 **최상위에는 SP 가 아는 키만 둔다** — SP 가져오기는 TOP_KEYS(groups · interfaces · types · relation_types) 밖의 키를
+  거절해(`_reject_unknown`) 파일 전체를 못 들인다. 그래서 이 설명은 파일의 `_note` 에 있다가 여기로 옮겼다(검토 11-11).
+
 실패를 예외로 올리지 않는다 — 흠 목록을 돌려준다. 한 흠에서 멈추면 나머지를 못 보고,
 못 본 것은 다음 판에서 또 걸린다.
 """

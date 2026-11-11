@@ -13,6 +13,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import ast
 import hashlib
 import json
 
@@ -25,6 +26,8 @@ ROOT = Path(__file__).resolve().parents[3]
 OURS = ROOT / "platform" / "core" / "ontology" / "dynaforge-core.json"
 CAE = OURS.with_name("dynaforge-cae.json")      # 해석 어휘 — 생산 쪽과 바이트 사본(고치지 않는다). 다리의 출발 타입이 여기 있다
 HUB = ROOT / "external" / "StandardPlatform" / "pipeline" / "core"
+# SP 의 정의 가져오기 — 받는 칸 목록(TOP_KEYS · *_FIELDS)의 정본. 서브모듈이 없으면 그 시험은 건너뛴다(허브 정의 시험과 같다)
+SP_IMPORTER = ROOT / "external" / "StandardPlatform" / "backend" / "app" / "modules" / "ontology" / "importer.py"
 
 
 def _cae_types() -> set[str]:
@@ -185,6 +188,53 @@ def test_the_hub_task_type_is_what_we_expect():
     assert by["plm_task"]["key_policy"] == "required"      # key = 과제코드
     # 개발모델이 모델명에서 자른 개정 조각을 들고 있다 — 우리 후보의 근거 ③ 이다
     assert "model_revision" in {p["key"] for p in by["plm_model"]["properties"]}
+
+
+# ── ③ SP 가져오기가 받는 키만 — 모르는 키 하나가 파일 전체를 못 들이게 한다 ─────────────────
+
+_SP_SETS = ("TOP_KEYS", "GROUP_FIELDS", "TYPE_FIELDS", "PROPERTY_FIELDS", "RELATION_FIELDS")
+
+
+def _sp_key_sets() -> dict[str, set[str]]:
+    """SP `importer.py` 의 칸 목록 — 모듈을 import 하지 않고(그쪽도 `app` 패키지라 우리와 이름이 겹친다) 리터럴을 AST 로 읽는다."""
+    out: dict[str, set[str]] = {}
+    for node in ast.parse(SP_IMPORTER.read_text(encoding="utf-8")).body:
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+        for t in targets:
+            if isinstance(t, ast.Name) and t.id in _SP_SETS:
+                out[t.id] = set(ast.literal_eval(node.value))
+    return out
+
+
+def _unknown_to_sp(doc: dict, sets: dict[str, set[str]]) -> list[str]:
+    """정의 문서에서 SP 가져오기가 모르는 키 — `_reject_unknown` 이 거절할 자리마다 한 줄."""
+    bad = [f"(최상위) {k}" for k in sorted(set(doc) - sets["TOP_KEYS"])]
+    for g in doc.get("groups") or []:
+        bad += [f"groups/{g.get('slug')} {k}" for k in sorted(set(g) - sets["GROUP_FIELDS"])]
+    for kind, items, fields in (("types", doc.get("types") or [], "TYPE_FIELDS"),
+                                ("relation_types", doc.get("relation_types") or [], "RELATION_FIELDS")):
+        for one in items:
+            bad += [f"{kind}/{one.get('slug')} {k}" for k in sorted(set(one) - sets[fields])]
+            for prop in one.get("properties") or []:
+                bad += [f"{kind}/{one.get('slug')}.{prop.get('key')} {k}" for k in sorted(set(prop) - sets["PROPERTY_FIELDS"])]
+    return bad
+
+
+def test_our_definition_carries_only_keys_sp_import_accepts():
+    """SP 가져오기는 모르는 키를 거절한다(`_reject_unknown`) — 최상위 `_note` 하나가 파일 전체를 못 들이게 했다(검토 11-11).
+    정본 해석 어휘(dynaforge-cae.json)는 생산 쪽과 바이트 사본이라 이 시험 밖이다(`_version` · `_note` 를 싣는다)."""
+    if not SP_IMPORTER.exists():
+        pytest.skip(f"submodule 이 없다: {SP_IMPORTER}")
+    sets = _sp_key_sets()
+    assert set(sets) == set(_SP_SETS), f"SP 칸 목록을 다 읽지 못했다: {sorted(set(_SP_SETS) - set(sets))}"
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _unknown_to_sp(doc, sets) == []
+    # 판별력 — 대조가 정말 본다(최상위 · 관계 · 관계 칸의 모르는 키를 잡는다)
+    rel = {**doc["relation_types"][0], "미래칸": 1}
+    rel["properties"] = [{"key": "x", "label": "X", "data_type": "text", "모르는칸": 1}]
+    got = _unknown_to_sp({**doc, "_note": "x", "relation_types": [rel]}, sets)
+    assert any(g.startswith("(최상위) _note") for g in got) and any("미래칸" in g for g in got) \
+        and any("모르는칸" in g for g in got), got
 
 
 # ── 판별력 — 흠을 정말 잡는가 ──────────────────────────────────────────────
