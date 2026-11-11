@@ -214,6 +214,9 @@ function ObjectCard({ type, objKey, def, rels, known, open }: {
         {!!d.previous.length && (
           <div className="text-muted">옛 식별자 — <span className="mono">{d.previous.join(', ')}</span></div>
         )}
+        {d.scope === 'readable' && o.type === 'dev_revision' && (
+          <div className="text-muted">리포트 선은 읽을 수 있는 리포트만 보인다</div>
+        )}
         {Object.keys(o.properties).length ? (
           <table className="w-full">
             <tbody>

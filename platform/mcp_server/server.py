@@ -1799,7 +1799,8 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
     같은 과제의 판끼리 결과를 견주려면 여기서 리포트 id 를 얻어 report_compare 로 넘긴다.
     ★`task_found:false`(reason `unknown_task`)면 **정본에 그 과제가 없다**는 뜻이다 — 개정이 0 인 것과 다르다.
     그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
-    / Revision chain; task_found:false means the task is unknown (not just empty)."""
+    ★판은 다 보이지만 판마다 리포트는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 온다 — 시스템 관리자는 전부(`scope`).
+    / Revision chain; task_found:false means the task is unknown (not just empty). Report ids cover only reports you can read."""
     return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/revisions")
 
 
@@ -1881,6 +1882,7 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
     """객체 하나 — 칸 · 상태 · 합쳐진 곳(`merged_into_now` — 바뀜 · 합침을 끝까지 푼 것) · 옛 식별자(`previous`) ·
     나가는/들어오는 선(`out` · `in` — 지금 이어진 것, 근거 메모 포함).
     ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
+    끝이 리포트인 선(개정에 달린 리포트)은 읽을 수 있는 리포트만 보인다(`scope`).
     / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
     return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg(key)}")
 
@@ -1912,7 +1914,9 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
     ★**안 잰 것은 `null` 이고 0 이 아니다** — 0 으로 읽으면 "쟀는데 0" 이 된다.
     ★`measured_from` 은 그 판의 **몇 건에서** 최악값을 모았는지다. 한 건과 열 건의 최악값은
     같은 뜻이 아니다. 그림까지 견주려면 `reports` 의 id 를 `report_compare` 로 넘긴다.
-    / Revisions of one task side by side, with the delta against the previous one."""
+    ★리포트 줄 · 수치(최악값 · 심각도 · 케이스 · `measured_from`)는 **읽을 수 있는 리포트(소유 · 같은 소속)만**으로 센다 —
+    판은 다 보이고 시스템 관리자는 전부다(`scope`: all · readable). 전사 수가 아닐 수 있다.
+    / Revisions of one task side by side; report rows and numbers cover only reports you can read (scope)."""
     return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/compare")
 
 

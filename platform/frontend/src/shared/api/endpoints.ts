@@ -240,9 +240,10 @@ export interface RevisionCompareRow extends RevisionRow {
   /** 앞 판 대비 변화. **양쪽에 값이 있을 때만** 온다. */
   d_worst_stress: number | null
 }
-export async function compareTaskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionCompareRow[]; note?: string }> {
+/** scope — readable 이면 리포트 줄 · 수치가 이 사람이 읽을 수 있는 리포트만으로 센 것이다(사용자 결정 11-11) */
+export async function compareTaskRevisions(taskKey: string): Promise<{ task: string; revisions: RevisionCompareRow[]; note?: string; scope?: 'all' | 'readable' }> {
   const { data } = await api.get(`/ontology/tasks/${encodeURIComponent(taskKey)}/compare`)
-  return unwrap<{ task: string; revisions: RevisionCompareRow[]; note?: string }>(data)
+  return unwrap<{ task: string; revisions: RevisionCompareRow[]; note?: string; scope?: 'all' | 'readable' }>(data)
 }
 export async function unlinkReportRevision(reportId: string): Promise<{ was: string[]; detail: string }> {
   const { data } = await api.delete(`/reports/${reportId}/revision`)
@@ -345,6 +346,8 @@ export interface OntoObjectOut {
   merged_into_now?: string | null
   out: OntoEdge[]
   in: OntoEdge[]
+  /** readable 이면 끝이 리포트인 선은 읽을 수 있는 리포트만 */
+  scope?: 'all' | 'readable'
   previous: string[]
 }
 export async function ontologyObject(type: string, key: string): Promise<OntoObjectOut> {

@@ -376,8 +376,12 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
 
 # ── 개정 줄 ────────────────────────────────────────────────────────────────
 
-async def history(db, task_key: str) -> list[dict]:
-    """한 과제의 개정 줄 — `rev_seq` 순으로, 각 판에 달린 리포트와 함께."""
+async def history(db, task_key: str, *, scope=None) -> list[dict]:
+    """한 과제의 개정 줄 — `rev_seq` 순으로, 각 판에 달린 리포트와 함께.
+
+    개정 자체는 전사 공용 축이라 다 보인다. ★그 안의 **리포트**는 `scope`(리포트 검색과 같은 술어 — 소유 · 같은 소속)로
+    거른다 — 읽지 못하는 리포트의 id 가 새지 않게(사용자 결정 11-11). 비우면 전부(시스템 관리자).
+    """
     revs = (await db.execute(
         select(OntoObject).where(OntoObject.type_slug == TYPE_REVISION,
                                  OntoObject.deleted.is_(False)))).scalars().all()
@@ -390,6 +394,9 @@ async def history(db, task_key: str) -> list[dict]:
                                    OntoRelation.dst_type == TYPE_REVISION,
                                    OntoRelation.dst_key.in_(keys),
                                    OntoRelation.deleted.is_(False)))).scalars().all()
+    if scope is not None and edges:
+        seen = await visible_reports(db, [e.src_key for e in edges], scope)
+        edges = [e for e in edges if e.src_key in seen]
     by_rev: dict[str, list[str]] = {}
     for e in edges:
         by_rev.setdefault(e.dst_key, []).append(e.src_key)
@@ -1019,7 +1026,15 @@ async def clear_unlink(db, report: ImpactReport) -> dict:
 
 # ── 개정 간 비교 ───────────────────────────────────────────────────────────
 
-async def compare(db, task_key: str) -> dict:
+async def visible_reports(db, ids, scope) -> set[str]:
+    """이 리포트 id 가운데 `scope`(리포트 검색과 같은 술어)로 읽을 수 있는 것. `scope` 가 비면 그대로 다(시스템 관리자)."""
+    ids = sorted({str(i) for i in ids if i})
+    if scope is None or not ids:
+        return set(ids)
+    return set((await db.execute(select(ImpactReport.id).where(ImpactReport.id.in_(ids), scope))).scalars())
+
+
+async def compare(db, task_key: str, *, scope=None) -> dict:
     """한 과제의 개정을 **나란히** 놓는다 — 그것이 이 기능의 목적이다.
 
     숫자는 **리포트에 이미 승격된 칸**(`worst_stress`·`worst_g`·`max_severity`·`n_cases`)을
@@ -1028,8 +1043,10 @@ async def compare(db, task_key: str) -> dict:
     ★**판마다 리포트가 여럿일 수 있다.** 그때 하나를 골라 대표로 삼지 않는다 — 어느 것을
     골랐는지가 안 보이면 비교가 거짓이 된다. 최악값은 **그 판의 리포트 전부에서** 모으고,
     몇 건에서 모았는지를 함께 낸다.
+    ★리포트 줄 · 수치는 `scope` 로 읽을 수 있는 리포트만으로 센다(사용자 결정 11-11 — 판은 다 보이고, 읽지 못하는 리포트의
+    id · 최악값 · 심각도 · 케이스 수는 새지 않는다). 비우면 전부(시스템 관리자).
     """
-    line = await history(db, task_key)
+    line = await history(db, task_key, scope=scope)
     # ★모르는 과제와 '개정 없음' 을 가른다(KR-07). 단, **개정이 있으면 그 자체로 '아는' 과제다** —
     #   개정은 거울에 없는 자유 문자열 key 에도 붙을 수 있다(set_revision). 그래서 개정이 없을 때만
     #   거울 존재를 따진다: 거울에 있으면 '개정 없음', 없으면 unknown_task.

@@ -105,8 +105,8 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | 도구 | 인자 | REST | 메모 |
 | --- | --- | --- | --- |
 | `list_tasks` | q?·limit?·project? | GET /ontology/tasks | 허브 과제 목록. `q` 는 key(과제명)·task_code(과제코드)·**별칭**(허브 `properties.aliases` · 우리 별칭)·label 을 본다 · **순위를 매긴 뒤 자른다**(`truncated` · `total`) · 항목마다 `matched_by` · `match_kind`(prefix · word · substring). `deprecated` 는 새로 고르지 않는다. ★비면 `reason`(「꺼졌다」≠「없다」) |
-| `task_revisions` | task_key | GET /ontology/tasks/{k}/revisions | 개정 줄 — `rev_seq` 순, 각 판의 리포트와 앞 판 |
-| `compare_task_revisions` | task_key | GET /ontology/tasks/{k}/compare | ★판끼리 **견준다** — 최악응력·최악G·심각도·케이스와 **앞 판 대비 변화**. 안 잰 것은 `null` 이고 0 이 아니다 |
+| `task_revisions` | task_key | GET /ontology/tasks/{k}/revisions | 개정 줄 — `rev_seq` 순, 각 판의 리포트와 앞 판. 판마다 리포트는 **읽을 수 있는 것만**(`scope` — 관리자는 전부) |
+| `compare_task_revisions` | task_key | GET /ontology/tasks/{k}/compare | ★판끼리 **견준다** — 최악응력·최악G·심각도·케이스와 **앞 판 대비 변화**. 안 잰 것은 `null` 이고 0 이 아니다. 리포트 줄 · 수치는 **읽을 수 있는 리포트만**으로 센다(`scope` — 관리자는 전부, 사용자 결정 11-11) |
 | `report_revision` | report_id, task_key? | GET /reports/{id}/revision | 이어진 개정(`linked`) + **어긋남** + 후보와 근거 + 과제의 허브 처지(`task_state` — `merged` 면 관리자가 화면에서 옮긴다 · `gone` · `deprecated`). `mismatch.kind` 가 `renamed` · `merged` 면 잘못이 아니다(수동 메타가 옛 이름). `unlinked`(by · at · was) 가 있으면 사람이 끊었다 — 자동 잇기가 다시 잇지 않는다. `linked.source` — 이 리포트의 선을 누가 이었나(manual · eng_meta · rule) |
 | `set_report_revision` | report_id, task_key, code, model_key?·supersedes?·note? | PUT /reports/{id}/revision | ★사람의 확정으로 기록된다(재인제스트에 안 지워진다) — **짐작으로 부르지 마라**. 사람이 끊은 기록이 있으면 지운다 |
 | `unlink_report_revision` | report_id | DELETE /reports/{id}/revision | 연결을 끊는다. **개정 객체는 남는다**(다른 리포트가 달려 있거나 줄의 가운데일 수 있다). ★끊은 사람 · 때를 **기록**한다 — 자동 잇기(받기 뒤 · 반입 뒤 · 관리자 일괄 적용) · 수동 메타 고침이 다시 잇지 않는다(11-11) |
@@ -117,7 +117,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `ontology_sync_state` | — | GET /ontology/sync | 허브 수신 상태(읽기는 로그인한 사용자 누구나 — KR-17). 마지막 실행 결과는 셋(`ok` · `needs_check` + 사유 · `failed`) · 정의 판 · 타입별 건수 · 옮길 합쳐진 과제 수. 타입의 `skipped` 는 **공개 안 된 타입**이라 건너뛴 것. ★타입 줄의 `stopped`(+`stopped_why`) 는 **멈춘 타입** — 받을 타입(`receive_types`) 밖이거나 카탈로그에 없어 더 받지 않는다(그 줄의 `last_status` · 건수는 마지막으로 받았을 때 그대로 — SRC-11). 맨 위 `problems` 는 지금 상태에서 본 문제(멈춘 타입 등). `last_run.counts.task_links` 는 받기 뒤 과제 잇기 결과(이음 · 후보 · 못 붙임 · 이름 없음 · 사람이 끊어 건너뜀 `skipped_unlinked` — 리포트 전부를 센 것이라 **시스템 관리자에게만**). 받기 실행은 관리자 화면에만 |
 | `ontology_types` | — | GET /ontology/types | 받은 타입 정의(칸 · 관계)와 타입별 건수(활성 · 그만 씀 · 사용 안 함) — 읽기 전용 |
 | `ontology_find` | type_slug, q?·state?·limit?·offset? | GET /ontology/objects | 받은 한 타입의 객체 — 사라진 것도 `active:false` 로 함께(지우지 않는다) |
-| `ontology_object` | type_slug, key | GET /ontology/objects/{t}/{k} | 객체 하나 — 칸 · 상태 · 합쳐진 곳 · 옛 식별자 · 선. 옛 식별자로 물으면 `renamed_to` |
+| `ontology_object` | type_slug, key | GET /ontology/objects/{t}/{k} | 객체 하나 — 칸 · 상태 · 합쳐진 곳 · 옛 식별자 · 선. 옛 식별자로 물으면 `renamed_to`. 끝이 리포트인 선은 읽을 수 있는 리포트만(`scope`) |
 
 ## 해석 온톨로지 (cae — 후처리 꾸러미)
 

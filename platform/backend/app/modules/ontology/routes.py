@@ -3,7 +3,8 @@
 여기 있는 쓰기는 모두 **우리 것**(개발 개정 · 별칭 · 수신 실행)에만 닿는다.
 
 권한 —
-  읽기            로그인한 누구나(과제·개정은 전사 공용 축이다)
+  읽기            로그인한 누구나(과제·개정은 전사 공용 축이다). ★단 그 안의 **리포트** 줄 · 수치(개정 줄의 리포트 id · 비교의
+                  최악값 · 심각도 · 케이스 수 · 객체 보기의 리포트 선)는 읽을 수 있는 리포트만(사용자 결정 11-11)
   과거 붙이기 계획  로그인한 누구나 — 단 **읽을 수 있는 리포트만**(소유 · 같은 소속, 시스템 관리자는 전부 — SRC-10)
   리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세). 확정 · 끊기 · 끊은 기록 지우기
   과거 붙이기 적용·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
@@ -48,6 +49,19 @@ def require_ontology() -> dict:
 router = APIRouter(tags=["ontology"], dependencies=[Depends(require_ontology)])
 
 
+def _report_scope(request: Request | None, user: User | None):
+    """리포트 줄을 거르는 술어 — 리포트 검색 · 상세와 **같은 술어**(소유 · 게이트웨이가 서명한 같은 소속, 두 벌로 두면 갈린다).
+    시스템 관리자는 `None`(전부). `user` 가 없으면 안쪽 호출(시험장 등)이라 거르지 않는다."""
+    if user is None or user.is_system_admin:
+        return None
+    aff = verified_affiliation(request.headers, user.email, settings.heax_gateway_secret) if request is not None else ""
+    return rsvc._readable_scope(user.id, aff)
+
+
+def _scope_label(scope) -> str:
+    return "all" if scope is None else "readable"
+
+
 # ── 과제 거울 ──────────────────────────────────────────────────────────────
 
 @router.get("/ontology/tasks")
@@ -85,34 +99,41 @@ async def list_tasks(
 @router.get("/ontology/tasks/{task_key:path}/compare")
 async def compare_revisions(
     task_key: str,
-    _user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """한 과제의 개정을 **나란히** — 판마다 최악값·심각도·케이스 수와 앞 판 대비 변화.
 
     숫자는 리포트에 **이미 승격된 칸**을 그대로 쓴다(다시 계산하지 않는다 — 같은 값을 두
     곳에서 계산하면 반드시 갈린다). 안 잰 것은 **`null` 이고 0 이 아니다.**
+    ★리포트 줄 · 수치는 **읽을 수 있는 리포트만**으로 센다(소유 · 같은 소속, 시스템 관리자는 전부 — 사용자 결정 11-11).
+    판은 다 보인다. `scope`(all · readable)가 어느 쪽인지 말한다.
     """
-    return ok(await svc.compare(db, task_key))
+    scope = _report_scope(request, user)
+    return ok({**await svc.compare(db, task_key, scope=scope), "scope": _scope_label(scope)})
 
 
 @router.get("/ontology/tasks/{task_key:path}/revisions")
 async def task_revisions(
     task_key: str,
-    _user: User = Depends(get_current_user),
+    request: Request,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """한 과제의 개정 줄 — `rev_seq` 순, 각 판에 달린 리포트와 앞 판.
 
     ★모르는 과제와 '개정 없음' 을 가른다(KR-07) — `task_found:false` · reason `unknown_task` 면
     정본에 그 과제가 없다는 뜻이다(개정이 0 인 것과 다르다). 단 개정이 있으면 그 자체로 '아는' 과제다
-    (개정은 거울에 없는 자유 문자열 key 에도 붙는다)."""
-    revs = await svc.history(db, task_key)
+    (개정은 거울에 없는 자유 문자열 key 에도 붙는다). 판마다 리포트는 **읽을 수 있는 것만** 보인다(사용자 결정 11-11 — `scope`)."""
+    scope = _report_scope(request, user)
+    revs = await svc.history(db, task_key, scope=scope)
+    label = _scope_label(scope)
     if revs:
-        return ok({"task": task_key, "task_found": True, "revisions": revs})
+        return ok({"task": task_key, "task_found": True, "revisions": revs, "scope": label})
     if await svc.task_exists(db, task_key):
-        return ok({"task": task_key, "task_found": True, "revisions": []})
-    return ok({"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [],
+        return ok({"task": task_key, "task_found": True, "revisions": [], "scope": label})
+    return ok({"task": task_key, "task_found": False, "reason": "unknown_task", "revisions": [], "scope": label,
                "hint": "list_tasks 로 정본 과제명을 먼저 찾으라 — 과제코드로도 검색된다(matched_by)"})
 
 
@@ -250,12 +271,9 @@ async def plan_links(
     같은 술어) 들고, 수도 그것으로 센다 — 리포트 수치가 새지 않게(일반 보기에서 `cae_*` 를 뺀 10-31 결정과 같은 까닭, 사용자
     결정 11-10). 시스템 관리자는 전부다. `scope` 가 어느 쪽인지 말한다(`all` · `readable`). 적용(POST …/apply)은 관리자 그대로다.
     """
-    scope = None
-    if not user.is_system_admin:
-        aff = verified_affiliation(request.headers, user.email, settings.heax_gateway_secret)
-        scope = rsvc._readable_scope(user.id, aff)      # 리포트 검색 · 상세와 같은 술어 — 두 벌로 두면 갈린다
+    scope = _report_scope(request, user)            # 리포트 검색 · 상세와 같은 술어 — 두 벌로 두면 갈린다
     got = await svc.plan_task_links(db, limit=limit, scope=scope)
-    return ok({"scope": "all" if scope is None else "readable", **got})
+    return ok({"scope": _scope_label(scope), **got})
 
 
 # ── 과거 붙이기 적용 · 별칭 · 수신 (관리자) ───────────────────────────────
@@ -563,10 +581,15 @@ def _obj_out(r: OntoObject, *, full: bool = False) -> dict:
 
 
 @router.get("/ontology/objects/{type_slug}/{key:path}")
-async def ontology_object(type_slug: str, key: str,
+async def ontology_object(type_slug: str, key: str, request: Request = None,
                           _user: User = Depends(get_current_user),
                           db: AsyncSession = Depends(get_db)):
-    """객체 하나 — 칸 · 상태 · 합쳐진 곳 · 옛 식별자 · 나가는/들어오는 선(지금 이어진 것)."""
+    """객체 하나 — 칸 · 상태 · 합쳐진 곳 · 옛 식별자 · 나가는/들어오는 선(지금 이어진 것).
+
+    ★끝이 리포트인 선(개정에 달린 리포트)은 **읽을 수 있는 리포트만** 보인다(사용자 결정 11-11 — 개정 비교 · 줄과 같은
+    술어, 시스템 관리자는 전부). `scope`(all · readable)가 어느 쪽인지 말한다.
+    """
+    scope = _report_scope(request, _user)
     obj = (await db.execute(select(OntoObject).where(
         OntoObject.type_slug == type_slug, OntoObject.key == key,
         OntoObject.report_id.is_(None)))).scalar_one_or_none()
@@ -582,6 +605,12 @@ async def ontology_object(type_slug: str, key: str,
     in_rows = (await db.execute(select(OntoRelation).where(
         OntoRelation.dst_type.in_([type_slug, ""]), OntoRelation.dst_key == key, OntoRelation.report_id.is_(None),
         OntoRelation.deleted.is_(False)).order_by(OntoRelation.relation, OntoRelation.src_key))).scalars().all()
+    if scope is not None:
+        reps = [r.src_key for r in in_rows if r.src_type == svc.TYPE_REPORT] + \
+               [r.dst_key for r in out_rows if r.dst_type == svc.TYPE_REPORT]
+        seen = await svc.visible_reports(db, reps, scope)
+        in_rows = [r for r in in_rows if r.src_type != svc.TYPE_REPORT or r.src_key in seen]
+        out_rows = [r for r in out_rows if r.dst_type != svc.TYPE_REPORT or r.dst_key in seen]
     labels = await _labels(db, [(r.dst_type, r.dst_key) for r in out_rows] + [(r.src_type, r.src_key) for r in in_rows])
     previous = (await db.execute(select(OntoPreviousKey.old_key).where(
         OntoPreviousKey.type_slug == type_slug, OntoPreviousKey.key == key)
@@ -597,7 +626,7 @@ async def ontology_object(type_slug: str, key: str,
     return ok({"object": _obj_out(obj, full=True), "merged_into_now": merged,
                "out": [edge(r, r.dst_type, r.dst_key) for r in out_rows],
                "in": [edge(r, r.src_type, r.src_key) for r in in_rows],
-               "previous": list(previous)})
+               "previous": list(previous), "scope": _scope_label(scope)})
 
 
 async def _labels(db, ends: list[tuple[str, str]]) -> dict[tuple[str, str], str]:

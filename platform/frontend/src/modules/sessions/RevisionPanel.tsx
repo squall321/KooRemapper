@@ -284,7 +284,10 @@ function Chain({ taskKey, here }: { taskKey: string; here: string }) {
   if (line.isLoading || !line.data || line.data.revisions.length === 0) return null
   return (
     <div className="space-y-1">
-      <div className="text-muted">이 과제의 개정 줄 — 판끼리 견준다</div>
+      <div className="text-muted">
+        이 과제의 개정 줄 — 판끼리 견준다
+        {line.data.scope === 'readable' && <span> · 읽을 수 있는 리포트만 센다</span>}
+      </div>
       <div className="overflow-x-auto">
         <table className="text-xs">
           <thead className="text-muted">
