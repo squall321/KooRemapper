@@ -93,7 +93,8 @@
 
 ## 다음 판으로 미룬 것(11-08 사용자 결정 — 운영 판에도 있는 기존 결함)
 - ★(11-11 StepForge 권고) 인클루드 닫힘을 펼치는 연산(apply_carryover_plan 등)은 끌어온 파일을 열기 전에 크기를 본다 — 474 바이트 주 덱이 33.8 GB
-  희소 파일을 끌어온 실측이 있다(StepForge 는 닫힘 바이트 × 9 를 남은 메모리와 견줘 `deck_too_large` 로 거절). 이 박스는 earlyoom 이 남을 죽인다.
+  희소 파일을 끌어온 실측이 있다(StepForge 는 닫힘 바이트 × 9 를 남은 메모리와 견줘 `deck_too_large` 로 거절 — 줄로 가르는 리더가 바이트의
+  6~8배를 쓴다는 실측, 그쪽 `docs/context-notes.md` D-684 「큰 덱 크기 관문」). 이 박스는 earlyoom 이 남을 죽인다.
 - ★(마지막 검토가 새로 짚은 것 — 물성을 조용히 바꾼다, 먼저 할 것) unfold 가 요소를 rc 0 으로 버린다(`examples/foldable_display/test_small_bent.k`
   100 → 53 · `examples/wave/wave_bent.k` 250 → 238) · tetremesh 가 같은 EID 의 솔리드를 셸로 덮어 잃고 8절점 셸을 4절점으로 · `_THICKNESS` 값을 버리고
   i10 입력을 8칸으로 쓴다 · extract-parts 가 `LONG=Y` 덱을 못 읽는다 · id_floor 의 elem_start 가 int 범위를 넘는다(2147483648).
