@@ -134,10 +134,12 @@ class _Pool:
     ours: dict[str, str] = field(default_factory=dict)                 # 우리 별칭 → 코어 key(거울에 살아 있는 것만)
     names: list[tuple[str, str, str]] = field(default_factory=list)    # (코어 key, 정규화 글, 어디서) — 후보용
     labels: dict[str, str] = field(default_factory=dict)               # 살아 있는 코어 key → 이름
+    quiet: set[str] = field(default_factory=set)                       # 그만 씀(deprecated) — 정확히 맞으면 잇지만 후보로는 안 낸다
 
 
 async def _pool(db, dst_type: str) -> _Pool:
-    pool, quiet = _Pool(), set()
+    pool = _Pool()
+    quiet = pool.quiet
     rows = (await db.execute(select(OntoObject).where(
         OntoObject.type_slug == dst_type, OntoObject.report_id.is_(None), OntoObject.source == SOURCE_HUB,
         OntoObject.deleted.is_(False)))).scalars().all()
@@ -174,7 +176,8 @@ def match(pool: _Pool, text: Any) -> dict:
     if len(hits) == 1:
         (key, how), = hits.items()
         return {"verdict": "rule", "key": key, "matched_by": how, "text": t, "options": []}
-    best: dict[str, tuple[int, int, str]] = {k: (0, 0, _WHY_MANY) for k in hits}
+    # 그만 씀은 여기서도 뺀다 — 후보는 새로 고르는 목록이다(10-30 결정 · 검토 11-11 P3). 여럿 맞음이라 규칙 선은 아니다.
+    best: dict[str, tuple[int, int, str]] = {k: (0, 0, _WHY_MANY) for k in hits if k not in pool.quiet}
     n = normalize(t)
     for key, name, how in pool.names:
         if name == n:

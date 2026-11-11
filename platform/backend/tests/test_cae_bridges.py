@@ -52,7 +52,7 @@ MIRROR = [
     ("failure_mode", "cbt:fm-motor", "Motor", "active", False, None),
     ("analysis_method", "cbt:am-drop", "낙하 해석", "active", False, None),
 ]
-EXTRA = [("part", "cbt:geom2")]           # 시험 도중 넣는 행
+EXTRA = [("part", "cbt:geom2"), ("part", "cbt:frame-live"), ("part", "cbt:frame-old")]     # 시험 도중 넣는 행
 ALIASES = [("part", "Bond\\Bond", "cbt:bond"), ("analysis_method", "drop_all_angle", "cbt:am-drop")]
 PREVIOUS = [("part", "Front\\Wall", "cbt:wall")]
 
@@ -213,6 +213,18 @@ def test_candidates_are_capped_with_the_rest_counted():
     p = _pool(objs={f"Q{i}": f"Frame{i}" for i in range(8)})
     got = br.match(p, "frame")
     assert len(got["options"]) == br.CANDIDATES_PER_OBJECT and got["more"] == 8 - br.CANDIDATES_PER_OBJECT
+
+
+@ON_SESSION_LOOP
+async def test_a_deprecated_object_is_never_offered_as_a_candidate(db, mirror):
+    """그만 씀(deprecated)은 새로 고르는 목록에 안 낸다 — 글자 그대로 둘이 맞아 후보가 된 자리(여럿 맞음)에서도(검토 11-11 P3).
+    둘이 맞았으니 규칙 선은 아니고, 후보에는 살아 있는 것만 남는다."""
+    db.add_all([OntoObject(type_slug="part", key="cbt:frame-live", label="CBT Frame", status="active", source=SOURCE_HUB),
+                OntoObject(type_slug="part", key="cbt:frame-old", label="CBT Frame", status="deprecated", source=SOURCE_HUB)])
+    await db.commit()
+    got = br.match(await br._pool(db, "part"), "CBT Frame")
+    assert got["verdict"] == "candidates" and "key" not in got
+    assert [o["key"] for o in got["options"]] == ["cbt:frame-live"], got["options"]
 
 
 def test_the_code_names_one_property_per_bridge_and_the_vocabulary_has_it():
