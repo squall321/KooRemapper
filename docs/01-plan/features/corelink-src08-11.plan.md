@@ -49,7 +49,8 @@ cae00 운영의 11-09 제안서 「플랫폼 데이터 온톨로지화 · 코어
   커밋마다 쓸었다(MCP `plan_task_links` · `ontology_sync_state` · `ingest_report` 설명, TOOLS.md, 라우트 머리말, 스모크 값 항).
   매뉴얼 · 카탈로그에는 이 셋을 말하는 줄이 없었다. 적대적 검토 둘(11-11) — 아래 결정 기록.
 - [ ] 검토 고침 라운드(11-11) — SRC-08 몫 · SRC-09 ~ 11 몫(갈래 둘) · 다시 검토 · 공통 maps_to 블록(StepForge 답 대기)
-- [ ] (보류 풀린 뒤) main · push · 배포 · 포털에 알림
+- [ ] (보류 풀린 뒤) main · push · 배포 · 포털에 알림 — ★11-12 포털 부탁으로 **main(bc022d9) · Drive(dist-20261108-234149Z) 동결**:
+  cae00 이 이번 update-all(KooRemapper 는 안 바뀐다는 글)을 끝냈다고 포털이 알려 올 때까지 main 에는 문서 커밋도 안 올린다. 가지 작업은 된다.
 
 ## 포털 · 계약에 알릴 것 (SRC-08)
 - 관계 셋 — `maps_to`(cae_part → part · 다대일 · StepForge part_role → part 와 같은 이름 — 한 질의로 두 앱) · `indicates`(cae_finding →
