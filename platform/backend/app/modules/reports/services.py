@@ -477,9 +477,9 @@ async def update_report_meta(
         report.eng_meta = cur or None
     if kfile_id is not None:
         report.source_kfile_id = (await _resolve_session_kfile(db, report.session_id, kfile_id)).id
-    if any(v is not None for _, (_, v) in field_map.items()):
-        # 과제·개정이 손으로 바뀌었다 — 선을 다시 본다. 사람이 개정 화면에서 확정한 것은
-        # 그대로 두고(manual 보호), `eng_meta` 만 고친 경우에 선이 뒤처지지 않게 한다.
+    if project is not None or dev_rev is not None:
+        # 과제·개정이 손으로 바뀌었다 — 기계가 이은 선만 따라간다. 사람이 이 리포트를 개정 화면에서 확정한 선 · 사람이 끊은
+        # 리포트는 set_revision 이 거절해 그대로 둔다(kept_manual · unlinked). 설계안 · DOE 만 고치면 선을 보지 않는다(검토 R3).
         await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)

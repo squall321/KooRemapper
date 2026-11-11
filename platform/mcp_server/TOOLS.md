@@ -77,7 +77,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `report_image` | report_id, case_key?·path?·role | (media + 파일 다운로드) | ★결과 이미지를 **그림으로** 돌려준다 — 모델이 실제로 보고 판단한다. 그림 앞에 출처 한 줄(report·case·file_id·sha256·path) |
 | `report_compare` | report_id, case_keys[], metrics?·max_images? | (cases + media) | ★케이스 여러 개를 **지표 표 + 이미지**로 한 번에 비교 — 리포트 쓸 때 쓴다. 장수 상한, 넘으면 **뺀 수를 말한다**. 이미지마다 출처 한 줄(report·case·file_id·sha256·path) |
 | `report_angle_stats` | report_id, metric?·part_id?·category?/angle_name?/near_lon+near_lat+tol_deg?·top_parts? | GET /reports/{id}/angle-stats | 특정 각도군 표준 통계(분포 n/mean/std/CoV/백분위/IQR/최악 + 부품별 위험·민감도). available_metrics 자동 감지 |
-| `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제). 사람이 개정 연결을 끊은 리포트는 메타만 저장하고 **다시 잇지 않는다** |
+| `update_report_meta` | report_id, label?·project?·dev_rev?·variation?·doe?·focus?·kfile_id? | PATCH /reports/{id} | 과제명·rev·초점·K파일 링크 수동 설정(""=삭제). 과제·rev 를 고치면 **기계가 이은** 개정 연결만 따라간다 — 사람이 손으로 확정한 연결 · 사람이 끊은 리포트는 그대로(메타만 저장), 설계안 · DOE 만 고치면 연결을 보지 않는다 |
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
 | `attach_render` | report_id, path(결과 폴더 또는 zip) | POST /reports/{id}/renders | SceneForge 렌더 결과(C-11)를 리포트 미디어에 **더한다** — render_id 멱등 · sha256 · 크기 전부 맞아야(전부 아니면 전무) · 실패한 렌더는 기록만 · 소유자만 |
 | `attach_cad` | report_id, path(fe_cad 묶음 폴더 또는 zip) | POST /reports/{id}/cad | StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 리포트 하나에 하나 · 같은 묶음 멱등 · 다른 열쇠면 갈아 끼움 · sha256 · 크기 · 열쇠 · 가중치 배열 · glb 정점 · 파트 겹침 전부 맞아야(전부 아니면 전무) · 소유자만. 붙이면 맵에서 「형상 보기」 |

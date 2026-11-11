@@ -637,6 +637,42 @@ async def test_a_metadata_edit_does_not_relink_an_unlinked_report(db):
         await _drop(db, u, s, keys=[task, other])
 
 
+async def test_a_metadata_edit_moves_only_a_machine_link_and_only_on_project_or_stage(db, monkeypatch):
+    """검토 R3 — 수동 메타 고침은 과제 · 개발단계가 바뀔 때만 선을 보고, 그때도 **기계가 이은** 선만 따라간다. 사람이 손으로
+    확정한 선은 그대로다. 설계안 · DOE 만 고치면 선을 아예 보지 않는다."""
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task, other = f"AL-{t}", f"AL2-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await _task(db, other)
+        await db.commit()
+        human = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.set_revision(db, human, task_key=task, code="pv1", decided_by="kim@x", source="manual"))["ok"]
+        machine = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, machine))["ok"]
+        await db.commit()
+
+        calls = []
+        real = onto.link_from_eng_meta
+
+        async def counted(sdb, rep):
+            calls.append(rep.id)
+            return await real(sdb, rep)
+
+        monkeypatch.setattr(onto, "link_from_eng_meta", counted)
+        human = await rsvc.update_report_meta(db, human, variation="A", doe="S1:c3")
+        assert calls == [], "설계안 · DOE 만 고쳤는데 선을 다시 봤다"
+        assert await _linked(db, human.id) == [f"{task}@pv1"]
+        human = await rsvc.update_report_meta(db, human, project=other)
+        assert await _linked(db, human.id) == [f"{task}@pv1"], "메타 고침이 사람이 확정한 판에서 리포트를 옮겼다"
+        machine = await rsvc.update_report_meta(db, machine, project=other)
+        assert await _linked(db, machine.id) == [f"{other}@dv1"], "기계가 이은 선이 바뀐 과제를 따라가지 않았다"
+    finally:
+        await _drop(db, u, s, keys=[task, other])
+
+
 async def test_a_receive_leaves_an_unlinked_report_unlinked_and_counts_it(db, hub_on, monkeypatch):
     t = _tag()
     task, code = f"AL-{t}", f"ALC-{t}"

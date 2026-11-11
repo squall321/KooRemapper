@@ -979,8 +979,9 @@ async def update_report_meta(
     """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
     DOE·초점(focus 예 camera-detail)·원본 K파일 링크를 수동 설정한다(부분 갱신).
     설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제.
-    과제·개발단계를 고치면 개정 연결도 따라가지만, ★사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는 메타만 저장하고
-    **다시 잇지 않는다** — 다시 잇게 하려면 `set_report_revision` 또는 `clear_report_unlink`."""
+    과제·개발단계를 고치면 **기계가 이은** 개정 연결만 따라간다 — ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고,
+    사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는 메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은
+    건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는 `clear_report_unlink`."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
