@@ -131,6 +131,10 @@ async def main():
                 d2 = (r2.json().get("data") or {}) if r2.status_code < 400 else {}
                 srid, ssid = d2.get("report_id"), d2.get("session_id")
             chk("새 판 sphere 리포트 반입", bool(srid), r2.text[:300])
+        tl = d.get("task_links") or {}
+        chk("반입 응답에 과제 잇기 결과가 실린다(SRC-09 — 이은 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 error)",
+            tl.get("scope") == "reports" and ("error" in tl or "skipped" in tl
+                                               or {"linked", "candidates", "unmatched", "reports_without_a_name"} <= set(tl)), tl)
         med = (d.get("media") or {})
         chk("미디어가 리포트에 붙었다 (이미지 8 · 영상 8)",
             med.get("n_images") == 8 and med.get("n_videos") == 8, med)
@@ -257,6 +261,10 @@ async def main():
                                           {"report_id": rid, "task_key": "SMOKE-NOPE", "code": "dv"})
                   chk("형식이 아닌 개정 코드는 **거절된다**(dv/pv 는 차수 필수)",
                       bool(bad.isError), str(bad.content)[:200])
+                  # 11-11 — 끊은 기록 지우기 도구가 길까지 닿는다(이 리포트는 끊은 적이 없다 — 없다고 거절해야 한다)
+                  nocut = await s.call_tool("clear_report_unlink", {"report_id": rid})
+                  chk("clear_report_unlink — 끊은 기록이 없으면 **거절한다**(조용히 성공하지 않는다)",
+                      bool(nocut.isError) and "끊은 기록이 없다" in str(nocut.content), str(nocut.content)[:200])
                   # ── 받은 것 보기(10-30 — SP 받는 쪽 전부) ──────────────────
                   ot = S._data(await s.call_tool("ontology_types", {}))
                   chk("ontology_types — 타입마다 정의와 상태별 건수",
@@ -284,11 +292,21 @@ async def main():
                   st = S._data(await s.call_tool("ontology_sync_state", {}))
                   chk("ontology_sync_state — 마지막 실행 · 정의 판 · 상태별 건수 · 옮길 합침 수를 함께 준다",
                       isinstance(st, dict) and {"last_run", "catalog", "object_states", "merged_waiting"} <= set(st), st)
+                  # SRC-11 — 멈춘 타입은 줄마다 표시 · 맨 위 problems(세기만 하면 칸이 없어도 초록이다 — 값으로 본다)
+                  chk("ontology_sync_state — 타입 줄마다 stopped, 맨 위에 problems · stopped_types · receive_types",
+                      isinstance(st, dict) and isinstance(st.get("problems"), list)
+                      and isinstance(st.get("stopped_types"), list) and "receive_types" in st
+                      and all(isinstance(t.get("stopped"), bool) for t in st.get("types") or [])
+                      and set(st["stopped_types"]) == {t["type_slug"] for t in st.get("types") or [] if t["stopped"]},
+                      {k: st.get(k) for k in ("problems", "stopped_types", "receive_types")} if isinstance(st, dict) else st)
                   pl = S._data(await s.call_tool("plan_task_links", {}))
                   chk("과거 붙이기 계획이 **붙는 것·후보·못 붙인 것**을 갈라 준다",
                       isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
-                      and {"links", "proposal", "unmatched", "reports_without_a_name"}
+                      and {"links", "proposal", "unmatched", "reports_without_a_name", "unlinked"}
                       <= set(pl["counts"]), pl)
+                  # SRC-10 — 누가 불렀는지에 따라 범위를 말한다(일반 사용자는 읽을 수 있는 리포트만)
+                  chk("plan_task_links — 범위(scope: all · readable)를 말한다",
+                      isinstance(pl, dict) and pl.get("scope") in ("all", "readable"), pl.get("scope") if isinstance(pl, dict) else pl)
 
                 # ── 해석 온톨로지(cae, 10-31) — 세기만 하면 안 부른 새 도구도 초록이다. 값으로 본다 ─────────
                 #   이 리포트는 꾸러미 없이 올렸으니 「안 실었다」 와 붙이는 길을 말해야 한다(빈 답이 아니라).

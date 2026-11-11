@@ -4,12 +4,13 @@
 
 권한 —
   읽기            로그인한 누구나(과제·개정은 전사 공용 축이다)
-  리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세)
-  과거 붙이기·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
+  과거 붙이기 계획  로그인한 누구나 — 단 **읽을 수 있는 리포트만**(소유 · 같은 소속, 시스템 관리자는 전부 — SRC-10)
+  리포트의 개정   그 리포트 **소유자**(리포트를 바꾸는 일이다 — `_require_owned_report` 와 같은 자세). 확정 · 끊기 · 끊은 기록 지우기
+  과거 붙이기 적용·별칭·수신  **시스템 관리자**(전사 데이터를 움직인다)
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +21,7 @@ from app.models import (OntoAlias, OntoCatalog, OntoObject, OntoPreviousKey, Ont
                         OntoRelationType, OntoSyncRun, OntoSyncState, OntoType, User)
 from app.modules.ontology import services as svc
 from app.modules.reports import services as rsvc
+from app.shared.affiliation import verified_affiliation
 from app.shared.auth import get_current_user, require_system_admin
 from app.shared.features import ontology_state
 from app.shared.responses import ok
@@ -147,6 +149,8 @@ async def get_report_revision(
         "resolved_task": resolved or None,
         "resolved_how": how or None,
         "linked": linked,
+        # 사람이 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다({by, at, was})
+        "unlinked": (await svc.unlinked_reports(db, [rep.id])).get(rep.id),
         "task_state": await svc.task_state(db, about) if about else None,
         "mismatch": await svc.mismatch(db, rep),
         "candidates": await svc.candidates(db, rep, task_key=task_key or resolved or ""),
@@ -162,7 +166,7 @@ async def set_report_revision(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`)."""
+    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`). 끊은 기록이 있으면 지운다(11-11)."""
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
@@ -186,31 +190,70 @@ async def unlink_report_revision(
 
     확정하는 기능에 되돌리는 길이 없으면 반쪽이다. 객체를 지우지 않는 이유는 그 판에 다른
     리포트가 달려 있거나 `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
+    ★끊은 사람 · 때를 기록한다(사용자 결정 11-11) — 자동 잇기(받기 뒤 · 반입 뒤 · 관리자 일괄 적용)와 수동 메타 고침이 이
+    리포트를 다시 잇지 않는다. 손으로 다시 잇거나(PUT) 기록을 지우면(DELETE …/revision/unlinked) 풀린다.
     """
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
-    got = await svc.unlink_revision(db, rep)
+    got = await svc.unlink_revision(db, rep, by=user.email)
     if not got.get("ok"):
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
-    return ok(got, message="개정 연결을 끊었습니다.")
+    return ok(got, message="개정 연결을 끊었습니다 — 끊은 기록이 남아 자동 잇기가 다시 잇지 않습니다.")
 
 
-# ── 과거 붙이기 · 별칭 · 수신 (관리자) ────────────────────────────────────
+@router.delete("/reports/{report_id}/revision/unlinked")
+async def clear_report_unlink(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """사람이 끊은 기록을 **지운다**(11-11) — 그 리포트를 자동 잇기가 다시 본다. 소유자만(끊기 · 잇기와 같은 자세).
+
+    지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다(`task_links` — 붙는 것이면 지금 이어진다, 아니면 수만 센다).
+    기록이 없으면 409 — 조용히 성공하지 않는다.
+    """
+    rep = await rsvc.get_owned_report(db, user.id, report_id)
+    if rep is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
+    got = await svc.clear_unlink(db, rep)
+    if not got.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"{got.get('error')}: {got.get('detail') or ''}")
+    await db.commit()
+    got["task_links"] = await svc.link_report(db, rep)
+    return ok(got, message="끊은 기록을 지웠습니다.")
+
+
+# ── 과거 붙이기 계획 (읽기 — 읽을 수 있는 리포트만) ──────────────────────
+
+@router.get("/ontology/task-links")
+async def plan_links(
+    request: Request,
+    limit: int | None = Query(default=None, ge=1, le=2000),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """★**계획이다 — 아무것도 쓰지 않는다.** 붙는 것·후보·못 붙인 것을 갈라서 준다.
+
+    로그인한 누구나 읽는다(SRC-10, 11-10). ★일반 사용자에게는 **읽을 수 있는 리포트만**(소유 · 같은 소속 — 리포트 검색과
+    같은 술어) 들고, 수도 그것으로 센다 — 리포트 수치가 새지 않게(일반 보기에서 `cae_*` 를 뺀 10-31 결정과 같은 까닭, 사용자
+    결정 11-10). 시스템 관리자는 전부다. `scope` 가 어느 쪽인지 말한다(`all` · `readable`). 적용(POST …/apply)은 관리자 그대로다.
+    """
+    scope = None
+    if not user.is_system_admin:
+        aff = verified_affiliation(request.headers, user.email, settings.heax_gateway_secret)
+        scope = rsvc._readable_scope(user.id, aff)      # 리포트 검색 · 상세와 같은 술어 — 두 벌로 두면 갈린다
+    got = await svc.plan_task_links(db, limit=limit, scope=scope)
+    return ok({"scope": "all" if scope is None else "readable", **got})
+
+
+# ── 과거 붙이기 적용 · 별칭 · 수신 (관리자) ───────────────────────────────
 
 admin = APIRouter(tags=["ontology"],
                   dependencies=[Depends(require_ontology), Depends(require_system_admin)])
-
-
-@admin.get("/ontology/task-links")
-async def plan_links(
-    limit: int | None = Query(default=None, ge=1, le=2000),
-    db: AsyncSession = Depends(get_db),
-):
-    """★**계획이다 — 아무것도 쓰지 않는다.** 붙는 것·후보·못 붙인 것을 갈라서 준다."""
-    return ok(await svc.plan_task_links(db, limit=limit))
 
 
 class ApplyLinks(BaseModel):
@@ -276,9 +319,14 @@ async def drop_alias(
 
 
 def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
+    counts = dict(r.counts or {})
+    if not who:
+        # 과제 잇기 수(SRC-09)는 **리포트 전부**를 센 것이다 — 관리자에게만 싣는다(리포트 수치가 새지 않게, 일반 보기에서
+        # cae_* 를 뺀 10-31 결정 · SRC-10 의 「읽을 수 있는 리포트만」 과 같은 까닭). 일반 사용자는 plan_task_links 로 자기 것을 본다.
+        counts.pop("task_links", None)
     out = {"id": r.id, "started_at": r.started_at, "finished_at": r.finished_at, "mode": r.mode,
            "allow_shrink": r.allow_shrink, "trigger": r.trigger, "result": r.result, "revision": r.revision,
-           "counts": r.counts or {}, "problems": r.problems or [], "notes": r.notes or [], "error": r.error}
+           "counts": counts, "problems": r.problems or [], "notes": r.notes or [], "error": r.error}
     if who:
         out["requested_by"] = r.requested_by     # 누른 사람은 관리 화면에만 — 읽기 창구는 누구나 본다
     return out
@@ -308,13 +356,18 @@ async def _object_states(db) -> dict[str, dict[str, int]]:
 
 @router.get("/ontology/sync")
 async def sync_state(
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """받기 상태 — 타입별 시계 · 마지막 실행(결과 셋과 「확인 필요」 사유) · 정의 판 · 타입별 건수.
 
     읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
-    수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
+    수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 적용 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
+    마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
+
+    ★멈춘 타입(SRC-11) — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖인데 거울에 남은 타입은 타입 줄에 `stopped`
+    (+ `stopped_why`)를 달고 `problems` 에 한 줄 싣는다. 타입 줄의 `last_status` 는 마지막으로 받았을 때의 기록이라 그대로 둔다 —
+    11-09 에 32 타입이 10-28 에 멈춘 채 `ok` 로 보였다. `problems` 는 지금 상태에서 본 것이고 `last_run.problems` 는 그 실행의 것이다.
     """
     from app.worker import plm_sync
     rows = (await db.execute(select(OntoSyncState)
@@ -323,22 +376,52 @@ async def sync_state(
     counts = {slug: c["total"] for slug, c in states.items()}
     last = (await db.execute(select(OntoSyncRun).order_by(OntoSyncRun.id.desc()).limit(1))).scalar_one_or_none()
     cat = (await db.execute(select(OntoCatalog).order_by(OntoCatalog.id.desc()).limit(1))).scalar_one_or_none()
+    opened = ({str(t.get("slug")) for t in ((cat.body or {}).get("types") or []) if t.get("slug")}
+              if cat else None)
+    stopped = plm_sync.stopped_types([r.type_slug for r in rows], opened=opened)
     return ok({
         "enabled": plm_sync.enabled(),
+        "receive_types": plm_sync.wanted_types(),
         "types": [{"type_slug": r.type_slug, "objects_as_of": r.objects_as_of,
                    "relations_as_of": r.relations_as_of,
                    "catalog_revision": r.catalog_revision, "last_run_at": r.last_run_at,
                    "last_status": r.last_status, "last_error": r.last_error,
-                   "objects": counts.get(r.type_slug, 0)} for r in rows],
+                   "objects": counts.get(r.type_slug, 0),
+                   "stopped": r.type_slug in stopped, "stopped_why": stopped.get(r.type_slug)} for r in rows],
+        "stopped_types": sorted(stopped),
+        "problems": _stopped_problems(stopped, rows, cat),
         "objects_by_type": counts,
         "object_states": states,
-        "last_run": _run_out(last, who=False) if last else None,
+        "last_run": _run_out(last, who=user.is_system_admin) if last else None,
         "catalog": ({"revision": cat.revision, "received_at": cat.received_at,
                      "system": (cat.body or {}).get("system"),
                      "types": len((cat.body or {}).get("types") or [])} if cat else None),
         "full_every_days": settings.sp_core_full_every_days,
         "merged_waiting": len(await svc.merged_tasks(db)),
     })
+
+
+def _stopped_problems(stopped: dict[str, str], rows: list[OntoSyncState], cat: OntoCatalog | None) -> list[str]:
+    """멈춘 타입을 까닭별로 한 줄씩 — 이름(앞 12개) · 마지막으로 받은 때 · 고칠 곳."""
+    at = {r.type_slug: r.last_run_at for r in rows}
+    out = []
+    for why, head, fix in (
+            ("not_in_list", f"받을 타입(KOORM_SP_CORE_TYPES={settings.sp_core_types or ''}) 밖이라 더 받지 않는다",
+             "받으려면 박스 설정 KOORM_SP_CORE_TYPES 에 넣는다(비우면 공개된 것 전부)"),
+            ("not_published", f"허브 카탈로그(판 {cat.revision if cat else '?'})에 없어 더 받지 않는다",
+             "허브가 공개를 거뒀거나 바꿨다 — 허브 관리자에게 확인한다")):
+        slugs = sorted(s for s, w in stopped.items() if w == why)
+        if not slugs:
+            continue
+        names = " · ".join(slugs[:12]) + (f" 외 {len(slugs) - 12}개" if len(slugs) > 12 else "")
+        seen = sorted(a for a in (at.get(s) for s in slugs) if a is not None)
+        when = ""
+        if seen:
+            when = f" — 마지막으로 받은 때 {seen[0]:%Y-%m-%d}"
+            if seen[-1].date() != seen[0].date():
+                when += f" ~ {seen[-1]:%Y-%m-%d}"
+        out.append(f"멈춘 타입 {len(slugs)}개 — {head}(거울의 건수 · 상태는 그때 그대로다): {names}{when}. {fix}")
+    return out
 
 
 @admin.get("/ontology/sync/runs")

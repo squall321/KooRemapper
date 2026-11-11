@@ -43,6 +43,25 @@ def wanted_types() -> list[str] | None:
     return raw or None
 
 
+def stopped_types(slugs, *, opened: set[str] | None) -> dict[str, str]:
+    """거울에 있는데 **더 받지 않는** 타입 → 까닭(SRC-11). 받기는 받을 타입만 돌므로 나머지는 마지막으로 받은 그대로 멈춘다.
+
+      `not_in_list`    받을 타입(`KOORM_SP_CORE_TYPES`) 밖이다 — 넓히는 것은 박스 설정이다(포털 BOX-01)
+      `not_published`  받을 타입이 「공개된 것 전부」(빈 설정)인데 마지막 카탈로그(`opened`)에 없다 — 허브가 공개를 거뒀거나 바꿨다
+    ★11-09 실측 — 32 타입이 10-28 에 받은 그대로였는데 타입 줄의 상태는 그때의 `ok` 로 보였다. 상태 칸은 마지막 실행의 기록이라
+    고치지 않고, 이 표시를 따로 붙인다.
+    """
+    wanted = wanted_types()
+    out: dict[str, str] = {}
+    for slug in slugs:
+        if wanted is not None:
+            if slug not in wanted:
+                out[slug] = "not_in_list"
+        elif opened is not None and slug not in opened:
+            out[slug] = "not_published"
+    return out
+
+
 # 규칙 14 — 두 실행이 겹치지 않게(워커 주기와 관리자 버튼은 다른 프로세스다). 트랜잭션 advisory 잠금이라 커밋 ·
 # 실패 때 저절로 풀린다 — 세션 잠금은 풀에서 연결이 바뀌면 다른 연결로 풀려 남는다.
 LOCK_NAME = "dynaforge.sp_core_sync"
@@ -71,11 +90,33 @@ async def _close_run(run_id: int, got: dict) -> None:
         run.result = str(got.get("result") or "failed")
         run.revision = got.get("revision")
         run.counts = {"types": got.get("types") or {}, "relations": got.get("relations") or {},
-                      "skipped": got.get("skipped") or [], "reflected": got.get("reflected")}
+                      "skipped": got.get("skipped") or [], "reflected": got.get("reflected"),
+                      "task_links": got.get("task_links")}
         run.problems = list(got.get("problems") or [])
         run.notes = list(got.get("notes") or [])
         run.error = got.get("error")
         await db.commit()
+
+
+async def _link_tasks(db) -> dict:
+    """받은 것을 **커밋한 뒤에** 과제 잇기(붙는 것만 · 리포트 전부 — SRC-09). 깨져도 받은 것은 남고 `error` 로 돌려준다.
+
+    커밋이 받기 잠금(트랜잭션 잠금)을 풀었으므로 새 트랜잭션에서 다시 건다 — 잇기도 층 2 쓰기다(개정 · 리포트 선). 그새 다른
+    받기 · 합친 과제 옮기기가 쥐었으면 건너뛴다(다음 받기가 전부를 다시 본다).
+    """
+    from app.modules.ontology import services as onto
+    try:
+        if not await try_lock(db):
+            await db.rollback()
+            return {"scope": "all", "skipped": "busy",
+                    "detail": "다른 받기 · 합친 과제 옮기기가 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"}
+        got = await onto.auto_link_tasks(db)
+        await db.commit()
+        return got
+    except Exception as exc:                           # noqa: BLE001 — 잇기 결함이 받기를 무르게 하면 안 된다
+        await db.rollback()
+        logger.exception("plm task links failed")
+        return {"scope": "all", "error": f"{type(exc).__name__}: {exc}"[:500]}
 
 
 async def full_due(now: datetime | None = None) -> bool:
@@ -134,6 +175,14 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
                 logger.exception("plm sync failed")
                 got = {"ok": False, "result": "failed", "error": "exception",
                        "detail": f"{type(exc).__name__}: {exc}"}
+            # SRC-09 — 받은 것이 굳은 뒤(멈춘 실행도 받은 타입이 있으면) 과제 잇기. 결과는 실행 기록의 counts.task_links 에 남고,
+            # 깨지면 받은 것은 그대로 두고 「확인 필요」 로 알린다(층 2 반영 실패와 같은 자세).
+            if got.get("types"):
+                links = got["task_links"] = await _link_tasks(db)
+                if links.get("error"):
+                    got["problems"] = [*(got.get("problems") or []), f"과제 잇기 실패 — {links['error']}"]
+                    if got.get("result") == "ok":
+                        got["result"] = "needs_check"
             await _close_run(run_id, got)
             got["run_id"] = run_id
     except Exception as exc:                           # noqa: BLE001 — 잠금 · 기록을 못 열었다
@@ -147,4 +196,9 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
         logger.info("plm sync ok — 판 %s · %s", got.get("revision"), counts)
     else:
         logger.warning("plm sync %s — %s", got.get("result"), got.get("error") or got.get("problems"))
+    links = got.get("task_links") or {}
+    if "linked" in links:
+        logger.info("plm task links — 이음 %s · 후보 %s · 못 붙임 %s · 이름 없음 %s · 이미 %s · 사람 판 %s",
+                    links["linked"], links["candidates"], links["unmatched"], links["reports_without_a_name"],
+                    links["already"], links["kept_manual"])
     return got

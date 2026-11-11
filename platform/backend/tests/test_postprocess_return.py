@@ -356,6 +356,68 @@ async def test_a_ready_manifest_is_ingested_under_the_reserver(db, owner, slurm)
     assert not (settings.storage_dir / ".incoming" / f"{job.id}.part").exists(), "임시 파일이 남았다"
 
 
+async def _forget_task_links(db, *keys):
+    """과제 잇기 시험이 남긴 과제 · 개정을 치운다(리포트 선은 리포트를 지울 때 DB 트리거가 지운다 — 0019)."""
+    from app.models import OntoRelation
+    for k in keys:
+        await db.execute(delete(OntoRelation).where(OntoRelation.src_key.like(f"{k}@%")))
+        await db.execute(delete(OntoRelation).where(OntoRelation.dst_key.like(f"{k}@%")))
+        await db.execute(delete(OntoObject).where(OntoObject.key.like(f"{k}@%")))
+        await db.execute(delete(OntoObject).where(OntoObject.key == k))
+    await db.commit()
+
+
+@needs_sphere
+@_aio
+async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slurm):
+    """반입 뒤 과제 잇기(SRC-09) — 예약 인자의 과제(여기선 과제코드)가 정본 과제로 풀리면 이어지고 원장(`task_links`)에 남는다."""
+    from app.models import OntoRelation
+    u, s = owner
+    t = ulid.new().str[:8]
+    task, code = f"PP-{t}", f"PPC-{t}"
+    db.add(OntoObject(type_slug="plm_task", key=task, label=task, source="hub", properties={"task_code": code}))
+    await db.commit()
+    try:
+        raw = _SPHERE.read_bytes()
+        slurm.manifest, slurm.files[REPORT] = _manifest(raw), raw
+        job = await _reserved(db, u, s, project=code)
+        await _poll(db, job)
+        assert job.status == "succeeded", job.error_summary
+        links = job.external_ref["task_links"]
+        assert (links["scope"], links["reports"], links["linked"]) == ("reports", 1, 1), links
+        assert not [w for w in job.warnings or [] if "과제 잇기" in w]
+        rid = job.external_ref["report_ids"][0]
+        edges = (await db.execute(select(OntoRelation.dst_key).where(
+            OntoRelation.relation == "measured_at", OntoRelation.src_key == rid))).scalars().all()
+        assert edges == [f"{task}@dv1"], edges
+    finally:
+        await _forget_task_links(db, task, code)
+
+
+@needs_sphere
+@_aio
+async def test_a_broken_task_link_warns_and_the_job_still_succeeds(db, owner, slurm, monkeypatch):
+    from app.modules.ontology import services as onto
+
+    async def boom(_db, **_kw):
+        raise RuntimeError("잇기 결함")
+
+    monkeypatch.setattr(onto, "auto_link_tasks", boom)
+    u, s = owner
+    project = f"PPX-{ulid.new().str[:8]}"
+    try:
+        raw = _SPHERE.read_bytes()
+        slurm.manifest, slurm.files[REPORT] = _manifest(raw), raw
+        job = await _reserved(db, u, s, project=project)
+        await _poll(db, job)
+        assert job.status == "succeeded", job.error_summary
+        assert "잇기 결함" in job.external_ref["task_links"]["error"]
+        assert any("과제 잇기를 못 했다" in w and "리포트는 반입됐다" in w for w in job.warnings), job.warnings
+        assert await db.get(ImpactReport, job.external_ref["report_ids"][0]) is not None
+    finally:
+        await _forget_task_links(db, project)
+
+
 @needs_sphere
 @_aio
 async def test_a_report_without_a_height_takes_the_reserved_one(db, owner, slurm):

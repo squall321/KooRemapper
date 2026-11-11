@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, GitBranch, GitMerge, Info, Unlink } from 'lucide-react'
 
 import {
-  compareTaskRevisions, moveMergedTask, ontologyState, reportRevision, setReportRevision,
+  clearReportUnlink, compareTaskRevisions, moveMergedTask, ontologyState, reportRevision, setReportRevision,
   unlinkReportRevision, type RevisionCandidate, type TaskState,
 } from '@/shared/api/endpoints'
 import { Badge, Button, Input, Spinner } from '@/shared/ui/ui'
@@ -39,6 +39,17 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
 
   const drop = useMutation({
     mutationFn: () => unlinkReportRevision(reportId),
+    onSuccess: () => {
+      setErr(null)
+      qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
+      qc.invalidateQueries({ queryKey: ['task-revisions'] })
+    },
+    onError: (e) => setErr(errorMessage(e)),
+  })
+
+  // 사람이 끊은 기록 지우기(11-11) — 지우면 자동 잇기가 이 리포트를 다시 본다(서버가 바로 한 번 돈다)
+  const clear = useMutation({
+    mutationFn: () => clearReportUnlink(reportId),
     onSuccess: () => {
       setErr(null)
       qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
@@ -111,6 +122,20 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
           </Button>
         )}
       </div>
+
+      {/* 사람이 끊은 기록 — 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다. 다시 확정하거나 기록을 지우면 풀린다(11-11) */}
+      {!d.linked && d.unlinked && (
+        <div className="flex items-center gap-2 flex-wrap text-muted">
+          <Unlink size={13} />
+          <span>
+            {d.unlinked.by || '사람'} 이 끊었다{d.unlinked.at ? ` (${new Date(d.unlinked.at).toLocaleString()})` : ''} —
+            자동 잇기가 다시 잇지 않는다
+          </span>
+          <Button size="sm" variant="ghost" onClick={() => clear.mutate()} disabled={clear.isPending}>
+            {clear.isPending ? <Spinner /> : '자동 잇기 다시 허용'}
+          </Button>
+        </div>
+      )}
 
       {/* 과제의 허브 처지 — 합쳐짐은 알리고 관리자가 옮긴다(저절로 옮기지 않는다 — 사용자 결정 10-30) */}
       {d.task_state && <TaskStateNotice st={d.task_state} reportId={reportId} />}

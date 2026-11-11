@@ -211,6 +211,8 @@ export interface ReportRevisionOut {
   resolved_how: string | null
   /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
   linked: { key: string; task: string; code: string } | null
+  /** 사람이 연결을 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다 */
+  unlinked?: { by: string; at: string | null; was: string[] } | null
   task_state: TaskState | null
   /** 비어 있지 않으면 수동 메타와 이어진 개정이 **다르다**. 서버는 조용히 맞추지 않는다 —
    *  화면이 보여 주고 사람이 고른다. `renamed` · `merged` 는 잘못이 아니다(수동 메타가 옛 이름). */
@@ -243,6 +245,11 @@ export async function unlinkReportRevision(reportId: string): Promise<{ was: str
   const { data } = await api.delete(`/reports/${reportId}/revision`)
   return unwrap<{ was: string[]; detail: string }>(data)
 }
+/** 사람이 끊은 기록을 지운다 — 지운 뒤 그 리포트의 자동 잇기를 한 번 돈다(task_links) */
+export async function clearReportUnlink(reportId: string): Promise<{ was: string[]; detail: string; task_links?: Record<string, unknown> }> {
+  const { data } = await api.delete(`/reports/${reportId}/revision/unlinked`)
+  return unwrap<{ was: string[]; detail: string; task_links?: Record<string, unknown> }>(data)
+}
 
 // 허브 받기 · 받은 것 보기(SP 받는 쪽 — 키트 2026-11-03). **고치는 길은 없다**(정본은 허브) — 쓰는 것은 받기 실행과
 // 합친 과제 옮기기(우리 개정 · 별칭)뿐이고 둘 다 관리자다.
@@ -267,7 +274,11 @@ export interface OntologySyncOut {
   /** 허브 주소 · 토큰 · 간격이 다 있나(받기 자체가 켜졌나) */
   enabled: boolean
   types: { type_slug: string; objects_as_of: string | null; relations_as_of: string | null; last_run_at: string | null
-           last_status: string | null; last_error: string | null; objects: number }[]
+           last_status: string | null; last_error: string | null; objects: number
+           /** 멈춘 타입(SRC-11) — 받을 타입 밖(not_in_list)이거나 카탈로그에 없어(not_published) 더 받지 않는다 */
+           stopped?: boolean; stopped_why?: string | null }[]
+  /** 지금 상태에서 본 문제(멈춘 타입 등) — 마지막 실행의 problems 와 따로다 */
+  problems?: string[]
   object_states: Record<string, ObjectCounts>
   last_run: SyncRun | null
   catalog: { revision: string; received_at: string; system: string | null; types: number } | null

@@ -251,6 +251,29 @@ async def test_the_plan_separates_links_proposals_and_unmatched(db, tag):
         await _wipe(db, u, s, keys=[key])
 
 
+async def test_the_plan_reads_the_tasks_once_for_all_unresolved_strings(db, tag, monkeypatch):
+    """계획은 받기마다 전부를 본다(SRC-09 자동 잇기) — 못 푼 문자열마다 과제 전부를 다시 읽으면 문자열 수 × 과제 수가 된다."""
+    u, s = await _session(db)
+    calls = []
+    real = onto._live_tasks
+
+    async def counted(_db):
+        calls.append(1)
+        return await real(_db)
+
+    monkeypatch.setattr(onto, "_live_tasks", counted)
+    try:
+        for n in range(3):
+            await _report(db, s, project=f"없는과제{tag}-{n}", code="dv1")
+        await db.commit()
+        got = await onto.plan_task_links(db)
+        mine = [e for e in got["plan"] if e["free"].startswith(f"없는과제{tag}-")]
+        assert len(mine) == 3 and all(e["verdict"] == "unmatched" for e in mine), mine
+        assert len(calls) == 1, f"과제를 {len(calls)}번 읽었다"
+    finally:
+        await _wipe(db, u, s)
+
+
 async def test_the_embedded_name_is_the_fallback_in_the_same_order(db, tag):
     """`services.py` 의 폴백과 같은 순서 — 두 벌이 되면 한쪽만 고쳐진다."""
     u, s = await _session(db)
