@@ -5,6 +5,7 @@ pytest 는 이 파일을 모으지 않는다(이름이 test_ 로 시작하지 �
 
     schemas <도구…>   — FastMCP 목록(`mcp.list_tools()`)이 내는 inputSchema 를 도구별로
     limits            — 느린 가짜 백엔드에 붙여 한도 · 기한 · 문구를 잰다(KOORM_MCP_API_TIMEOUT_S 를 작게 두고)
+    paths <값…>       — 경로에 사용자 값을 넣는 도구를 값마다 불러 가짜 백엔드가 받은 요청 대상(퍼센트 인코딩 그대로)을 낸다
 """
 from __future__ import annotations
 
@@ -102,7 +103,68 @@ def limits() -> dict:
     return out
 
 
+class _Record(BaseHTTPRequestHandler):
+    """받은 요청 대상을 **보낸 그대로**(퍼센트 인코딩 포함) 적기만 하는 가짜 백엔드."""
+    def log_message(self, *a):
+        pass
+
+    def _ok(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            self.rfile.read(length)
+        self.server.seen.append([self.command, self.path])
+        raw = json.dumps({"success": True, "data": {}, "message": None}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = _ok
+
+
+# 경로에 사용자 값을 넣는 도구 — (이름, 값 하나로 인자 만들기). 과제 · 리포트 · 세션 · 레시피 · 케이스 · 객체가 모두 든다.
+PATH_CALLS = (
+    ("report_summary", lambda v: {"report_id": v}),
+    ("report_revision", lambda v: {"report_id": v}),
+    ("unlink_report_revision", lambda v: {"report_id": v}),
+    ("clear_report_unlink", lambda v: {"report_id": v}),
+    ("report_case", lambda v: {"report_id": v, "case_key": v}),
+    ("get_session", lambda v: {"session_id": v}),
+    ("task_revisions", lambda v: {"task_key": v}),
+    ("compare_task_revisions", lambda v: {"task_key": v}),
+    ("ontology_object", lambda v: {"type_slug": v, "key": v}),
+    ("recipe_get", lambda v: {"name": v}),
+)
+
+
+def paths(values: list[str]) -> dict:
+    """값마다 경로 도구를 불러 가짜 백엔드가 받은 요청 대상을 돌려준다(경로 칸 감싸기 — 검토 반영 11-11)."""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Record)
+    srv.seen = []
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    server = _load(f"http://127.0.0.1:{srv.server_address[1]}")
+    server._forward_headers = lambda ctx: {}
+    calls: dict = {}
+    for v in values:
+        for name, make in PATH_CALLS:
+            srv.seen.clear()
+            err = None
+            try:
+                asyncio.run(server.mcp.call_tool(name, make(v)))
+            except Exception as exc:  # noqa: BLE001 — 시험이 모양을 본다
+                err = f"{type(exc).__name__}: {exc}"
+            calls.setdefault(name, {})[v] = {"seen": list(srv.seen), "error": err}
+    srv.shutdown()
+    return {"calls": calls, "seg": {v: server._seg(v) for v in values}}
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "schemas"
-    result = schemas(sys.argv[2:]) if mode == "schemas" else limits()
+    if mode == "schemas":
+        result = schemas(sys.argv[2:])
+    elif mode == "paths":
+        result = paths(sys.argv[2:])
+    else:
+        result = limits()
     print(json.dumps(result, ensure_ascii=False))

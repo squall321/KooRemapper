@@ -143,6 +143,17 @@ def _forward_headers(ctx: Context) -> dict:
     return headers
 
 
+def _seg(value) -> str:
+    """사용자 값을 경로 칸 **하나**로 — `quote(…, safe='')` 에 칸 전체가 `.`·`..` 인 것까지 감싼다(httpx 가 점 칸을 접는다).
+
+    감싸지 않으면 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 은 뒤를 잘라, `x/../../sessions/S` 는 남의 길로 간다
+    (검토 반영 11-11). 경로에 들어가는 사용자 값(리포트 · 세션 · 잡 · 과제 · 개정 · 레시피 · 케이스 …)은 모두 이것을 지난다 —
+    `tests/test_mcp_tools_contract.py` 가 f-문자열 경로를 훑어 못박는다.
+    """
+    s = quote(str(value), safe="")
+    return s.replace(".", "%2E") if s in (".", "..") else s
+
+
 def _unwrap(r: httpx.Response):
     """Unwrap {success,data,message}. RAISE on error so Claude sees a tool error
     (a returned error dict would look like a successful result)."""
@@ -197,7 +208,7 @@ async def list_operations(ctx: Context) -> list:
 async def describe_operation(operation: str, ctx: Context) -> dict:
     """한 오퍼레이션의 상세 — 인자 JSON Schema(args_schema), 입출력, 예제 args, 매뉴얼.
     run_operation 호출 전에 args 를 어떻게 구성할지 여기서 확인하라."""
-    return await _get(ctx, f"/operations/{operation}")
+    return await _get(ctx, f"/operations/{_seg(operation)}")
 
 
 # ── 세션 / 파일 ──────────────────────────────────────────────────────
@@ -235,7 +246,7 @@ async def create_session(
 async def get_session(session_id: str, ctx: Context) -> dict:
     """세션 상세와 포함 파일 목록(meta 포함)을 반환한다 — "이 세션에 뭐가 들어 있나"의 입구.
     파일 하나의 깊은 메타는 inspect_file, 잡 이력은 list_session_jobs."""
-    return await _get(ctx, f"/sessions/{session_id}")
+    return await _get(ctx, f"/sessions/{_seg(session_id)}")
 
 
 @mcp.tool()
@@ -258,7 +269,7 @@ async def upload_kfile(
     async with _client() as c:
         return _unwrap(
             await c.post(
-                f"/sessions/{session_id}/files", files=files, headers=_forward_headers(ctx)
+                f"/sessions/{_seg(session_id)}/files", files=files, headers=_forward_headers(ctx)
             )
         )
 
@@ -280,7 +291,7 @@ async def upload_local_path(session_id: str, path: str, ctx: Context, filename: 
     async with _client() as c:
         return _unwrap(
             await c.post(
-                f"/sessions/{session_id}/files", files=files, headers=_forward_headers(ctx)
+                f"/sessions/{_seg(session_id)}/files", files=files, headers=_forward_headers(ctx)
             )
         )
 
@@ -293,7 +304,7 @@ async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx
     import os as _os
     async with _client() as c:
         r = await c.get(
-            f"/sessions/{session_id}/files/{file_id}/download", headers=_forward_headers(ctx)
+            f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/download", headers=_forward_headers(ctx)
         )
     if r.status_code >= 400:
         raise RuntimeError(f"download failed: HTTP {r.status_code}")
@@ -309,7 +320,7 @@ async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx
 async def list_session_files(session_id: str, ctx: Context) -> list:
     """세션 안의 파일 목록 + 각 파일의 meta(노드/요소/파트/bbox/*INCLUDE/키워드).
     "이 K파일 안에 뭐가 들어있는지" 를 여기서 확인한다."""
-    return await _get(ctx, f"/sessions/{session_id}/files")
+    return await _get(ctx, f"/sessions/{_seg(session_id)}/files")
 
 
 @mcp.tool()
@@ -323,14 +334,14 @@ async def session_includes(session_id: str, ctx: Context) -> dict:
     `flatten_includes` 를 안내한다 — 사용자가 원하면 config 에 `flatten_includes: true` 를 넣어 다시 돌린다
     (닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다 · 2026-10-17). 넘김값 `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs`
     본문)에만 있고 **이 MCP 도구로는 줄 수 없다**. 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
-    return await _get(ctx, f"/sessions/{session_id}/includes")
+    return await _get(ctx, f"/sessions/{_seg(session_id)}/includes")
 
 
 @mcp.tool()
 async def inspect_file(session_id: str, file_id: int, ctx: Context) -> dict:
     """단일 K파일의 상세 메타(info 결과 + *INCLUDE 내부 파일 목록)를 반환한다 — 업로드한
     덱의 구조·포함 관계를 확인할 때 쓴다. 파트 단위 정보는 part_info/list_parts."""
-    return await _get(ctx, f"/sessions/{session_id}/files/{file_id}/inspect")
+    return await _get(ctx, f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/inspect")
 
 
 # ── 실행 / 결과 ──────────────────────────────────────────────────────
@@ -346,7 +357,7 @@ async def run_operation(
     describe_operation 의 args_schema 를 따른다(파일 인자는 세션 내 파일명). 진행상황은
     get_job 으로 폴링하고, 끝나면 download_result 로 산출물을 가져온다."""
     return await _post(
-        ctx, f"/sessions/{session_id}/jobs", {"operation": operation, "args": args}
+        ctx, f"/sessions/{_seg(session_id)}/jobs", {"operation": operation, "args": args}
     )
 
 
@@ -355,10 +366,10 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
     """Job 상태/진행/exit_code/산출 파일. include_logs=true 면 stdout/stderr 일부도.
     `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는 경고 등이다
     (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
-    job = await _get(ctx, f"/jobs/{job_id}")
+    job = await _get(ctx, f"/jobs/{_seg(job_id)}")
     if include_logs and isinstance(job, dict):
         async with _client() as c:
-            r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
+            r = await c.get(f"/jobs/{_seg(job_id)}/logs", headers=_forward_headers(ctx))
             job = {**job, "logs": r.text[-4000:] if r.status_code < 400 else f"(logs unavailable: HTTP {r.status_code})"}
     return job
 
@@ -367,7 +378,7 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
 async def cancel_job(job_id: str, ctx: Context) -> dict:
     """실행 중이거나 대기 중인 Job 을 취소한다 — 잘못 낸 잡이나 매달린 잡을 정리할 때.
     상태 확인은 job_status, 취소 후 재실행은 run_job. / Cancel a queued or running job."""
-    return await _post(ctx, f"/jobs/{job_id}/cancel", None)
+    return await _post(ctx, f"/jobs/{_seg(job_id)}/cancel", None)
 
 
 @mcp.tool()
@@ -378,27 +389,27 @@ async def update_session(
     / Rename or re-describe a session."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
     async with _client() as c:
-        return _unwrap(await c.patch(f"/sessions/{session_id}", json=body, headers=_forward_headers(ctx)))
+        return _unwrap(await c.patch(f"/sessions/{_seg(session_id)}", json=body, headers=_forward_headers(ctx)))
 
 
 @mcp.tool()
 async def delete_session(session_id: str, ctx: Context) -> dict:
     """세션과 그 안의 모든 파일을 삭제. / Delete a session and all its files (irreversible)."""
-    return await _delete(ctx, f"/sessions/{session_id}")
+    return await _delete(ctx, f"/sessions/{_seg(session_id)}")
 
 
 @mcp.tool()
 async def delete_file(session_id: str, file_id: int, ctx: Context) -> dict:
     """세션에서 파일 1건을 삭제한다(복구 불가) — 잘못 올린 파일 정리용. 어떤 파일이 있는지는
     get_session 으로 먼저 확인. / Delete a single file from a session."""
-    return await _delete(ctx, f"/sessions/{session_id}/files/{file_id}")
+    return await _delete(ctx, f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}")
 
 
 @mcp.tool()
 async def get_job_outputs(job_id: str, ctx: Context) -> list:
     """Job 이 생성한 산출 파일 목록(session_file id/이름/meta)을 반환한다 — 잡이 끝난 뒤
     "무엇이 나왔나"의 입구. 내려받기는 download_result, 잡 로그는 slurm/job 로그 도구."""
-    return await _get(ctx, f"/jobs/{job_id}/outputs")
+    return await _get(ctx, f"/jobs/{_seg(job_id)}/outputs")
 
 
 @mcp.tool()
@@ -409,7 +420,7 @@ async def download_result(
     바이너리거나 큰 파일이면 as_base64=true 로 base64 반환."""
     async with _client() as c:
         r = await c.get(
-            f"/sessions/{session_id}/files/{file_id}/download",
+            f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/download",
             headers=_forward_headers(ctx),
         )
     if r.status_code >= 400:
@@ -453,7 +464,7 @@ async def _run_figure_job(ctx: Context, session_id: str, operation: str,
     """
     import asyncio
 
-    job = await _post(ctx, f"/sessions/{session_id}/jobs", {"operation": operation, "args": args})
+    job = await _post(ctx, f"/sessions/{_seg(session_id)}/jobs", {"operation": operation, "args": args})
     job_id = job.get("id") or job.get("job_id")
     if not job_id:
         raise RuntimeError(f"잡을 만들지 못했습니다: {job}")
@@ -466,7 +477,7 @@ async def _run_figure_job(ctx: Context, session_id: str, operation: str,
     try:
         while time.monotonic() < end:
             await asyncio.sleep(max(0.0, min(1.0, end - time.monotonic())))
-            last = await _get(ctx, f"/jobs/{job_id}")
+            last = await _get(ctx, f"/jobs/{_seg(job_id)}")
             # 백엔드는 `canceled`(l 하나)로 쓴다 — `cancelled` 만 보면 취소된 잡을 끝난 것으로
             # 알아보지 못해 `timeout_s`(최대 300초)를 꽉 채운 뒤에야 에러가 된다. 둘 다 본다.
             if last.get("status") in ("succeeded", "failed", "canceled", "cancelled"):
@@ -482,7 +493,7 @@ async def _run_figure_job(ctx: Context, session_id: str, operation: str,
             "%s 잡이 끝나지 않았거나 실패했습니다: status=%s exit_code=%s job_id=%s\n--- 로그 ---\n%s"
             % (operation, last.get("status"), last.get("exit_code"), job_id,
                await _job_log_tail(ctx, job_id)))
-    return job_id, await _get(ctx, f"/jobs/{job_id}/outputs")
+    return job_id, await _get(ctx, f"/jobs/{_seg(job_id)}/outputs")
 
 
 async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
@@ -491,7 +502,7 @@ async def _job_log_tail(ctx: Context, job_id: str, limit: int = 2500) -> str:
     이것이 그 둘의 매니페스트 노릇을 한다."""
     try:
         async with _client() as c:
-            r = await c.get(f"/jobs/{job_id}/logs", headers=_forward_headers(ctx))
+            r = await c.get(f"/jobs/{_seg(job_id)}/logs", headers=_forward_headers(ctx))
         return r.text[-limit:] if r.status_code < 400 else f"(로그를 읽지 못했습니다: HTTP {r.status_code})"
     except Exception as e:  # 로그를 못 읽는 것이 그림을 못 쓴 것은 아니다
         return f"(로그를 읽지 못했습니다: {e})"
@@ -613,7 +624,7 @@ async def mesh_section_figure(
     if axis not in ("auto", "x", "y", "z"):
         raise RuntimeError("axis 는 auto, x, y, z 중 하나여야 합니다 (받은 값: %s)" % axis)
 
-    files = await _get(ctx, f"/sessions/{session_id}/files")
+    files = await _get(ctx, f"/sessions/{_seg(session_id)}/files")
     byid = {int(f["id"]): f for f in files}
     if file_id not in byid:
         raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
@@ -639,7 +650,7 @@ async def mesh_section_figure(
         raise RuntimeError(f"단면 매니페스트(JSON)가 산출물에 없습니다: {[f.get('filename') for f in outs]}")
 
     async with _client() as c:
-        r = await c.get(f"/sessions/{session_id}/files/{json_id}/download",
+        r = await c.get(f"/sessions/{_seg(session_id)}/files/{_seg(json_id)}/download",
                         headers=_forward_headers(ctx))
     if r.status_code >= 400:
         raise RuntimeError(f"매니페스트를 내려받지 못했습니다: HTTP {r.status_code}")
@@ -729,7 +740,7 @@ async def mesh_surface_figure(
     응답의 `svg_bytes` 와 `download_warning` 을 보고, 크면 `save_result_to_path` 로 디스크에
     저장하거나 `wire=true` 로 좁힌다. 이미지 블록은 이 상한과 무관하게 온다(서버가 그려 줄인다).
     """
-    files = await _get(ctx, f"/sessions/{session_id}/files")
+    files = await _get(ctx, f"/sessions/{_seg(session_id)}/files")
     byid = {int(f["id"]): f for f in files}
     if file_id not in byid:
         raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
@@ -793,7 +804,7 @@ async def mesh_stack_diagram(
     if axis not in ("x", "y", "z"):
         raise RuntimeError("axis 는 x, y, z 중 하나여야 합니다 (받은 값: %s)" % axis)
 
-    files = await _get(ctx, f"/sessions/{session_id}/files")
+    files = await _get(ctx, f"/sessions/{_seg(session_id)}/files")
     byid = {int(f["id"]): f for f in files}
     if file_id not in byid:
         raise RuntimeError(f"세션에 file_id={file_id} 가 없습니다. list_session_files 로 확인하세요.")
@@ -822,7 +833,7 @@ async def mesh_stack_diagram(
 async def list_session_jobs(session_id: str, ctx: Context) -> list:
     """세션에서 실행된 Job 이력(상태/오퍼레이션/exit_code/생성시각).
     The job history of a session — status, operation, exit_code, timestamps."""
-    return await _get(ctx, f"/sessions/{session_id}/jobs")
+    return await _get(ctx, f"/sessions/{_seg(session_id)}/jobs")
 
 
 @mcp.tool()
@@ -959,7 +970,7 @@ async def ingest_report(
         files["scenario"] = ("scenario.json", scenario_content.encode("utf-8"), "application/json")
     async with _client() as c:
         return _unwrap(await c.post(
-            f"/sessions/{session_id}/reports",
+            f"/sessions/{_seg(session_id)}/reports",
             files=files, data=data, headers=_forward_headers(ctx),
         ))
 
@@ -988,7 +999,7 @@ async def update_report_meta(
     }.items() if v is not None}
     async with _client() as c:
         return _unwrap(await c.patch(
-            f"/reports/{report_id}", json=body, headers=_forward_headers(ctx)))
+            f"/reports/{_seg(report_id)}", json=body, headers=_forward_headers(ctx)))
 
 
 @mcp.tool()
@@ -1018,7 +1029,7 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
         raise RuntimeError(f"path not found on the MCP host: {path}")
     files = {"file": ("render_result.zip", raw, "application/zip")}
     async with _client() as c:
-        return _unwrap(await c.post(f"/reports/{report_id}/renders", files=files, headers=_forward_headers(ctx)))
+        return _unwrap(await c.post(f"/reports/{_seg(report_id)}/renders", files=files, headers=_forward_headers(ctx)))
 
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
@@ -1053,7 +1064,7 @@ async def attach_cae_package(
         raw = fh.read()
     files = {"file": (_os.path.basename(path), raw, "application/json")}
     async with _client() as c:
-        return _unwrap(await c.post(f"/reports/{report_id}/cae", files=files, headers=_forward_headers(ctx)))
+        return _unwrap(await c.post(f"/reports/{_seg(report_id)}/cae", files=files, headers=_forward_headers(ctx)))
 
 
 @mcp.tool()
@@ -1067,7 +1078,7 @@ async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     확정하거나 사람 선을 지우는 것은 MCP 도구가 아니라 REST 다 — POST · DELETE /reports/{id}/cae/bridges(리포트 주인 · 시스템 관리자).
     실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
     One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings, core bridges."""
-    return await _get(ctx, f"/reports/{report_id}/cae")
+    return await _get(ctx, f"/reports/{_seg(report_id)}/cae")
 
 
 @mcp.tool()
@@ -1140,7 +1151,7 @@ async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
         raise RuntimeError(f"path not found on the MCP host: {path}")
     files = {"file": ("fe_cad.zip", raw, "application/zip")}
     async with _client() as c:
-        return _unwrap(await c.post(f"/reports/{report_id}/cad", files=files, headers=_forward_headers(ctx)))
+        return _unwrap(await c.post(f"/reports/{_seg(report_id)}/cad", files=files, headers=_forward_headers(ctx)))
 
 
 @mcp.tool()
@@ -1152,7 +1163,7 @@ async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Con
     files = {"file": ("scenario.json", scenario_content.encode("utf-8"), "application/json")}
     async with _client() as c:
         return _unwrap(await c.post(
-            f"/reports/{report_id}/scenario", files=files, headers=_forward_headers(ctx)))
+            f"/reports/{_seg(report_id)}/scenario", files=files, headers=_forward_headers(ctx)))
 
 
 @mcp.tool()
@@ -1164,7 +1175,7 @@ async def list_reports(session_id: str, ctx: Context, kfile_id: int | None = Non
     계정에 없다'는 뜻이다. 전사 규모의 유사 해석 유무는 corpus_summary·report_corpus
     (개인 식별 없는 집계)로 물어라. 심의 좌석이 빈 배열을 부재 증거로 오독한 실사례 있음."""
     params = {"kfile_id": kfile_id} if kfile_id is not None else None
-    return await _get(ctx, f"/sessions/{session_id}/reports", params=params)
+    return await _get(ctx, f"/sessions/{_seg(session_id)}/reports", params=params)
 
 
 @mcp.tool()
@@ -1174,7 +1185,7 @@ async def report_blocks(report_id: str, ctx: Context) -> dict:
     정규화가 해석하지 않는 블록도 여기 다 뜬다(`read_by_parser=false`). 그 블록은
     `report_block` 으로 꺼내 쓴다. **무엇이 들어 있는지부터 여기서 보라** — 리포트 종류마다
     블록 구성이 다르다(deep 21 · sphere 12 · impact 27 가 실측값이다)."""
-    return await _get(ctx, f"/reports/{report_id}/blocks")
+    return await _get(ctx, f"/reports/{_seg(report_id)}/blocks")
 
 
 @mcp.tool()
@@ -1192,7 +1203,7 @@ async def report_block(
         q["path"] = path
     if limit:
         q["limit"] = limit
-    return await _get(ctx, f"/reports/{report_id}/blocks/{name}", q)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/blocks/{_seg(name)}", q)
 
 
 @mcp.tool()
@@ -1216,7 +1227,7 @@ async def report_hotspots(
         q["part_id"] = part_id
     if case_key:
         q["case_key"] = case_key
-    return await _get(ctx, f"/reports/{report_id}/hotspots", q)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/hotspots", q)
 
 
 @mcp.tool()
@@ -1234,7 +1245,7 @@ async def report_contact_profile(
     q = {"metric": metric, "top": top, "axis_top": axis_top}
     if case_key:
         q["case_key"] = case_key
-    return await _get(ctx, f"/reports/{report_id}/contact_profile", q)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/contact_profile", q)
 
 
 @mcp.tool()
@@ -1244,7 +1255,7 @@ async def report_behavior_clusters(report_id: str, ctx: Context) -> dict:
     ★`degenerate=true` 면 선언한 군집 수와 **실제로 쓰인** 수가 다르다 — 거동이 갈리지 않은
     것이고, 그때 "N 가지 거동" 으로 읽으면 안 된다(실측으로 4 선언/1 사용인 리포트가 있다).
     ★`is_mock=true` 면 **합성**이다 — 결론의 근거로 쓰지 말라."""
-    return await _get(ctx, f"/reports/{report_id}/clusters")
+    return await _get(ctx, f"/reports/{_seg(report_id)}/clusters")
 
 
 @mcp.tool()
@@ -1256,7 +1267,7 @@ async def report_analytics(report_id: str, ctx: Context, block: str = "") -> dic
     다시 계산하면 리포트 화면의 숫자와 조용히 갈린다).
     ★`not_computed` 가 붙은 하위는 "값이 0" 이 아니라 **계산되지 않았다**는 뜻이다.
     원본은 `report_block(name, path=…)` 으로 끝까지 되짚어라."""
-    return await _get(ctx, f"/reports/{report_id}/analytics", {"block": block} if block else None)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/analytics", {"block": block} if block else None)
 
 
 @mcp.tool()
@@ -1276,7 +1287,7 @@ async def report_media(
             q[k] = v
     if images_only:
         q["images_only"] = True
-    return await _get(ctx, f"/reports/{report_id}/media", q or None)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/media", q or None)
 
 
 # ── 결과 이미지 — **네가 볼 수 있게** 돌려준다 ────────────────────────────────
@@ -1301,13 +1312,13 @@ async def _fetch_media(ctx: Context, report_id: str, *, case_key: str = "",
     for k, v in (("case_key", case_key), ("role", role)):
         if v:
             q[k] = v
-    got = await _get(ctx, f"/reports/{report_id}/media", q or None)
+    got = await _get(ctx, f"/reports/{_seg(report_id)}/media", q or None)
     return (got or {}).get("media") or []
 
 
 async def _download_bytes(ctx: Context, session_id: str, file_id: int) -> bytes:
     async with _client() as c:
-        r = await c.get(f"/sessions/{session_id}/files/{file_id}/download",
+        r = await c.get(f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/download",
                         headers=_forward_headers(ctx))
     if r.status_code >= 400:
         raise RuntimeError(f"미디어 다운로드 실패: HTTP {r.status_code}")
@@ -1353,7 +1364,7 @@ async def report_image(
         return {"error": "고른 것이 영상(mp4)이라 **모델이 볼 수 없다**",
                 "videos": vids,
                 "hint": "같은 케이스의 `role=peak` png 를 써라 — `report_media(role='peak')`"}
-    sess = (await _get(ctx, f"/reports/{report_id}")) or {}
+    sess = (await _get(ctx, f"/reports/{_seg(report_id)}")) or {}
     session_id = sess.get("session_id")
     if not session_id:
         raise RuntimeError("리포트의 세션을 알 수 없다")
@@ -1378,14 +1389,14 @@ async def report_compare(
     ★이미지 장수에 상한이 있다(기본 8) — 넘으면 **몇 장을 뺐는지 말한다**. 그림은 응답을
     금방 불리므로, 많은 케이스는 지표로 먼저 좁히고(`report_worst_cases`) 그중 몇 개만 보라."""
     metrics = metrics or ["peak_stress", "peak_g", "peak_disp"]
-    rep = (await _get(ctx, f"/reports/{report_id}")) or {}
+    rep = (await _get(ctx, f"/reports/{_seg(report_id)}")) or {}
     session_id = rep.get("session_id")
     lines = ["# 비교 — report %s (%s)" % (report_id, rep.get("kind")),
              "",
              "| case | " + " | ".join(metrics) + " |",
              "|---" * (len(metrics) + 1) + "|"]
     for ck in case_keys:
-        case = (await _get(ctx, f"/reports/{report_id}/cases/{ck}")) or {}
+        case = (await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(ck)}")) or {}
         roll = case.get("rollup") or {}
         cells = []
         for m in metrics:
@@ -1435,7 +1446,7 @@ async def report_compare(
 async def report_summary(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
     """리포트 요약 — kind, 프로젝트/DOE, sim_params, parts, findings, 전역 최악 롤업.
     무엇을 분석할 수 있는지 먼저 여기서 파악하라."""
-    return await _get(ctx, f"/reports/{report_id}")
+    return await _get(ctx, f"/reports/{_seg(report_id)}")
 
 
 @mcp.tool()
@@ -1450,7 +1461,7 @@ async def report_worst_cases(
         raise RuntimeError(f"metric 은 {sorted(_WORST_METRICS)} 중 하나여야 합니다.")
     order = "asc" if metric == "min_safety_factor" else "desc"
     return await _get(
-        ctx, f"/reports/{report_id}/cases",
+        ctx, f"/reports/{_seg(report_id)}/cases",
         params={"sort": metric, "order": order, "limit": top_n},
     )
 
@@ -1461,14 +1472,14 @@ async def report_part_risk(report_id: Annotated[str, Field(description=_A_REPORT
     """파트별 최악값과 그게 발생한 케이스(각도/위치) + 최소 안전율. part_id 를 주면 그 파트만.
     "어느 파트가 어느 방향/위치에서 가장 위험한가" 를 답한다."""
     params = {"part_id": part_id} if part_id is not None else None
-    return await _get(ctx, f"/reports/{report_id}/parts", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/parts", params=params)
 
 
 @mcp.tool()
 async def report_case(report_id: str, case_key: str, ctx: Context) -> dict:
     """한 케이스(각도/위치)의 상세 — identity + 파트별 메트릭. case_key 는
     report_worst_cases 결과의 case_key(sphere=run_folder/각도명, impact=pos_id)."""
-    return await _get(ctx, f"/reports/{report_id}/cases/{case_key}")
+    return await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(case_key)}")
 
 
 @mcp.tool()
@@ -1477,7 +1488,7 @@ async def report_directional(report_id: Annotated[str, Field(description=_A_REPO
     """방향 취약도 — 방향 범주(sphere: 면/엣지/코너, impact: F1~F6)별 최악 응력·G.
     part_id 를 주면 그 파트의 범주별 취약도. "어느 방향이 가장 위험한가"."""
     params = {"part_id": part_id} if part_id is not None else None
-    return await _get(ctx, f"/reports/{report_id}/directional", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/directional", params=params)
 
 
 @mcp.tool()
@@ -1588,7 +1599,7 @@ async def report_query(
     }.items():
         if v is not None:
             params[k] = v
-    return await _get(ctx, f"/reports/{report_id}/query", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/query", params=params)
 
 
 @mcp.tool()
@@ -1604,7 +1615,7 @@ async def report_scatter(
     params = {"metric": metric}
     if part_id is not None:
         params["part_id"] = part_id
-    return await _get(ctx, f"/reports/{report_id}/scatter", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/scatter", params=params)
 
 
 @mcp.tool()
@@ -1615,7 +1626,7 @@ async def report_part_energy(report_id: str, ctx: Context, part_id: int | None =
     지정 시 그 파트만. matsum 이 없으면(run 이 안 덤프) note 로 안내. sphere/impact 는 파트별
     에너지 시계열이 리포트에 없어 note — 글로벌 에너지/하중경로는 report_energy_flow 를 써라."""
     params = {"part_id": part_id} if part_id is not None else None
-    return await _get(ctx, f"/reports/{report_id}/part-energy", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/part-energy", params=params)
 
 
 @mcp.tool()
@@ -1642,7 +1653,7 @@ async def report_angle_stats(
                  ("near_lon", near_lon), ("near_lat", near_lat)):
         if v is not None:
             params[k] = v
-    return await _get(ctx, f"/reports/{report_id}/angle-stats", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/angle-stats", params=params)
 
 
 @mcp.tool()
@@ -1654,7 +1665,7 @@ async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None 
     (`detail_note`)이다. 실제로 쓴 케이스는 `flow_case_key`. 전 각도의 파트쌍 접촉력은 `report_contact_profile`.
     HTML 압축본이면 원해상도 피크 등 빠진 칸을 `energy_flow.form_note` 가 말한다."""
     params = {"case_key": case_key} if case_key else None
-    return await _get(ctx, f"/reports/{report_id}/energy", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/energy", params=params)
 
 
 @mcp.tool()
@@ -1668,7 +1679,7 @@ async def report_geometry(report_id: str, ctx: Context) -> dict:
     `footprints_are_measured`(bool) · `synthetic_footprints`(개수) · 파트별
     `synthetic_footprint` 를 **먼저 보라** — 실측으로 유일한 impact 샘플은 **25/25 가 합성**이고
     `zmin`/`zmax` 도 전부 null 이다. 합성 footprint 를 부품 위치·크기로 쓰면 안 된다."""
-    return await _get(ctx, f"/reports/{report_id}/geometry")
+    return await _get(ctx, f"/reports/{_seg(report_id)}/geometry")
 
 
 @mcp.tool()
@@ -1680,7 +1691,7 @@ async def report_part_series(
     ctx: Context,
 ) -> dict:
     """한 케이스·파트의 시계열(원본 재파싱, 다운샘플) — 응력/변형률/G/변위 시간이력."""
-    return await _get(ctx, f"/reports/{report_id}/cases/{case_key}/series", params={"part_id": part_id})
+    return await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(case_key)}/series", params={"part_id": part_id})
 
 
 @mcp.tool()
@@ -1693,7 +1704,7 @@ async def report_findings(
     """리포트의 위험 소견(CRITICAL/WARNING/INFO). severity 로 필터 가능.
     항복 초과·과도 G 등 자동 판정된 항목을 준다(sphere/impact)."""
     params = {"severity": severity} if severity else None
-    return await _get(ctx, f"/reports/{report_id}/findings", params=params)
+    return await _get(ctx, f"/reports/{_seg(report_id)}/findings", params=params)
 
 
 @mcp.tool()
@@ -1707,9 +1718,9 @@ async def compare_reports(report_ids: list, ctx: Context, part_id: int | None = 
     rows = {}
     kinds = {}
     for rid in report_ids:
-        summ = await _get(ctx, f"/reports/{rid}")
+        summ = await _get(ctx, f"/reports/{_seg(rid)}")
         kinds[rid] = summ.get("kind")
-        pr = await _get(ctx, f"/reports/{rid}/parts",
+        pr = await _get(ctx, f"/reports/{_seg(rid)}/parts",
                         params={"part_id": part_id} if part_id is not None else None)
         for p in pr.get("parts", []):
             key = p.get("part_id")
@@ -1751,13 +1762,13 @@ async def publish_report_to_datahub(
         body["doe"] = doe
     if title:
         body["title"] = title
-    return await _post(ctx, f"/reports/{report_id}/publish-datahub", body)
+    return await _post(ctx, f"/reports/{_seg(report_id)}/publish-datahub", body)
 
 
 @mcp.tool()
 async def delete_report(report_id: str, ctx: Context) -> dict:
     """인제스트된 리포트를 삭제한다(원본 HTML 포함). / Delete an ingested report."""
-    return await _delete(ctx, f"/reports/{report_id}")
+    return await _delete(ctx, f"/reports/{_seg(report_id)}")
 
 
 # ── 과제 · 개발 개정 (온톨로지) ──────────────────────────────────────
@@ -1789,7 +1800,7 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
     ★`task_found:false`(reason `unknown_task`)면 **정본에 그 과제가 없다**는 뜻이다 — 개정이 0 인 것과 다르다.
     그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
     / Revision chain; task_found:false means the task is unknown (not just empty)."""
-    return await _get(ctx, f"/ontology/tasks/{quote(task_key, safe='')}/revisions")
+    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/revisions")
 
 
 @mcp.tool()
@@ -1808,7 +1819,7 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     `linked.source` 는 이 리포트의 선을 누가 이었나다(manual 사람 · eng_meta 인제스트 때 잇기 · rule 자동 잇기, 옛 선은 null) —
     사람이 이은 선은 기계가 옮기지 않는다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
-    return await _get(ctx, f"/reports/{report_id}/revision",
+    return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)
 
 
@@ -1823,7 +1834,7 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
     ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
     `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라. 사람이 끊은 기록이 있으면 지운다.
     / Confirm the revision of a report. Survives re-ingest; do not guess."""
-    return await _put(ctx, f"/reports/{report_id}/revision", {
+    return await _put(ctx, f"/reports/{_seg(report_id)}/revision", {
         "task_key": task_key, "code": code, "model_key": model_key,
         "supersedes": supersedes, "note": note})
 
@@ -1871,7 +1882,7 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
     나가는/들어오는 선(`out` · `in` — 지금 이어진 것, 근거 메모 포함).
     ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
     / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
-    return await _get(ctx, f"/ontology/objects/{quote(type_slug, safe='')}/{quote(key, safe='')}")
+    return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg(key)}")
 
 
 @mcp.tool()
@@ -1902,7 +1913,7 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
     ★`measured_from` 은 그 판의 **몇 건에서** 최악값을 모았는지다. 한 건과 열 건의 최악값은
     같은 뜻이 아니다. 그림까지 견주려면 `reports` 의 id 를 `report_compare` 로 넘긴다.
     / Revisions of one task side by side, with the delta against the previous one."""
-    return await _get(ctx, f"/ontology/tasks/{quote(task_key, safe='')}/compare")
+    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/compare")
 
 
 @mcp.tool()
@@ -1915,7 +1926,7 @@ async def unlink_report_revision(report_id: str, ctx: Context) -> dict:
     (update_report_meta)도 이 리포트를 다시 잇지 않는다. 다시 잇게 하려면 `set_report_revision`(손으로) 또는
     `clear_report_unlink`(기록 지우기).
     / Unlink a report from its revision and record who/when; automatic linking then leaves it alone."""
-    return await _delete(ctx, f"/reports/{report_id}/revision")
+    return await _delete(ctx, f"/reports/{_seg(report_id)}/revision")
 
 
 @mcp.tool()
@@ -1925,7 +1936,7 @@ async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REP
     지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다 — 과제명 · 과제코드 · 별칭이 글자 그대로 맞고 개정 코드가 있으면
     지금 이어진다(`task_links`). 기록이 없으면 거절된다(조용히 성공하지 않는다). 기록은 `report_revision` 의 `unlinked` 로 본다.
     / Clear the unlink record of a report (owner only) and run the automatic link for it once."""
-    return await _delete(ctx, f"/reports/{report_id}/revision/unlinked")
+    return await _delete(ctx, f"/reports/{_seg(report_id)}/revision/unlinked")
 
 
 @mcp.tool()
@@ -1968,7 +1979,7 @@ async def recipe_search(ctx: Context, q: str = "", kind: str = "", tag: str = ""
 @mcp.tool()
 async def recipe_get(name: str, ctx: Context) -> dict:
     """레시피 하나의 상세 — 판 목록·상태·메타·관문 결과·코드. 돌리기 전에 무엇을 하는지 본다."""
-    return await _get(ctx, f"/recipes/{name}")
+    return await _get(ctx, f"/recipes/{_seg(name)}")
 
 
 @mcp.tool()
@@ -1984,11 +1995,11 @@ async def recipe_run(name: str, session_id: str, report_ids: list, ctx: Context,
     body = {"session_id": session_id, "report_ids": report_ids, "params": params or {}}
     if version is not None:
         body["version"] = version
-    sub = await _post(ctx, f"/recipes/{name}/run", body)
+    sub = await _post(ctx, f"/recipes/{_seg(name)}/run", body)
     run_id, job_id = sub.get("run_id"), sub.get("job_id")
     last = sub
     for _ in range(max(1, wait_sec)):
-        last = await _get(ctx, f"/recipes/runs/{run_id}")
+        last = await _get(ctx, f"/recipes/runs/{_seg(run_id)}")
         if last.get("status") in ("succeeded", "failed", "canceled"):
             break
         await asyncio.sleep(1)
@@ -2021,7 +2032,7 @@ async def recipe_evaluate(run_id: str, useful: bool, note: str, ctx: Context) ->
     """실행이 쓸모 있었는지·왜 그런지 남긴다 — useful=true + 글(20자↑)이 등록 관문의 근거다.
 
     무엇을 보여 줬는지 구체적으로 적어라(예: '전 각도에서 파트 7 이 항복을 넘는 방향을 한 번에 집어냈다')."""
-    return await _post(ctx, f"/recipes/runs/{run_id}/evaluate",
+    return await _post(ctx, f"/recipes/runs/{_seg(run_id)}/evaluate",
                        {"useful": useful, "note": note})
 
 
@@ -2036,7 +2047,7 @@ async def recipe_register(name: str, ctx: Context, version: int | None = None) -
     통과하면 platform/recipes/<이름>/ 로 파일까지 내보낸다(git 반영은 사람이 tools/recipes_publish.sh 로).
     관문을 못 넘으면 무엇이 빠졌는지 알려 준다 — 보통 실행이나 평가가 아직 없는 것이다."""
     body = {"version": version} if version is not None else {}
-    return await _post(ctx, f"/recipes/{name}/register", body)
+    return await _post(ctx, f"/recipes/{_seg(name)}/register", body)
 
 
 @mcp.tool()
@@ -2044,7 +2055,7 @@ async def recipe_deprecate(name: str, reason: str, ctx: Context) -> dict:
     """레시피를 **내린다**(올린 사람·관리자) — 검색과 남의 실행에서 빠진다. 판 기록은 남는다.
 
     왜 내리는지 reason 에 남겨라(틀린 결과·더 나은 레시피로 대체 등)."""
-    return await _post(ctx, f"/recipes/{name}/deprecate", {"reason": reason})
+    return await _post(ctx, f"/recipes/{_seg(name)}/deprecate", {"reason": reason})
 
 
 
