@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -25,6 +27,9 @@ from app.shared.affiliation import verified_affiliation
 from app.shared.auth import get_current_user, require_system_admin
 from app.shared.features import ontology_state
 from app.shared.responses import ok
+
+logger = logging.getLogger("koorm.ontology")
+
 
 def require_ontology() -> dict:
     """기능이 꺼져 있으면 **거절한다.** 화면에서만 숨기고 API 가 계속 답하면 그것은 꺼진 것이
@@ -264,8 +269,16 @@ class ApplyLinks(BaseModel):
 @admin.post("/ontology/task-links/apply")
 async def apply_links(body: ApplyLinks, actor: User = Depends(require_system_admin),
                       db: AsyncSession = Depends(get_db)):
-    done = await svc.apply_task_links(db, only=body.only, decided_by=actor.email)
+    """붙는 것만 잇는다 — 받기 뒤 자동 잇기와 같은 길 · 같은 기계 출처(`rule`): 사람이 끊은 리포트 · 손으로 확정한 리포트는
+    건너뛰고 세며(`skipped_unlinked` · `kept_manual`) 판에 관리자 이름을 찍지 않는다(검토 반영 11-11). 받기와 같은 잠금을 건다 —
+    받는 중이거나 다른 적용 · 합친 과제 옮기기가 돌면 409 `busy`."""
+    from app.worker import plm_sync
+    if not await plm_sync.try_lock(db):
+        raise HTTPException(status.HTTP_409_CONFLICT, "busy: 지금 받는 중이거나 다른 적용이 돈다 — 끝난 뒤 다시 누르세요")
+    done = await svc.apply_task_links(db, only=body.only)
     await db.commit()
+    logger.info("task links applied by %s — 이음 %s · 사람 판 %s · 끊음 %s", actor.email,
+                done["linked"], done["kept_manual"], done["skipped_unlinked"])
     return ok(done, message="붙는 것만 이었습니다.")
 
 

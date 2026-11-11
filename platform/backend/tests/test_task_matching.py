@@ -297,13 +297,15 @@ async def test_apply_links_only_what_resolves(db, tag):
         r_ok = await _report(db, s, project=key, code="dv1")
         await _report(db, s, project=f"없는과제{tag}", code="dv1")
         await db.commit()
-        done = await onto.apply_task_links(db, decided_by="koo.park")
+        # 이 시험의 문자열만 고른다 — 고르지 않으면 공유 dev DB 의 남의 리포트까지 잇는다(시험 격리)
+        done = await onto.apply_task_links(db, only=[key, f"없는과제{tag}"])
         await db.commit()
         assert done["linked"] == 1 and done["strings"] == 1
         line = await onto.history(db, key)
         assert [x["code"] for x in line] == ["dv1"]
         assert line[0]["reports"] == [r_ok.id]
-        assert line[0]["decided_by"] == "koo.park"
+        # 일괄 적용은 자동 잇기와 같은 기계 출처다 — 판에 관리자 이름을 찍지 않는다(검토 반영 11-11)
+        assert line[0]["rev_source"] == "rule" and line[0]["decided_by"] is None, line[0]
     finally:
         await _wipe(db, u, s, keys=[key])
 
@@ -316,7 +318,7 @@ async def test_a_report_without_a_code_is_counted_not_guessed(db, tag):
         await _task(db, key)
         await _report(db, s, project=key)          # 코드 없음
         await db.commit()
-        done = await onto.apply_task_links(db, decided_by="x")
+        done = await onto.apply_task_links(db, only=[key])      # 이 시험의 문자열만(시험 격리)
         await db.commit()
         assert done["linked"] == 0 and done["skipped_no_code"] == 1
         assert await onto.history(db, key) == []
@@ -333,7 +335,7 @@ async def test_apply_can_be_narrowed_to_chosen_strings(db, tag):
         await _report(db, s, project=a, code="dv1")
         await _report(db, s, project=b, code="dv1")
         await db.commit()
-        done = await onto.apply_task_links(db, only=[a], decided_by="x")
+        done = await onto.apply_task_links(db, only=[a])
         await db.commit()
         assert done["linked"] == 1
         assert await onto.history(db, a) and await onto.history(db, b) == []

@@ -558,7 +558,7 @@ async def test_the_auto_link_and_the_admin_apply_skip_an_unlinked_report_and_the
         entry = plan["plan"][0]
         assert entry["verdict"] == "links" and entry["unlinked"] == [r.id], entry
         assert plan["counts"]["unlinked"] == 1, plan["counts"]
-        done = await onto.apply_task_links(db, only=[task], decided_by="boss@x")
+        done = await onto.apply_task_links(db, only=[task])
         assert (done["skipped_unlinked"], done["linked"]) == (1, 0), done
         assert await _linked(db, r.id) == [] and len(await _tombstones(db, r.id)) == 1, "일괄 적용이 사람의 끊음을 덮었다"
     finally:
@@ -709,3 +709,81 @@ async def test_the_unlink_routes_record_show_and_clear(db):
     finally:
         await _drop(db, o, so)
         await _drop(db, u, s, keys=[task])
+
+
+# ── ⑥ 관리자 일괄 적용 — 자동 잇기와 같은 길 · 같은 기계 출처(검토 반영 11-11) ─────────────────────────
+# 예전엔 manual 로 이어서 그새 끊은 기록을 지우고(R1) 주인이 확정한 판에서 옮기고(R4) 판에 관리자 이름을 찍었다.
+
+async def test_the_admin_apply_respects_an_unlink_that_lands_after_it_read_its_plan(db, monkeypatch):
+    """R1 — 적용이 계획을 읽은 직후 주인이 끊고 커밋해도, 적용은 그 끊음을 보고 건너뛴다(기록은 남는다)."""
+    t = _tag()
+    task = f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    try:
+        await _task(db, task)
+        await db.commit()
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        assert (await onto.link_from_eng_meta(db, r))["ok"]
+        await db.commit()
+        real = onto.plan_task_links
+        fired = []
+
+        async def plan_then_owner_unlinks(sdb, **kw):
+            got = await real(sdb, **kw)
+            if not fired:
+                fired.append(1)
+                async with SessionLocal() as other:
+                    rep = await other.get(ImpactReport, r.id)
+                    assert (await onto.unlink_revision(other, rep, by="kim@x"))["ok"]
+                    await other.commit()
+            return got
+
+        monkeypatch.setattr(onto, "plan_task_links", plan_then_owner_unlinks)
+        done = await onto.apply_task_links(db, only=[task])
+        await db.commit()
+        monkeypatch.undo()
+        assert fired and (done["skipped_unlinked"], done["linked"]) == (1, 0), done
+        assert await _linked(db, r.id) == [] and [m.dst_key for m in await _tombstones(db, r.id)] == [f"{task}@dv1"], \
+            "일괄 적용이 그새 끊은 기록을 지우고 다시 이었다"
+    finally:
+        await _drop(db, u, s, keys=[task])
+
+
+async def test_the_admin_apply_keeps_an_owner_confirmed_report_and_stamps_no_admin(db):
+    """R4 — 주인이 손으로 확정한 리포트는 일괄 적용이 옮기지 않고 `kept_manual` 로 센다. 이은 판에 관리자 이름이 없다."""
+    t = _tag()
+    task = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task)
+        mine = await _rep(db, s, project=task, code="dv1")
+        assert (await onto.set_revision(db, mine, task_key=task, code="pv1", decided_by="kim@x", source="manual"))["ok"]
+        other = await _rep(db, s, project=task, code="dv2")                     # 손대지 않은 리포트 — 이어져야 한다
+        done = await onto.apply_task_links(db, only=[task])
+        assert (done["kept_manual"], done["linked"], done["strings"]) == (1, 1, 1), done
+        assert await _linked(db, mine.id) == [f"{task}@pv1"], "일괄 적용이 사람이 확정한 판에서 옮겼다"
+        p = (await _rev(db, f"{task}@dv2")).properties
+        assert p["rev_source"] == onto.SOURCE_RULE and "decided_by" not in p, p
+        assert await _rev(db, f"{task}@dv1") is None, "옮기지도 않을 판을 만들었다"
+    finally:
+        await db.rollback()
+
+
+async def test_the_admin_apply_is_refused_while_a_receive_holds_the_lock(db):
+    """일괄 적용은 받기 뒤 자동 잇기와 같은 잠금을 건다 — 받는 중이면 409 busy(겹쳐 돌지 않는다)."""
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    a, sa = await _owner(db, admin=True, commit=True)
+    try:
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        async with SessionLocal() as holder:
+            assert await plm_sync.try_lock(holder)                              # 받는 중이다
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                         base_url="http://test") as c:
+                r = await c.post(f"{P}/ontology/task-links/apply", json={"only": ["없는-문자열"]},
+                                 headers={"authorization": f"Bearer {security.create_access_token(a.id)}"})
+            await holder.rollback()
+        assert r.status_code == 409 and "busy" in r.json()["message"], (r.status_code, r.text[:200])
+    finally:
+        await _drop(db, a, sa)

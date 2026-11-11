@@ -706,43 +706,20 @@ async def confirm_alias(db, *, alias: str, key: str, by: str = "", note: str = "
     return {"ok": True, "alias": alias, "key": key}
 
 
-async def apply_task_links(db, *, only: list[str] | None = None,
-                           decided_by: str = "") -> dict:
-    """계획 중 **붙는 것만** 실제로 잇는다(후보·못 붙인 것은 건드리지 않는다).
+async def apply_task_links(db, *, only: list[str] | None = None) -> dict:
+    """계획 중 **붙는 것만** 실제로 잇는다(후보·못 붙인 것은 건드리지 않는다) — 관리자 버튼(POST /ontology/task-links/apply).
 
-    `only` 를 주면 그 자유 문자열만. 각 리포트는 자기 `dev_revision` 코드로 이어진다 —
-    코드가 없는 리포트는 **과제만 알고 개정은 모르는 것**이므로 건너뛰고 그 수를 돌려준다.
-    ★사람이 끊은 리포트는 건너뛰고 센다(`skipped_unlinked`) — 일괄 적용은 사람의 손이지만 그 리포트를 보고 내린 판단이 아니다.
-    그 판단(끊음)을 덮으려면 리포트를 손으로 다시 잇거나 끊은 기록을 지운다(11-11).
+    `only` 를 주면 그 자유 문자열만. ★받기 뒤 자동 잇기와 **같은 길 · 같은 기계 출처**(`rule`)로 잇는다(검토 반영 11-11 — 예전엔
+    `manual` 이라 그새 끊은 기록을 지우고(R1) 주인이 확정한 판에서 옮기고(R4) 판에 관리자 이름을 찍었다). 버튼은 사람의 손이지만
+    리포트마다 본 판단이 아니다 — 그래서 사람이 끊은 리포트는 건너뛰고(`skipped_unlinked`), 사람이 손으로 확정한 리포트는
+    옮기지 않고(`kept_manual`), 판에 누가 정했다(`decided_by`)를 찍지 않는다. 결과는 자동 잇기와 같은 꼴에 고른 문자열 수(`strings`).
+    받기 잠금 · 커밋은 부르는 쪽(라우트 — 받는 중이면 409).
     """
     planned = await plan_task_links(db)
-    done = {"linked": 0, "skipped_no_code": 0, "skipped_unlinked": 0, "strings": 0, "refused": []}
-    for entry in planned["plan"]:
-        if entry["verdict"] != "links":
-            continue
-        if only is not None and entry["free"] not in only:
-            continue
-        done["strings"] += 1
-        task_key = entry["task_key"]
-        held = set(entry["unlinked"])
-        for rid in entry["reports"]:
-            if rid in held:
-                done["skipped_unlinked"] += 1
-                continue
-            rep = await db.get(ImpactReport, rid)
-            if rep is None:
-                continue
-            code = str((rep.eng_meta or {}).get("dev_revision", {}).get("code") or "")
-            if not code:
-                done["skipped_no_code"] += 1
-                continue
-            got = await set_revision(db, rep, task_key=task_key, code=code,
-                                     decided_by=decided_by, source="manual")
-            if got.get("ok"):
-                done["linked"] += 1
-            else:
-                done["refused"].append({"report": rid, "why": got.get("error")})
-    return done
+    picked = [e for e in planned["plan"] if e["verdict"] == "links" and (only is None or e["free"] in only)]
+    got = await auto_link_tasks(db, report_ids=sorted({rid for e in picked for rid in e["reports"]}))
+    got["strings"] = len(picked)
+    return got
 
 
 # ── 과거 붙이기 자동 (SRC-09) ──────────────────────────────────────────────
