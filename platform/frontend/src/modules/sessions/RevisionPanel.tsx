@@ -183,7 +183,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       {/* 과제 후보 — 자유 문자열이 정본에 안 붙었을 때 */}
       {!!d.task_candidates.length && (
         <div className="space-y-1">
-          <div className="text-muted">과제 후보 — 관리자가 별칭을 적으면 다음부터 자동으로 붙는다</div>
+          <div className="text-muted">과제 후보 — 관리자가 별칭을 적으면 다음부터 자동으로 붙는다(다른 정확 일치가 다른 과제를 가리키면 그때도 후보다)</div>
           {d.task_candidates.map((t) => (
             <div key={t.key} className="flex items-center gap-2 flex-wrap">
               <b className="text-fg">{t.key}</b>
