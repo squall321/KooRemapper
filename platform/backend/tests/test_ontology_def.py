@@ -28,6 +28,8 @@ CAE = OURS.with_name("dynaforge-cae.json")      # 해석 어휘 — 생산 쪽�
 HUB = ROOT / "external" / "StandardPlatform" / "pipeline" / "core"
 # SP 의 정의 가져오기 — 받는 칸 목록(TOP_KEYS · *_FIELDS)의 정본. 서브모듈이 없으면 그 시험은 건너뛴다(허브 정의 시험과 같다)
 SP_IMPORTER = ROOT / "external" / "StandardPlatform" / "backend" / "app" / "modules" / "ontology" / "importer.py"
+SP_MODELS = SP_IMPORTER.with_name("models.py")       # 칸마다 String(N) — SP 가 저장하는 글자 상한의 정본
+SP_SERVICES = SP_IMPORTER.with_name("services.py")   # SLUG_RE · KEY_RE — slug · 속성 key 의 꼴
 
 
 def _cae_types() -> set[str]:
@@ -235,6 +237,105 @@ def test_our_definition_carries_only_keys_sp_import_accepts():
     got = _unknown_to_sp({**doc, "_note": "x", "relation_types": [rel]}, sets)
     assert any(g.startswith("(최상위) _note") for g in got) and any("미래칸" in g for g in got) \
         and any("모르는칸" in g for g in got), got
+
+
+# ── ④ SP 가 저장하는 값의 꼴 — 키 이름만이 아니라 값이 표에 들어가나(검토 2차 11-11) ─────────────────
+# SP 의 진짜 계획(importer.plan, e2676ad)이 indicates · follows_method 의 matched_by help(218자)를 「200자까지」 로 거절했다 —
+# 키 이름 대조는 그것을 못 본다. `_field_errors` 와 같은 규칙으로 본다 — 칸 이름이 표의 String(N) 칸이면 글자 수 ≤ N(문자 수),
+# CHOICES 의 칸이면 허용값 안, slug · 속성 key 는 SLUG_RE · KEY_RE(`require_slug` · `require_key`).
+
+_SP_TABLE_OF = {"groups": "NavGroup", "types": "ObjectType", "relation_types": "RelationType"}
+
+
+def _sp_value_rules() -> tuple[dict[str, dict[str, int | None]], dict[str, tuple], str, str]:
+    """SP models.py 의 표마다 (칸 → String(N) 의 N · 글자가 아닌 칸은 None), importer.py 의 CHOICES(칸 → 허용값),
+    services.py 의 SLUG_RE · KEY_RE 꼴 — 모두 리터럴을 AST 로 읽는다(그쪽도 app 패키지라 import 하지 않는다)."""
+    tree = ast.parse(SP_MODELS.read_text(encoding="utf-8"))
+    consts: dict[str, object] = {}
+    tables: dict[str, dict[str, int | None]] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            try:
+                consts[node.targets[0].id] = ast.literal_eval(node.value)
+            except ValueError:
+                pass
+        if isinstance(node, ast.ClassDef) and node.name in (*_SP_TABLE_OF.values(), "PropertyDef"):
+            cols: dict[str, int | None] = {}
+            for st in node.body:
+                call = st.value if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) else None
+                if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "mapped_column" and call.args):
+                    continue
+                kind = call.args[0]
+                if isinstance(kind, ast.Call) and getattr(kind.func, "id", None) == "String" and kind.args:
+                    n = kind.args[0]
+                    cols[st.target.id] = n.value if isinstance(n, ast.Constant) else consts[n.id]
+                else:
+                    cols[st.target.id] = None                 # Text · JSONB · Boolean … — 글자 상한이 없다
+            tables[node.name] = cols
+    choices: dict[str, tuple] = {}
+    for node in ast.parse(SP_IMPORTER.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "CHOICES":
+            for k, v in zip(node.value.keys, node.value.values):
+                if isinstance(v, ast.Name) and v.id in consts:   # revision.SOURCES 처럼 다른 모듈 것은 우리 파일이 안 쓴다
+                    choices[k.value] = tuple(consts[v.id])
+    pats = {}
+    for node in ast.parse(SP_SERVICES.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) in ("SLUG_RE", "KEY_RE"):
+            pats[node.targets[0].id] = node.value.args[0].value
+    return tables, choices, pats["SLUG_RE"], pats["KEY_RE"]
+
+
+def _refused_by_sp(doc: dict, rules) -> list[str]:
+    """SP 가져오기가 값 때문에 거절할 자리 — 글자 칸 상한 · 글자 아님 · 허용값 밖 · slug/key 꼴. 한 자리에 한 줄."""
+    import re
+    tables, choices, slug_re, key_re = rules
+    bad: list[str] = []
+
+    def check(where: str, one: dict, table: str, *, ident: str, ident_re: str) -> None:
+        if not re.fullmatch(ident_re, str(one.get(ident) or "")):
+            bad.append(f"{where} {ident}={one.get(ident)!r} 꼴이 아니다")
+        for name, value in one.items():
+            if name in (ident, "properties") or value is None:
+                continue
+            if name in choices and value not in choices[name]:
+                bad.append(f"{where}.{name}={value!r} 는 {choices[name]} 밖이다")
+            limit = tables[table].get(name, "없음")
+            if limit == "없음" or limit is None:
+                continue
+            if not isinstance(value, str):
+                bad.append(f"{where}.{name} 는 글자여야 한다")
+            elif len(value) > limit:
+                bad.append(f"{where}.{name} {len(value)}자 > {limit}자")
+
+    for kind, table in _SP_TABLE_OF.items():
+        for one in doc.get(kind) or []:
+            where = f"{kind}/{one.get('slug')}"
+            check(where, one, table, ident="slug", ident_re=slug_re)
+            for end in ("src_type_slugs", "dst_type_slugs"):
+                bad += [f"{where}.{end} {t!r} 꼴이 아니다" for t in one.get(end) or [] if not re.fullmatch(slug_re, t)]
+            for prop in one.get("properties") or []:
+                check(f"{where}.{prop.get('key')}", prop, "PropertyDef", ident="key", ident_re=key_re)
+    return bad
+
+
+def test_our_definition_values_fit_what_sp_stores():
+    """키 이름만 맞아도 SP 는 값에서 거절한다 — 공유 maps_to 블록을 포함해 우리 파일의 모든 값이 SP 표에 들어가야 한다."""
+    if not (SP_MODELS.exists() and SP_SERVICES.exists()):
+        pytest.skip(f"submodule 이 없다: {SP_MODELS}")
+    rules = _sp_value_rules()
+    tables, choices, _, _ = rules
+    assert {"help", "label", "key", "data_type"} <= set(tables["PropertyDef"]) and tables["PropertyDef"]["help"] == 200
+    assert {"cardinality", "data_type", "key_policy"} <= set(choices), "SP 의 허용값을 다 읽지 못했다"
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _refused_by_sp(doc, rules) == []
+    # 판별력 — 긴 help · 허용값 밖 · slug 꼴이 아닌 것을 잡는다
+    rel = json.loads(json.dumps(doc["relation_types"][-1]))
+    rel["properties"][0]["help"] = "가" * 201
+    rel["cardinality"] = "아무거나"
+    rel["slug"] = "Bad-Slug"
+    got = _refused_by_sp({**doc, "relation_types": [rel]}, rules)
+    assert any("201자 > 200자" in g for g in got) and any("cardinality" in g for g in got) \
+        and any("꼴이 아니다" in g for g in got), got
 
 
 # ── 판별력 — 흠을 정말 잡는가 ──────────────────────────────────────────────
