@@ -261,6 +261,10 @@ async def main():
                                           {"report_id": rid, "task_key": "SMOKE-NOPE", "code": "dv"})
                   chk("형식이 아닌 개정 코드는 **거절된다**(dv/pv 는 차수 필수)",
                       bool(bad.isError), str(bad.content)[:200])
+                  # 11-11 — 끊은 기록 지우기 도구가 길까지 닿는다(이 리포트는 끊은 적이 없다 — 없다고 거절해야 한다)
+                  nocut = await s.call_tool("clear_report_unlink", {"report_id": rid})
+                  chk("clear_report_unlink — 끊은 기록이 없으면 **거절한다**(조용히 성공하지 않는다)",
+                      bool(nocut.isError) and "끊은 기록이 없다" in str(nocut.content), str(nocut.content)[:200])
                   # ── 받은 것 보기(10-30 — SP 받는 쪽 전부) ──────────────────
                   ot = S._data(await s.call_tool("ontology_types", {}))
                   chk("ontology_types — 타입마다 정의와 상태별 건수",
@@ -298,7 +302,7 @@ async def main():
                   pl = S._data(await s.call_tool("plan_task_links", {}))
                   chk("과거 붙이기 계획이 **붙는 것·후보·못 붙인 것**을 갈라 준다",
                       isinstance(pl, dict) and isinstance(pl.get("counts"), dict)
-                      and {"links", "proposal", "unmatched", "reports_without_a_name"}
+                      and {"links", "proposal", "unmatched", "reports_without_a_name", "unlinked"}
                       <= set(pl["counts"]), pl)
                   # SRC-10 — 누가 불렀는지에 따라 범위를 말한다(일반 사용자는 읽을 수 있는 리포트만)
                   chk("plan_task_links — 범위(scope: all · readable)를 말한다",
