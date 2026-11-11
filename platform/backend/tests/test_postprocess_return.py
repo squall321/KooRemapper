@@ -375,7 +375,7 @@ async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slur
     from app.models import OntoRelation
     monkeypatch.setattr(settings, "ontology", "1")              # 반입 뒤 잇기는 과제·개정 기능이 켜져 있을 때만 돈다
     u, s = owner
-    t = ulid.new().str[:8]
+    t = ulid.new().str
     task, code = f"PP-{t}", f"PPC-{t}"
     db.add(OntoObject(type_slug="plm_task", key=task, label=task, source="hub", properties={"task_code": code}))
     await db.commit()
@@ -408,7 +408,7 @@ async def test_a_broken_task_link_warns_and_the_job_still_succeeds(db, owner, sl
 
     monkeypatch.setattr(onto, "auto_link_tasks", boom)
     u, s = owner
-    project = f"PPX-{ulid.new().str[:8]}"
+    project = f"PPX-{ulid.new().str}"
     try:
         raw = _SPHERE.read_bytes()
         slurm.manifest, slurm.files[REPORT] = _manifest(raw), raw

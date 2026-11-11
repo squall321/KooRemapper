@@ -57,7 +57,7 @@ async def _user(db):
 async def test_the_sync_state_flags_a_stopped_type_and_says_so(db, monkeypatch):
     from app.config import settings
     from app.main import create_app
-    tag = ulid.new().str[:8].lower()
+    tag = ulid.new().str.lower()
     # 이름은 앞에 오게 — 줄의 이름 목록은 앞 12개만 적는다(실제 거울이 있는 박스에서도 이 시험의 타입이 보이게)
     inside, outside = f"a0_in_{tag}", f"a0_out_{tag}"
     monkeypatch.setattr(settings, "sp_core_types", f"{DEFAULT},{inside}")

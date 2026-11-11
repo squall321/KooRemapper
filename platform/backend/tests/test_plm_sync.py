@@ -38,6 +38,19 @@ def on(monkeypatch):
     return settings
 
 
+@pytest.fixture(autouse=True)
+def links_nothing(monkeypatch):
+    """★받기 뒤 과제 잇기(SRC-09)는 리포트 **전부**를 본다 — 공유 dev DB 의 남의 리포트(다른 시험 · 실데이터)를 잇지 않게
+    범위를 비운다(시험 격리 — 검토 반영 11-11). 잇기 자체는 test_task_links_auto 가 잰다."""
+    from app.modules.ontology import services as onto
+    real = onto.auto_link_tasks
+
+    async def none(db, *, report_ids=None):
+        return await real(db, report_ids=[])
+
+    monkeypatch.setattr(onto, "auto_link_tasks", none)
+
+
 async def _cat_mark(db) -> int:
     return int((await db.execute(select(func.coalesce(func.max(OntoCatalog.id), 0)))).scalar_one())
 
@@ -117,7 +130,7 @@ async def test_the_type_list_comes_from_settings():
 
 async def test_sync_once_writes_and_commits(db, on):
     """받은 것은 **커밋한다** — 성공한 타입은 남아야 한다."""
-    slug = f"t_{ulid.new().str[:12].lower()}"
+    slug = f"t_{ulid.new().str.lower()}"
     mark, got = await _cat_mark(db), None
     try:
         got = await plm_sync.sync_once(client=_one_task_hub(slug))
@@ -132,7 +145,7 @@ async def test_sync_once_writes_and_commits(db, on):
 
 async def test_every_run_leaves_a_record_with_one_of_three_results(db, on):
     """규칙 16 — 결과는 셋(정상 · 확인 필요 · 실패)이고 실행마다 기록이 남는다(관리 화면의 「최근 실행」)."""
-    slug = f"t_{ulid.new().str[:12].lower()}"
+    slug = f"t_{ulid.new().str.lower()}"
     mark, got = await _cat_mark(db), None
     try:
         got = await plm_sync.sync_once(client=_one_task_hub(slug), trigger="admin", requested_by="a@x")
@@ -142,13 +155,16 @@ async def test_every_run_leaves_a_record_with_one_of_three_results(db, on):
         assert run.finished_at is not None and run.revision == "r1"
         assert run.counts["types"][slug]["rows"] == 1, run.counts
         assert "reflected" in run.counts, "층 2 반영 결과도 기록에 남는다"
+        # 받기 뒤 잇기는 돌았지만 범위가 비었다 — 공유 dev DB 의 남의 리포트를 보지 않았다(시험 격리 픽스처가 걸렸다는 값)
+        links = run.counts["task_links"]
+        assert links.get("skipped") == "busy" or (links["scope"], links["reports"]) == ("reports", 0), links
     finally:
         await _forget(db, slug, got, mark)
 
 
 async def test_a_run_does_not_start_while_another_holds_the_lock(db, on):
     """규칙 14 — 워커 주기와 관리자 버튼은 다른 프로세스다. 겹치면 기준 시각이 엇갈린다 — 시작하지 않고 「받는 중」."""
-    slug = f"t_{ulid.new().str[:12].lower()}"
+    slug = f"t_{ulid.new().str.lower()}"
     from app.database import SessionLocal
     async with SessionLocal() as holder:
         assert await plm_sync.try_lock(holder)
@@ -167,7 +183,7 @@ async def test_a_broken_reflect_keeps_what_was_received_and_says_so(db, on, monk
         raise RuntimeError("반영 결함")
 
     monkeypatch.setattr(onto, "reflect_after_sync", boom)
-    slug = f"t_{ulid.new().str[:12].lower()}"
+    slug = f"t_{ulid.new().str.lower()}"
     mark, got = await _cat_mark(db), None
     try:
         got = await plm_sync.sync_once(client=_one_task_hub(slug))
@@ -219,7 +235,7 @@ async def test_a_relation_to_a_system_type_never_creates_an_object_row(db, on):
     `shared/visibility.py` 가 판정한다. 그래서 받은 선의 **먼 끝은 행을 만들지 않는다**
     (SP 의 `object_links` 와 같은 자리 — 한쪽 끝이 `objects` 밖이다).
     """
-    slug = f"t_{ulid.new().str[:12].lower()}"
+    slug = f"t_{ulid.new().str.lower()}"
     cat = {"system": "허브", "revision": "r1", "as_of": "T0",
            "types": [{"slug": slug, "label": "과제", "count": 1, "properties": [],
                       "endpoint": f"/core/{slug}", "relations": ["dept_in_charge"]}]}

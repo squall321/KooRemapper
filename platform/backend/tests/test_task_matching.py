@@ -31,7 +31,7 @@ pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 @pytest.fixture()
 def tag():
-    return ulid.new().str[:10]
+    return ulid.new().str          # 통째로 — 앞자리는 시각이라 잘라 쓰면 1초 안에 겹친다(시험 격리)
 
 
 async def _session(db):
@@ -407,14 +407,15 @@ async def test_an_alias_makes_the_next_report_link_by_itself(db, tag):
     u, s = await _session(db)
     try:
         await _task(db, key)
-        await _report(db, s, project="우리끼리부르는이름", code="dv1")
+        free = f"우리끼리부르는이름{tag}"           # 고정 글자면 겹쳐 도는 시험끼리 같은 별칭을 다툰다(시험 격리)
+        await _report(db, s, project=free, code="dv1")
         await db.commit()
         assert [e["verdict"] for e in (await onto.plan_task_links(db))["plan"]
-                if e["free"] == "우리끼리부르는이름"] == ["unmatched"]
-        await onto.confirm_alias(db, alias="우리끼리부르는이름", key=key, by="koo.park")
+                if e["free"] == free] == ["unmatched"]
+        await onto.confirm_alias(db, alias=free, key=key, by="koo.park")
         await db.commit()
         again = [e for e in (await onto.plan_task_links(db))["plan"]
-                 if e["free"] == "우리끼리부르는이름"][0]
+                 if e["free"] == free][0]
         assert again["verdict"] == "links" and again["how"] == "alias"
     finally:
         await _wipe(db, u, s, keys=[key])

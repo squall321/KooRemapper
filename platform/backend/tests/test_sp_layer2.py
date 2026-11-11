@@ -31,7 +31,7 @@ P = "/api/v1"
 
 
 def _tag() -> str:
-    return ulid.new().str[:8].lower()
+    return ulid.new().str.lower()          # 통째로 — 앞자리는 시각이라 잘라 쓰면 1초 안에 겹친다(시험 격리)
 
 
 def _report(*, project: str = "", code: str = "") -> ImpactReport:
