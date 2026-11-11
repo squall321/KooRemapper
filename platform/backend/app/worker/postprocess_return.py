@@ -487,13 +487,23 @@ async def _fetch_and_ingest(db, job: Job, ref: dict, client: KooSlurmClient, ver
 
     # 리포트 곁의 해석 온톨로지 꾸러미 — 반입 · 잡 성공을 **먼저 굳힌 뒤** 싣는다. 싣기가 깨지면 attach_ontology 가 세션을
     # 되감는데, 그때 굳히지 않은 반입까지 함께 되감기면 안 된다(리포트가 정본이고 꾸러미는 덧붙이는 산출물이다).
+    # ★무엇이 깨져도 원장(`external_ref.ontology`)에 남기고 경고로 올린다 — 잡은 이미 성공으로 굳었으니 여기서 예외가 새면 스캔이
+    # 되감아 원장도 경고도 없이 빠졌다(검토 2차 11-11 항목 6). 다리만 깨진 것(`bridges.error`)도 경고로 — 꾸러미는 실렸다.
     jid, rid = job.id, report.id
     await db.commit()
-    onto = await _attach_package(db, client, str(ref["slurm_job_id"]), rid, entry, cap)
+    try:
+        onto = await _attach_package(db, client, str(ref["slurm_job_id"]), rid, entry, cap)
+    except Exception as exc:  # noqa: BLE001 — 반입한 리포트 · 잡 성공은 그대로다
+        logger.exception("postprocess report %s: ontology package step crashed", rid)
+        await db.rollback()
+        onto = {"state": "failed", "why": f"꾸러미 단계가 깨졌다 — {short_error(exc)}"}
     j = await db.get(Job, jid)
     j.external_ref = {**(j.external_ref or {}), "ontology": onto}
     if onto["state"] == "failed":
         j.warnings = [*(j.warnings or []), f"해석 온톨로지 꾸러미를 싣지 못했다 — {onto['why']} (리포트는 반입됐다)"]
+    elif isinstance(onto.get("bridges"), dict) and onto["bridges"].get("error"):
+        j.warnings = [*(j.warnings or []), f"코어 다리를 못 지었다 — {onto['bridges']['error']} (꾸러미는 실렸다 — 같은 꾸러미를 "
+                                           "다시 붙이면 다시 짓는다)"]
 
 
 async def _attach_package(db, client: KooSlurmClient, sid: str, rid: str, entry: dict, cap: int) -> dict:

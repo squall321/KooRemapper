@@ -374,13 +374,18 @@ async def reread(db, report: ImpactReport, rid: str) -> None:
 async def rebuild_after_attach(db, report: ImpactReport) -> dict:
     """같은 꾸러미를 다시 붙일 때(행은 그대로) 다리만 지금 거울로 다시 짓고(`rebuild_quietly`) 커밋한다 — **깨져도 붙이기를 무르지
     않는다.** 셈 또는 `{"error": 짧은 꼴}` — 다음 붙이기가 다시 짓는다.
+
+    ★커밋이 깨지면(연결 끊김 등) 되감고 리포트 객체를 다시 읽어 둔다(`link_report` 와 같은 자세). 예전에는 깨진 트랜잭션을 그대로 두고
+    돌아와 부르는 쪽의 다음 문장이 깨졌다 — 7-1 은 잡 원장에 `ontology` 를 못 적고 경고도 없이 빠졌다(검토 2차 항목 6).
     """
     rid = report.id
     counts = await rebuild_quietly(db, report)
     try:
-        await db.commit()                   # 지은 다리(또는 아무것도)를 굳히고 리포트 행 잠금을 푼다 — 되감지 않는다
+        await db.commit()                   # 지은 다리(또는 아무것도)를 굳히고 리포트 행 잠금을 푼다
     except Exception as exc:                # noqa: BLE001
         logger.exception("코어 다리 커밋 실패 — report %s", rid)
+        await db.rollback()
+        await reread(db, report, rid)
         counts = counts if counts.get("error") else {"error": short_error(exc)}
     return counts
 

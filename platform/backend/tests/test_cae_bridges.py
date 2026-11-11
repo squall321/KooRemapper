@@ -1091,3 +1091,50 @@ async def test_already_is_decided_on_the_summary_read_after_the_lock(db):
         assert same["already"] is True and same["file_id"] == now["file_id"] != got["file_id"], (same["file_id"], now["file_id"])
     finally:
         await _drop(db, u)
+
+
+# ── 다리 커밋이 깨지면 되감고 다시 읽는다(검토 2차 11-11 항목 6) ─────────────────────────────────────────
+
+async def _kill_connection(dbx) -> None:
+    """이 세션이 쥔 DB 연결을 서버 쪽에서 끊는다(pg_terminate_backend — 자기 연결만) — 커밋 중 연결이 끊긴 것을 만든다."""
+    import asyncio
+
+    import asyncpg
+    from sqlalchemy import text
+
+    from app.config import settings
+    pid = (await dbx.execute(text("select pg_backend_pid()"))).scalar_one()
+    c = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg://", "postgresql://"))
+    try:
+        await c.fetchval("select pg_terminate_backend($1)", pid)
+    finally:
+        await c.close()
+    await asyncio.sleep(0.2)
+
+
+@ON_SESSION_LOOP
+async def test_a_lost_commit_after_the_rebuild_rolls_back_and_rereads(db, monkeypatch):
+    """같은 꾸러미 다시 붙이기의 다리 커밋에서 연결이 끊기면 — 되감고 리포트를 다시 읽어 두고 짧은 오류를 돌려준다. 그 뒤 세션 · 리포트
+    객체를 그대로 쓸 수 있다. 예전에는 깨진 트랜잭션을 둔 채 돌아와 부르는 쪽의 다음 문장이 깨졌다(7-1 은 원장을 못 적었다)."""
+    from sqlalchemy import text
+
+    u, rep = await _make(db)
+    try:
+        first = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        real_commit = db.commit
+
+        async def lost_commit():
+            monkeypatch.setattr(db, "commit", real_commit)
+            await _kill_connection(db)
+            await real_commit()
+        monkeypatch.setattr(db, "commit", lost_commit)
+        got = await svc.attach_ontology(db, rep, FIX.read_bytes())      # 같은 바이트 — 다리만 다시 짓고 커밋한다
+        assert got["already"] is True and set(got["bridges"]) == {"error"}, got["bridges"]
+        err = got["bridges"]["error"]
+        assert "[SQL" not in err and "Background" not in err and len(err) <= 300, err
+        assert not _columns_expired(rep) and rep.ontology["sha256"] == first["sha256"]
+        assert (await db.execute(text("select 1"))).scalar_one() == 1
+        await db.commit()
+        assert "error" not in (await svc.attach_ontology(db, rep, FIX.read_bytes()))["bridges"], "다음 붙이기는 다시 짓는다"
+    finally:
+        await _drop(db, u)

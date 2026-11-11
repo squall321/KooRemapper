@@ -791,7 +791,7 @@ async def test_one_job_rolling_back_does_not_stop_the_scan(db, owner, slurm, mon
 
 @_aio
 @needs_sphere
-async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner, slurm, monkeypatch):
+async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner, slurm, own_key, monkeypatch):
     """7-1 반입이 꾸러미를 붙이다 코어 다리가 깨져도 반입 · 잡 성공은 그대로이고 같은 스캔의 다음 잡이 돈다. 스캔 고리(`_poll_jobs`)를
     이 시험의 잡 id 로만 부른다 — 전체 스캔(`poll_due`)은 떠 있는 dev 의 진짜 예약까지 가짜 KooSlurm 으로 볼 수 있다."""
     from app.database import SessionLocal
@@ -818,6 +818,8 @@ async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner
     loaded = [o for _, o in states if o and o.get("state") == "loaded"]
     assert len(loaded) == 1, states          # 둘째 잡은 같은 키 — 먼저 반입한 리포트를 알린다(7-2)
     assert loaded[0]["bridges"] == {"error": "RuntimeError: 다리 계획이 깨졌다(시험)"} and loaded[0]["rows"]["cae_part"] == 23
+    j = await db.get(Job, next(jid for jid, (_, o) in zip((j1.id, j2.id), states) if o and o.get("state") == "loaded"))
+    assert any("코어 다리를 못 지었다" in w and "다리 계획이 깨졌다" in w for w in j.warnings or []), j.warnings
 
 
 # ── 꾸러미 쓰기가 깨져도 원장에 남는다(검토 2차 11-11 항목 2) ─────────────────────────────────────────────
@@ -873,3 +875,70 @@ async def test_a_package_write_failure_is_recorded_and_leaves_no_file(db, owner,
     left = (await db.execute(select(SessionFile.filename).where(SessionFile.session_id == s.id,
                                                                  SessionFile.filename.like("ontology/%")))).scalars().all()
     assert left == [], left
+
+
+# ── 꾸러미 단계가 어디서 깨져도 원장 · 경고에 남는다(검토 2차 11-11 항목 6) ───────────────────────────────────
+
+async def _kill_connection(dbx) -> None:
+    """이 세션이 쥔 DB 연결을 서버 쪽에서 끊는다(pg_terminate_backend — 자기 연결만)."""
+    import asyncio
+
+    import asyncpg
+    from sqlalchemy import text
+
+    from app.config import settings
+    pid = (await dbx.execute(text("select pg_backend_pid()"))).scalar_one()
+    c = await asyncpg.connect(settings.database_url.replace("postgresql+asyncpg://", "postgresql://"))
+    try:
+        await c.fetchval("select pg_terminate_backend($1)", pid)
+    finally:
+        await c.close()
+    await asyncio.sleep(0.2)
+
+
+@_aio
+@needs_sphere
+async def test_a_lost_connection_at_the_package_commit_is_recorded_and_warned(db, owner, slurm, own_key, monkeypatch):
+    """꾸러미의 본 커밋에서 연결이 끊겨도 잡 원장(`external_ref.ontology`)에 실패와 짧은 까닭이 남고 경고가 오른다 — 예전에는 다리 커밋이
+    깨진 트랜잭션을 둔 채 돌아와 원장을 적는 문장이 깨졌고, 스캔이 되감아 원장도 경고도 없이 빠졌다."""
+    from app.modules.reports import bridges as br
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+    real = br.rebuild_quietly
+
+    async def then_lose(dbx, report):
+        got = await real(dbx, report)
+        await _kill_connection(dbx)
+        return got
+    monkeypatch.setattr(br, "rebuild_quietly", then_lose)
+    j = await _scan_one(db, await _reserved(db, u, s))
+    assert j.status == "succeeded", j.error_summary
+    onto = (j.external_ref or {}).get("ontology")
+    assert onto and onto["state"] == "failed" and "[SQL" not in onto["why"], onto
+    assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w for w in j.warnings or []), j.warnings
+    rid = j.external_ref["report_ids"][0]
+    assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
+
+
+@_aio
+@needs_sphere
+async def test_a_crash_in_the_package_step_is_recorded_and_warned(db, owner, slurm, own_key, monkeypatch):
+    """꾸러미 단계 자체가 예외를 내도(받기 · 읽기 등) 잡은 성공 그대로이고 원장에 실패 · 경고가 남는다."""
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+
+    async def crash(*a, **kw):
+        raise RuntimeError("꾸러미 단계가 깨졌다(시험)")
+    monkeypatch.setattr(pr, "_attach_package", crash)
+    j = await _scan_one(db, await _reserved(db, u, s))
+    assert j.status == "succeeded", j.error_summary
+    assert j.external_ref["ontology"] == {"state": "failed", "why": "꾸러미 단계가 깨졌다 — RuntimeError: 꾸러미 단계가 깨졌다(시험)"}
+    assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w for w in j.warnings or []), j.warnings
