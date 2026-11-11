@@ -255,15 +255,20 @@ async def plan(db, report: ImpactReport, *, rows: list | None = None, edges: lis
     return {"counts": counts, "rules": rules, "states": states, "stale": stale, "lines": lines, "pools": pools}
 
 
-async def _lock(db, rid: str) -> None:
-    """한 리포트의 다리 쓰기는 한 번에 하나 — 둘이 함께 다시 지으면 같은 규칙 선을 두 번 넣어 유일 제약에 걸린다."""
+async def lock_report(db, rid: str) -> None:
+    """한 리포트의 다리 · 해석 행 쓰기는 한 번에 하나 — 리포트 행을 FOR UPDATE 로 잠근다.
+
+    ★모든 쓰기 길이 **이 잠금을 먼저** 잡는다(사람 선 확정 · 지우기 · 다시 짓기 · 꾸러미 붙이기의 본 트랜잭션). 차례가 엇갈리면
+    교착이었다 — 붙이기가 선을 지운 뒤 FK 검사에서 확정의 행 잠금을, 확정은 규칙 선 지우기에서 붙이기를 기다렸다(검토 11-11 P4).
+    둘이 함께 다시 지으면 같은 규칙 선을 두 번 넣어 유일 제약에 걸리는 것도 이 잠금이 막는다.
+    """
     await db.execute(select(ImpactReport.id).where(ImpactReport.id == rid).with_for_update())
 
 
 async def rebuild(db, report: ImpactReport) -> dict:
     """그 리포트의 다리를 다시 짓는다 — 규칙 선은 걷고 지금 거울로 다시 긋고, 사람 선은 그대로 둔다. 셈은 리포트의
     `ontology.bridges` 에 남는다. **커밋은 부르는 쪽이 한다.**"""
-    await _lock(db, report.id)
+    await lock_report(db, report.id)
     p = await plan(db, report)
     await db.execute(delete(OntoRelation).where(
         OntoRelation.report_id == report.id, OntoRelation.relation.in_(relations()),
@@ -403,7 +408,7 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     같은 짝의 규칙 선이 있으면 그 선을 사람 선으로 올린다. 다대일이면 그 객체의 다른 규칙 선은 다시 짓기에서 빠진다(사람이 이긴다).
     """
     rid, bmap = report.id, bridges()
-    await _lock(db, rid)
+    await lock_report(db, rid)
     key = _full(rid, src_key)
     found = (await db.execute(select(OntoObject).where(
         OntoObject.report_id == rid, OntoObject.key == key))).scalars().all()
@@ -464,7 +469,7 @@ async def remove(db, report: ImpactReport, *, src_key: str, dst_key: str) -> dic
     """사람 선을 지운다 — 끊긴 사람 선(해석 객체가 사라진 것)도 지울 수 있다. 규칙 선은 지우지 않는다(다시 지으면 다시 선다).
     커밋은 부르는 쪽."""
     rid = report.id
-    await _lock(db, rid)
+    await lock_report(db, rid)
     key, dst_key = _full(rid, src_key), (dst_key or "").strip()
     line = (await db.execute(select(OntoRelation).where(
         OntoRelation.report_id == rid, OntoRelation.relation.in_(relations()), OntoRelation.src_key == key,

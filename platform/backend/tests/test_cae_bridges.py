@@ -418,6 +418,94 @@ async def test_a_broken_bridge_view_does_not_take_the_cae_view_down(db, monkeypa
         await _drop(db, u)
 
 
+def _pause_in_plan(monkeypatch, who):
+    """`who` 세션이 다리 계획에 들어서면(리포트 행 잠금을 쥔 채) 멈춘다 — 다른 길을 그 사이에 끼워 넣어 겹침을 만든다."""
+    import asyncio
+    paused, go = asyncio.Event(), asyncio.Event()
+    orig = br.plan
+
+    async def hook(dbx, report, **kw):
+        if dbx is who and not go.is_set():
+            paused.set()
+            await go.wait()
+        return await orig(dbx, report, **kw)
+    monkeypatch.setattr(br, "plan", hook)
+    return paused, go
+
+
+@ON_SESSION_LOOP
+async def test_a_reattach_during_a_confirm_does_not_deadlock(db, mirror, monkeypatch):
+    """확정(B)이 리포트 행 잠금을 쥔 채 다리 계획에 멈춘 사이 새 꾸러미 붙이기(A)가 들어와도 교착이 없다(검토 11-11 P4).
+    붙이기도 본 트랜잭션 처음에 같은 잠금을 먼저 잡는다 — 모든 길이 같은 차례로 잠근다. 고치기 전에는 A 가 선을 지운 뒤 FK 검사에서
+    B 의 행 잠금을, B 는 규칙 선 지우기에서 A 를 기다려 교착이었다."""
+    import asyncio
+
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid = rep.id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        pkg = _pkg()
+        pkg["_note"] = str(pkg.get("_note") or "") + " (확정과 겹쳐 다시 낸 판)"
+        async with SessionLocal() as sa, SessionLocal() as sb:
+            ra, rb = await sa.get(ImpactReport, rid), await sb.get(ImpactReport, rid)
+            paused, go = _pause_in_plan(monkeypatch, sb)
+
+            async def confirm():
+                got = await br.confirm(sb, rb, src_key="part/1", dst_key="cbt:metal-a", by="o")
+                await sb.commit()
+                return got
+            tb = asyncio.create_task(confirm())
+            await asyncio.wait_for(paused.wait(), 15)
+            ta = asyncio.create_task(svc.attach_ontology(sa, ra, _raw(pkg)))
+            await asyncio.sleep(2.0)                      # A 가 막힐 자리까지 가게 둔다
+            go.set()
+            res = await asyncio.gather(asyncio.wait_for(tb, 40), asyncio.wait_for(ta, 40), return_exceptions=True)
+            for s in (sa, sb):
+                await s.rollback()
+        assert not any(isinstance(x, BaseException) for x in res), res
+        confirmed, attached = res
+        assert confirmed["ok"] and attached["already"] is False and attached["bridges"]["human"] == 1, attached["bridges"]
+        lines = await _lines(db, rid)
+        assert lines[("part/1", "cbt:metal-a")].properties["basis"] == "human", "겹친 확정의 사람 선이 다시 붙이기를 넘어 남았다"
+        assert _flat(attached["bridges"]) == {**EXPECT, "human": 1, "candidates": EXPECT["candidates"] - 1}
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_two_confirms_on_one_many_to_one_part_leave_one_human_line(db, mirror, monkeypatch):
+    """양성 대조(검토 P6) — 다대일 파트에 사람 선 둘이 겹쳐 들어와도 잠금이 줄 세워 하나만 서고 다른 하나는 already_bound 다."""
+    import asyncio
+
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid = rep.id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        async with SessionLocal() as s1, SessionLocal() as s2:
+            r1, r2 = await s1.get(ImpactReport, rid), await s2.get(ImpactReport, rid)
+            paused, go = _pause_in_plan(monkeypatch, s1)
+
+            async def one(s, r, dst):
+                got = await br.confirm(s, r, src_key="part/1", dst_key=dst, by="o")
+                await s.commit()
+                return got
+            t1 = asyncio.create_task(one(s1, r1, "cbt:metal-a"))
+            await asyncio.wait_for(paused.wait(), 15)
+            t2 = asyncio.create_task(one(s2, r2, "cbt:metal-b"))
+            await asyncio.sleep(0.5)
+            go.set()
+            res = await asyncio.gather(asyncio.wait_for(t1, 30), asyncio.wait_for(t2, 30), return_exceptions=True)
+        assert [(x.get("ok"), x.get("error")) for x in res] == [(True, None), (False, "already_bound")], res
+        human = [k for k, r in (await _lines(db, rid)).items() if k[0] == "part/1" and r.properties["basis"] == "human"]
+        assert human == [("part/1", "cbt:metal-a")]
+    finally:
+        await _drop(db, u)
+
+
 @ON_SESSION_LOOP
 async def test_deleting_the_report_takes_its_human_lines_with_it(db, mirror):
     """사람 선도 리포트의 것이다 — 리포트를 지우면 FK 로 함께 사라진다(지운 리포트를 가리키는 선이 남지 않는다 — 0019 의 교훈)."""
