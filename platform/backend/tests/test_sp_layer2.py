@@ -311,9 +311,13 @@ async def test_hub_and_our_aliases_are_searched_and_resolved(db):
         assert await onto.resolve_task(db, f"DUP-{t}") == ("", ""), "두 과제가 가진 별칭으로 풀었다(짐작이다)"
         cands = {c["key"] for c in await onto.task_candidates(db, f"dup{t}")}
         assert {t1, t3} <= cands, cands                 # 풀지는 않고 후보로 둘 다 보인다
-        # 사람이 이 플랫폼에서 정한 별칭이 허브 별칭보다 먼저다
+        # 사람이 이 플랫폼에서 정한 별칭과 허브 별칭이 엇갈리면 어느 쪽도 조용히 이기지 않는다 — 풀지 않고 둘 다 후보로 보인다
+        # (검토 R8 · 11-11 — 예전엔 우리 별칭이 먼저였다. 정확 일치는 원천이 하나로 모일 때만이다)
         assert (await onto.confirm_alias(db, alias=f"OLD-{t}", key=t2))["ok"]
-        assert await onto.resolve_task(db, f"OLD-{t}") == (t2, "alias")
+        assert await onto.resolve_task(db, f"OLD-{t}") == ("", "")
+        cands, ambiguous = await onto.candidates_for(db, f"OLD-{t}")
+        assert ambiguous and [(c["key"], c["why"]) for c in cands][:2] == \
+            [(t2, "사람이 붙인 별칭이 가리킨다"), (t1, "허브 별칭이 글자 그대로 같다")], cands
     finally:
         await db.rollback()
 

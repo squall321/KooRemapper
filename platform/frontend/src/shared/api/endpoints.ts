@@ -220,6 +220,8 @@ export interface ReportRevisionOut {
   mismatch: { kind: 'differs' | 'eng_meta_missing' | 'renamed' | 'merged'; linked: string; eng_meta?: string; said: string } | null
   candidates: RevisionCandidate[]
   task_candidates: TaskCandidate[]
+  /** 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 둔다 */
+  ambiguous?: boolean
 }
 export async function reportRevision(reportId: string, taskKey?: string): Promise<ReportRevisionOut> {
   const { data } = await api.get(`/reports/${reportId}/revision`, { params: { task_key: taskKey || undefined } })

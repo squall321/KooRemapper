@@ -142,7 +142,9 @@ async def get_report_revision(
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
     free = svc.report_free_task(rep)
-    resolved, how = await svc.resolve_task(db, free) if free else ("", "")
+    found = await svc.exact_matches(db, free) if free else []
+    resolved, how = svc._pick(found)
+    task_cands, ambiguous = ([], False) if resolved or not free else await svc.candidates_for(db, free, found=found)
     linked = await svc.linked_revision(db, rep)
     # 이어진 개정의 과제(없으면 풀린 과제)가 허브에서 어떤 처지인가 — 합쳐졌으면 화면이 「A 는 B 로 합쳐짐」 을
     # 띄우고 관리자가 옮긴다(사용자 결정 10-30). 사라짐 · 그만 씀도 여기서 말한다.
@@ -159,8 +161,9 @@ async def get_report_revision(
         "task_state": await svc.task_state(db, about) if about else None,
         "mismatch": await svc.mismatch(db, rep),
         "candidates": await svc.candidates(db, rep, task_key=task_key or resolved or ""),
-        "task_candidates": ([] if resolved or not free
-                            else await svc.task_candidates(db, free)),
+        "task_candidates": task_cands,
+        # 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 낸다(검토 R8 · R6). 사람이 고른다
+        "ambiguous": ambiguous,
     })
 
 

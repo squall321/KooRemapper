@@ -1795,6 +1795,7 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
 @mcp.tool()
 async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> dict:
     """이 리포트가 어느 과제·개정인가(`linked`) + **어긋남** + **후보와 근거** + 그 과제의 허브 처지(`task_state`).
+    `ambiguous: true` 면 글자 그대로 맞는 과제가 둘 이상이다(원천이 엇갈린다) — 풀지 않고 `task_candidates` 에 근거와 함께 둔다.
 
     ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
     **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라. `kind` 가
@@ -1877,7 +1878,8 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
 async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     """과거 리포트의 자유 문자열 과제를 정본에 붙이는 **계획** — 로그인한 누구나 부른다.
     ★**아무것도 쓰지 않는다**(미리 보기다). `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
-    갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라.
+    갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라. `links` 는 글자 그대로 맞는 원천(과제명 ·
+    과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 **과제 하나로 모일 때만**이다 — 엇갈리면(`ambiguous: true`) 후보다.
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
     ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
@@ -1929,7 +1931,8 @@ async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REP
 @mcp.tool()
 async def confirm_task_alias(alias: str, task_key: str, ctx: Context,
                              note: str = "") -> dict:
-    """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다.
+    """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다 — 단 다른 정확 일치(과제명 ·
+    과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous`).
 
     ★짐작으로 부르지 마라 — `plan_task_links` 의 후보와 **근거**를 사람에게 보여 주고 고른
     값을 넣어라. 한 문자열은 **한 과제만** 가리킨다(다른 곳에 붙어 있으면 거절된다).

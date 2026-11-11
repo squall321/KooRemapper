@@ -434,48 +434,79 @@ def normalize(text: str) -> str:
 async def resolve_task(db, free: str) -> tuple[str, str]:
     """자유 문자열 → (과제 key, 어떻게). 못 풀면 `("", "")`.
 
-    **짐작이 없는 길만** 여기서 푼다 —
+    **짐작이 없는 길만** 여기서 푼다(`exact_matches`) —
       `exact`        과제명(plm_task.key)과 글자 그대로 같다
       `task_code`    과제코드(`properties.task_code`)와 글자 그대로 같다
       `previous_key` 허브가 바꾼 옛 과제명이다(`onto_previous_keys` — 같은 과제다)
       `alias`        사람이 이 플랫폼에서 이미 붙인 기록이 있다
-      `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같고 그런 과제가 **하나뿐**이다(KR-01 다시, 10-30)
+      `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같다
+    ★원천이 **모두 같은 과제 하나**를 가리킬 때만 푼다(검토 반영 11-11). 둘이 엇갈리면(사람이 붙인 별칭과 나중에 온 같은 글자의
+      허브 과제 — R8), 과제코드 · 허브 별칭이 두 과제에 걸리면(R6), 이름(label)이 글자 그대로 같은 다른 과제가 있으면 풀지 않고
+      **후보**로 낸다(`candidates_for`) — 사람이 고른다. 예전엔 원천 차례로 먼저 걸린 것이 조용히 이겼다.
     ⚠ key 는 **과제명**이다(rootdesign plm_task.key). 과제코드는 `properties.task_code` 에 있다 —
       보고서에는 과제코드가 적혀 오므로 그 경로가 없으면 과제코드로는 영영 안 풀린다(KR-01, 2026-10-27).
-    ★우리 별칭이 허브 별칭보다 먼저다 — 허브가 나중에 같은 별칭을 다른 과제에 달아도 사람이 정한 것을 조용히 바꾸지 않는다.
     정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
+    """
+    return _pick(await exact_matches(db, free))
+
+
+# 글자 그대로 맞은 원천 → 후보에 보일 근거
+_EXACT_WHY = {"exact": "과제명이 글자 그대로 같다", "task_code": "과제코드가 글자 그대로 같다",
+              "previous_key": "허브가 바꾼 옛 과제명이다", "alias": "사람이 붙인 별칭이 가리킨다",
+              "hub_alias": "허브 별칭이 글자 그대로 같다", "label": "이름(label)이 글자 그대로 같다"}
+
+
+async def exact_matches(db, free: str) -> list[tuple[str, str]]:
+    """자유 문자열과 **글자 그대로** 맞는 과제 — `(과제 key, 원천)` 목록. 원천 차례(과제명 · 과제코드 · 옛 과제명 · 우리 별칭 ·
+    허브 별칭 · 이름), 같은 원천 안에서는 key 차례라 실행마다 같다(R6b — 예전 과제코드 고름은 차례 없는 `.first()` 였다).
+    `label` 은 이것만으로는 잇지 않는다 — 다른 원천과 엇갈리는지 볼 때만 쓴다(정확 일치의 원천이 아니었다).
     """
     free = (free or "").strip()
     if not free:
-        return "", ""
-    hit = (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.key == free,
-                                 OntoObject.deleted.is_(False)))).scalar_one_or_none()
-    if hit is not None:
-        return hit.key, "exact"
-    code_hit = (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.properties["task_code"].astext == free,
-                                 OntoObject.deleted.is_(False)))).scalars().first()
-    if code_hit is not None:
-        return code_hit.key, "task_code"
+        return []
+    live = (OntoObject.type_slug == TYPE_TASK, OntoObject.deleted.is_(False))
+    out: list[tuple[str, str]] = [(k, "exact") for k in (await db.execute(
+        select(OntoObject.key).where(*live, OntoObject.key == free))).scalars()]
+    out += [(k, "task_code") for k in (await db.execute(select(OntoObject.key).where(
+        *live, OntoObject.properties["task_code"].astext == free).order_by(OntoObject.key))).scalars()]
     now = await current_key(db, TYPE_TASK, free)
     if now != free and await task_exists(db, now):
-        return now, "previous_key"
-    al = (await db.execute(
-        select(OntoAlias).where(OntoAlias.type_slug == TYPE_TASK,
-                                OntoAlias.alias == free))).scalar_one_or_none()
+        out.append((now, "previous_key"))
+    al = (await db.execute(select(OntoAlias.key).where(
+        OntoAlias.type_slug == TYPE_TASK, OntoAlias.alias == free))).scalar_one_or_none()
     if al is not None:
-        return al.key, "alias"
-    named = [t.key for t in (await db.execute(
-        select(OntoObject).where(OntoObject.type_slug == TYPE_TASK,
-                                 OntoObject.properties["aliases"].contains([free]),
-                                 OntoObject.deleted.is_(False)))).scalars().all()
-             if free in hub_aliases(t)]
-    if len(named) == 1:
-        return named[0], "hub_alias"
-    return "", ""
+        out.append((al, "alias"))
+    out += [(t.key, "hub_alias") for t in (await db.execute(select(OntoObject).where(
+        *live, OntoObject.properties["aliases"].contains([free])).order_by(OntoObject.key))).scalars()
+        if free in hub_aliases(t)]
+    out += [(k, "label") for k in (await db.execute(select(OntoObject.key).where(
+        *live, OntoObject.label == free).order_by(OntoObject.key))).scalars()]
+    return out
+
+
+def _pick(found: list[tuple[str, str]]) -> tuple[str, str]:
+    """원천들이 과제 하나로 모이고 이름이 아닌 원천이 하나라도 있으면 그것(원천 차례 첫째) — 아니면 못 푼 것."""
+    linkers = [m for m in found if m[1] != "label"]
+    return linkers[0] if linkers and len({k for k, _ in found}) == 1 else ("", "")
+
+
+async def candidates_for(db, free: str, *, found: list[tuple[str, str]] | None = None,
+                         rows: list[OntoObject] | None = None) -> tuple[list[dict], bool]:
+    """못 푼 자유 문자열의 후보와 근거 — `(후보, 엇갈림)`. 글자 그대로 맞은 원천(엇갈려서 못 푼 것)을 먼저, 그다음 정규화해서
+    같아 보이는 것(`task_candidates`). 엇갈림(`ambiguous`)은 글자 그대로 맞은 과제가 둘 이상이라는 뜻이다 — 사람이 고른다."""
+    if found is None:
+        found = await exact_matches(db, free)
+    if rows is None:
+        rows = await _live_tasks(db)
+    labels = {t.key: t.label for t in rows}
+    out: list[dict] = []
+    for k, how in found:
+        if any(c["key"] == k for c in out):
+            continue
+        out.append({"key": k, "label": labels.get(k), "why": _EXACT_WHY[how], "rank": -1})
+    seen = {c["key"] for c in out}
+    out += [c for c in await task_candidates(db, free, rows=rows) if c["key"] not in seen]
+    return out, len({k for k, _ in found}) > 1
 
 
 def hub_aliases(obj: OntoObject) -> list[str]:
@@ -645,7 +676,8 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
     plan: list[dict] = []
     for free in sorted(groups):
         rows = groups[free]
-        key, how = await resolve_task(db, free)
+        found = await exact_matches(db, free)
+        key, how = _pick(found)
         codes = sorted({str((r.eng_meta or {}).get("dev_revision", {}).get("code") or "")
                         for r in rows} - {""})
         entry = {
@@ -662,8 +694,9 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
         else:
             if tasks is None:
                 tasks = await _live_tasks(db)
-            cands = await task_candidates(db, free, rows=tasks)
+            cands, ambiguous = await candidates_for(db, free, found=found, rows=tasks)
             entry["candidates"] = cands
+            entry["ambiguous"] = ambiguous      # 글자 그대로 맞은 과제가 둘 이상 — 잇지 않고 사람이 고른다(R8 · R6)
             entry["verdict"] = "proposal" if cands else "unmatched"
         plan.append(entry)
         if limit and len(plan) >= limit:
