@@ -818,3 +818,58 @@ async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner
     loaded = [o for _, o in states if o and o.get("state") == "loaded"]
     assert len(loaded) == 1, states          # 둘째 잡은 같은 키 — 먼저 반입한 리포트를 알린다(7-2)
     assert loaded[0]["bridges"] == {"error": "RuntimeError: 다리 계획이 깨졌다(시험)"} and loaded[0]["rows"]["cae_part"] == 23
+
+
+# ── 꾸러미 쓰기가 깨져도 원장에 남는다(검토 2차 11-11 항목 2) ─────────────────────────────────────────────
+
+@pytest.fixture()
+def own_key(monkeypatch):
+    """이 시험만의 잡 키(stcx:<무작위>) — 같은 DB 에서 다른 시험이 고정 키(stcx:4242)로 돌아도 겹치지 않는다(하네스는 SID · KEY 를
+    부를 때마다 모듈에서 읽는다)."""
+    import random
+    sid = str(random.randint(10**8, 10**9 - 1))
+    monkeypatch.setitem(globals(), "SID", sid)
+    monkeypatch.setitem(globals(), "KEY", f"stcx:{sid}")
+    return sid
+
+
+async def _scan_one(db, job) -> Job:
+    """스캔 고리(`_poll_jobs`)를 따로 연 세션으로 이 잡 하나만 — 실패 갈래가 세션을 되감아도 시험 세션의 객체(사용자 · 세션)는 그대로다
+    (전체 스캔 `poll_due` 는 떠 있는 dev 의 진짜 예약까지 볼 수 있다)."""
+    from app.database import SessionLocal
+    async with SessionLocal() as scan:
+        await pr._poll_jobs(scan, [job.id], FAR + timedelta(minutes=1))
+    j = await db.get(Job, job.id)
+    await db.refresh(j)
+    return j
+
+
+@_aio
+@needs_sphere
+async def test_a_package_write_failure_is_recorded_and_leaves_no_file(db, owner, slurm, own_key, monkeypatch):
+    """꾸러미가 검사를 지났는데 본 쓰기가 DB 에서 깨지면(선 둘 → 유일 제약) — 잡은 성공 그대로, 원장에 짧은 까닭 · 경고, 꾸러미 파일은 없다."""
+    from app.reports import onto_package as op
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    pkg = _package_for(raw)
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+    orig = op.check
+
+    def dup(*a, **k):
+        got = orig(*a, **k)
+        got["edges"] = got["edges"] + got["edges"][:1]
+        return got
+    monkeypatch.setattr(op, "check", dup)
+    job = await _scan_one(db, await _reserved(db, u, s))
+    assert job.status == "succeeded", job.error_summary
+    onto = job.external_ref["ontology"]
+    assert onto["state"] == "failed" and "UniqueViolationError" in onto["why"], onto
+    assert "[SQL" not in onto["why"] and len(onto["why"]) <= 400, onto["why"]
+    assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w for w in job.warnings)
+    rid = job.external_ref["report_ids"][0]
+    assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
+    left = (await db.execute(select(SessionFile.filename).where(SessionFile.session_id == s.id,
+                                                                 SessionFile.filename.like("ontology/%")))).scalars().all()
+    assert left == [], left

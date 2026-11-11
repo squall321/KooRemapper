@@ -89,6 +89,10 @@ class Bridge:
         return self.cardinality in ("many_to_one", "one_to_one")
 
 
+class ReportGone(Exception):
+    """잠그려던 리포트 행이 없다 — 그사이 지워졌다(지우기가 굳은 뒤 차례가 왔다). 부르는 쪽은 404 로 말한다(검토 2차 11-11 항목 3)."""
+
+
 # 응답 · 원장에 싣지 않는 줄 — SQL 문 · 매개변수 · DETAIL(값이 든다) · 배경 링크 · autoflush 안내
 _NOISE = ("[SQL", "[parameters", "DETAIL:", "(Background on this error", "(raised as a result of Query-invoked autoflush")
 
@@ -312,8 +316,12 @@ async def lock_report(db, rid: str) -> None:
     ★모든 쓰기 길이 **이 잠금을 먼저** 잡는다(사람 선 확정 · 지우기 · 다시 짓기 · 꾸러미 붙이기의 본 트랜잭션). 차례가 엇갈리면
     교착이었다 — 붙이기가 선을 지운 뒤 FK 검사에서 확정의 행 잠금을, 확정은 규칙 선 지우기에서 붙이기를 기다렸다(검토 11-11 P4).
     둘이 함께 다시 지으면 같은 규칙 선을 두 번 넣어 유일 제약에 걸리는 것도 이 잠금이 막는다.
+    ★행이 없으면 `ReportGone` — 커밋 전인 리포트 지우기 뒤에서 기다렸다가 지우기가 굳으면 잠글 행이 없다. 예전에는 조용히 지나가 쓰기가
+    FK 에서 깨지고(500) 꾸러미 파일이 남았다(검토 2차 항목 3). 부르는 쪽은 404 로 말한다.
     """
-    await db.execute(select(ImpactReport.id).where(ImpactReport.id == rid).with_for_update())
+    got = (await db.execute(select(ImpactReport.id).where(ImpactReport.id == rid).with_for_update())).scalar_one_or_none()
+    if got is None:
+        raise ReportGone(f"리포트 {rid} 가 그사이 지워졌다")
 
 
 async def rebuild(db, report: ImpactReport) -> dict:
@@ -339,22 +347,36 @@ async def rebuild(db, report: ImpactReport) -> dict:
     return p
 
 
-async def rebuild_after_attach(db, report: ImpactReport) -> dict:
-    """꾸러미를 붙인 끝에 다리를 다시 짓고 커밋한다 — **깨져도 붙이기를 무르지 않는다**(행은 이미 커밋됐다).
-
-    ★저장점(SAVEPOINT) 안에서 짓는다 — 깨지면 다리만 되감고 **부르는 쪽 세션은 되감지 않는다.** 예전에는 세션을 통째로 되감아
-    부르는 쪽 객체가 만료됐고, 번들 반입이 응답을 짓다 500 이 나고(리포트 · 꾸러미는 이미 굳은 뒤) 7-1 스캔이 다음 잡에서 멈췄다
-    (검토 11-11 P1 · P8). 셈 또는 `{"error": 짧은 꼴}`(`short_error` — 전문은 로그) — 실패해도 붙이기 결과는 그대로다(다음 붙이기가
-    다시 짓는다).
+async def rebuild_quietly(db, report: ImpactReport) -> dict:
+    """다리를 **저장점(SAVEPOINT) 안에서** 다시 짓는다 — 깨지면 다리만 되감고 **부르는 쪽 세션 · 객체는 되감지 않는다.** 셈 또는
+    `{"error": 짧은 꼴}`(`short_error` — 전문은 로그). 커밋은 부르는 쪽 — 꾸러미 붙이기는 본 트랜잭션과 한 번에, 같은 꾸러미 다시
+    붙이기는 `rebuild_after_attach` 가 한다. 예전에는 세션을 통째로 되감아 부르는 쪽 객체가 만료됐고, 번들 반입이 응답을 짓다 500 이
+    나고(리포트 · 꾸러미는 이미 굳은 뒤) 7-1 스캔이 다음 잡에서 멈췄다(검토 11-11 P1 · P8).
     """
     rid = report.id
     try:
         async with db.begin_nested():
-            got = await rebuild(db, report)
-        counts = got["counts"]
+            return (await rebuild(db, report))["counts"]
     except Exception as exc:                # noqa: BLE001 — 다리 하나가 실은 꾸러미를 무르게 하면 안 된다
         logger.exception("코어 다리 짓기 실패 — report %s", rid)
-        counts = {"error": short_error(exc)}
+        return {"error": short_error(exc)}
+
+
+async def reread(db, report: ImpactReport, rid: str) -> None:
+    """되감은 뒤 리포트 객체를 다시 읽어 둔다 — 되감기는 세션의 모든 객체를 만료시키고, 부르는 쪽(라우트 · 번들 반입 · 7-1)은 그
+    객체를 계속 읽는다(async 에서 만료된 칸을 읽으면 깨진다 — key 도 만료돼 `rid` 를 따로 받는다). 그사이 지워졌으면 만료된 채로 둔다."""
+    try:
+        await db.refresh(report)
+    except Exception:                       # noqa: BLE001 — 되감은 뒤의 정리가 원래 실패를 가리면 안 된다
+        logger.warning("리포트 %s 를 다시 읽지 못했다 — 되감은 뒤 지워졌을 수 있다", rid, exc_info=True)
+
+
+async def rebuild_after_attach(db, report: ImpactReport) -> dict:
+    """같은 꾸러미를 다시 붙일 때(행은 그대로) 다리만 지금 거울로 다시 짓고(`rebuild_quietly`) 커밋한다 — **깨져도 붙이기를 무르지
+    않는다.** 셈 또는 `{"error": 짧은 꼴}` — 다음 붙이기가 다시 짓는다.
+    """
+    rid = report.id
+    counts = await rebuild_quietly(db, report)
     try:
         await db.commit()                   # 지은 다리(또는 아무것도)를 굳히고 리포트 행 잠금을 푼다 — 되감지 않는다
     except Exception as exc:                # noqa: BLE001
@@ -471,11 +493,16 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
 
     거절(→ `ok: False` · `status` · `error`) — 그런 해석 객체가 없다(404 not_found) · 다리가 없는 타입(422 no_bridge) · 관계 이름이
     다르다(422 wrong_relation) · 끝 타입이 다르다(422 wrong_type — cae_part 는 part 에만) · 거울에 없는 코어 객체(422 not_in_mirror) ·
-    허브에서 사용 안 함(422 inactive) · 다대일인데 다른 사람 선이 이미 있다(409 already_bound — 먼저 지운다).
+    허브에서 사용 안 함(422 inactive) · 다대일인데 다른 사람 선이 이미 있다(409 already_bound — 먼저 지운다) · 리포트가 그사이
+    지워졌다(404 report_gone).
     같은 짝의 규칙 선이 있으면 그 선을 사람 선으로 올린다. 다대일이면 그 객체의 다른 규칙 선은 다시 짓기에서 빠진다(사람이 이긴다).
     """
     rid, bmap = report.id, bridges()
-    await lock_report(db, rid)
+    try:
+        await lock_report(db, rid)
+    except ReportGone:
+        return _refuse(404, "report_gone", "리포트가 그사이 지워졌다")
+    await db.refresh(report, attribute_names=["ontology"])     # 잠근 뒤 요약 — already 가 돌려주는 셈도 지금 것이다
     key = _full(rid, src_key)
     found = (await db.execute(select(OntoObject).where(
         OntoObject.report_id == rid, OntoObject.key == key))).scalars().all()
@@ -534,9 +561,12 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
 
 async def remove(db, report: ImpactReport, *, src_key: str, dst_key: str) -> dict:
     """사람 선을 지운다 — 끊긴 사람 선(해석 객체가 사라진 것)도 지울 수 있다. 규칙 선은 지우지 않는다(다시 지으면 다시 선다).
-    커밋은 부르는 쪽."""
+    커밋은 부르는 쪽. 리포트가 그사이 지워졌으면 404 report_gone."""
     rid = report.id
-    await lock_report(db, rid)
+    try:
+        await lock_report(db, rid)
+    except ReportGone:
+        return _refuse(404, "report_gone", "리포트가 그사이 지워졌다")
     key, dst_key = _full(rid, src_key), (dst_key or "").strip()
     line = (await db.execute(select(OntoRelation).where(
         OntoRelation.report_id == rid, OntoRelation.relation.in_(relations()), OntoRelation.src_key == key,

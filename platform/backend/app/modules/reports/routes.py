@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import logging
 import zlib
 
 from fastapi import (APIRouter, Depends, File, Form, HTTPException, Query, Request,
@@ -24,6 +25,8 @@ from app.reports.cad_bundle import CadBundleError
 from app.reports.onto_package import OntoPackageError
 from app.reports.render_result import RenderResultError
 from app.shared.responses import ok
+
+logger = logging.getLogger("koorm.reports")
 
 router = APIRouter(tags=["reports"])
 
@@ -255,6 +258,12 @@ async def report_intake(
             # 매핑 정본은 리포트 자신(`set_report.media`)이다 — 서비스가 읽는다.
             media_summary = await svc.attach_media(
                 db, s, report, media=bundle_media, html=raw)
+        # 반입은 여기서 굳었다(ingest_report · attach_media 가 커밋했다) — 응답은 지금 값으로 짓는다. 꾸러미 싣기가 깨져 세션을 되감으면
+        # 객체가 만료되므로 그 뒤에 다시 읽지 않는다(검토 2차 11-11 항목 2).
+        payload = {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
+                   "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
+                   "source_kfile_id": report.source_kfile_id,
+                   "task_links": getattr(report, "auto_task_links", None)}   # 반입 뒤 과제 잇기(SRC-09)
         onto_summary: dict | None = None
         if bundle_onto:
             # 후처리 꾸러미(같은 이름 줄기) — 실패해도 리포트 반입은 막지 않고 까닭을 돌려준다(사용자 결정 10-31 (가))
@@ -264,16 +273,18 @@ async def report_intake(
                                 "bridges": got.get("bridges")}
             except OntoPackageError as exc:
                 onto_summary = {"ok": False, "why": str(exc)}
+            except Exception as exc:  # noqa: BLE001 — 굳은 반입을 500 으로 바꾸면 클라이언트가 다시 보내 리포트 · 세션이 둘이 된다
+                logger.exception("번들 반입 %s: 꾸러미 싣기 실패 — 반입은 그대로다", payload["report_id"])
+                await db.rollback()
+                onto_summary = {"ok": False, "error": bridges.short_error(exc),
+                                "why": "꾸러미를 싣지 못했다 — 리포트는 반입됐다. 번들을 다시 보내지 말고 꾸러미만 "
+                                       f"POST /reports/{payload['report_id']}/cae 로 붙인다"}
     except ValueError as exc:
         if created_here:
             await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
         elif krow is not None:
             await sess_svc.delete_file(db, krow)          # 기존 세션엔 방금 넣은 K만 회수
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
-    payload = {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
-               "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
-               "source_kfile_id": report.source_kfile_id,
-               "task_links": getattr(report, "auto_task_links", None)}   # 반입 뒤 과제 잇기(SRC-09)
     if bundle_info:
         payload["bundle"] = bundle_info
     if media_summary:
@@ -282,7 +293,7 @@ async def report_intake(
         payload["ontology"] = onto_summary
     return ok(
         payload,
-        message=f"{report.kind} 리포트 반입 완료 ({report.n_cases} 케이스"
+        message=f"{payload['kind']} 리포트 반입 완료 ({payload['n_cases']} 케이스"
                 + ("· K파일 링크" if kfile_id else "") + ")",
         status_code=201,
     )
@@ -880,13 +891,19 @@ async def attach_ontology(
     """후처리 온톨로지 꾸러미(`<리포트 이름>.ontology.json`, `dynaforge.onto_package`)를 리포트에 싣는다 — 캠페인 수준만 행으로
     (사용자 결정 10-31 (가)). 소유자만. 받아들인 어휘 판 · 짝 HTML 지문 · 종류 · 런 키에 안 맞으면 422 — 아무것도 바꾸지 않는다.
     같은 바이트는 행을 그대로 둔다(멱등), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 어느 쪽이든 끝에 코어 다리(core-link SRC-08)를
-    지금 거울로 다시 짓는다 — 응답 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선 수와 후보 · 못 붙인 객체 수(사람 선은 다시 붙여도 남는다)."""
+    지금 거울로 다시 짓는다 — 응답 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선 수와 후보 · 못 붙인 객체 수(사람 선은 다시 붙여도 남는다).
+    리포트가 그사이 지워졌으면 404, 싣는 쓰기가 깨지면 500 과 짧은 까닭 — 어느 쪽이든 아무것도 바뀌지 않는다(옛 꾸러미 · 행 그대로)."""
     r = await _require_owned_report(db, user, report_id)
     raw, name = await _read_upload(file, what="온톨로지 꾸러미")
     try:
         summary = await svc.attach_ontology(db, r, raw, filename=name or "")
     except OntoPackageError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"온톨로지 꾸러미를 받지 않았다: {exc}")
+    except bridges.ReportGone:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다 — 그사이 지워졌다")
+    except svc.OntoAttachError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            f"온톨로지 꾸러미를 싣지 못했다 — {exc} · 아무것도 바꾸지 않았다(옛 꾸러미 · 행 그대로)")
     loaded = summary["counts"]["loaded"]
     msg = ("이미 실은 꾸러미다 — 행은 그대로 둔다" if summary["already"]
            else "해석 온톨로지를 실었다 — " + " · ".join(f"{t.removeprefix('cae_')} {n}" for t, n in loaded.items() if n))
@@ -957,7 +974,8 @@ async def confirm_cae_bridge(
 
     리포트 주인과 시스템 관리자만(같은 소속 읽기 사용자는 403). 거절 — 해석 객체 없음 404 · 다리가 없는 타입 · 끝 타입이 다름(cae_part 는
     part 에만) · 거울에 없음 · 허브에서 사용 안 함 422 · 다대일(파트 · 캠페인)인데 다른 사람 선이 이미 있음 409(먼저 지운다).
-    같은 짝의 규칙 선은 사람 선으로 오르고, 다대일이면 그 객체의 다른 규칙 선은 빠진다(사람이 이긴다). 응답 `bridges` 는 다시 지은 셈."""
+    같은 짝의 규칙 선은 사람 선으로 오르고, 다대일이면 그 객체의 다른 규칙 선은 빠진다(사람이 이긴다). 리포트가 그사이 지워졌으면 404.
+    응답 `bridges` 는 다시 지은 셈."""
     r = await _require_bridge_editor(db, user, report_id, request)
     if not isinstance(r.ontology, dict):
         raise HTTPException(status.HTTP_409_CONFLICT, "이 리포트에 실은 해석 온톨로지가 없다 — 꾸러미부터 붙인다(POST /reports/{id}/cae)")
@@ -984,7 +1002,8 @@ async def remove_cae_bridge(
     db: AsyncSession = Depends(get_db),
 ):
     """코어 다리의 **사람 선**을 지운다 — 끊긴 사람 선(가리키던 해석 객체가 다시 반입에서 사라진 것)도 지운다. 리포트 주인과 시스템 관리자만.
-    규칙 선은 지우지 않는다(409 — 다시 지으면 다시 선다). 지운 뒤 다리를 다시 짓는다 — 그 짝이 정확히 맞으면 규칙 선으로 다시 선다."""
+    규칙 선은 지우지 않는다(409 — 다시 지으면 다시 선다). 지운 뒤 다리를 다시 짓는다 — 그 짝이 정확히 맞으면 규칙 선으로 다시 선다.
+    리포트가 그사이 지워졌으면 404."""
     r = await _require_bridge_editor(db, user, report_id, request)
     got = await bridges.remove(db, r, src_key=src_key, dst_key=dst_key)
     if not got.get("ok"):

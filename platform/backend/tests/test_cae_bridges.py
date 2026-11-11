@@ -12,6 +12,7 @@ key 로 넣고 앞뒤에 지운다(dev 거울에는 이 세 타입이 없다 —
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ from app.models import (SOURCE_HUB, ImpactCase, ImpactReport, OntoAlias, OntoObj
 from app.modules.reports import bridges as br
 from app.modules.reports import services as svc
 from app.reports import onto_package as op
-from app.shared import security
+from app.shared import security, storage
 
 ON_SESSION_LOOP = pytest.mark.asyncio(loop_scope="session")     # DB 픽스처와 같은 루프 — 순수 시험에는 달지 않는다
 FIX = Path(__file__).with_name("fixtures") / "cae_package_v14_min.json"
@@ -122,10 +123,12 @@ async def _make(db, *, admin: bool = False, with_report: bool = True, shared: st
     if not with_report:
         return u, None
     pkg = _pkg()
-    s = Session(id=ulid.new().str, user_id=u.id, name="cbt", storage_path=f"{u.id}/cbt")
+    sid = ulid.new().str
+    # 세션 자리는 진짜 꼴로 — 꾸러미 파일 행의 rel_path 와 디스크 자리가 같아야 지운 파일을 디스크에서도 본다
+    s = Session(id=sid, user_id=u.id, name="cbt", storage_path=storage.session_rel_dir(u.id, sid))
     db.add(s)
     await db.flush()
-    html = SessionFile(session_id=s.id, filename="report.html", rel_path=f"{u.id}/cbt/report.html", kind="input",
+    html = SessionFile(session_id=s.id, filename="report.html", rel_path=f"{s.storage_path}/report.html", kind="input",
                        size_bytes=1, sha256=pkg["source"]["html"]["sha256"])
     db.add(html)
     await db.flush()
@@ -878,3 +881,213 @@ def test_an_error_goes_out_as_class_and_one_line_without_sql_or_values():
                                        "Please rollback() fully before proceeding")
     assert br.short_error(RuntimeError("x" * 1000)) == ("RuntimeError: " + "x" * 1000)[:300]
     assert br.short_error(RuntimeError()) == "RuntimeError"
+
+
+# ── 꾸러미 붙이기는 리포트 행 잠금 아래 한 트랜잭션(검토 2차 11-11 항목 2 · 3 · 4) ─────────────────────────────
+
+def _dup_edge(monkeypatch) -> None:
+    """꾸러미 선 하나를 두 번 — 검사를 지난 뒤 본 쓰기가 DB 유일 제약에서 깨진다(다리 밖의 실패)."""
+    orig = op.check
+
+    def dup(*a, **k):
+        got = orig(*a, **k)
+        got["edges"] = got["edges"] + got["edges"][:1]
+        return got
+    monkeypatch.setattr(op, "check", dup)
+
+
+async def _package_files(db, sid: str, rid: str) -> list[str]:
+    return sorted((await db.execute(select(SessionFile.filename).where(
+        SessionFile.session_id == sid, SessionFile.filename.like(f"ontology/{rid}/%")))).scalars().all())
+
+
+def _disk_files(uid: int, sid: str, rid: str) -> list[str]:
+    d = storage.session_abs_dir(uid, sid) / "ontology" / rid
+    return sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file()) if d.exists() else []
+
+
+def _variant(tag: str) -> bytes:
+    pkg = _pkg()
+    pkg["_note"] = str(pkg.get("_note") or "") + f" ({tag})"
+    return _raw(pkg)
+
+
+async def _count(db, model, *where) -> int:
+    from sqlalchemy import func
+    return (await db.execute(select(func.count()).select_from(model).where(*where))).scalar_one()
+
+
+def _columns_expired(obj) -> set[str]:
+    """만료된 칸(관계 말고 열) — 비어 있어야 부르는 쪽이 async 에서 그 객체를 계속 읽는다."""
+    from sqlalchemy import inspect
+    return inspect(obj).expired_attributes & {c.key for c in inspect(type(obj)).column_attrs}
+
+
+@ON_SESSION_LOOP
+async def test_a_package_write_that_fails_rolls_back_and_leaves_no_file(db, monkeypatch):
+    """본 쓰기가 DB 에서 깨지면(꾸러미 선 둘 → 유일 제약) 되감고 이번 파일 행 · 디스크 파일을 걷는다 — 옛 꾸러미 · 행 · 요약이 그대로이고
+    리포트 객체 · 세션을 계속 쓸 수 있다. REST 는 500 과 짧은 까닭. 예전에는 깨진 커밋 뒤 만료된 객체를 읽다 PendingRollbackError 가 나
+    정리가 돌지 않았고 파일 행 · 디스크 파일이 남았다."""
+    import httpx
+    from httpx import ASGITransport
+    from sqlalchemy import text
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        first = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        files, disk = await _package_files(db, sid, rid), _disk_files(uid, sid, rid)
+        rows = await _count(db, OntoObject, OntoObject.report_id == rid)
+        assert files == [first["file"]] and len(disk) == 1
+        _dup_edge(monkeypatch)
+        raw = _variant("선이 겹친 판")
+        with pytest.raises(svc.OntoAttachError) as err:
+            await svc.attach_ontology(db, rep, raw)
+        why = str(err.value)
+        assert "UniqueViolationError" in why and "[SQL" not in why and "INSERT" not in why and len(why) <= 300, why
+        assert not _columns_expired(rep), "되감은 뒤 리포트 객체를 다시 읽어 둔다"
+        assert rep.ontology["sha256"] == first["sha256"]
+        assert (await db.execute(text("select 1"))).scalar_one() == 1
+        assert await _package_files(db, sid, rid) == files, "이번 파일 행이 남았다"
+        assert _disk_files(uid, sid, rid) == disk, "이번 디스크 파일이 남았다"
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (first["sha256"], first["file_id"])
+        assert await _count(db, OntoObject, OntoObject.report_id == rid) == rows
+
+        await db.refresh(u)                   # 되감기는 이 세션의 사용자 객체도 만료시켰다 — 라우트가 읽는다
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/reports/{rid}/cae", files={"file": ("report.ontology.json", raw, "application/json")})
+        assert r.status_code == 500 and r.json()["message"].startswith("온톨로지 꾸러미를 싣지 못했다"), r.text[:400]
+        assert "UniqueViolationError" in r.json()["message"] and "[SQL" not in r.text
+        assert await _package_files(db, sid, rid) == files and _disk_files(uid, sid, rid) == disk
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+@pytest.mark.skipif(not SPHERE.exists(), reason="sphere 샘플 없음")
+async def test_bundle_intake_answers_with_an_ontology_error_when_the_package_write_fails(db, monkeypatch):
+    """번들 반입의 리포트 · 세션은 꾸러미보다 먼저 굳는다 — 꾸러미 쓰기가 깨져도 500 이 아니라 반입 결과(201)에 `ontology` 오류를 싣는다.
+    예전에는 500 이라 클라이언트가 다시 보내 리포트 · 세션이 둘씩 남았다."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, _ = await _make(db, with_report=False)
+    uid = u.id
+    try:
+        _dup_edge(monkeypatch)
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post("/api/v1/reports/intake",
+                             files={"file": ("bundle.zip", _bundle_for(SPHERE.read_bytes()), "application/zip")})
+        assert r.status_code == 201, (r.status_code, r.text[:600])
+        data = r.json()["data"]
+        onto = data["ontology"]
+        assert onto["ok"] is False and "UniqueViolationError" in onto["error"], onto
+        assert "[SQL" not in onto["error"] and len(onto["error"]) <= 300 and "다시 보내지 말고" in onto["why"], onto
+        assert data["kind"] == "sphere" and data["n_cases"] > 0, "응답은 굳은 반입 그대로다"
+        assert await _count(db, ImpactReport, ImpactReport.user_id == uid) == 1
+        assert await _count(db, Session, Session.user_id == uid) == 1
+        rid = data["report_id"]
+        assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
+        assert await _package_files(db, data["session_id"], rid) == [] and _disk_files(uid, data["session_id"], rid) == []
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+@pytest.mark.parametrize("path", ["attach", "confirm", "remove"])
+async def test_a_write_queued_behind_a_report_delete_is_a_404_and_writes_nothing(db, mirror, monkeypatch, path):
+    """리포트 지우기가 커밋 전에 행을 쥔 동안 들어온 쓰기(꾸러미 붙이기 · 사람 선 확정 · 지우기) — 지우기가 굳으면 잠글 행이 없어 404 다.
+    예전에는 잠금이 조용히 지나가 쓰기가 FK 에서 깨지고(500) 붙이기는 꾸러미 파일을 남겼다."""
+    import asyncio
+
+    import httpx
+    from httpx import ASGITransport
+
+    from app.database import SessionLocal
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        if path == "remove":
+            assert (await br.confirm(db, rep, src_key="part/1", dst_key="cbt:metal-a", by="o"))["ok"]
+            await db.commit()
+        before = await _package_files(db, sid, rid)
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        url = f"/api/v1/reports/{rid}"
+        async with SessionLocal() as sx, httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False),
+                                                            base_url="http://t") as c:
+            rx = await sx.get(ImpactReport, rid)
+            gate, real_commit = asyncio.Event(), sx.commit
+
+            async def held_commit():                  # 지우기의 문장은 다 나갔고(행을 쥐었다) 커밋 앞에서 기다린다
+                await sx.flush()
+                await gate.wait()
+                await real_commit()
+            monkeypatch.setattr(sx, "commit", held_commit)
+            td = asyncio.create_task(svc.delete_report(sx, rx))
+            await asyncio.sleep(0.5)
+            if path == "attach":
+                call = c.post(f"{url}/cae", files={"file": ("report.ontology.json", _variant("지우는 중"), "application/json")})
+            elif path == "confirm":
+                call = c.post(f"{url}/cae/bridges", json={"src_key": "part/2", "dst_key": "cbt:wall"})
+            else:
+                call = c.delete(f"{url}/cae/bridges", params={"src_key": "part/1", "dst_key": "cbt:metal-a"})
+            tw = asyncio.create_task(call)
+            await asyncio.sleep(1.0)
+            assert not tw.done(), "쓰기가 지우기의 행 잠금을 기다리지 않았다"
+            gate.set()
+            await asyncio.wait_for(td, 30)
+            r = await asyncio.wait_for(tw, 30)
+        assert r.status_code == 404 and "지워졌다" in r.json()["message"], (r.status_code, r.text[:400])
+        assert await _count(db, ImpactReport, ImpactReport.id == rid) == 0
+        left = await _package_files(db, sid, rid)
+        assert set(left) <= set(before), f"쓰기가 꾸러미 파일을 남겼다: {sorted(set(left) - set(before))}"
+        assert len(_disk_files(uid, sid, rid)) <= len(before), "쓰기가 디스크 파일을 남겼다"
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_already_is_decided_on_the_summary_read_after_the_lock(db):
+    """「이미 실었다」 는 잠근 뒤 다시 읽은 요약으로 정한다 — B 가 리포트를 읽은 뒤 A 가 다른 꾸러미 Z 를 붙였으면, B 가 붙이는 X 는
+    (B 가 본 옛 요약과 같아도) 정말로 싣는다. 거꾸로 지금 X 가 실려 있으면 already 로 **지금** 요약(파일)을 돌려준다. 예전에는 B 가
+    잠그기 전에 읽은 요약으로 already 와 옛 X 요약을 냈고 DB 에는 Z 가 남았다."""
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid, sid = rep.id, rep.session_id
+    try:
+        x = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        z_raw = _variant("Z")
+        async with SessionLocal() as sb:
+            rb = await sb.get(ImpactReport, rid)                          # B 가 읽었다(요약 X)
+            await svc.attach_ontology(db, rep, z_raw)                     # 그사이 A 가 Z 를 붙였다
+            got = await svc.attach_ontology(sb, rb, FIX.read_bytes())     # B 가 X 를 붙인다
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert got["already"] is False and got["sha256"] == x["sha256"] == stored["sha256"], (got["already"], stored["sha256"])
+        assert stored["file_id"] == got["file_id"] != x["file_id"]
+        assert await _package_files(db, sid, rid) == [got["file"]], "Z 의 파일은 지난 꾸러미로 지워졌다"
+
+        async with SessionLocal() as sc:
+            rc = await sc.get(ImpactReport, rid)                          # C 가 읽었다(요약 X — 그때 파일)
+            await svc.attach_ontology(db, rep, z_raw)                     # Z 를 붙였다가
+            now = await svc.attach_ontology(db, rep, FIX.read_bytes())    # 다시 X — 새 파일
+            same = await svc.attach_ontology(sc, rc, FIX.read_bytes())
+        assert same["already"] is True and same["file_id"] == now["file_id"] != got["file_id"], (same["file_id"], now["file_id"])
+    finally:
+        await _drop(db, u)

@@ -536,7 +536,7 @@ async def _attach_package(db, client: KooSlurmClient, sid: str, rid: str, entry:
         summary = await report_svc.attach_ontology(db, report, raw, filename=PurePosixPath(path).name)
     except OntoPackageError as exc:
         return {"state": "failed", "why": f"꾸러미를 받지 않았다 — {exc}"}
-    except Exception as exc:  # noqa: BLE001 — 꾸러미 하나가 반입한 리포트 · 잡 성공을 무르게 하면 안 된다
+    except Exception as exc:  # noqa: BLE001 — 꾸러미 하나가 반입한 리포트 · 잡 성공을 무르게 하면 안 된다(리포트가 지워짐 · 쓰기 깨짐)
         logger.exception("postprocess report %s: ontology package attach crashed", rid)
         await db.rollback()
         return {"state": "failed", "why": f"꾸러미를 싣다 깨졌다 — {short_error(exc)}"}
