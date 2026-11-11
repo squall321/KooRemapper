@@ -354,13 +354,20 @@ async def drop_alias(
 
 def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
     counts = dict(r.counts or {})
+    problems = list(r.problems or [])
     if not who:
-        # 과제 잇기 수(SRC-09)는 **리포트 전부**를 센 것이다 — 관리자에게만 싣는다(리포트 수치가 새지 않게, 일반 보기에서
-        # cae_* 를 뺀 10-31 결정 · SRC-10 의 「읽을 수 있는 리포트만」 과 같은 까닭). 일반 사용자는 plan_task_links 로 자기 것을 본다.
+        # 과제 잇기 수(SRC-09)와 층 2 반영이 옮긴 리포트 수는 **리포트 전부**를 센 것이다 — 관리자에게만 싣는다(리포트 수치가
+        # 새지 않게, 일반 보기에서 cae_* 를 뺀 10-31 결정 · SRC-10 의 「읽을 수 있는 리포트만」 과 같은 까닭). 일반 사용자는
+        # plan_task_links 로 자기 것을 본다.
         counts.pop("task_links", None)
+        if isinstance(counts.get("reflected"), dict):
+            counts["reflected"] = {k: v for k, v in counts["reflected"].items() if k != "reports"}
     out = {"id": r.id, "started_at": r.started_at, "finished_at": r.finished_at, "mode": r.mode,
            "allow_shrink": r.allow_shrink, "trigger": r.trigger, "result": r.result, "revision": r.revision,
-           "counts": counts, "problems": r.problems or [], "notes": r.notes or [], "error": r.error}
+           "counts": counts, "problem_count": len(problems), "notes": r.notes or [],
+           # ★사유 줄 · 오류 글은 예외 원문이 섞인다(과제 잇기 실패 · 층 2 반영 실패 — 검토 반영 11-11) — 관리자에게만. 일반 사용자는
+           #   「문제가 있었다」(problem_count · result)까지만 본다.
+           "problems": problems if who else [], "error": r.error if who else None}
     if who:
         out["requested_by"] = r.requested_by     # 누른 사람은 관리 화면에만 — 읽기 창구는 누구나 본다
     return out

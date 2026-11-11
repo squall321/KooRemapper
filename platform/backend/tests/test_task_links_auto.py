@@ -484,9 +484,11 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
     from app.modules.ontology.routes import require_ontology
     u, s = await _owner(db, commit=True)
     a, sa = await _owner(db, admin=True, commit=True)
-    run = OntoSyncRun(mode="normal", trigger="test", result="ok", counts={
+    run = OntoSyncRun(mode="normal", trigger="test", result="needs_check", counts={
         "types": {}, "task_links": {"scope": "all", "linked": 2, "candidates": 3, "unmatched": 4,
-                                    "reports_without_a_name": 5}})
+                                    "reports_without_a_name": 5},
+        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": []}},
+        problems=["과제 잇기 실패 — RuntimeError: 원문에 남의 리포트 01ABC"], error="exception: 원문")
     db.add(run)
     await db.commit()
     try:
@@ -503,6 +505,11 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
         assert p["id"] == b["id"] == run.id
         assert "task_links" not in p["counts"], "리포트 전부를 센 수가 일반 사용자에게 샜다"
         assert b["counts"]["task_links"]["linked"] == 2
+        # 예외 원문(사유 줄 · 오류 글)과 층 2 가 옮긴 리포트 수도 관리자에게만 — 일반 사용자는 「문제가 있었다」(수)까지만
+        assert (p["problems"], p["error"], p["problem_count"]) == ([], None, 1), p
+        assert "reports" not in p["counts"]["reflected"] and p["counts"]["reflected"]["renamed"] == 1, p["counts"]
+        assert (b["problems"][0].startswith("과제 잇기 실패"), b["error"], b["problem_count"]) == (True, "exception: 원문", 1)
+        assert b["counts"]["reflected"]["reports"] == 7
     finally:
         await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == run.id))
         await db.commit()

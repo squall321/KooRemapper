@@ -1843,8 +1843,9 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
 @mcp.tool()
 async def ontology_sync_state(ctx: Context) -> dict:
     """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
-    '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요(사유는
-    `last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 등) · `failed` 실패(`error`).
+    '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패.
+    사유 수는 `last_run.problem_count` 다. ★사유 줄(`last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 ·
+    예외 원문 등) · 오류 글(`error`) · 층 2 반영이 옮긴 리포트 수는 **시스템 관리자에게만** 온다 — 일반 사용자에게는 빈 목록 · null 이다.
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는

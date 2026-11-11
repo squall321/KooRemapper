@@ -269,7 +269,9 @@ export interface SyncRun {
   result: 'running' | 'ok' | 'needs_check' | 'failed'
   revision: string | null
   counts: { types?: Record<string, Record<string, number>>; relations?: Record<string, Record<string, number>>; skipped?: string[] }
+  /** 사유 줄 · 오류 글은 시스템 관리자에게만 — 일반 사용자에게는 빈 목록 · null(사유 수는 problem_count) */
   problems: string[]
+  problem_count?: number
   notes: string[]
   error: string | null
   requested_by?: string
