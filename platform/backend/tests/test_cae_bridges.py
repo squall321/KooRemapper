@@ -1182,3 +1182,48 @@ async def test_renamed_follows_the_name_the_rule_matches_on_and_a_reconfirm_clea
         assert same["already"] and "relabeled" not in same, "이름이 그대로면 고칠 것이 없다"
     finally:
         await _drop(db, u)
+
+
+# ── 끝이 거울에 없는 우리 별칭도 엇갈림이다(검토 2차 11-11 항목 9) ─────────────────────────────────────────
+
+def test_an_alias_whose_target_is_not_in_the_mirror_is_a_disagreement():
+    """우리 별칭의 끝이 거울에 없어도(지워짐 · 허브가 바꾼 옛 key) 사람이 그 글을 다른 객체로 정했다는 기록이다 — 다른 칸이 한 객체로 맞아도
+    규칙 선이 아니라 후보다. 그 끝은 확정할 수 없어 후보로 내지 않는다. 다른 데 맞는 것이 없으면 못 붙임이다."""
+    p = _pool(objs={"Q1": "Holder"})
+    p.stray["Holder"] = "Q-gone"
+    got = br.match(p, "Holder")
+    assert got["verdict"] == "candidates" and "key" not in got
+    assert [(o["key"], o["why"]) for o in got["options"]] == [("Q1", br._WHY_STRAY.format(key="Q-gone") + "(이름)")]
+    p.stray["Lone"] = "Q-gone"
+    assert br.match(p, "Lone")["verdict"] == "unmatched"
+
+
+@ON_SESSION_LOOP
+async def test_a_stray_alias_turns_an_exact_line_into_a_candidate(db, mirror):
+    """실물 꾸러미로 — part/3(PCB\\PCB)은 이름으로 cbt:pcb 에 규칙 선이었다. 같은 글을 거울에 없는 key 로 가리키는 우리 별칭이 생기면
+    규칙 선이 아니라 후보다. 허브가 key 를 바꿔 옛 key 를 가리키는 별칭도 같다(옛 key 를 따라가지 않는다)."""
+    gone = ("part", "cbt:gone-pcb")
+    u, rep = await _make(db)
+    try:
+        db.add(OntoAlias(type_slug="part", alias="PCB\\PCB", key=gone[1], source="manual", confirmed_by="test", note=TAG))
+        db.add(OntoObject(type_slug="part", key="cbt:holder", label="CBT Holder", status="active", source=SOURCE_HUB))
+        db.add(OntoObject(type_slug="part", key="cbt:holder-new", label="새 key 홀더", status="active", source=SOURCE_HUB))
+        db.add(OntoPreviousKey(type_slug="part", old_key="cbt:holder-old", key="cbt:holder-new"))
+        db.add(OntoAlias(type_slug="part", alias="CBT Holder", key="cbt:holder-old", source="manual", confirmed_by="test",
+                         note=TAG))
+        await db.commit()
+        got = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        assert _flat(got["bridges"]) == {**EXPECT, "rule": EXPECT["rule"] - 1, "candidates": EXPECT["candidates"] + 1}, got["bridges"]
+        assert ("part/3", "cbt:pcb") not in await _lines(db, rep.id)
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        c = next(x for x in view["candidates"] if x["src_key"] == "part/3")
+        assert [(o["key"], o["why"]) for o in c["options"]][:1] == [("cbt:pcb", br._WHY_STRAY.format(key=gone[1]) + "(이름)")], c
+        hit = br.match(await br._pool(db, "part"), "CBT Holder")
+        assert hit["verdict"] == "candidates" and [o["key"] for o in hit["options"]] == ["cbt:holder"], hit
+    finally:
+        await db.rollback()
+        await db.execute(delete(OntoObject).where(OntoObject.key.in_(["cbt:holder", "cbt:holder-new"]),
+                                                  OntoObject.report_id.is_(None)))
+        await db.execute(delete(OntoPreviousKey).where(OntoPreviousKey.old_key == "cbt:holder-old"))
+        await db.commit()
+        await _drop(db, u)

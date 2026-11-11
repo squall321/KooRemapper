@@ -18,6 +18,9 @@
   허브 별칭이 같은 글) 어느 쪽도 정하지 않고 둘 다 후보로 낸다 — 예전에는 우리 별칭이 먼저라 X 로 그었다(검토 11-11 — 과제 잇기도
   같은 규칙으로 바뀐다). 여러 칸이 같은 객체를 가리키면 맞은 칸(`matched_by`)은 우리 별칭 > key > 이름 > 허브 별칭 > 옛 key 차례로
   하나를 적는다.
+  ★우리 별칭의 끝이 거울에 없어도(허브에서 지워짐 · 허브가 key 를 바꿔 옛 key 를 가리킴 · 받은 적 없음) 엇갈림이다 — 사람이 그 글을
+  다른 객체로 정했다는 기록이라, 다른 칸이 한 객체로 맞아도 규칙 선을 긋지 않고 후보로 낸다(그 끝은 거울에 없어 확정할 수 없으니
+  후보로 내지 않는다). 예전에는 그런 별칭을 조용히 건너뛰어 다른 객체로 그었다(검토 2차 11-11 항목 9).
 
 **후보**(짐작 — 선이 아니다)는 과제 후보(`task_candidates`)와 같은 정규화(`normalize` — 대소문자 · 공백 · 구분기호를 지운다)로 본다.
   ① 글자 그대로 맞는 코어 객체가 여럿 ② 정규화하면 같다 ③ 정규화한 한쪽이 다른 쪽을 품는다(짧은 쪽이 두 글자 이상).
@@ -60,8 +63,9 @@ RULE, HUMAN = "rule", "human"
 CANDIDATES_PER_OBJECT = 5
 MIN_CONTAINED = 2           # 품는 쪽 후보 — 짧은 쪽이 이보다 짧으면 아무 글에나 걸린다
 RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key · "
-             "우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 후보 = 여럿이 맞음(칸끼리 엇갈림 포함) · "
-             "구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 객체는 안 낸다). "
+             "우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 후보 = 여럿이 맞음(칸끼리 엇갈림 · "
+             "끝이 거울에 없는 우리 별칭 포함) · 구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 "
+             "객체는 안 낸다). "
              "사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale, 그 해석 쪽 이름이 바뀌면 drift.renamed 로 보인다(같은 짝을 "
              "다시 확정하면 지금 이름으로 맞춘다). counts 는 지금 거울로 센 것이다 — 저장된 규칙 선과 다르면 drift 가 말한다(다시 붙이면 "
              "맞춰진다).")
@@ -73,6 +77,7 @@ _WHY_HOLDS = {"key": "해석 쪽 글이 코어 key 를 품고 있다", "label": 
 _WHY_HELD = {"key": "코어 key 가 해석 쪽 글을 품고 있다", "label": "코어 이름이 해석 쪽 글을 품고 있다",
              "hub_alias": "허브 별칭이 해석 쪽 글을 품고 있다", "alias": "우리 별칭이 해석 쪽 글을 품고 있다"}
 _WHY_MANY = "글자 그대로 맞는 코어 객체가 여럿이다"
+_WHY_STRAY = "글자 그대로 맞지만 우리 별칭은 거울에 없는 {key!r} 를 가리킨다"
 # 정확 일치의 칸 — 같은 객체를 여러 칸이 가리키면 맞은 칸은 이 차례로 하나를 적고, 여럿이 맞으면 후보 까닭에 칸 이름을 단다
 _EXACT_ORDER = ("alias", "key", "label", "hub_alias", "previous_key")
 _FIELD = {"alias": "우리 별칭", "key": "key", "label": "이름", "hub_alias": "허브 별칭", "previous_key": "옛 key"}
@@ -184,6 +189,7 @@ class _Pool:
     ours: dict[str, str] = field(default_factory=dict)                 # 우리 별칭 → 코어 key(거울에 살아 있는 것만)
     names: list[tuple[str, str, str]] = field(default_factory=list)    # (코어 key, 정규화 글, 어디서) — 후보용
     labels: dict[str, str] = field(default_factory=dict)               # 살아 있는 코어 key → 이름
+    stray: dict[str, str] = field(default_factory=dict)                # 끝이 거울에 없는 우리 별칭 → 그 key — 엇갈림(후보)으로 센다
     quiet: set[str] = field(default_factory=set)                       # 그만 씀(deprecated) — 정확히 맞으면 잇지만 후보로는 안 낸다
 
 
@@ -208,10 +214,14 @@ async def _pool(db, dst_type: str) -> _Pool:
             pool.exact.setdefault(old, {}).setdefault(new, set()).add("previous_key")
     for alias, key in (await db.execute(select(OntoAlias.alias, OntoAlias.key).where(
             OntoAlias.type_slug == dst_type))).all():
-        if key in pool.labels:      # 거울에 없는 key 를 가리키는 별칭으로는 선을 긋지 않는다(끊긴 선이 된다)
+        if key in pool.labels:
             pool.ours[alias] = key
             if key not in quiet and normalize(alias):
                 pool.names.append((key, normalize(alias), "alias"))
+        else:
+            # 끝이 거울에 없다(지워짐 · 허브가 바꾼 옛 key · 받은 적 없음) — 그 key 로는 긋지 않고(끊긴 선이 된다), 사람이 이 글을 다른
+            # 객체로 정했다는 기록이라 다른 칸이 맞아도 그 글로는 규칙 선을 긋지 않는다(검토 2차 항목 9 — 예전에는 조용히 건너뛰었다)
+            pool.stray[alias] = key
     return pool
 
 
@@ -223,13 +233,15 @@ def match(pool: _Pool, text: Any) -> dict:
     hits = {k: set(hows) for k, hows in pool.exact.get(t, {}).items()}
     if t in pool.ours:
         hits.setdefault(pool.ours[t], set()).add("alias")       # 우리 별칭도 칸 하나다 — 먼저가 아니다
-    if len(hits) == 1:
+    stray = pool.stray.get(t)       # 끝이 거울에 없는 우리 별칭 — 그 끝도 한 표다(엇갈림)
+    if len(hits) == 1 and stray is None:
         (key, hows), = hits.items()
         return {"verdict": "rule", "key": key, "matched_by": next(h for h in _EXACT_ORDER if h in hows), "text": t,
                 "options": []}
     # 여럿 — 칸끼리 엇갈려도 여럿이다. 그만 씀은 여기서도 뺀다 — 후보는 새로 고르는 목록이다(10-30 결정 · 검토 11-11 P3).
+    why = _WHY_MANY if stray is None else _WHY_STRAY.format(key=stray)
     best: dict[str, tuple[int, int, str]] = {
-        k: (0, 0, f"{_WHY_MANY}({' · '.join(_FIELD[h] for h in _EXACT_ORDER if h in hows)})")
+        k: (0, 0, f"{why}({' · '.join(_FIELD[h] for h in _EXACT_ORDER if h in hows)})")
         for k, hows in hits.items() if k not in pool.quiet}
     n = normalize(t)
     for key, name, how in pool.names:
