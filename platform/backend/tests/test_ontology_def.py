@@ -13,6 +13,7 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import hashlib
 import json
 
 import pytest
@@ -57,20 +58,43 @@ BRIDGES = {"maps_to": ("cae_part", "part", "many_to_one"),
 
 
 def test_the_three_bridges_and_their_cardinalities():
-    """★`maps_to` 는 StepForge 의 part_role → part 와 같은 이름이다 — 한 질의(maps_to → part)로 두 앱을 묻는다."""
+    """다리 셋의 끝 · 카디널리티. ★`maps_to` 는 StepForge 와 **같은 정의**다 — 출발에 그쪽 `part_role` 과 우리 `cae_part` 가 함께 있고,
+    한 질의(maps_to → part)로 두 앱을 묻는다(블록 지문은 아래 시험이 고정한다)."""
     doc, _ = load(OURS)
     rels = {r["slug"]: r for r in doc["relation_types"]}
-    got = {s: (r["src_type_slugs"], r["dst_type_slugs"], r["cardinality"]) for s, r in rels.items() if s in BRIDGES}
-    assert got == {s: ([src], [dst], card) for s, (src, dst, card) in BRIDGES.items()}
-    for slug in BRIDGES:
+    for slug, (src, dst, card) in BRIDGES.items():
         r = rels[slug]
-        assert r["acyclic"] is False and r["transitive"] is False, "끝 타입이 겹치지 않는다 — 막을 순환이 없다"
+        assert src in r["src_type_slugs"] and r["dst_type_slugs"] == [dst] and r["cardinality"] == card, slug
+        # 빠지면 SP 기본값(거짓)이다 — 공유 블록(maps_to)은 이 칸을 싣지 않는다. 끝 타입이 겹치지 않아 막을 순환도 없다
+        assert r.get("acyclic", False) is False and r.get("transitive", False) is False, slug
         assert r["description"] and r["inverse_label"], slug
         basis = next(p for p in r["properties"] if p["key"] == "basis")
-        assert basis["enum_options"] == ["rule", "human"] and basis["required"] is True, slug
+        assert {"rule", "human"} <= set(basis["enum_options"]) and basis["required"] is True, slug
+    assert rels["maps_to"]["src_type_slugs"] == ["part_role", "cae_part"]
+    assert [r["src_type_slugs"] for s, r in rels.items() if s in ("indicates", "follows_method")] == [["cae_finding"], ["cae_campaign"]]
     for end in ("part", "failure_mode", "analysis_method"):
         assert end in EXTERNAL_TYPES, f"{end} 는 허브 거울이다 — 우리 정의 파일에 타입을 만들지 않는다"
         assert end not in {t["slug"] for t in doc["types"]}
+    assert "part_role" in EXTERNAL_TYPES and "part_role" not in {t["slug"] for t in doc["types"]}, "StepForge 의 타입이다"
+
+
+# ★StepForge 도 이 블록을 **바이트 그대로**(같은 칸 · 같은 차례) 싣는다(사용자 결정 11-11). 고칠 때는 두 앱이 함께 고치고 이 지문을 같이 바꾼다.
+MAPS_TO_SHA256 = "e5749ad481197908248576dd11c82eef6c2962545e9bf58a9247fd7568b96d07"
+
+
+def test_maps_to_is_the_block_stepforge_carries_unchanged():
+    """SP 가져오기는 지우지 않고, 마지막 가져오기가 src_type_slugs · enum 을 덮으며, 다른 출처가 관리하는 정의는 「그대로」 가 아니면
+    거절한다(`importer._refuse_managed`) — 두 앱의 블록이 한 글자라도 다르면 한 허브에 둘을 싣지 못하거나 서로 덮는다."""
+    doc, _ = load(OURS)
+    block = next(r for r in doc["relation_types"] if r["slug"] == "maps_to")
+    raw = json.dumps(block, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    assert hashlib.sha256(raw.encode("utf-8")).hexdigest() == MAPS_TO_SHA256
+    assert list(block) == ["slug", "label", "inverse_label", "description", "cardinality", "src_type_slugs", "dst_type_slugs",
+                           "properties"], "칸 차례도 같게 둔다"
+    assert [p["key"] for p in block["properties"]] == ["basis", "matched_by", "matched_text", "src_label", "decided_by",
+                                                       "decided_at", "note"]
+    basis = block["properties"][0]
+    assert basis["enum_options"] == ["human", "other", "rule"], "other 는 StepForge 의 값이다 — 우리는 쓰지 않는다"
 
 
 def test_the_bridge_sources_are_in_the_cae_vocabulary_which_we_do_not_edit():

@@ -1059,7 +1059,10 @@ async def attach_cae_package(
 async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
     """리포트 하나의 해석 온톨로지 — 캠페인(단위계 · 낙하 높이 · 충돌 속도 …) · **파트 판정 위험한 것부터**(최소 안전율 · 최악 응력과
     그 런의 각도 · 위치 identity) · **하중 경로 충격량 큰 것부터**(파트 쌍 · 맞닿은 비율) · 접촉(양쪽 파트) · 소견 · 응력 집중 ·
-    **코어 다리**(`bridges` — 파트 → 코어 부품 maps_to · 소견 → 고장모드 indicates · 캠페인 → 해석 방법 follows_method). bridges 는
+    **코어 다리**(`bridges` — 파트 → 코어 부품 maps_to(StepForge 와 같은 정의) · 소견 → 고장모드 indicates · 캠페인 → 해석 방법
+    follows_method). 규칙 — 부르는 칸(파트 name · 소견 title · 캠페인 scenario_kind)의 글이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key ·
+    우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때만 규칙 선을 긋고 나머지는 후보다. 사람 선은
+    꾸러미를 다시 붙여도 남고 다대일(파트 · 캠페인)에서는 규칙을 이긴다. bridges 는
     `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나, 해석 객체 이름이 확정 때와 달라진 사람 선은 `renamed_from`) ·
     `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 — 지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key ·
     까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) · `counts` · `rule`(맞추는 규칙 글) · `drift`(있을 때만 — 붙인 뒤 거울이

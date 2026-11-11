@@ -44,6 +44,7 @@ CARDINALITIES = frozenset({"one_to_one", "one_to_many", "many_to_one", "many_to_
 EXTERNAL_TYPES = frozenset({
     "plm_project", "plm_task", "plm_model", "plm_test_site",   # 허브 거울
     "part", "failure_mode", "analysis_method",                 # 허브 거울 — 해석 객체 → 코어 다리의 끝(core-link SRC-08)
+    "part_role",                                               # 형제 앱(StepForge)의 타입 — 공유 정의 maps_to 의 다른 출발(11-11)
     "impact_report", "session", "workspace", "user",           # 우리 1급 표 · 포탈 정본
 })
 

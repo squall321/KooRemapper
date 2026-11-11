@@ -4,6 +4,9 @@
 
 다리 셋은 자체 정의(`platform/core/ontology/dynaforge-core.json`)의 관계다 — 끝 타입 · 카디널리티는 그 파일에서 읽는다(코드에
 두 벌을 두지 않는다). 코드가 정하는 것은 **해석 객체를 부르는 칸**(`NAME_PROP`) 하나다.
+  ★`maps_to` 는 StepForge 와 **같은 정의**다(사용자 결정 11-11) — 두 앱이 같은 블록을 바이트 그대로 싣는다(출발 `part_role` · `cae_part`,
+  근거 층 human · other · rule — other 는 StepForge 의 값이라 우리는 쓰지 않는다). 그 설명은 앱 중립이라 **우리 쪽 규칙은 여기(아래)와
+  MCP `report_cae` 설명에 둔다** — 정확 일치만 규칙 선 · 후보 · 사람 선은 다시 붙여도 남는다 · 끊긴 사람 선 · 이름 바뀐 사람 선.
   - 파트(cae_part)는 이름(`name` — 덱 *PART 제목).
   - 소견(cae_finding)은 제목(`title`) — 해석 어휘에 고장 종류를 따로 적는 칸이 없고 제목이 판정 문장이다.
   - 캠페인(cae_campaign)은 해석 종류(`scenario_kind` — drop_all_angle · impact_all_position · single_run).
@@ -86,13 +89,19 @@ class Bridge:
 
 @lru_cache(maxsize=1)
 def bridges() -> dict[str, Bridge]:
-    """해석 타입 → 다리. 정의 파일의 관계 가운데 출발이 `NAME_PROP` 의 타입 하나인 것(어긋나면 시험이 잡는다)."""
+    """해석 타입 → 다리. 정의 파일의 관계 가운데 출발에 `NAME_PROP` 의 타입이 든 것(어긋나면 시험이 잡는다).
+
+    공유 정의(`maps_to` — StepForge 와 같은 블록, 11-11)는 출발이 여럿이다(StepForge `part_role` · 우리 `cae_part`) — 우리 타입만 다리다.
+    """
     doc = json.loads((VOCAB_DIR / CORE_DEFS).read_text(encoding="utf-8"))
     out: dict[str, Bridge] = {}
     for r in doc.get("relation_types") or []:
-        src, dst = r.get("src_type_slugs") or [], r.get("dst_type_slugs") or []
-        if len(src) == 1 and src[0] in NAME_PROP and len(dst) == 1:
-            out[src[0]] = Bridge(r["slug"], src[0], dst[0], r.get("cardinality") or "many_to_many", NAME_PROP[src[0]])
+        dst = r.get("dst_type_slugs") or []
+        if len(dst) != 1:
+            continue
+        for src in r.get("src_type_slugs") or []:
+            if src in NAME_PROP:
+                out[src] = Bridge(r["slug"], src, dst[0], r.get("cardinality") or "many_to_many", NAME_PROP[src])
     return {t: out[t] for t in NAME_PROP if t in out}
 
 
