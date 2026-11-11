@@ -181,9 +181,11 @@ GIT_REMOTE="$(git_or config --get remote.origin.url)"
 # platform/infra 의 *.sif.bak-* 같은 백업이 여기 든다). `dirty` 는 첫째가 있을 때만이다(11-11 KR-24).
 _PORC="$(git_or status --porcelain)"
 _paths() { awk '{ print $NF }' | cut -d/ -f1-2 | sort -u | head -8 | paste -sd' ' -; }
-_SRC_DIRT="$(printf '%s\n' "$_PORC" | grep -v '^??' | grep -v ' \.bkit/' | grep -v '^$' | _paths)"
-_TOOL_DIRT="$(printf '%s\n' "$_PORC" | grep ' \.bkit/' | _paths)"
-_UNTRACKED="$(printf '%s\n' "$_PORC" | grep '^??' | grep -v ' \.bkit/' | _paths)"
+# ⚠ 갈래 하나가 비면 grep 이 1 을 돌려 pipefail · set -e 로 스크립트가 아무 말 없이 죽었다(11-11 KR-24 고침 직후 — 소스가 깨끗한
+#   트리에서 게시가 BUILD_INFO 앞에서 멈췄다). 빈 갈래는 정상이라 `|| true` 로 끊는다.
+_SRC_DIRT="$(printf '%s\n' "$_PORC" | grep -v '^??' | grep -v ' \.bkit/' | grep -v '^$' | _paths || true)"
+_TOOL_DIRT="$(printf '%s\n' "$_PORC" | grep ' \.bkit/' | _paths || true)"
+_UNTRACKED="$(printf '%s\n' "$_PORC" | grep '^??' | grep -v ' \.bkit/' | _paths || true)"
 if [ -n "$_SRC_DIRT" ]; then GIT_STATE="dirty — $_SRC_DIRT"; else GIT_STATE="clean"; fi
 [ -n "$_TOOL_DIRT" ] && GIT_STATE="$GIT_STATE · 툴 상태(빌드와 무관): $_TOOL_DIRT"
 [ -n "$_UNTRACKED" ] && GIT_STATE="$GIT_STATE · 추적 안 하는 파일(빌드에 안 든다): $_UNTRACKED"
