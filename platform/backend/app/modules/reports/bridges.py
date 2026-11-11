@@ -42,6 +42,7 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias, OntoObject, OntoRelation
@@ -86,6 +87,24 @@ class Bridge:
     def single(self) -> bool:
         """한 해석 객체에 선 하나 — 사람 선이 있으면 규칙은 그 객체를 건너뛴다."""
         return self.cardinality in ("many_to_one", "one_to_one")
+
+
+# 응답 · 원장에 싣지 않는 줄 — SQL 문 · 매개변수 · DETAIL(값이 든다) · 배경 링크 · autoflush 안내
+_NOISE = ("[SQL", "[parameters", "DETAIL:", "(Background on this error", "(raised as a result of Query-invoked autoflush")
+
+
+def short_error(exc: BaseException, limit: int = 300) -> str:
+    """응답 · 7-1 원장에 싣는 오류의 짧은 꼴 — 「클래스: 한 줄」(`limit` 자 안). SQL 문 · 매개변수 · DETAIL · 배경 링크는 싣지 않는다 —
+    전문은 서버 로그(`logger.exception`)에 남긴다. 예전에는 SQLAlchemy 오류 전문(약 1.6 KB — 문장과 값까지)이 `bridges.error` 로 API
+    응답과 7-1 원장에 실렸다(검토 2차 11-11 항목 7)."""
+    inner = exc.orig if isinstance(exc, StatementError) and exc.orig is not None else None   # 드라이버 오류 — 문장 없이 까닭만
+    text = str(inner if inner is not None else exc)
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith(_NOISE)), "")
+    line = re.sub(r"\s*\(Background on this error at: [^)]*\)\s*$", "", line)
+    m = re.match(r"<class '(?:[\w.]+\.)?(\w+)'>:\s*(.*)", line)     # asyncpg 어댑터 꼴 「<class 'asyncpg…Error'>: 까닭」
+    if m:
+        line = m.group(2) if m.group(1) == type(exc).__name__ else f"{m.group(1)}: {m.group(2)}"
+    return (f"{type(exc).__name__}: {line}" if line else type(exc).__name__)[:limit]
 
 
 @lru_cache(maxsize=1)
@@ -325,7 +344,8 @@ async def rebuild_after_attach(db, report: ImpactReport) -> dict:
 
     ★저장점(SAVEPOINT) 안에서 짓는다 — 깨지면 다리만 되감고 **부르는 쪽 세션은 되감지 않는다.** 예전에는 세션을 통째로 되감아
     부르는 쪽 객체가 만료됐고, 번들 반입이 응답을 짓다 500 이 나고(리포트 · 꾸러미는 이미 굳은 뒤) 7-1 스캔이 다음 잡에서 멈췄다
-    (검토 11-11 P1 · P8). 셈 또는 `{"error": …}` — 실패해도 붙이기 결과는 그대로다(다음 붙이기가 다시 짓는다).
+    (검토 11-11 P1 · P8). 셈 또는 `{"error": 짧은 꼴}`(`short_error` — 전문은 로그) — 실패해도 붙이기 결과는 그대로다(다음 붙이기가
+    다시 짓는다).
     """
     rid = report.id
     try:
@@ -334,12 +354,12 @@ async def rebuild_after_attach(db, report: ImpactReport) -> dict:
         counts = got["counts"]
     except Exception as exc:                # noqa: BLE001 — 다리 하나가 실은 꾸러미를 무르게 하면 안 된다
         logger.exception("코어 다리 짓기 실패 — report %s", rid)
-        counts = {"error": f"{type(exc).__name__}: {exc}"}
+        counts = {"error": short_error(exc)}
     try:
         await db.commit()                   # 지은 다리(또는 아무것도)를 굳히고 리포트 행 잠금을 푼다 — 되감지 않는다
     except Exception as exc:                # noqa: BLE001
         logger.exception("코어 다리 커밋 실패 — report %s", rid)
-        counts = counts if counts.get("error") else {"error": f"{type(exc).__name__}: {exc}"}
+        counts = counts if counts.get("error") else {"error": short_error(exc)}
     return counts
 
 

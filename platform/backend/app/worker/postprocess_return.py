@@ -29,6 +29,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import ImpactReport, Job, Session, User
 from app.modules.reports import services as report_svc
+from app.modules.reports.bridges import short_error
 from app.reports.onto_package import OntoPackageError
 from app.runner.kooslurm_client import MANIFEST_PATH, SSO_PATH, KooSlurmClient, mint_user_token
 from app.runner.stcx_client import STATES_BAD, STATES_OK
@@ -538,6 +539,6 @@ async def _attach_package(db, client: KooSlurmClient, sid: str, rid: str, entry:
     except Exception as exc:  # noqa: BLE001 — 꾸러미 하나가 반입한 리포트 · 잡 성공을 무르게 하면 안 된다
         logger.exception("postprocess report %s: ontology package attach crashed", rid)
         await db.rollback()
-        return {"state": "failed", "why": f"꾸러미를 싣다 깨졌다 — {type(exc).__name__}: {exc}"}
+        return {"state": "failed", "why": f"꾸러미를 싣다 깨졌다 — {short_error(exc)}"}
     return {"state": "loaded", "sha256": summary["sha256"], "rows": summary["counts"]["loaded"],
             "warnings": summary.get("warnings") or [], "bridges": summary.get("bridges")}

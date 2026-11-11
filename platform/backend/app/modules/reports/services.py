@@ -1516,7 +1516,7 @@ async def ontology_view(db: AsyncSession, report: ImpactReport) -> dict:
         bridge_view = await bridges.view(db, report, rows=rows, edges=edges)
     except Exception as exc:                # noqa: BLE001 — 다리가 깨져도 해석 온톨로지 보기는 선다(붙이기와 같은 자세)
         logger.exception("코어 다리 보기 실패 — report %s", rid)
-        bridge_view = {"error": f"{type(exc).__name__}: {exc}"}
+        bridge_view = {"error": bridges.short_error(exc)}
     return {"report_id": rid, "loaded": True, "summary": report.ontology,
             "campaign": item(camp[0]) if camp else None,
             "parts": parts, "load_paths": paths, "contacts": contacts, "findings": findings,

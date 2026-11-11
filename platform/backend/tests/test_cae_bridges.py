@@ -856,3 +856,25 @@ async def test_a_broken_bridge_definition_fails_only_the_bridges(db, mirror, mon
         assert rule == [], "규칙 선은 꾸러미 선과 함께 걷혔고 다리가 깨져 다시 서지 않았다"
     finally:
         await _drop(db, u)
+
+
+# ── 오류는 짧은 꼴로(검토 2차 11-11 항목 7) ─────────────────────────────────────────────────────
+
+def test_an_error_goes_out_as_class_and_one_line_without_sql_or_values():
+    """응답 · 7-1 원장의 오류(`bridges.error` · 보기 · 꾸러미 실패 까닭)는 「클래스: 한 줄」(300자 안) — SQL 문 · 매개변수 · DETAIL(값) ·
+    배경 링크를 싣지 않는다(전문은 서버 로그). 예전에는 SQLAlchemy 오류 전문(약 1.6 KB)이 그대로 실렸다."""
+    from sqlalchemy.exc import IntegrityError, PendingRollbackError
+
+    orig = Exception("<class 'asyncpg.exceptions.UniqueViolationError'>: duplicate key value violates unique constraint "
+                     "\"uq_onto_relations_edge\"\nDETAIL:  Key (src_key)=(비밀-값) already exists.")
+    exc = IntegrityError("INSERT INTO onto_relations (relation, src_key) VALUES ($1, $2)", ("maps_to", "비밀-값"), orig)
+    assert "[SQL" in str(exc) and "비밀-값" in str(exc), "전문은 문장 · 값까지 든다"
+    assert br.short_error(exc) == ('IntegrityError: UniqueViolationError: duplicate key value violates unique constraint '
+                                   '"uq_onto_relations_edge"')
+    pending = PendingRollbackError("Can't reconnect until invalid transaction is rolled back.  Please rollback() fully "
+                                   "before proceeding", code="8s2b")
+    assert "Background on this error" in str(pending)
+    assert br.short_error(pending) == ("PendingRollbackError: Can't reconnect until invalid transaction is rolled back.  "
+                                       "Please rollback() fully before proceeding")
+    assert br.short_error(RuntimeError("x" * 1000)) == ("RuntimeError: " + "x" * 1000)[:300]
+    assert br.short_error(RuntimeError()) == "RuntimeError"
