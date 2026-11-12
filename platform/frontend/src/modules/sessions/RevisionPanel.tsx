@@ -210,7 +210,9 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       )}
 
       {/* 이어진 개정의 과제가 먼저다 — 수동 메타가 합쳐지기 전 과제를 말해도 줄은 옮겨진 곳에 있다 */}
-      {(d.linked?.task ?? d.resolved_task) && <Chain taskKey={(d.linked?.task ?? d.resolved_task)!} here={reportId} />}
+      {(d.linked?.task ?? d.resolved_task) && (
+        <Chain taskKey={(d.linked?.task ?? d.resolved_task)!} here={reportId} hereSource={d.linked?.source} />
+      )}
     </div>
   )
 }
@@ -275,8 +277,10 @@ function TaskStateNotice({ st, reportId }: { st: TaskState; reportId: string }) 
   )
 }
 
-/** 같은 과제의 개정 줄 — 어느 판에 결과가 몇 건 달렸는지. 판끼리 견주려면 여기서 고른다. */
-function Chain({ taskKey, here }: { taskKey: string; here: string }) {
+/** 같은 과제의 개정 줄 — 어느 판에 결과가 몇 건 달렸는지. 판끼리 견주려면 여기서 고른다.
+ *  ★「사람이 확정」 은 **이 리포트의 선**을 누가 이었나(`linked.source`)로 표시한다 — 판의 `rev_source` 는 판 하나에 하나라 여러
+ *  리포트가 나눠 쓰고, 남이 자기 리포트를 그 판에 확정했다고 내 리포트까지 사람이 확정한 것처럼 보이면 안 된다(재검토 11-12). */
+function Chain({ taskKey, here, hereSource }: { taskKey: string; here: string; hereSource?: string | null }) {
   const line = useQuery({
     queryKey: ['task-revisions', taskKey],
     queryFn: () => compareTaskRevisions(taskKey),
@@ -308,7 +312,7 @@ function Chain({ taskKey, here }: { taskKey: string; here: string }) {
                 <tr key={r.key} className={mine ? 'text-accent' : 'text-muted'}>
                   <td className="pr-3 py-0.5">
                     {r.code}
-                    {r.rev_source === 'manual' && <span className="ml-1" title="사람이 확정">✓</span>}
+                    {mine && hereSource === 'manual' && <span className="ml-1" title="이 리포트를 사람이 이 판에 확정했다">✓</span>}
                     {mine && <span className="ml-1" title="이 리포트">◂</span>}
                   </td>
                   {/* ★`null` 을 0 으로 그리지 않는다 — 0 은 「쟀는데 0」 으로 읽힌다 */}
