@@ -206,8 +206,9 @@ async def set_report_revision(
                                  model_key=body.model_key, supersedes=body.supersedes,
                                  decided_by=user.email, note=body.note, source="manual")
     if not got.get("ok"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"{got.get('error')}: {got.get('detail') or ''}")
+        # 읽은 뒤 그사이 지워진 리포트(잠근 뒤 행이 없다 — 재검토 11-12)는 404, 나머지 거절은 400
+        code = status.HTTP_404_NOT_FOUND if got.get("error") == "report_gone" else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(code, f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
     return ok(got, message="개정을 확정했습니다.")
 

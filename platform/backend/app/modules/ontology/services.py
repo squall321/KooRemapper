@@ -20,7 +20,7 @@ import weakref
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy import and_, inspect, or_, select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
@@ -231,7 +231,11 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         return {"ok": False, "error": "bad_code", "detail": str(exc)}
     # 리포트 행을 먼저 잠그고 그 뒤에 읽는다 — 같은 리포트를 고치는 다른 길과 겹쳐도 선이 둘이 되거나(R11) 끊은 기록이 지워지지
     # 않는다(R2). 받기 뒤 자동 잇기가 이 리포트를 쥐고 있으면 그것이 커밋할 때까지 기다린다.
-    await lock_reports(db, [report.id])
+    locked = await lock_reports(db, [report.id])
+    if str(report.id) not in locked and inspect(report).has_identity:
+        # 읽은 뒤 그사이 지워졌다(지우기가 굳은 뒤 차례가 왔다) — 선을 넣으면 지운 리포트의 선이 남는다(0019 트리거는 지울 때 한 번
+        # 돈다 — 재검토 11-12). DB 에 넣은 적 없는 손 객체(시험)는 잠글 것이 없어 지나간다.
+        return {"ok": False, "error": "report_gone", "detail": "리포트가 그사이 지워졌다"}
     # ★사람이 끊은 리포트(11-11) — 기계 경로(인제스트 때 잇기 · 수동 메타 고침 · 자동 잇기)는 **다시 잇지 않는다**. 이 자리에서
     #   막아야 앞으로 생길 자동 경로도 같은 규칙을 지난다. 사람이 손으로 이으면(manual) 아래에서 기록을 지운다.
     marks = await unlink_rows(db, report.id)
@@ -971,7 +975,7 @@ async def link_report(db, report: ImpactReport) -> dict:
 
     ★실패가 반입을 되돌리지 않는다 — 저장점 안에서 돌고, 깨지면 그 저장점만 되감고 `{"error": …}` 를 돌려준다(부르는 쪽이
     응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기 · 관리자 일괄 적용)을 걸고, 쥐고 있으면 건너뛰고
-    그렇게 말한다(받기 뒤 자동 잇기가 전부를 본다). 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음 — 라우트와
+    그렇게 말한다(허브 받기가 켜져 있으면 다음 받기 뒤 자동 잇기가 전부를 본다 — 꺼져 있으면 관리자 일괄 적용이 잇는다). 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음 — 라우트와
     같은 판정) 하지 않고 `skipped: off` 로 말한다.
     """
     from app.shared.features import ontology_state
@@ -987,7 +991,8 @@ async def link_report(db, report: ImpactReport) -> dict:
         if not await plm_sync.try_lock(db):
             await db.commit()          # 잠금 질의로 연 트랜잭션만 닫는다 — rollback 은 리포트 행을 만료시킨다
             return {"scope": "reports", "skipped": "busy",
-                    "detail": "받기 · 합친 과제 옮기기가 잠금을 쥐고 있어 건너뛰었다 — 받기 뒤 자동 잇기가 이 리포트까지 본다"}
+                    "detail": "받기 · 합친 과제 옮기기 · 관리자 일괄 적용이 잠금을 쥐고 있어 이번엔 잇지 않았다 — 허브 받기가 켜져 있으면 "
+                              "다음 받기 뒤 자동 잇기가, 아니면 관리자 일괄 적용이 잇는다"}
         async with db.begin_nested():
             got = await auto_link_tasks(db, report_ids=[rid])
         await db.commit()

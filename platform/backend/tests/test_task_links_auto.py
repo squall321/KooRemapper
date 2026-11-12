@@ -356,7 +356,9 @@ async def test_a_busy_lock_skips_the_link_and_says_so(db):
             assert await plm_sync.try_lock(holder)            # 받기가 도는 중이다
             got = await onto.link_report(db, r)
             await holder.rollback()
-        assert got["skipped"] == "busy" and "받기 뒤" in got["detail"], got
+        assert got["skipped"] == "busy", got
+        # 「받기 뒤 자동 잇기가 이 리포트까지 본다」 고 약속하지 않는다 — 허브 받기가 꺼진 박스에서는 거짓이다(재검토 11-12)
+        assert "켜져 있으면" in got["detail"] and "관리자 일괄 적용" in got["detail"], got
         assert r.kind == "sphere"
     finally:
         await _drop(db, u, s)

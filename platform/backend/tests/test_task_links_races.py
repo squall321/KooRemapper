@@ -420,3 +420,42 @@ async def test_the_rename_loop_never_waits_on_a_report_while_holding_revisions_a
     finally:
         await db.rollback()
         await _drop(uid, sid, [old1, new1, old2, new2])
+
+
+# ── 지우기와 겹친 손 확정(재검토 11-12) ─────────────────────────────────────────────────────────────
+
+async def test_a_hand_confirm_racing_a_report_delete_is_a_404_and_leaves_no_line(db, monkeypatch):
+    """손 확정(PUT)이 리포트를 읽은 뒤 그 리포트가 지워지면, 잠글 행이 없어 지나가던 `lock_reports` 뒤에 선을 넣어 지운 리포트의 선이
+    남았다(0019 트리거는 지울 때 한 번 돈다). 이제 잠근 뒤 리포트 행이 없으면 `report_gone` — 라우트는 404 다."""
+    import httpx
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    task = f"RG-{t}"
+    uid, sid = await _owner(db)
+    rid = await _rep(db, uid, sid, project="", code="")
+    real = onto.lock_reports
+    fired = []
+
+    async def delete_first(sdb, ids):
+        if rid in {str(i) for i in ids} and not fired:          # PUT 이 리포트를 읽은 뒤 · 잠그기 전에 주인이 지운다(커밋)
+            fired.append(1)
+            async with SessionLocal() as other:
+                await other.execute(delete(ImpactReport).where(ImpactReport.id == rid))
+                await other.commit()
+        return await real(sdb, ids)
+
+    monkeypatch.setattr(onto, "lock_reports", delete_first)
+    app = create_app()
+    app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            r = await c.put(f"/api/v1/reports/{rid}/revision", json={"task_key": task, "code": "dv1"},
+                            headers={"authorization": f"Bearer {security.create_access_token(uid)}"})
+        assert fired, "지우기가 끼어들지 않았다 — 시험이 틀렸다"
+        assert r.status_code == 404 and "report_gone" in r.text, (r.status_code, r.text[:300])
+        assert await _live(rid) == [], "지운 리포트의 선이 남았다"
+    finally:
+        await _drop(uid, sid, [task])
