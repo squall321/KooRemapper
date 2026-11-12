@@ -191,7 +191,8 @@ def _pool(**kw) -> br._Pool:
 
 
 def test_exact_is_the_task_link_rule_strip_only():
-    """「정확」 은 과제 잇기(resolve_task)와 같다 — 앞뒤 공백만 걷는다. 대소문자 · 구분기호가 다르면 정확이 아니라 후보다."""
+    """「정확」 의 견줌은 과제 잇기(resolve_task)와 같다 — 앞뒤 공백만 걷는다. 대소문자 · 구분기호가 다르면 정확이 아니라 후보다.
+    견주는 칸은 다르다(다리는 이름도 온전한 칸 · 과제 잇기는 이름만으로 잇지 않는다 — bridges 머리말)."""
     p = _pool(objs={"Q1": "PCB Main"})
     assert br.match(p, "  PCB Main ")["verdict"] == "rule"
     got = br.match(p, "pcb-main")
