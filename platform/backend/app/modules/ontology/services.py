@@ -498,7 +498,8 @@ async def resolve_task(db, free: str) -> tuple[str, str]:
       `hub_alias`    허브 행의 별칭(`properties.aliases`)과 글자 그대로 같다
     ★원천이 **모두 같은 과제 하나**를 가리킬 때만 푼다(검토 반영 11-11). 둘이 엇갈리면(사람이 붙인 별칭과 나중에 온 같은 글자의
       허브 과제 — R8), 과제코드 · 허브 별칭이 두 과제에 걸리면(R6), 이름(label)이 글자 그대로 같은 다른 과제가 있으면 풀지 않고
-      **후보**로 낸다(`candidates_for`) — 사람이 고른다. 예전엔 원천 차례로 먼저 걸린 것이 조용히 이겼다.
+      **후보**로 낸다(`candidates_for`) — 사람이 고른다. 예전엔 원천 차례로 먼저 걸린 것이 조용히 이겼다. 그만 쓴 과제는 살아 있는
+      과제가 하나도 안 맞을 때만 센다(사용자 결정 11-12 「살아 있는 객체가 정한다」 — `exact_matches`).
     ⚠ key 는 **과제명**이다(rootdesign plm_task.key). 과제코드는 `properties.task_code` 에 있다 —
       보고서에는 과제코드가 적혀 오므로 그 경로가 없으면 과제코드로는 영영 안 풀린다(KR-01, 2026-10-27).
     정규화해서 같아 보이는 것은 **여기서 풀지 않는다**(후보일 뿐이다 — `task_candidates`).
@@ -516,6 +517,9 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     """자유 문자열과 **글자 그대로** 맞는 과제 — `(과제 key, 원천)` 목록. 원천 차례(과제명 · 과제코드 · 옛 과제명 · 우리 별칭 ·
     허브 별칭 · 이름), 같은 원천 안에서는 key 차례라 실행마다 같다(R6b — 예전 과제코드 고름은 차례 없는 `.first()` 였다).
     `label` 은 이것만으로는 잇지 않는다 — 다른 원천과 엇갈리는지 볼 때만 쓴다(정확 일치의 원천이 아니었다).
+    ★살아 있는 과제가 정한다(사용자 결정 11-12 — SRC-08 다리와 같은 규칙) — 그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안
+    맞을 때만 센다. 그만 쓴 과제는 살아 있는 과제의 일치를 막지 못한다(재검토 rr2b — 그만 쓴 과제의 이름이 다른 과제의 과제코드와
+    같아 엇갈림이 됐다). 살아 있는 과제가 안 맞으면 그만 쓴 과제 하나는 예전처럼 잇고, 여럿이면 못 붙임이다(후보로도 내지 않는다).
     """
     free = (free or "").strip()
     if not free:
@@ -537,7 +541,10 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
         if free in hub_aliases(t)]
     out += [(k, "label") for k in (await db.execute(select(OntoObject.key).where(
         *live, OntoObject.label == free).order_by(OntoObject.key))).scalars()]
-    return out
+    keys = sorted({k for k, _ in out})
+    quiet = set((await db.execute(select(OntoObject.key).where(
+        *live, OntoObject.status == "deprecated", OntoObject.key.in_(keys)))).scalars()) if keys else set()
+    return [m for m in out if m[0] not in quiet] or out
 
 
 def _pick(found: list[tuple[str, str]]) -> tuple[str, str]:
@@ -555,10 +562,11 @@ async def candidates_for(db, free: str, *, found: list[tuple[str, str]] | None =
     if rows is None:
         rows = await _live_tasks(db)
     labels = {t.key: t.label for t in rows}
+    quiet = {t.key for t in rows if t.status == "deprecated"}
     out: list[dict] = []
     for k, how in found:
-        if any(c["key"] == k for c in out):
-            continue
+        if k in quiet or any(c["key"] == k for c in out):
+            continue        # 그만 쓴 과제는 후보로 내지 않는다(새로 고르는 목록 — 10-30 결정 · 다리와 같다)
         out.append({"key": k, "label": labels.get(k), "why": _EXACT_WHY[how], "rank": -1})
     seen = {c["key"] for c in out}
     out += [c for c in await task_candidates(db, free, rows=rows) if c["key"] not in seen]
