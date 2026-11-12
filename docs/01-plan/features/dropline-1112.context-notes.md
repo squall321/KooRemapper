@@ -33,3 +33,16 @@ origin 에 올린다. 본 트리(main)는 건드리지 않는다.
 
 `test_supervisor_log.py` 넷 — 작업 트리에 `platform/.env` 가 없다(git 밖). `test_gmsh_probe.py` 하나 — 심볼릭 링크로 이은
 `platform/backend/bin` 의 gmsh 경로를 탐지기와 바이너리가 다르게 푼다. 본 트리(main)에서는 둘 다 통과(13/13).
+
+### 위임 창구는 클라이언트 이름을 허용 목록으로 거른다 — 400 은 비밀 탓이 아니다 (dev 실측 11-12)
+
+dev 에 값을 넣고 `--email e2etest@…` 로 점검하니 400 이었다. 본문은 「알 수 없는 클라이언트: 'dynaforge-check'
+(허용: dynaforge, gateway-smart-twin-cluster, gateway-smart-twin-mcp)」 — 맞는 비밀이었다. 틀린 비밀로 보내면 401
+「게이트웨이 비밀 불일치」 다. 점검 스크립트가 앱(`kooslurm_client.SSO_CLIENT = "dynaforge"`)과 다른 이름을 보낸 것이 원인이라
+같은 이름으로 고쳤다(`e49987e`). 고친 뒤 e2etest 명의 토큰을 받았다(username=e2etest). 앱 자체는 원래 `dynaforge` 라 반입 길은
+영향이 없었다. 교훈 — 점검 도구는 **앱과 같은 요청 꼴**로 두드려야 한다. 다른 꼴이면 점검이 앱이 겪지 않는 실패를 만든다.
+
+### dev 에 넣은 것 (11-12, 포털 · 사용자 결정 — dev 전용)
+
+`platform/.env` 끝 블록(URL · SSO 비밀 · 확인 간격 10초, 지우면 되돌아감) · `.env` 0644 → 0600 · API 재기동 ·
+DynaForge 사용자 `e2etest@kooremapper.test` 와 세션 `01M77VGGBVFR1H7GF25GTESVH9`(비밀번호는 `~/.config/smarttwin/dev_dynaforge_e2etest` 0600).
