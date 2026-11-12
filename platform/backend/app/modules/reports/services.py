@@ -1267,8 +1267,12 @@ async def _link_revision(db, report) -> None:
     흠은 로그로만 남긴다(화면은 `ontology.services.mismatch` 가 따로 말한다).
     """
     from app.modules.ontology import services as onto
+    # 리포트(인제스트) · 메타 고침(PATCH)은 바깥 트랜잭션에 먼저 굳히고 잇기만 저장점에 넣는다 — 잇기가 깨져도 그 저장점만 되감겨
+    # 부르는 쪽의 커밋이 살아 있다(재검토 11-12 rr1 — 예전엔 예외를 삼키고도 세션이 되감김 대기라 커밋이 깨져 리포트째 잃었다).
+    await db.flush()
     try:
-        got = await onto.link_from_eng_meta(db, report)
+        async with db.begin_nested():
+            got = await onto.link_from_eng_meta(db, report)
     except Exception:                       # noqa: BLE001
         logger.exception("개정 잇기 실패 — report %s", report.id)
         return

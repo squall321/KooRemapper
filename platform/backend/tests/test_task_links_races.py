@@ -205,3 +205,119 @@ async def test_an_unlink_landing_after_the_auto_links_first_look_is_respected(db
     finally:
         await db.rollback()
         await _drop(uid, sid, [task, code])
+
+
+# ── 아직 없는 같은 판을 둘이 같은 순간 처음 만들 때(재검토 11-12 rr1) ─────────────────────────────────────
+# 리포트 행 잠금은 리포트마다라 **다른 리포트 둘**이 같은 새 판을 만들면 서로 막지 않았다 — 둘째가 유일 제약
+# (`uq_onto_objects_type_key`)에 걸려 인제스트는 리포트째 잃고(500 · HTML 고아), 손 확정은 500, 자동 잇기는 회차 전체가 되감겼다.
+# 이제 판을 만들거나 고치는 길은 리포트 행 다음에 **판 이름 잠금**을 건다 — 둘째는 첫째가 끝날 때까지 기다렸다가 그 판을 쓴다.
+
+async def _hold_new_revision(task: str, code: str, uid: int, sid: str):
+    """다른 세션이 리포트 A 를 새 판 task@code 에 잇고 **커밋하지 않은 채** 쥔다(인제스트 때 잇기 · 자동 잇기의 긴 트랜잭션)."""
+    s = SessionLocal()
+    rid = uuid.uuid4().hex[:26].upper()
+    s.add(ImpactReport(id=rid, session_id=sid, user_id=uid, kind="sphere", n_cases=0,
+                       eng_meta={"project": task, "dev_revision": {"code": code}}))
+    await s.commit()
+    rep = await s.get(ImpactReport, rid)
+    assert (await onto.link_from_eng_meta(s, rep))["ok"]
+    return s, rid
+
+
+async def test_an_ingest_linking_a_revision_another_transaction_is_creating_keeps_the_report(db):
+    """인제스트 때 잇기가 같은 새 판을 만들던 트랜잭션과 겹쳐도 리포트는 남고 같은 판에 이어진다(예전엔 PendingRollbackError 로 통째로 잃었다)."""
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task = f"RF-{t}"
+    uid, sid = await _owner(db)
+    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
+    bid = uuid.uuid4().hex[:26].upper()
+    try:
+        async def ingest(other):
+            other.add(ImpactReport(id=bid, session_id=sid, user_id=uid, kind="sphere", n_cases=0,
+                                   eng_meta={"project": task, "dev_revision": {"code": "dv1"}}))
+            await rsvc._link_revision(other, await other.get(ImpactReport, bid))   # ingest_report 의 차례 — 넣고 커밋 전에 잇기
+            return "linked"
+
+        job = asyncio.create_task(_in_other_session(ingest))
+        await asyncio.sleep(1.0)
+        blocked = not job.done()
+        await holder.commit()                                    # 먼저 만든 쪽이 커밋한다
+        outcome = await asyncio.wait_for(job, 30)
+        assert blocked, "같은 새 판을 만들던 트랜잭션을 기다리지 않았다"
+        assert outcome == ("ok", "linked"), f"인제스트가 깨졌다 — 리포트를 잃는다: {outcome}"
+        async with SessionLocal() as f:
+            assert await f.get(ImpactReport, bid) is not None, "리포트가 남지 않았다"
+        assert (await _live(a_id), await _live(bid)) == ([f"{task}@dv1"], [f"{task}@dv1"])
+    finally:
+        await holder.close()
+        await _drop(uid, sid, [task])
+
+
+async def test_a_hand_confirm_of_a_revision_another_transaction_is_creating_succeeds(db):
+    """손 확정(PUT)이 같은 새 판을 만들던 트랜잭션과 겹치면 기다렸다가 200(예전엔 500)."""
+    import httpx
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    task = f"RH-{t}"
+    uid, sid = await _owner(db)
+    bid = await _rep(db, uid, sid, project="", code="")
+    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
+    app = create_app()
+    app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+    try:
+        async def put():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                         base_url="http://test") as c:
+                return await c.put(f"/api/v1/reports/{bid}/revision", json={"task_key": task, "code": "dv1"},
+                                   headers={"authorization": f"Bearer {security.create_access_token(uid)}"})
+
+        job = asyncio.create_task(put())
+        await asyncio.sleep(1.0)
+        blocked = not job.done()
+        await holder.commit()
+        r = await asyncio.wait_for(job, 30)
+        assert blocked, "같은 새 판을 만들던 트랜잭션을 기다리지 않았다"
+        assert r.status_code == 200, r.text[:300]
+        assert await _live(bid) == [f"{task}@dv1"]
+    finally:
+        await holder.close()
+        await _drop(uid, sid, [task])
+
+
+async def test_an_auto_link_round_with_a_colliding_new_revision_keeps_every_link(db, monkeypatch):
+    """받기 뒤 자동 잇기 — 리포트 하나의 판이 다른 트랜잭션의 새 판과 겹쳐도 회차가 되감기지 않는다(다른 리포트까지 잃었다)."""
+    from app.worker import plm_sync
+    t = _tag()
+    task, other = f"RA-{t}", f"RB-{t}"
+    uid, sid = await _owner(db)
+    await _task(db, task, task_code=f"RAC-{t}")
+    await _task(db, other, task_code=f"RBC-{t}")
+    early = await _rep(db, uid, sid, project=f"RBC-{t}", code="dv1")        # 따로 이을 수 있는 리포트
+    late = await _rep(db, uid, sid, project=f"RAC-{t}", code="dv1")         # 겹치는 판(task@dv1)
+    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
+    real = onto.auto_link_tasks
+
+    async def yes(_db):
+        return True
+
+    monkeypatch.setattr(plm_sync, "try_lock", yes)
+    monkeypatch.setattr(onto, "auto_link_tasks", lambda sdb, report_ids=None: real(sdb, report_ids=sorted([early, late])))
+    try:
+        async def round_():
+            async with SessionLocal() as s3:
+                return await plm_sync._link_tasks(s3)
+
+        job = asyncio.create_task(round_())
+        await asyncio.sleep(1.0)
+        blocked = not job.done()
+        await holder.commit()
+        got = await asyncio.wait_for(job, 30)
+        assert blocked, "같은 새 판을 만들던 트랜잭션을 기다리지 않았다"
+        assert not got.get("error") and got["linked"] == 2, got
+        assert (await _live(early), await _live(late)) == ([f"{other}@dv1"], [f"{task}@dv1"])
+    finally:
+        await holder.close()
+        await _drop(uid, sid, [task, other, f"RAC-{t}", f"RBC-{t}"])

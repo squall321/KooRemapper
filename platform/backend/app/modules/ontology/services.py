@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, or_, select, text, update
 
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
                         OntoObject, OntoPreviousKey, OntoRelation)
@@ -59,14 +59,29 @@ async def lock_reports(db, ids) -> None:
     """리포트 행을 id 차례로 잠근다(`SELECT … ORDER BY id FOR UPDATE`, 트랜잭션이 끝날 때 풀린다).
 
     ★리포트 선(리포트 → 개정)을 고치는 **모든 길**이 다른 행을 건드리기 전에 이것부터 한다 — 사람 확정 · 끊기 · 끊은 기록 지우기 ·
-    인제스트 때 잇기 · 자동 잇기 · 관리자 일괄 적용 · 허브 이름 바뀜 옮기기. 잠금 차례가 하나(리포트 행 먼저, id 차례)라 서로
-    교착하지 않고, 잠근 뒤에 다시 읽으므로 겹친 쪽이 본 것을 덮지 않는다(검토 R11 · R7 · R2 — 받기 뒤 자동 잇기는 긴 트랜잭션이다).
+    인제스트 때 잇기 · 자동 잇기 · 관리자 일괄 적용 · 허브 이름 바뀜 옮기기. 잠금 차례가 하나(리포트 행 먼저 id 차례, 그다음 판
+    이름 — `lock_revision_names`)라 서로 교착하지 않고, 잠근 뒤에 다시 읽으므로 겹친 쪽이 본 것을 덮지 않는다(검토 R11 · R7 · R2 —
+    받기 뒤 자동 잇기는 긴 트랜잭션이다).
     DB 에 없는 리포트(시험의 손 객체)는 잠글 것이 없어 지나간다.
     """
     keys = sorted({str(i) for i in ids if i})
     if keys:
         await db.execute(select(ImpactReport.id).where(ImpactReport.id.in_(keys))
                          .order_by(ImpactReport.id).with_for_update())
+
+
+async def lock_revision_names(db, keys) -> None:
+    """판 **이름** 잠금 — 아직 없는 판 key 도 잠근다(`pg_advisory_xact_lock`, 트랜잭션이 끝날 때 풀린다).
+
+    리포트 행 잠금은 리포트마다라 **다른 리포트 둘**이 같은 새 판을 같은 순간 처음 만들면 서로 막지 못했다 — 둘째가 유일 제약
+    (`uq_onto_objects_type_key`)에 걸려 인제스트는 리포트째 잃고 손 확정은 500 이었다(재검토 11-12 rr1). 판 행을 만들거나 고치거나 판
+    key 를 그리로 바꾸는 길(`set_revision` · `move_task_revisions`)은 판 행을 읽기 **전에** 이것을 건다 — 둘째는 첫째가 끝날 때까지
+    기다렸다가 그때의 판을 읽어 쓴다. 행이 아직 없을 수 있어 행 잠금(FOR UPDATE)으로는 못 한다(이름 잠금이라야 한다).
+    ★잠금 차례 — 리포트 행 먼저(`lock_reports`), 그다음 판 이름(key 차례). 두 정수 꼴(`hashtext('dynaforge.rev')` · `hashtext(key)`)이라
+    받기 잠금(정수 하나 꼴 — `plm_sync.try_lock`)과 열쇠 공간이 겹치지 않는다.
+    """
+    for k in sorted({str(k) for k in keys if k}):
+        await db.execute(text("select pg_advisory_xact_lock(hashtext('dynaforge.rev'), hashtext(:k))"), {"k": k})
 
 
 # ── 후보 ───────────────────────────────────────────────────────────────────
@@ -228,9 +243,13 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
             await db.delete(m)
         await db.flush()
 
+    # ★판 이름 잠금(리포트 행 다음) — 같은 새 판을 다른 리포트가 지금 만들고 있으면 그것이 끝날 때까지 기다렸다가 그때의 판을
+    #   읽는다(재검토 11-12 rr1 — 예전엔 둘째가 유일 제약에 걸렸다). 잠근 뒤 새로 읽는다(정체 맵의 옛 판 객체를 믿지 않는다).
+    await lock_revision_names(db, [key])
     obj = (await db.execute(
         select(OntoObject).where(OntoObject.type_slug == TYPE_REVISION,
-                                 OntoObject.key == key))).scalar_one_or_none()
+                                 OntoObject.key == key)
+        .execution_options(populate_existing=True))).scalar_one_or_none()
     props: dict[str, Any] = {
         "task": task_key,
         "code": code,
@@ -1269,6 +1288,9 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
         return done
     revs = await _task_revisions(db, [from_key])
     await lock_reports(db, await _reports_on(db, [r.key for r in revs]))
+    # 판 이름 — 옮기는 판의 옛 key 와 새 key(그리로 바꾸거나 거기에 합친다). 새 key 를 다른 리포트가 지금 처음 만들고 있으면 기다린다(rr1)
+    await lock_revision_names(db, [r.key for r in revs] + [
+        revision_key(to_key, str((r.properties or {}).get("code") or r.key.rsplit("@", 1)[-1])) for r in revs])
     for rev in revs:
         props = dict(rev.properties or {})
         code = str(props.get("code") or rev.key.rsplit("@", 1)[-1])
