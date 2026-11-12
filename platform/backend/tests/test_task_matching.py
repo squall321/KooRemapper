@@ -257,6 +257,30 @@ async def test_among_live_tasks_a_same_label_still_only_disagrees(db, tag):
         await _wipe(db, keys=[a, b])
 
 
+async def test_an_alias_whose_task_is_missing_disagrees_and_never_links(db, tag):
+    """사람이 붙인 별칭의 끝(과제)이 거울에 없으면(허브에서 지워짐 · 합쳐짐 · 받은 적 없음) 엇갈림이다 — 다른 원천이 한 과제로 맞아도
+    잇지 않고 후보로 낸다. 그 끝은 거울에 없어 고를 수 없으니 후보로 내지 않고 `alias_missing` 으로 보인다(SRC-08 다리와 같은 규칙 —
+    예전엔 거울에 없는 그 key 로 풀려 확인 못 한 과제의 판을 만들었다)."""
+    from app.models import ImpactReport as IR
+    live, gone, word = f"L-{tag}", f"G-{tag}", f"W-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, live)
+        assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim"))["ok"]      # 끝이 거울에 없는 별칭
+        assert (await onto.confirm_alias(db, alias=live, key=gone, by="kim"))["ok"]      # 살아 있는 과제명과 같은 글자 · 끝이 없다
+        assert await onto.resolve_task(db, word) == ("", ""), "끝이 거울에 없는 별칭으로 풀었다"
+        assert await onto.resolve_task(db, live) == ("", ""), "끝이 없는 별칭이 엇갈리는데 과제명으로 이었다"
+        cands, ambiguous = await onto.candidates_for(db, live)
+        assert ambiguous and [c["key"] for c in cands] == [live] and gone in cands[0]["why"], cands
+        r = await _report(db, s, project=word, code="dv1")
+        e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+        assert e["verdict"] != "links" and e.get("alias_missing") == gone, e
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert got["linked"] == 0 and await onto.history(db, gone) == [], got
+    finally:
+        await _wipe(db, u, s, keys=[live, gone, word])
+
+
 async def test_a_string_cannot_point_at_two_tasks(db, tag):
     """★한 문자열이 두 과제를 가리키면 그 데이터로는 아무 질문에도 답할 수 없다."""
     a, b = f"A-{tag}", f"B-{tag}"

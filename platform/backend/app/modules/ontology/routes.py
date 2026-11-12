@@ -186,6 +186,8 @@ async def get_report_revision(
         "task_candidates": task_cands,
         # 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 낸다(검토 R8 · R6). 사람이 고른다
         "ambiguous": ambiguous,
+        # 끝이 거울에 없는 사람의 별칭(있으면 그것 때문에 잇지 않았다 — 재검토 11-12, SRC-08 다리와 같은 규칙)
+        "alias_missing": svc.missing_alias(found),
     })
 
 

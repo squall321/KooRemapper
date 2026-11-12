@@ -510,7 +510,8 @@ async def resolve_task(db, free: str) -> tuple[str, str]:
 # 글자 그대로 맞은 원천 → 후보에 보일 근거
 _EXACT_WHY = {"exact": "과제명이 글자 그대로 같다", "task_code": "과제코드가 글자 그대로 같다",
               "previous_key": "허브가 바꾼 옛 과제명이다", "alias": "사람이 붙인 별칭이 가리킨다",
-              "hub_alias": "허브 별칭이 글자 그대로 같다", "label": "이름(label)이 글자 그대로 같다"}
+              "hub_alias": "허브 별칭이 글자 그대로 같다", "label": "이름(label)이 글자 그대로 같다",
+              "alias_missing": "사람이 붙인 별칭이 거울에 없는 과제를 가리킨다"}
 
 
 async def exact_matches(db, free: str) -> list[tuple[str, str]]:
@@ -520,6 +521,9 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     ★살아 있는 과제가 정한다(사용자 결정 11-12 — SRC-08 다리와 같은 규칙) — 그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안
     맞을 때만 센다. 그만 쓴 과제는 살아 있는 과제의 일치를 막지 못한다(재검토 rr2b — 그만 쓴 과제의 이름이 다른 과제의 과제코드와
     같아 엇갈림이 됐다). 살아 있는 과제가 안 맞으면 그만 쓴 과제 하나는 예전처럼 잇고, 여럿이면 못 붙임이다(후보로도 내지 않는다).
+    ★사람이 붙인 별칭의 끝이 거울에 없으면(허브에서 지워짐 · 합쳐짐 · 받은 적 없음) `alias_missing` — 엇갈림이다. 다른 원천이 한 과제로
+    맞아도 잇지 않고 후보로 낸다. 그 끝은 거울에 없어 고를 수 없으니 후보로 내지 않는다(SRC-08 다리와 같은 규칙 — 재검토 11-12, 예전엔
+    거울에 없는 그 key 로 풀렸다).
     """
     free = (free or "").strip()
     if not free:
@@ -535,7 +539,7 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     al = (await db.execute(select(OntoAlias.key).where(
         OntoAlias.type_slug == TYPE_TASK, OntoAlias.alias == free))).scalar_one_or_none()
     if al is not None:
-        out.append((al, "alias"))
+        out.append((al, "alias" if await task_exists(db, al) else "alias_missing"))
     out += [(t.key, "hub_alias") for t in (await db.execute(select(OntoObject).where(
         *live, OntoObject.properties["aliases"].contains([free])).order_by(OntoObject.key))).scalars()
         if free in hub_aliases(t)]
@@ -544,12 +548,18 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     keys = sorted({k for k, _ in out})
     quiet = set((await db.execute(select(OntoObject.key).where(
         *live, OntoObject.status == "deprecated", OntoObject.key.in_(keys)))).scalars()) if keys else set()
-    return [m for m in out if m[0] not in quiet] or out
+    alive = [m for m in out if m[0] not in quiet]
+    return alive if any(how != "alias_missing" for _, how in alive) else out
+
+
+def missing_alias(found: list[tuple[str, str]]) -> str | None:
+    """끝이 거울에 없는 사람의 별칭이 가리키는 key — 있으면 엇갈림이라 잇지 않는다(그 끝은 후보로도 안 낸다)."""
+    return next((k for k, how in found if how == "alias_missing"), None)
 
 
 def _pick(found: list[tuple[str, str]]) -> tuple[str, str]:
-    """원천들이 과제 하나로 모이고 이름이 아닌 원천이 하나라도 있으면 그것(원천 차례 첫째) — 아니면 못 푼 것."""
-    linkers = [m for m in found if m[1] != "label"]
+    """원천들이 과제 하나로 모이고 이름 · 끝이 없는 별칭이 아닌 원천이 하나라도 있으면 그것(원천 차례 첫째) — 아니면 못 푼 것."""
+    linkers = [m for m in found if m[1] not in ("label", "alias_missing")]
     return linkers[0] if linkers and len({k for k, _ in found}) == 1 else ("", "")
 
 
@@ -563,11 +573,13 @@ async def candidates_for(db, free: str, *, found: list[tuple[str, str]] | None =
         rows = await _live_tasks(db)
     labels = {t.key: t.label for t in rows}
     quiet = {t.key for t in rows if t.status == "deprecated"}
+    stray = missing_alias(found)
     out: list[dict] = []
     for k, how in found:
-        if k in quiet or any(c["key"] == k for c in out):
-            continue        # 그만 쓴 과제는 후보로 내지 않는다(새로 고르는 목록 — 10-30 결정 · 다리와 같다)
-        out.append({"key": k, "label": labels.get(k), "why": _EXACT_WHY[how], "rank": -1})
+        if how == "alias_missing" or k in quiet or any(c["key"] == k for c in out):
+            continue        # 끝이 거울에 없는 별칭 · 그만 쓴 과제는 후보로 내지 않는다(고를 수 없다 · 새로 고르는 목록 — 다리와 같다)
+        why = _EXACT_WHY[how] + (f" — 사람이 붙인 별칭은 거울에 없는 과제 {stray!r} 를 가리킨다" if stray else "")
+        out.append({"key": k, "label": labels.get(k), "why": why, "rank": -1})
     seen = {c["key"] for c in out}
     out += [c for c in await task_candidates(db, free, rows=rows) if c["key"] not in seen]
     return out, len({k for k, _ in found}) > 1
@@ -753,6 +765,8 @@ async def plan_task_links(db, *, limit: int | None = None, scope=None) -> dict:
             "how": how or None,
             "unlinked": sorted(r.id for r in rows if r.id in marks),
         }
+        if missing_alias(found):
+            entry["alias_missing"] = missing_alias(found)    # 끝이 거울에 없는 사람의 별칭 — 그래서 잇지 않았다(떼고 다시 붙인다)
         if key:
             entry["verdict"] = "links"
         else:
