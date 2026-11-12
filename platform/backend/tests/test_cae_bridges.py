@@ -4,7 +4,8 @@
 key 로 넣고 앞뒤에 지운다(dev 거울에는 이 세 타입이 없다 — 받을 타입 기본값 밖).
 
 거울 픽스처가 v14 에 낳는 것(손으로 셈 — 아래 EXPECT).
-  파트  규칙 6 — part/2(옛 key) · part/3(이름) · part/18(허브 별칭) · part/20(우리 별칭) · part/21(key) · part/23(그만 씀이어도 정확은 잇는다)
+  파트  규칙 6 — part/2(옛 key) · part/3(이름) · part/18(허브 별칭) · part/20(우리 별칭) · part/21(key) · part/23(살아 있는 것이 하나도
+        안 맞아 그만 쓴 객체로 긋는다 — 보기에서 dst_deprecated)
         후보 7 — part/1(같은 이름 둘) · part/4(구분기호만 다름) · part/12 · part/13(「pkg\\pkg1」 을 품는다) · part/16 · part/17 · part/19(SUBPKG)
         못 붙임 10 — 사라진 행(Geom\\솔리드)과 그만 쓴 후보(SUBPBA)는 보지 않는다
   소견  규칙 1(finding/3 — 제목이 이름과 같다) · 후보 1(finding/18 — 「Motor」 를 품는다) · 못 붙임 20
@@ -53,7 +54,8 @@ MIRROR = [
     ("failure_mode", "cbt:fm-motor", "Motor", "active", False, None),
     ("analysis_method", "cbt:am-drop", "낙하 해석", "active", False, None),
 ]
-EXTRA = [("part", "cbt:geom2"), ("part", "cbt:frame-live"), ("part", "cbt:frame-old"), ("part", "cbt:battery")]  # 시험 도중 넣는 행
+EXTRA = [("part", "cbt:geom2"), ("part", "cbt:frame-live"), ("part", "cbt:frame-old"), ("part", "cbt:battery"),
+         ("part", "cbt:frame-live2")]                                                           # 시험 도중 넣는 행
 ALIASES = [("part", "Bond\\Bond", "cbt:bond"), ("analysis_method", "drop_all_angle", "cbt:am-drop")]
 PREVIOUS = [("part", "Front\\Wall", "cbt:wall")]
 
@@ -175,12 +177,15 @@ def _flat(counts: dict) -> dict:
 # ── 순수 — 정확 · 후보 규칙 ────────────────────────────────────────────────────────────────
 
 def _pool(**kw) -> br._Pool:
+    """순수 시험용 거울 — `quiet` 은 그만 씀(deprecated) key(진짜 `_pool` 처럼 후보용 이름에서 뺀다)."""
     p = br._Pool()
+    p.quiet.update(kw.get("quiet", ()))
     for key, label in kw.get("objs", {}).items():
         p.labels[key] = label
         for how, text in (("key", key), ("label", label)):
             p.exact.setdefault(text, {}).setdefault(key, set()).add(how)
-            p.names.append((key, br.normalize(text), how))
+            if key not in p.quiet:
+                p.names.append((key, br.normalize(text), how))
     p.ours.update(kw.get("ours", {}))
     return p
 
@@ -232,16 +237,49 @@ def test_candidates_are_capped_with_the_rest_counted():
     assert len(got["options"]) == br.CANDIDATES_PER_OBJECT and got["more"] == 8 - br.CANDIDATES_PER_OBJECT
 
 
+def test_live_objects_decide_and_a_deprecated_one_counts_only_when_none_matches():
+    """살아 있는 객체가 정한다(사용자 결정 11-12) — 검토 다섯 꼴과 「살아 있는 것이 후보로만 맞음」.
+    ① 살아 있는 A · 그만 쓴 D 가 같은 이름 → A 로 선(그만 쓴 것은 막지 못한다) ② 우리 별칭 X → 살아 있는 K, 그만 쓴 D 의 이름이 X → K 로 선
+    ③ 우리 별칭 X → 그만 쓴 D, 살아 있는 A 의 이름이 X → 엇갈림(후보 A, 까닭에 별칭의 끝이 그만 썼다) ④ 그만 쓴 것만 둘 → 못 붙임
+    ⑤ 그만 쓴 것만 하나 → 선(`deprecated` — 보기가 그 끝을 표시한다) ⑥ 그만 쓴 것 하나가 글자 그대로 맞아도 살아 있는 것이 후보로라도
+    맞으면 그만 쓴 것은 세지 않는다(살아 있는 것이 하나도 안 맞을 때만)."""
+    a = br.match(_pool(objs={"A": "Frame", "D": "Frame"}, quiet={"D"}), "Frame")
+    assert (a["verdict"], a["key"], a["matched_by"], a.get("deprecated")) == ("rule", "A", "label", None)
+    b = br.match(_pool(objs={"K": "케이", "D": "Bracket"}, ours={"Bracket": "K"}, quiet={"D"}), "Bracket")
+    assert (b["verdict"], b["key"], b["matched_by"], b.get("deprecated")) == ("rule", "K", "alias", None)
+    c = br.match(_pool(objs={"A": "Bracket", "D": "디"}, ours={"Bracket": "D"}, quiet={"D"}), "Bracket")
+    assert c["verdict"] == "candidates" and "key" not in c
+    assert [(o["key"], o["why"]) for o in c["options"]] == [("A", br._WHY_GONE_ALIAS.format(key="D") + "(이름)")]
+    d = br.match(_pool(objs={"D1": "Frame", "D2": "Frame"}, quiet={"D1", "D2"}), "Frame")
+    assert (d["verdict"], d["options"]) == ("unmatched", [])
+    e = br.match(_pool(objs={"D": "Frame"}, quiet={"D"}), "Frame")
+    assert (e["verdict"], e["key"], e["matched_by"], e["deprecated"]) == ("rule", "D", "label", True)
+    f = br.match(_pool(objs={"D": "Frame", "L": "frame"}, quiet={"D"}), "Frame")
+    assert f["verdict"] == "candidates" and [o["key"] for o in f["options"]] == ["L"], f
+    g = br.match(_pool(objs={"D": "디"}, ours={"Bracket": "D"}, quiet={"D"}), "Bracket")
+    assert (g["verdict"], g["key"], g["matched_by"], g["deprecated"]) == ("rule", "D", "alias", True), "별칭만 있고 살아 있는 맞음이 없다"
+
+
 @ON_SESSION_LOOP
-async def test_a_deprecated_object_is_never_offered_as_a_candidate(db, mirror):
-    """그만 씀(deprecated)은 새로 고르는 목록에 안 낸다 — 글자 그대로 둘이 맞아 후보가 된 자리(여럿 맞음)에서도(검토 11-11 P3).
-    둘이 맞았으니 규칙 선은 아니고, 후보에는 살아 있는 것만 남는다."""
+async def test_a_deprecated_object_never_vetoes_a_live_match_nor_becomes_a_candidate(db, mirror):
+    """진짜 거울로 — 살아 있는 「CBT Frame」 하나와 그만 쓴 같은 이름이 있으면 살아 있는 것으로 긋는다(예전에는 둘이 맞아 후보였다).
+    우리 별칭이 그만 쓴 쪽을 가리키면 엇갈림(살아 있는 것을 후보로 · 까닭). 살아 있는 것이 둘이면 후보에 그만 쓴 것은 없다(10-30 결정)."""
     db.add_all([OntoObject(type_slug="part", key="cbt:frame-live", label="CBT Frame", status="active", source=SOURCE_HUB),
                 OntoObject(type_slug="part", key="cbt:frame-old", label="CBT Frame", status="deprecated", source=SOURCE_HUB)])
     await db.commit()
     got = br.match(await br._pool(db, "part"), "CBT Frame")
-    assert got["verdict"] == "candidates" and "key" not in got
-    assert [o["key"] for o in got["options"]] == ["cbt:frame-live"], got["options"]
+    assert (got["verdict"], got["key"], got["matched_by"]) == ("rule", "cbt:frame-live", "label") and not got.get("deprecated")
+    alias = OntoAlias(type_slug="part", alias="CBT Frame", key="cbt:frame-old", source="manual", confirmed_by="test", note=TAG)
+    db.add(alias)
+    await db.commit()
+    got = br.match(await br._pool(db, "part"), "CBT Frame")
+    assert got["verdict"] == "candidates" and [(o["key"], o["why"]) for o in got["options"]] == [
+        ("cbt:frame-live", br._WHY_GONE_ALIAS.format(key="cbt:frame-old") + "(이름)")], got
+    await db.delete(alias)
+    db.add(OntoObject(type_slug="part", key="cbt:frame-live2", label="CBT Frame", status="active", source=SOURCE_HUB))
+    await db.commit()
+    got = br.match(await br._pool(db, "part"), "CBT Frame")
+    assert got["verdict"] == "candidates" and [o["key"] for o in got["options"]] == ["cbt:frame-live", "cbt:frame-live2"], got
 
 
 def test_the_code_names_one_property_per_bridge_and_the_vocabulary_has_it():
@@ -286,6 +324,8 @@ async def test_attaching_v14_draws_exact_lines_and_lists_candidates(db, mirror):
                                                            "part/23", "finding/3"]
         ln = next(x for x in view["lines"] if x["src_key"] == "part/3")
         assert (ln["dst_label"], ln["dst_active"], ln["src_label"], ln["basis"]) == ("PCB\\PCB", True, "PCB\\PCB", "rule")
+        assert {x["src_key"]: x["dst_deprecated"] for x in view["lines"]} == {k: k == "part/23" for k in RULES}, \
+            "그만 쓴 끝으로 그은 선(part/23 → cbt:part23)만 표시한다"
     finally:
         await _drop(db, u)
 

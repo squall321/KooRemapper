@@ -21,10 +21,17 @@
   ★우리 별칭의 끝이 거울에 없어도(허브에서 지워짐 · 허브가 key 를 바꿔 옛 key 를 가리킴 · 받은 적 없음) 엇갈림이다 — 사람이 그 글을
   다른 객체로 정했다는 기록이라, 다른 칸이 한 객체로 맞아도 규칙 선을 긋지 않고 후보로 낸다(그 끝은 거울에 없어 확정할 수 없으니
   후보로 내지 않는다). 예전에는 그런 별칭을 조용히 건너뛰어 다른 객체로 그었다(검토 2차 11-11 항목 9).
+  ★**살아 있는 객체가 정한다**(사용자 결정 11-12). 견주기는 살아 있는 객체(그만 씀 deprecated 가 아닌 것)로 한다 — 그만 쓴 객체는
+  살아 있는 맞음을 막지 못하고(같은 이름의 그만 쓴 객체가 있어도 살아 있는 하나로 긋는다) 후보로도 나오지 않는다(10-30 결정).
+  살아 있는 객체가 하나도 안 맞을 때만(글자 그대로도 후보로도) 그만 쓴 객체가 센다 — 글자 그대로 하나면 규칙 선을 긋고 보기에서 그
+  끝을 그만 씀으로 표시한다(선의 `dst_deprecated`), 여럿이면 못 붙임. 우리 별칭이 그만 쓴 객체를 가리키는데 살아 있는 객체가 글자로
+  맞으면 엇갈림이다 — 살아 있는 객체를 후보로 내고 까닭에 별칭의 끝이 그만 썼다고 적는다. 예전에는 그만 쓴 객체도 한 표라 살아 있는
+  객체와 이름이 같으면 둘 다 후보였다(검토 2차 11-11).
 
 **후보**(짐작 — 선이 아니다)는 과제 후보(`task_candidates`)와 같은 정규화(`normalize` — 대소문자 · 공백 · 구분기호를 지운다)로 본다.
   ① 글자 그대로 맞는 코어 객체가 여럿 ② 정규화하면 같다 ③ 정규화한 한쪽이 다른 쪽을 품는다(짧은 쪽이 두 글자 이상).
-  객체마다 가까운 것부터 다섯까지 낸다. 그만 씀(deprecated)인 코어 객체는 후보에 넣지 않는다(새로 고르는 목록 — 10-30 결정).
+  객체마다 가까운 것부터 다섯까지 낸다. 그만 씀(deprecated)인 코어 객체는 후보에 넣지 않는다(새로 고르는 목록 — 10-30 결정 · 위의
+  「살아 있는 객체가 정한다」).
 
 **선은 리포트에 묶인다**(`report_id`) — 리포트를 지우면 함께 사라지고 읽기는 리포트 가시성을 따른다(10-31 결정 — 리포트 행은
 전사 보기에 내지 않는다). 규칙 선(`basis: rule`)은 다시 지을 때마다 걷고 다시 긋는다. 사람 선(`basis: human`)은 다시 붙여도
@@ -62,10 +69,11 @@ NAME_PROP = {"cae_campaign": "scenario_kind", "cae_part": "name", "cae_finding":
 RULE, HUMAN = "rule", "human"
 CANDIDATES_PER_OBJECT = 5
 MIN_CONTAINED = 2           # 품는 쪽 후보 — 짧은 쪽이 이보다 짧으면 아무 글에나 걸린다
-RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key · "
-             "우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 후보 = 여럿이 맞음(칸끼리 엇갈림 · "
-             "끝이 거울에 없는 우리 별칭 포함) · 구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 "
-             "객체는 안 낸다). "
+RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 살아 있는 코어 객체의 key · 이름 · 허브 별칭 · "
+             "옛 key · 우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 그만 쓴(deprecated) 객체는 "
+             "살아 있는 객체가 하나도 안 맞을 때만 센다 — 글자 그대로 하나면 규칙 선(그 끝에 dst_deprecated), 여럿이면 못 붙임. "
+             "후보 = 여럿이 맞음(칸끼리 엇갈림 · 끝이 거울에 없거나 그만 쓴 객체인 우리 별칭 포함) · 구분기호와 대소문자만 다름 · 한쪽이 "
+             "다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 객체는 후보로 안 낸다). "
              "사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale, 그 해석 쪽 이름이 바뀌면 drift.renamed 로 보인다(같은 짝을 "
              "다시 확정하면 지금 이름으로 맞춘다). counts 는 지금 거울로 센 것이다 — 저장된 규칙 선과 다르면 drift 가 말한다(다시 붙이면 "
              "맞춰진다).")
@@ -78,6 +86,7 @@ _WHY_HELD = {"key": "코어 key 가 해석 쪽 글을 품고 있다", "label": "
              "hub_alias": "허브 별칭이 해석 쪽 글을 품고 있다", "alias": "우리 별칭이 해석 쪽 글을 품고 있다"}
 _WHY_MANY = "글자 그대로 맞는 코어 객체가 여럿이다"
 _WHY_STRAY = "글자 그대로 맞지만 우리 별칭은 거울에 없는 {key!r} 를 가리킨다"
+_WHY_GONE_ALIAS = "글자 그대로 맞지만 우리 별칭은 그만 쓴(deprecated) {key!r} 를 가리킨다"
 # 정확 일치의 칸 — 같은 객체를 여러 칸이 가리키면 맞은 칸은 이 차례로 하나를 적고, 여럿이 맞으면 후보 까닭에 칸 이름을 단다
 _EXACT_ORDER = ("alias", "key", "label", "hub_alias", "previous_key")
 _FIELD = {"alias": "우리 별칭", "key": "key", "label": "이름", "hub_alias": "허브 별칭", "previous_key": "옛 key"}
@@ -190,7 +199,7 @@ class _Pool:
     names: list[tuple[str, str, str]] = field(default_factory=list)    # (코어 key, 정규화 글, 어디서) — 후보용
     labels: dict[str, str] = field(default_factory=dict)               # 살아 있는 코어 key → 이름
     stray: dict[str, str] = field(default_factory=dict)                # 끝이 거울에 없는 우리 별칭 → 그 key — 엇갈림(후보)으로 센다
-    quiet: set[str] = field(default_factory=set)                       # 그만 씀(deprecated) — 정확히 맞으면 잇지만 후보로는 안 낸다
+    quiet: set[str] = field(default_factory=set)                       # 그만 씀(deprecated) — 살아 있는 것이 하나도 안 맞을 때만 센다
 
 
 async def _pool(db, dst_type: str) -> _Pool:
@@ -202,7 +211,7 @@ async def _pool(db, dst_type: str) -> _Pool:
     for o in rows:
         pool.labels[o.key] = o.label or ""
         if o.status == "deprecated":
-            quiet.add(o.key)        # 그만 씀 — 정확히 맞으면 잇지만(resolve_task 와 같다) 후보에는 안 낸다
+            quiet.add(o.key)        # 그만 씀 — 살아 있는 맞음을 막지 못하고 후보에도 안 나온다(match — 사용자 결정 11-12)
         for how, text in (("key", o.key), ("label", o.label or ""), *(("hub_alias", a) for a in hub_aliases(o))):
             if not text:
                 continue
@@ -225,24 +234,34 @@ async def _pool(db, dst_type: str) -> _Pool:
     return pool
 
 
+def _rule(key: str, hows: set[str], t: str) -> dict:
+    return {"verdict": "rule", "key": key, "matched_by": next(h for h in _EXACT_ORDER if h in hows), "text": t, "options": []}
+
+
 def match(pool: _Pool, text: Any) -> dict:
-    """해석 쪽 글 하나 → `verdict`(rule · candidates · unmatched · unnamed)와 그 근거. 쓰지 않는다."""
-    t = text.strip() if isinstance(text, str) else ""     # resolve_task 와 같은 「정확」 — 앞뒤 공백만 걷는다
+    """해석 쪽 글 하나 → `verdict`(rule · candidates · unmatched · unnamed)와 그 근거. 쓰지 않는다.
+
+    살아 있는 객체가 정한다(사용자 결정 11-12) — ① 살아 있는 객체 하나로 모이고 우리 별칭이 엇갈리지 않으면(끝이 거울에 없음 · 그만 씀)
+    규칙 선 ② 아니면 살아 있는 것만 후보(글자 그대로 여럿 · 엇갈림 · 정규화) ③ 살아 있는 것이 하나도 안 맞을 때만 그만 쓴 객체 —
+    글자 그대로 하나면 규칙 선(`deprecated: True` — 보기가 그 끝을 표시한다), 여럿이면 못 붙임.
+    """
+    t = text.strip() if isinstance(text, str) else ""     # resolve_task 와 같은 견줌 — 앞뒤 공백만 걷는다
     if not t:
         return {"verdict": "unnamed", "text": "", "options": []}
     hits = {k: set(hows) for k, hows in pool.exact.get(t, {}).items()}
     if t in pool.ours:
         hits.setdefault(pool.ours[t], set()).add("alias")       # 우리 별칭도 칸 하나다 — 먼저가 아니다
+    live = {k: hows for k, hows in hits.items() if k not in pool.quiet}
     stray = pool.stray.get(t)       # 끝이 거울에 없는 우리 별칭 — 그 끝도 한 표다(엇갈림)
-    if len(hits) == 1 and stray is None:
-        (key, hows), = hits.items()
-        return {"verdict": "rule", "key": key, "matched_by": next(h for h in _EXACT_ORDER if h in hows), "text": t,
-                "options": []}
-    # 여럿 — 칸끼리 엇갈려도 여럿이다. 그만 씀은 여기서도 뺀다 — 후보는 새로 고르는 목록이다(10-30 결정 · 검토 11-11 P3).
-    why = _WHY_MANY if stray is None else _WHY_STRAY.format(key=stray)
+    gone = pool.ours[t] if pool.ours.get(t) in pool.quiet else None     # 우리 별칭의 끝이 그만 씀 — 살아 있는 맞음과 엇갈린다
+    if len(live) == 1 and stray is None and gone is None:
+        (key, hows), = live.items()
+        return _rule(key, hows, t)
+    # 여럿 · 엇갈림 — 살아 있는 것만 후보다(그만 쓴 것은 새로 고르는 목록에 안 낸다 — 10-30 결정 · 검토 11-11 P3)
+    why = (_WHY_STRAY.format(key=stray) if stray is not None else _WHY_GONE_ALIAS.format(key=gone) if gone is not None
+           else _WHY_MANY)
     best: dict[str, tuple[int, int, str]] = {
-        k: (0, 0, f"{why}({' · '.join(_FIELD[h] for h in _EXACT_ORDER if h in hows)})")
-        for k, hows in hits.items() if k not in pool.quiet}
+        k: (0, 0, f"{why}({' · '.join(_FIELD[h] for h in _EXACT_ORDER if h in hows)})") for k, hows in live.items()}
     n = normalize(t)
     for key, name, how in pool.names:
         if name == n:
@@ -257,7 +276,14 @@ def match(pool: _Pool, text: Any) -> dict:
             best[key] = got
     ranked = sorted(best.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0]))
     options = [{"key": k, "label": pool.labels.get(k, ""), "why": why} for k, (_, _, why) in ranked[:CANDIDATES_PER_OBJECT]]
-    out = {"verdict": "candidates" if options else "unmatched", "text": t, "options": options}
+    if not options:
+        # 살아 있는 것이 하나도 안 맞았다 — 그만 쓴 객체가 센다. 글자 그대로 하나면 선(보기에서 그만 씀 표시), 여럿이면 못 붙임
+        dead = {k: hows for k, hows in hits.items() if k in pool.quiet}
+        if len(dead) == 1 and stray is None:
+            (key, hows), = dead.items()
+            return {**_rule(key, hows, t), "deprecated": True}
+        return {"verdict": "unmatched", "text": t, "options": []}
+    out = {"verdict": "candidates", "text": t, "options": options}
     if len(ranked) > CANDIDATES_PER_OBJECT:
         out["more"] = len(ranked) - CANDIDATES_PER_OBJECT
     return out
@@ -427,31 +453,34 @@ def brief(counts: dict | None) -> str:
 
 # ── 보기 ────────────────────────────────────────────────────────────────────────────────
 
-async def _ends(db, lines: list, pools: dict) -> dict[tuple[str, str], tuple[str, bool]]:
-    """선의 코어 끝 → (이름, 살아 있나). 거울에 살아 있는 것은 계획이 읽은 것으로, 사라진 것은 한 번 더 읽는다."""
-    out: dict[tuple[str, str], tuple[str, bool]] = {}
+async def _ends(db, lines: list, pools: dict) -> dict[tuple[str, str], tuple[str, bool, bool]]:
+    """선의 코어 끝 → (이름, 살아 있나, 그만 씀). 거울에 살아 있는 것은 계획이 읽은 것으로, 사라진 것은 한 번 더 읽는다."""
+    out: dict[tuple[str, str], tuple[str, bool, bool]] = {}
     gone = set()
     for e in lines:
         pool = pools.get(e.dst_type)
         if pool is not None and e.dst_key in pool.labels:
-            out[(e.dst_type, e.dst_key)] = (pool.labels[e.dst_key], True)
+            out[(e.dst_type, e.dst_key)] = (pool.labels[e.dst_key], True, e.dst_key in pool.quiet)
         else:
             gone.add((e.dst_type, e.dst_key))
     if gone:
-        for t, k, lab in (await db.execute(select(OntoObject.type_slug, OntoObject.key, OntoObject.label).where(
-                OntoObject.report_id.is_(None), OntoObject.key.in_(sorted({k for _, k in gone}))))).all():
+        for t, k, lab, st in (await db.execute(select(OntoObject.type_slug, OntoObject.key, OntoObject.label, OntoObject.status)
+                                               .where(OntoObject.report_id.is_(None),
+                                                      OntoObject.key.in_(sorted({k for _, k in gone}))))).all():
             if (t, k) in gone:
-                out[(t, k)] = (lab, False)
+                out[(t, k)] = (lab, False, st == "deprecated")
     return out
 
 
 def _line(rid: str, e: OntoRelation, names: dict[str, str], ends: dict, called: dict[str, str] | None = None) -> dict:
     """선 하나 — `names` 는 해석 객체 key → 이름(label, 보이기), `called` 는 key → 지금 부르는 이름(renamed 견주기)."""
     p = e.properties or {}
-    lab, alive = ends.get((e.dst_type, e.dst_key), (None, False))
+    lab, alive, dep = ends.get((e.dst_type, e.dst_key), (None, False, False))
+    # dst_active — 허브에 살아 있나(사용 안 함 · 사라짐이면 거짓), dst_deprecated — 허브가 그만 쓰라고 한 끝(살아 있는 것이 하나도 안 맞아
+    # 그만 쓴 객체로 그은 규칙 선 · 사람이 그만 쓴 객체에 이은 선 — 사용자 결정 11-12)
     out = {"relation": e.relation, "basis": p.get("basis") or RULE, "src_type": e.src_type, "src_key": _rel(rid, e.src_key),
            "src_label": names.get(e.src_key) or p.get("src_label"), "dst_type": e.dst_type, "dst_key": e.dst_key,
-           "dst_label": lab, "dst_active": alive}
+           "dst_label": lab, "dst_active": alive, "dst_deprecated": dep}
     for k in ("matched_by", "matched_text", "decided_by", "decided_at", "note"):
         if p.get(k):
             out[k] = p[k]
@@ -568,7 +597,7 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
         OntoRelation.report_id == rid, OntoRelation.relation == b.relation, OntoRelation.src_key == key))).scalars().all()
     same = next((e for e in lines if e.dst_key == dst_key), None)
     name, now = _name(obj, b), datetime.now(timezone.utc).isoformat()
-    end = {(b.dst_type, dst_key): (core.label, True)}
+    end = {(b.dst_type, dst_key): (core.label, True, core.status == "deprecated")}
     if same is not None and _basis(same) == HUMAN:
         was = (same.properties or {}).get("src_label") or ""
         if was == name:
@@ -620,8 +649,8 @@ async def remove(db, report: ImpactReport, *, src_key: str, dst_key: str) -> dic
     obj = (await db.execute(select(OntoObject.key, OntoObject.label).where(
         OntoObject.report_id == rid, OntoObject.key == key))).first()
     was = _line(rid, line, {key: obj.label} if obj is not None else {}, {})
-    was.pop("dst_label", None)
-    was.pop("dst_active", None)
+    for k in ("dst_label", "dst_active", "dst_deprecated"):
+        was.pop(k, None)
     await db.delete(line)
     await db.flush()
     got = await rebuild(db, report)
