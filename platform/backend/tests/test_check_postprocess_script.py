@@ -30,9 +30,15 @@ def _run(env_text: str, *extra) -> tuple[int, str]:
 
 class _Sso(http.server.BaseHTTPRequestHandler):
     def do_POST(self):                                    # noqa: N802
-        if self.headers.get("X-Heax-Gateway-Secret") == SECRET:
+        if self.headers.get("X-Heax-Client") != "dynaforge":       # KooSlurm 은 클라이언트 이름을 허용 목록으로 거른다
+            body = "{\"error\": \"알 수 없는 클라이언트\"}".encode()
+            self.send_response(400)
+        elif self.headers.get("X-Heax-Gateway-Secret") == SECRET:
             body = b'{"access_token": "kst_TokenShouldNeverPrint0123", "username": "alice"}'
             self.send_response(200)
+        elif self.headers.get("X-Heax-Gateway-Secret"):
+            body = "{\"error\": \"게이트웨이 비밀 불일치\"}".encode()
+            self.send_response(401)
         else:
             body = b'{"error": "forbidden"}'
             self.send_response(403)
@@ -73,5 +79,7 @@ def test_a_live_window_that_refuses_without_secret_passes_and_email_mints_withou
         rc, out = _run(env, "--email", "alice@example.com")
         assert rc == 0 and "username=alice" in out
         assert "kst_TokenShouldNeverPrint" not in out and SECRET not in out
+        rc, out = _run(f'KOORM_STCX_BACKEND_URL={url}\nKOORM_KOOSLURM_SSO_SECRET=wrong\n', "--email", "alice@example.com")
+        assert rc == 1 and "HTTP 401" in out and "비밀 불일치" in out and "KooSlurm 과 다르다" in out
     finally:
         srv.shutdown()

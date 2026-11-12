@@ -29,6 +29,8 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 RESERVE = ("KOORM_STCX_BACKEND_URL", "KOORM_KOOSLURM_SSO_SECRET")
 SUBMIT = ("KOORM_GATEWAY_PAT", "KOORM_STCX_WORK_ROOT", "KOORM_STCX_LSTC_IP")
 SSO_PATH = "/api/auth/sso"            # app/runner/kooslurm_client.py 와 같다
+# 클라이언트 이름도 앱과 같아야 한다 — KooSlurm 은 허용 목록으로 거른다(다르면 맞는 비밀이어도 400 「알 수 없는 클라이언트」).
+SSO_CLIENT = "dynaforge"
 _TOKEN = re.compile(r"\b(kst|kr|hx)_[A-Za-z0-9_\-]{8,}")
 
 
@@ -57,9 +59,20 @@ def post(url: str, headers: dict, body: bytes = b"", timeout: float = 10.0):
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.status, r.read(65536)
     except urllib.error.HTTPError as e:
-        return e.code, b""
+        return e.code, e.read(4096)        # 거절 까닭 — 찍을 때 _reason 이 토큰을 가린다
     except (urllib.error.URLError, OSError, ValueError) as e:
         return None, _TOKEN.sub("<token>", str(getattr(e, "reason", e)))[:120]
+
+
+def _reason(body) -> str:
+    """거절 본문의 까닭 한 줄(토큰 꼴은 가린다) — 비밀 불일치(401)와 사용자 · 클라이언트 거절(400)을 가르려고."""
+    try:
+        txt = body.decode("utf-8", "replace") if isinstance(body, bytes) else str(body)
+        o = json.loads(txt) if txt.strip().startswith("{") else {}
+        txt = str(o.get("error") or o.get("detail") or o.get("message") or txt)
+    except ValueError:
+        pass
+    return _TOKEN.sub("<token>", txt.strip())[:160]
 
 
 def main(argv=None) -> int:
@@ -82,7 +95,7 @@ def main(argv=None) -> int:
     url = env.get("KOORM_STCX_BACKEND_URL", "").strip().rstrip("/")
     if url:
         print(f"[위임 창구] POST …{SSO_PATH} (비밀 없이)")
-        code, why = post(url + SSO_PATH, {"X-Heax-Client": "dynaforge-check"})
+        code, why = post(url + SSO_PATH, {"X-Heax-Client": SSO_CLIENT})
         if code is None:
             print(f"    닿지 않는다 — {why}")
             bad.append("위임 창구에 닿지 않음")
@@ -101,7 +114,7 @@ def main(argv=None) -> int:
                 print("    --email 을 줬지만 KOORM_KOOSLURM_SSO_SECRET 이 비었다 — 받아 보지 않는다")
             else:
                 h = {"X-Heax-Gateway-Secret": secret, "X-Heax-User-Email": a.email,
-                     "X-Hwax-Delegate-Email": a.email, "X-Heax-Client": "dynaforge-check"}
+                     "X-Hwax-Delegate-Email": a.email, "X-Heax-Client": SSO_CLIENT}
                 code, body = post(url + SSO_PATH, h)
                 tok = isinstance(body, bytes) and _TOKEN.search(body.decode("utf-8", "replace") or "")
                 if code == 200 and tok:
@@ -111,8 +124,9 @@ def main(argv=None) -> int:
                         user = "?"
                     print(f"    {a.email} 명의 토큰을 받았다(username={user}) — 비밀이 KooSlurm 과 맞는다")
                 else:
-                    print(f"    {a.email} 명의로 못 받았다 — HTTP {code}"
-                          + ("" if code else f" ({body})") + " · 비밀(HEAX_GATEWAY_SECRET)과 맞는지 본다")
+                    why = body if not code else _reason(body)
+                    print(f"    {a.email} 명의로 못 받았다 — HTTP {code}" + (f" ({why})" if why else "")
+                          + (" · 비밀(HEAX_GATEWAY_SECRET)이 KooSlurm 과 다르다" if code == 401 else ""))
                     bad.append("위임 창구 토큰 받기 실패")
 
     pat = env.get("KOORM_GATEWAY_PAT", "").strip()
