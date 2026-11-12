@@ -807,26 +807,31 @@ async def test_a_metadata_edit_moves_only_a_machine_link_and_only_on_project_or_
 async def test_a_link_that_breaks_in_the_database_never_drops_the_metadata_save(db, monkeypatch):
     """인제스트 때 잇기(`_link_revision`)가 DB 쪽에서 깨져도(세션이 되감김 대기가 되는 오류) 메타 저장은 굳는다 — 잇기만 저장점에서
     되감긴다(재검토 11-12 rr1 — 예전엔 예외를 삼키고도 부르는 쪽의 커밋이 PendingRollbackError 로 깨져 인제스트는 리포트째 잃었다)."""
+    from types import SimpleNamespace
+
     from sqlalchemy import text as sql
 
     from app.modules.reports import services as rsvc
     t = _tag()
     task, other = f"AL-{t}", f"AL2-{t}"
     u, s = await _owner(db, commit=True)
+    # 고친 것이 무르면 세션이 되감김 대기라 객체 칸을 못 읽는다 — id 를 먼저 적어 두고 그것으로 치운다(남기지 않는다)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
     try:
         r = await _rep(db, s, project=task, code="dv1", commit=True)
+        rid = r.id
 
         async def broken(sdb, rep):
             await sdb.execute(sql("select 1/0"))           # 바깥 트랜잭션에서 나면 세션째 되감김 대기가 되는 DB 오류
             return {"ok": True}
 
         monkeypatch.setattr(onto, "link_from_eng_meta", broken)
-        r = await rsvc.update_report_meta(db, r, project=other)
+        await rsvc.update_report_meta(db, r, project=other)
         async with SessionLocal() as f:
-            saved = await f.get(ImpactReport, r.id)
+            saved = await f.get(ImpactReport, rid)
             assert (saved.eng_meta or {}).get("project") == other, f"잇기가 깨져 메타 저장까지 잃었다: {saved.eng_meta}"
     finally:
-        await _drop(db, u, s, keys=[task, other])
+        await _drop(db, *mine, keys=[task, other])
 
 
 async def test_a_receive_leaves_an_unlinked_report_unlinked_and_counts_it(db, hub_on, monkeypatch):
