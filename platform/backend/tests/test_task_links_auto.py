@@ -546,7 +546,8 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
     run = OntoSyncRun(mode="normal", trigger="test", result="needs_check", counts={
         "types": {}, "task_links": {"scope": "all", "linked": 2, "candidates": 3, "unmatched": 4,
                                     "reports_without_a_name": 5},
-        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": []}},
+        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": ["A@dv1 → B@dv1"],
+                      "error": "IntegrityError: … Key (src_key)=(01SOMEONEELSES) …"}},
         problems=["과제 잇기 실패 — RuntimeError: 원문에 남의 리포트 01ABC"], error="exception: 원문")
     db.add(run)
     await db.commit()
@@ -566,11 +567,53 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
         assert b["counts"]["task_links"]["linked"] == 2
         # 예외 원문(사유 줄 · 오류 글)과 층 2 가 옮긴 리포트 수도 관리자에게만 — 일반 사용자는 「문제가 있었다」(수)까지만
         assert (p["problems"], p["error"], p["problem_count"]) == ([], None, 1), p
-        assert "reports" not in p["counts"]["reflected"] and p["counts"]["reflected"]["renamed"] == 1, p["counts"]
+        # 층 2 반영의 글(예외 원문 `error` · 끊은 줄 `dropped`)도 관리자에게만 — 일반 사용자는 반영 **수**만(재검토 11-12)
+        assert p["counts"]["reflected"] == {"renamed": 1, "revisions": 1}, p["counts"]
         assert (b["problems"][0].startswith("과제 잇기 실패"), b["error"], b["problem_count"]) == (True, "exception: 원문", 1)
-        assert b["counts"]["reflected"]["reports"] == 7
+        assert b["counts"]["reflected"]["reports"] == 7 and "01SOMEONEELSES" in b["counts"]["reflected"]["error"]
     finally:
         await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == run.id))
+        await db.commit()
+        await _drop(db, a, sa)
+        await _drop(db, u, s)
+
+
+async def test_the_hub_error_text_on_type_rows_reaches_only_a_system_admin(db):
+    """허브가 준 오류 원문(`{kind}: {detail}` — 주소 · 응답 글이 든다)은 실행의 `error` 만 가리고 타입 줄 `last_error`(받기 상태) ·
+    과제 목록 `last_error` 로는 그대로 갔다(재검토 11-12). 이제 셋 다 관리자에게만 — 일반 사용자는 `last_status`(표시)까지."""
+    from app.main import create_app
+    from app.models import OntoSyncState
+    from app.modules.ontology.routes import require_ontology
+    raw = "transport: ConnectError: [Errno 111] connect to https://hub.internal:8443/api/core/objects?token=…"
+    slug = f"t_{_tag()}"
+    u, s = await _owner(db, commit=True)
+    a, sa = await _owner(db, admin=True, commit=True)
+    mine = [slug]
+    db.add(OntoSyncState(type_slug=slug, last_status="error", last_error=raw))
+    if (await db.get(OntoSyncState, onto.TYPE_TASK)) is None:      # 과제 목록이 읽는 과제 타입 줄 — 없을 때만 만들고 치운다
+        db.add(OntoSyncState(type_slug=onto.TYPE_TASK, last_status="error", last_error=raw))
+        mine.append(onto.TYPE_TASK)
+    await db.commit()
+    try:
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        got = {}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            for who, uid in (("plain", u.id), ("boss", a.id)):
+                h = {"authorization": f"Bearer {security.create_access_token(uid)}"}
+                st, tasks = await c.get(f"{P}/ontology/sync", headers=h), await c.get(f"{P}/ontology/tasks", headers=h)
+                assert st.status_code == 200 and tasks.status_code == 200, (st.text[:200], tasks.text[:200])
+                row = next(r for r in st.json()["data"]["types"] if r["type_slug"] == slug)
+                got[who] = (row["last_status"], row["last_error"], tasks.json()["data"]["last_error"])
+        assert got["plain"][:2] == ("error", None), got["plain"]
+        assert got["boss"][:2] == ("error", raw), got["boss"]
+        if onto.TYPE_TASK in mine:
+            assert (got["plain"][2], got["boss"][2]) == (None, raw), got
+        else:
+            assert got["plain"][2] is None, got
+    finally:
+        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug.in_(mine)))
         await db.commit()
         await _drop(db, a, sa)
         await _drop(db, u, s)

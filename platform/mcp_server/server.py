@@ -1788,7 +1788,8 @@ async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str =
     별칭으로 걸렸으면 `matched_alias` · `alias_source`(hub · dynaforge)도. **순위를 매긴 뒤 자른다** — 앞부분 · 낱말 경계
     일치가 위로 오고, 더 있으면 `truncated:true` · `total`. `project` 로 좁힐 수 있다.
     ★`status:"deprecated"` 는 허브가 **그만 쓰라고 한** 과제다 — 새로 붙일 때는 고르지 마라(이미 이은 것은 그대로다).
-    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
+    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다. `last_error`(허브가 준 오류 원문)는 시스템
+    관리자에게만 온다 — 일반 사용자는 null 이고 `last_status` 를 본다.
     / Mirrored PLM tasks. `q` matches name · task_code · aliases · label, ranked before truncation;
     each item carries `matched_by` and `match_kind`."""
     params: dict = {"limit": limit}
@@ -1850,8 +1851,11 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
 async def ontology_sync_state(ctx: Context) -> dict:
     """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
     '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패.
-    사유 수는 `last_run.problem_count` 다. ★사유 줄(`last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 ·
-    예외 원문 등) · 오류 글(`error`) · 층 2 반영이 옮긴 리포트 수는 **시스템 관리자에게만** 온다 — 일반 사용자에게는 빈 목록 · null 이다.
+    사유 수는 `last_run.problem_count` 다. ★오류 원문은 **시스템 관리자에게만** 온다 — 사유 줄(`last_run.problems` — 공개 안 된 타입 ·
+    「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄
+    (`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반 사용자에게는 빈 목록 · null 이고
+    `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` · `merged_waiting` · `deferred` — 리포트를
+    누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다.
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
