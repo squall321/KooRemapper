@@ -139,16 +139,21 @@ def test_the_code_pattern_matches_the_one_the_reports_already_use():
         assert not ours.fullmatch(bad), bad
 
 
-# ── 결 맞추기 — StepForge 와 같은 관계 이름 ────────────────────────────────
+# ── 결 맞추기 — StepForge 와 같은 관계 이름 · 다른 정의 ─────────────────────────
 
-def test_the_shared_relation_names_match_stepforge_exactly():
-    """★뜻이 같은 관계는 **이름이 같아야** 한다 — 나중에 한 질의로 양쪽 개정을 묻는다.
-    그리고 타입 slug 는 **달라야** 한다(같은 꼴 다른 축 — 허브에서 만날 수 있다)."""
+def test_the_revision_relations_share_names_with_stepforge_but_not_definitions():
+    """`revision_of` · `supersedes` 는 StepForge 와 **이름만 같다** — 그쪽은 끝 타입이 cad_revision 이고 supersedes 가 transitive 가
+    아니다(사용자 결정 11-12 — 정의는 그대로, 글만 고친다). 「한 질의로 두 앱의 개정을 묻는다」 는 약속은 거뒀다 — 설명은 한 허브에 두 앱
+    정의를 함께 싣기 전에 맞춰야 한다고 말해야 한다. 타입 slug 는 **달라야** 한다(같은 꼴 다른 축 — 허브에서 만날 수 있다)."""
     doc, _ = load(OURS)
-    rels = {r["slug"] for r in doc["relation_types"]}
-    assert {"revision_of", "supersedes"} <= rels
+    rels = {r["slug"]: r for r in doc["relation_types"]}
+    assert {"revision_of", "supersedes"} <= set(rels)
     assert doc["types"][0]["slug"] == "dev_revision"
     assert doc["types"][0]["slug"] != "cad_revision", "StepForge 의 축과 섞였다"
+    for slug in ("revision_of", "supersedes"):
+        text = rels[slug]["description"]
+        assert "다른 정의" in text and "cad_revision" in text and "맞춰야 한다" in text, (slug, text)
+        assert "한 질의" not in text, f"{slug} 설명이 거둔 약속(한 질의로 두 앱)을 아직 한다"
 
 
 def test_the_revision_chain_cannot_loop():
