@@ -886,7 +886,8 @@ def test_an_error_goes_out_as_class_and_one_line_without_sql_or_values():
 # ── 꾸러미 붙이기는 리포트 행 잠금 아래 한 트랜잭션(검토 2차 11-11 항목 2 · 3 · 4) ─────────────────────────────
 
 def _dup_edge(monkeypatch) -> None:
-    """꾸러미 선 하나를 두 번 — 검사를 지난 뒤 본 쓰기가 DB 유일 제약에서 깨진다(다리 밖의 실패)."""
+    """검사를 지난 결과에 선 하나를 두 번 끼워 넣는다 — 본 쓰기가 DB 유일 제약에서 깨진다(다리 밖의 실패를 만드는 손). 꾸러미에 든
+    같은 관계는 검사가 422(duplicate_relation)로 거절하므로 이 손은 「검사 뒤 DB 실패」 만 만든다."""
     orig = op.check
 
     def dup(*a, **k):
@@ -1252,5 +1253,40 @@ async def test_deleting_a_report_removes_its_package_files(db):
         await svc.delete_report(db, rep)
         assert await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == []
         assert len(await _package_files(db, sid, other.id)) == 1 and len(_disk_files(uid, sid, other.id)) == 1
+    finally:
+        await _drop(db, u)
+
+
+# ── 꾸러미에 같은 관계가 두 번이면 검사가 거절한다(결정 11-12) ───────────────────────────────────────────
+
+@ON_SESSION_LOOP
+async def test_a_package_listing_a_relation_twice_is_a_422_and_changes_nothing(db):
+    """같은 관계(이름 · 양 끝)가 두 번 든 꾸러미는 검사에서 거절한다 — 422 duplicate_relation 과 그 선. 본 쓰기의 유일 제약까지 가지
+    않으니 옛 꾸러미 · 행 · 파일이 그대로다(예전에는 쓰기에서 깨져 500 이었다)."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        first = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        files, disk = await _package_files(db, sid, rid), _disk_files(uid, sid, rid)
+        pkg = _pkg()
+        pkg["_note"] = str(pkg.get("_note") or "") + " (같은 관계가 두 번인 판)"
+        r0 = pkg["relations"][0]
+        pkg["relations"].append(json.loads(json.dumps(r0)))
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/reports/{rid}/cae", files={"file": ("report.ontology.json", _raw(pkg), "application/json")})
+        msg = r.json().get("message") or ""
+        assert r.status_code == 422 and "duplicate_relation" in msg, r.text[:400]
+        assert f"{r0['relation']} {r0['src'][0]} {r0['src'][1]} → {r0['dst'][0]} {r0['dst'][1]}" in msg, msg
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (first["sha256"], first["file_id"])
+        assert await _package_files(db, sid, rid) == files and _disk_files(uid, sid, rid) == disk
     finally:
         await _drop(db, u)

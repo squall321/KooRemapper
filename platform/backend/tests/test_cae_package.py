@@ -195,6 +195,22 @@ def test_refusals():
     _bad(lambda p: p["relations"][0].update(relation="made_up"), word="모르는 관계")
     _bad(lambda p: p["relations"][0].update(dst=["cae_part", "part/999999"]), word="꾸러미에 없다")
     _bad(lambda p: p["objects"].append(copy.deepcopy(_obj(p, "cae_part"))), word="두 번")
+    _bad(lambda p: p["relations"].append(copy.deepcopy(p["relations"][0])), word="duplicate_relation")
+
+
+def test_a_relation_listed_twice_is_refused_by_name():
+    """같은 관계(이름 · 양 끝)가 두 번이면 검사가 거절하고 어느 선인지 말한다 — 속성만 달라도 같은 관계다(선의 유일 제약 · 만든 쪽
+    package.relate 의 열쇠와 같다). 예전에는 검사를 지나 본 쓰기가 유일 제약에서 깨졌다(결정 11-12)."""
+    pkg = copy.deepcopy(_pkg())
+    one, two = copy.deepcopy(pkg["relations"][0]), copy.deepcopy(pkg["relations"][1])
+    one["properties"] = {"role": "다른 속성"}
+    pkg["relations"] += [one, two, copy.deepcopy(two)]
+    with pytest.raises(op.OntoPackageError) as exc:
+        _check(pkg)
+    msg = str(exc.value)
+    name = lambda r: f"{r['relation']} {r['src'][0]} {r['src'][1]} → {r['dst'][0]} {r['dst'][1]}"   # noqa: E731
+    assert msg.startswith("duplicate_relation") and "(3곳)" in msg, msg
+    assert name(one) in msg and name(two) in msg, msg
 
 
 # ── 실물(다른 리포의 표본이 있을 때) ─────────────────────────────────────────

@@ -6,6 +6,9 @@
   배포판(늦게 바뀌는 노드 SIF 포함)의 꾸러미가 모두 막힌다. 정본을 올릴 때는 옛 바이트를 `history/` 로 옮겨 여기 남긴다.
 - 짝 — 꾸러미의 `source.html.sha256` 이 리포트 원본 HTML 의 지문과 같아야 한다. 종류(scenario_kind)가 리포트 종류와 같아야 한다.
 - 지어내지 않는다 — 모르는 타입 · 칸 · 관계 · 열거값, 빠진 필수값, 가리킬 곳 없는 참조가 있으면 통째로 거절한다(전부 아니면 전무).
+- 같은 관계(이름 · 양 끝이 같은 것 — 속성만 달라도 같다)가 두 번 나오면 거절한다(`duplicate_relation`, 어느 선인지 말한다). 만든 쪽
+  (koo_deep_report `package.relate`)도 같은 열쇠로 두 번째를 흠으로 쳐 꾸러미를 내지 않는다 — 들어왔다면 만든 쪽 결함이다. 예전에는
+  검사를 지나 본 쓰기가 선의 유일 제약에서 깨졌다(검토 2차 11-11 · 결정 11-12).
 - 행으로 바꾸는 것은 `LOADED_TYPES` 뿐이다. 런 · 파트 응답의 정본은 `impact_cases`(`case_key` 가 같다), 하중 전달은 꾸러미 파일에 남는다.
 """
 from __future__ import annotations
@@ -132,6 +135,8 @@ def check(pkg: Any, *, report_id: str, report_kind: str, html_sha256: str | None
         rows.append({"type_slug": t, "key": f"{report_id}/{k}", "label": str(o.get("label") or k)[:500], "properties": out})
 
     edges: list[dict] = []
+    seen: set[tuple] = set()
+    twice: list[str] = []
     for r in relations:
         slug = r.get("relation") if isinstance(r, dict) else None
         src_, dst_ = (r.get("src"), r.get("dst")) if isinstance(r, dict) else (None, None)
@@ -143,10 +148,19 @@ def check(pkg: Any, *, report_id: str, report_kind: str, html_sha256: str | None
                 raise OntoPackageError(f"관계 {slug} 의 끝 타입 {typ!r} 는 어휘가 허락하지 않는다({allowed})")
             if key not in keys.get(typ, ()):
                 raise OntoPackageError(f"관계 {slug} 의 끝 {typ} {key!r} 가 꾸러미에 없다")
+        ident = (slug, src_[0], src_[1], dst_[0], dst_[1])        # 만든 쪽의 「같은 관계」 열쇠와 같다(속성은 보지 않는다)
+        if ident in seen:
+            twice.append(f"{slug} {src_[0]} {src_[1]} → {dst_[0]} {dst_[1]}")
+            continue
+        seen.add(ident)
         if src_[0] in LOADED_TYPES and dst_[0] in LOADED_TYPES:
             edges.append({"relation": slug, "src_type": src_[0], "src_key": f"{report_id}/{src_[1]}",
                           "dst_type": dst_[0], "dst_key": f"{report_id}/{dst_[1]}",
                           "properties": r.get("properties") if isinstance(r.get("properties"), dict) else None})
+    if twice:
+        raise OntoPackageError(f"duplicate_relation — 같은 관계가 두 번 이상 나온다({len(twice)}곳) — " + " · ".join(twice[:5])
+                               + (f" 외 {len(twice) - 5}" if len(twice) > 5 else "")
+                               + " — 만든 쪽은 같은 관계(이름 · 양 끝)를 한 번만 싣는다")
     campaigns = [x for x in rows if x["type_slug"] == "cae_campaign"]
     if len(campaigns) != 1:
         raise OntoPackageError(f"캠페인이 하나여야 한다(지금 {len(campaigns)})")
