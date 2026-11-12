@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import logging
 import re
+import weakref
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, or_, select, text, update
+from sqlalchemy.exc import DBAPIError
 
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
                         OntoObject, OntoPreviousKey, OntoRelation)
@@ -55,19 +57,44 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def lock_reports(db, ids) -> None:
+class ReportsBusy(Exception):
+    """판 이름을 쥔 트랜잭션이 잠그려던 리포트 행(또는 옮길 판)을 다른 트랜잭션이 쥐고 있다 — 기다리면 교착할 수 있어 기다리지 않았다."""
+
+
+_NAMES_HELD = "onto_rev_names_tx"     # 판 이름 잠금을 쥔 바깥 트랜잭션(약한 참조) — `db.info` 에 둔다
+
+
+def _names_held(db) -> bool:
+    """이 세션의 지금 바깥 트랜잭션이 판 이름 잠금을 쥐었나(트랜잭션 잠금이라 그 트랜잭션이 끝나면 풀린다)."""
+    ref, tx = db.info.get(_NAMES_HELD), db.sync_session.get_transaction()
+    return ref is not None and tx is not None and ref() is tx
+
+
+async def lock_reports(db, ids) -> set[str]:
     """리포트 행을 id 차례로 잠근다(`SELECT … ORDER BY id FOR UPDATE`, 트랜잭션이 끝날 때 풀린다).
 
     ★리포트 선(리포트 → 개정)을 고치는 **모든 길**이 다른 행을 건드리기 전에 이것부터 한다 — 사람 확정 · 끊기 · 끊은 기록 지우기 ·
     인제스트 때 잇기 · 자동 잇기 · 관리자 일괄 적용 · 허브 이름 바뀜 옮기기. 잠금 차례가 하나(리포트 행 먼저 id 차례, 그다음 판
     이름 — `lock_revision_names`)라 서로 교착하지 않고, 잠근 뒤에 다시 읽으므로 겹친 쪽이 본 것을 덮지 않는다(검토 R11 · R7 · R2 —
     받기 뒤 자동 잇기는 긴 트랜잭션이다).
-    DB 에 없는 리포트(시험의 손 객체)는 잠글 것이 없어 지나간다.
+    DB 에 없는 리포트(시험의 손 객체)는 잠글 것이 없어 지나간다 — 돌려주는 것은 잠근 리포트 id(DB 에 있는 것)다.
+    ★판 이름을 이미 쥔 트랜잭션은 리포트 행을 **기다리지 않는다**(NOWAIT) — 그 리포트를 쥐고 판 이름을 기다리는 길(손 확정 · 인제스트
+    때 잇기)과 교착한다(재검토 11-12 rr5 — 이름 바뀜 옮기기가 앞 과제의 판을 쥔 채 뒤 과제에 그새 이어진 리포트를 기다렸다). 못 잠그면
+    그 저장점만 되감고 `ReportsBusy` 다(부르는 쪽 — 옮기기 — 가 미룬다). 이미 쥔 행은 NOWAIT 이어도 그대로 잠긴다.
     """
     keys = sorted({str(i) for i in ids if i})
-    if keys:
-        await db.execute(select(ImpactReport.id).where(ImpactReport.id.in_(keys))
-                         .order_by(ImpactReport.id).with_for_update())
+    if not keys:
+        return set()
+    stmt = select(ImpactReport.id).where(ImpactReport.id.in_(keys)).order_by(ImpactReport.id)
+    if not _names_held(db):
+        return set((await db.execute(stmt.with_for_update())).scalars().all())
+    try:
+        async with db.begin_nested():
+            return set((await db.execute(stmt.with_for_update(nowait=True))).scalars().all())
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) == "55P03":          # lock_not_available
+            raise ReportsBusy("다른 트랜잭션이 쥔 리포트가 있다") from exc
+        raise
 
 
 async def lock_revision_names(db, keys) -> None:
@@ -80,8 +107,11 @@ async def lock_revision_names(db, keys) -> None:
     ★잠금 차례 — 리포트 행 먼저(`lock_reports`), 그다음 판 이름(key 차례). 두 정수 꼴(`hashtext('dynaforge.rev')` · `hashtext(key)`)이라
     받기 잠금(정수 하나 꼴 — `plm_sync.try_lock`)과 열쇠 공간이 겹치지 않는다.
     """
-    for k in sorted({str(k) for k in keys if k}):
+    keys = sorted({str(k) for k in keys if k})
+    for k in keys:
         await db.execute(text("select pg_advisory_xact_lock(hashtext('dynaforge.rev'), hashtext(:k))"), {"k": k})
+    if keys:
+        db.info[_NAMES_HELD] = weakref.ref(db.sync_session.get_transaction())   # 이 트랜잭션은 이제 리포트를 기다리지 않는다
 
 
 # ── 후보 ───────────────────────────────────────────────────────────────────
@@ -1254,13 +1284,28 @@ async def _repoint(db, old: str, new: str, *, incoming_only: bool) -> dict:
     return done
 
 
+def _rev_code(key: str, props: dict | None) -> str:
+    return str((props or {}).get("code") or key.rsplit("@", 1)[-1])
+
+
+async def _task_revision_keys(db, tasks: list[str]) -> list[tuple[str, str]]:
+    """이 과제들에 매달린 살아 있는 우리 개정의 `(key, 코드)`(key 차례) — **열만** 읽는다. 잠그기 전에 읽는 자리라 정체 맵에 판 객체를
+    남기지 않는다(남기면 잠근 뒤에도 그 옛 칸으로 덮는다 — 재검토 11-12 rr6)."""
+    if not tasks:
+        return []
+    return sorted((k, _rev_code(k, p)) for k, p in (await db.execute(select(OntoObject.key, OntoObject.properties).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF, OntoObject.deleted.is_(False),
+        OntoObject.properties["task"].astext.in_(list(tasks))))).all())
+
+
 async def _task_revisions(db, tasks: list[str]) -> list[OntoObject]:
-    """이 과제들에 매달린 살아 있는 우리 개정 행(key 차례)."""
-    want = set(tasks)
-    return sorted((r for r in (await db.execute(select(OntoObject).where(
-        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF,
-        OntoObject.deleted.is_(False)))).scalars().all()
-        if str((r.properties or {}).get("task") or "") in want), key=lambda r: r.key)
+    """이 과제들에 매달린 살아 있는 우리 개정 행(key 차례) — 늘 새로 읽는다(`populate_existing` — 잠근 뒤에 부르는 자리다)."""
+    if not tasks:
+        return []
+    return (await db.execute(select(OntoObject).where(
+        OntoObject.type_slug == TYPE_REVISION, OntoObject.source == SOURCE_SELF, OntoObject.deleted.is_(False),
+        OntoObject.properties["task"].astext.in_(list(tasks))).order_by(OntoObject.key)
+        .execution_options(populate_existing=True))).scalars().all()
 
 
 async def _reports_on(db, keys: list[str]) -> list[str]:
@@ -1279,26 +1324,38 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
     개정 key 는 `<과제>@<코드>` 라 과제가 바뀌면 key 도 바뀐다 — 같은 개정 행의 key 만 바꾸고 선의 끝을 따라 옮긴다.
     ★B 에 같은 코드 개정이 이미 있으면 A 쪽 리포트 선(`measured_at`)과 A 쪽을 앞 판으로 둔 선만 B 개정으로 옮기고,
     A 쪽 개정은 지우지 않고 비활성(`merged_into`)으로 둔다 — 지우면 되돌릴 수 없다. 옮긴 사람 · 까닭은 개정 칸에 남긴다.
-    옮길 선이 달린 리포트 행을 먼저 잠근다(다른 모든 길과 같은 차례 — `lock_reports`).
+    ★잠금 차례(다른 모든 길과 같다) — ① 옮길 판에 이어진 리포트 행(`lock_reports`) ② 판 이름(옛 key · 새 key — `lock_revision_names`)
+    ③ 이름을 쥔 뒤 판 행을 **새로 읽고**(기다리는 동안 사람이 판 칸을 고쳤을 수 있다 — 예전엔 잠그기 전에 읽은 판 객체로 덮어
+    `rev_source` · `decided_by` · `note` 가 사라졌다, 재검토 11-12 rr6) 그새 이어진 리포트(늦게 온 선)도 잠근다. 판 이름을 쥔 뒤에는
+    리포트를 기다리지 않는다(NOWAIT) — 늦게 온 리포트를 다른 트랜잭션이 쥐고 있거나 그새 옮길 판이 달라졌으면 **아무것도 쓰지 않고**
+    `deferred` 로 돌려준다(이름 바뀜은 다음 받기가, 합침은 관리자가 다시 누른다 — rr5 의 교착 대신).
     """
     from_key, to_key = (from_key or "").strip(), (to_key or "").strip()
     done: dict[str, Any] = {"from": from_key, "to": to_key, "revisions": 0, "collapsed": 0,
-                            "reports": 0, "edges": 0, "aliases": 0, "dropped": []}
+                            "reports": 0, "edges": 0, "aliases": 0, "dropped": [], "deferred": False}
     if not from_key or not to_key or from_key == to_key:
         return done
-    revs = await _task_revisions(db, [from_key])
-    await lock_reports(db, await _reports_on(db, [r.key for r in revs]))
-    # 판 이름 — 옮기는 판의 옛 key 와 새 key(그리로 바꾸거나 거기에 합친다). 새 key 를 다른 리포트가 지금 처음 만들고 있으면 기다린다(rr1)
-    await lock_revision_names(db, [r.key for r in revs] + [
-        revision_key(to_key, str((r.properties or {}).get("code") or r.key.rsplit("@", 1)[-1])) for r in revs])
+    first = await _task_revision_keys(db, [from_key])
+    try:
+        held = await lock_reports(db, await _reports_on(db, [k for k, _ in first]))
+        await lock_revision_names(db, [k for k, _ in first] + [revision_key(to_key, c) for _, c in first])
+        revs = await _task_revisions(db, [from_key])
+        if [r.key for r in revs] != [k for k, _ in first]:
+            raise ReportsBusy("옮길 판이 그새 달라졌다")
+        await lock_reports(db, set(await _reports_on(db, [r.key for r in revs])) - held)
+    except ReportsBusy as exc:
+        done["deferred"] = True
+        done["detail"] = f"{exc} — 이번엔 옮기지 않았다"
+        return done
     for rev in revs:
         props = dict(rev.properties or {})
-        code = str(props.get("code") or rev.key.rsplit("@", 1)[-1])
+        code = _rev_code(rev.key, props)
         old, new = rev.key, revision_key(to_key, code)
         note = {"from": old, "to": new, "why": reason, "by": by, "at": _now()}
         props["moves"] = [*(props.get("moves") or []), note]
         there = (await db.execute(select(OntoObject).where(
-            OntoObject.type_slug == TYPE_REVISION, OntoObject.key == new))).scalar_one_or_none()
+            OntoObject.type_slug == TYPE_REVISION, OntoObject.key == new)
+            .execution_options(populate_existing=True))).scalar_one_or_none()
         if there is None:
             # 같은 개정이다 — key 만 바꾼다
             for e in (await db.execute(select(OntoRelation).where(
@@ -1382,6 +1439,9 @@ async def move_merged_task(db, key: str, *, by: str = "", note: str = "") -> dic
         return {"ok": False, "error": "target_gone", "into": into,
                 "detail": f"합쳐진 곳 {into!r} 도 허브에 살아 있지 않다 — 옮길 곳이 없다"}
     got = await move_task_revisions(db, row.key, into, by=by, reason=MOVE_MERGE + (f" — {note}" if note else ""))
+    if got["deferred"]:
+        return {"ok": False, "error": "busy", "into": into,
+                "detail": f"{got['detail']} — 그 과제의 리포트를 누가 고치는 중이다. 잠시 뒤 다시 누른다"}
     return {"ok": True, **got}
 
 
@@ -1393,15 +1453,19 @@ async def reflect_after_sync(db) -> dict:
     그것이 가장 단순하고 틀릴 일이 적다). 옮길 것이 없으면 아무것도 쓰지 않는다.
     """
     out: dict[str, Any] = {"renamed": 0, "revisions": 0, "collapsed": 0, "reports": 0, "aliases": 0,
-                           "models": 0, "dropped": [], "merged_waiting": 0}
+                           "models": 0, "dropped": [], "merged_waiting": 0, "deferred": 0}
     renamed = sorted((await renamed_keys(db, TYPE_TASK)).items())
     if renamed:
-        # 옮길 선이 달린 리포트 행을 **한꺼번에** 먼저 잠근다 — 과제마다 잠그면 앞 과제에서 쥔 행과 다음 과제의 리포트 잠금이
-        # 사람 확정과 엇갈릴 수 있다(잠금 차례 하나 — 리포트 행 먼저)
-        revs = await _task_revisions(db, [old for old, _ in renamed])
-        await lock_reports(db, await _reports_on(db, [r.key for r in revs]))
+        # 옮길 선이 달린 리포트 행을 **한꺼번에 · 한 번** 먼저 잠근다(아직 판 이름을 쥐지 않았다 — 기다려도 된다). 과제마다 옮기는 동안
+        # 그새 새로 이어진 리포트는 기다리지 않고(판 이름을 쥐었다) 그 과제를 미룬다 — `deferred`, 다음 받기가 옮긴다(재검토 rr5).
+        # 판은 열만 읽는다 — 정체 맵에 옛 판 객체를 남기지 않는다(옮기기가 잠근 뒤 새로 읽는다).
+        keys = await _task_revision_keys(db, [old for old, _ in renamed])
+        await lock_reports(db, await _reports_on(db, [k for k, _ in keys]))
     for old, new in renamed:
         got = await move_task_revisions(db, old, new, reason=MOVE_RENAME)
+        if got["deferred"]:
+            out["deferred"] += 1
+            continue
         if got["revisions"] or got["collapsed"] or got["aliases"]:
             out["renamed"] += 1
         for k in ("revisions", "collapsed", "reports", "aliases"):

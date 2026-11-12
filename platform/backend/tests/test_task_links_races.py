@@ -321,3 +321,100 @@ async def test_an_auto_link_round_with_a_colliding_new_revision_keeps_every_link
     finally:
         await holder.close()
         await _drop(uid, sid, [task, other, f"RAC-{t}", f"RBC-{t}"])
+
+
+# ── 판 옮기기(허브 이름 바뀜 · 합침)도 잠근 뒤 다시 읽고 잠금 차례를 지킨다(재검토 11-12 rr6 · rr5) ─────────────────
+
+async def test_a_move_waiting_on_a_hand_confirm_keeps_the_confirmed_revision_fields(db):
+    """rr6 — 옮기기가 사람의 손 확정(커밋 전)을 기다렸으면 **그때의** 판 칸으로 옮긴다. 예전엔 기다리기 전에 읽은 판 객체로 덮어
+    `rev_source` 가 되돌고 `decided_by` · `note` 가 사라졌다."""
+    t = _tag()
+    old, new = f"RM-{t}", f"RMN-{t}"
+    uid, sid = await _owner(db)
+    x = await _rep(db, uid, sid, project=old, code="dv1")
+    async with SessionLocal() as s:                              # X 는 인제스트 때 잇기로 old@dv1(eng_meta)에 있다
+        assert (await onto.link_from_eng_meta(s, await s.get(ImpactReport, x)))["ok"]
+        await s.commit()
+    hand = SessionLocal()
+    try:
+        assert (await onto.set_revision(hand, await hand.get(ImpactReport, x), task_key=old, code="dv1",
+                                        decided_by="owner@x", note="사람이 본 판", source="manual"))["ok"]
+
+        async def move(other):
+            return await onto.move_task_revisions(other, old, new, by="admin@x", reason=onto.MOVE_MERGE)
+
+        job = asyncio.create_task(_in_other_session(move))
+        await asyncio.sleep(1.0)
+        blocked = not job.done()
+        await hand.commit()                                      # 주인의 손 확정이 굳는다
+        outcome = await asyncio.wait_for(job, 30)
+        assert blocked, "옮기기가 커밋 전인 손 확정을 기다리지 않았다"
+        assert outcome[0] == "ok" and outcome[1]["revisions"] == 1, outcome
+        async with SessionLocal() as f:
+            obj = (await f.execute(select(OntoObject).where(OntoObject.type_slug == onto.TYPE_REVISION,
+                                                            OntoObject.key == f"{new}@dv1"))).scalar_one()
+        p = obj.properties or {}
+        assert (p.get("rev_source"), p.get("decided_by"), p.get("note")) == ("manual", "owner@x", "사람이 본 판"), \
+            f"옮기기가 기다리기 전에 읽은 칸으로 판을 덮었다: {p}"
+        assert await _live(x) == [f"{new}@dv1"]
+    finally:
+        await hand.close()
+        await _drop(uid, sid, [old, new])
+
+
+async def test_the_rename_loop_never_waits_on_a_report_while_holding_revisions_and_defers_that_task(db, monkeypatch):
+    """rr5 — 이름 바뀜 옮기기(받기 뒤 층 2)는 과제마다 옮긴다. 앞 과제의 판을 쥔 채 뒤 과제에 그새 이어진 리포트를 기다리면, 그
+    리포트를 쥐고 앞 판을 기다리는 손 확정과 교착했다. 이제 판 이름을 쥔 뒤에는 리포트를 기다리지 않고 그 과제를 미룬다(`deferred`) —
+    다음 받기가 옮긴다."""
+    t = _tag()
+    old1, new1, old2, new2 = f"RD1-{t}", f"RN1-{t}", f"RD2-{t}", f"RN2-{t}"
+    uid, sid = await _owner(db)
+    a = await _rep(db, uid, sid, project="", code="")
+    y = await _rep(db, uid, sid, project="", code="")
+    z = await _rep(db, uid, sid, project="", code="")
+    for rid, task in ((a, old1), (y, old2)):
+        async with SessionLocal() as s:
+            assert (await onto.set_revision(s, await s.get(ImpactReport, rid), task_key=task, code="dv1",
+                                            decided_by="kim@x", source="manual"))["ok"]
+            await s.commit()
+
+    async def mine(_db, type_slug):                              # 받은 사본 전체 대신 이 시험의 이름 바뀜 둘만(공유 DB)
+        return {old1: new1, old2: new2} if type_slug == onto.TYPE_TASK else {}
+
+    real = onto._reports_on
+    side: dict = {}
+
+    async def hooked(sdb, keys):
+        if list(keys) == [f"{old2}@dv1"] and "t2" not in side:  # 뒤 과제 옮기기의 첫 보기 — 앞 과제의 판 이름은 이미 쥐었다
+            async with SessionLocal() as s:                      # Z 가 뒤 과제의 판에 이어진다(커밋)
+                assert (await onto.set_revision(s, await s.get(ImpactReport, z), task_key=old2, code="dv1",
+                                                decided_by="kim@x", source="manual"))["ok"]
+                await s.commit()
+
+            async def hand(other):                               # 다른 사람 손: Z 를 쥐고 앞 과제의 판(옮기는 중)으로 확정
+                return await onto.set_revision(other, await other.get(ImpactReport, z), task_key=old1, code="dv1",
+                                               decided_by="lee@x", source="manual")
+            side["t2"] = asyncio.create_task(_in_other_session(hand))
+            await asyncio.sleep(0.7)
+        return await real(sdb, keys)
+
+    monkeypatch.setattr(onto, "renamed_keys", mine)
+    monkeypatch.setattr(onto, "_reports_on", hooked)
+    try:
+        try:
+            first = ("ok", await onto.reflect_after_sync(db))
+            await db.commit()
+        except Exception as exc:                                 # noqa: BLE001 — 깨지면 그 모양을 단언에 보인다
+            await db.rollback()
+            first = ("error", f"{type(exc).__name__}: {str(exc)[:200]}")
+        second = await asyncio.wait_for(side["t2"], 30)
+        assert first[0] == "ok", f"이름 바뀜 옮기기가 깨졌다(교착): {first}"
+        assert second[0] == "ok" and second[1]["ok"], f"손 확정이 깨졌다(교착): {second}"
+        assert (first[1]["renamed"], first[1]["deferred"]) == (1, 1), first[1]
+        monkeypatch.setattr(onto, "_reports_on", real)
+        again = await onto.reflect_after_sync(db)                # 다음 받기 — 미룬 과제를 옮긴다
+        await db.commit()
+        assert again["deferred"] == 0 and await _live(y) == [f"{new2}@dv1"], (again, await _live(y))
+    finally:
+        await db.rollback()
+        await _drop(uid, sid, [old1, new1, old2, new2])
