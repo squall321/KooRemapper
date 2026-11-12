@@ -68,7 +68,8 @@ def test_every_argument_of_the_requested_tools_is_described(schemas):
     missing = [f"{t}.{a}" for t in TOOLS for a, spec in (schemas["tools"][t].get("properties") or {}).items()
                if not str(spec.get("description") or "").strip()]
     n = sum(len(schemas["tools"][t].get("properties") or {}) for t in TOOLS)
-    assert n == 36 and not missing, (n, missing)
+    # 36 → 37: find_reports 에 external_job_key 를 덧붙였다(2026-11-12, 포털 낙하 파이프라인 (b))
+    assert n == 37 and not missing, (n, missing)
 
 
 @needs_mcp

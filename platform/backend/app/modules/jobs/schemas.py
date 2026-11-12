@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, computed_field
+
+from app.shared.diagnostics import redact
 
 
 class JobCreate(BaseModel):
@@ -24,6 +26,28 @@ class JobCreate(BaseModel):
     allow_dangling_refs: bool = True
 
 
+def external_summary(kind: str | None, ref: dict | None) -> dict | None:
+    """외부 잡(stcx · 후처리 예약)의 요약 — 원본 `external_ref` 대신 응답에 싣는다(2026-11-12, 포털 낙하 파이프라인 (a)).
+
+    가이드 §4 · §5-1 이 보라는 두 칸(`cluster_state` · `ontology.state`)만 낸다. 원본에는 결과 폴더 경로 · 레지스트리 id ·
+    업로드 id 가 있어 그대로 내보내지 않고, 문자열은 진단 번들과 **같은** `redact`(경로 접기 · 이메일 · 토큰)를 거친다.
+    외부 잡이 아니면 None.
+    """
+    if not kind:
+        return None
+    ref = ref if isinstance(ref, dict) else {}
+
+    def r(v):
+        return redact(v) if isinstance(v, str) else v
+    onto = ref.get("ontology") if isinstance(ref.get("ontology"), dict) else None
+    out = {"kind": kind, "cluster_state": r(ref.get("cluster_state")), "ontology": None}
+    if onto is not None:
+        out["ontology"] = {"state": r(onto.get("state"))}
+        if onto.get("why"):
+            out["ontology"]["why"] = r(onto.get("why"))
+    return out
+
+
 class JobRead(BaseModel):
     id: str
     session_id: str
@@ -40,5 +64,13 @@ class JobRead(BaseModel):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+    # 원본은 받아만 두고 내보내지 않는다 — 응답에는 아래 `external` 요약만 간다.
+    external_kind: str | None = Field(default=None, exclude=True)
+    external_ref: dict | None = Field(default=None, exclude=True)
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def external(self) -> dict | None:
+        return external_summary(self.external_kind, self.external_ref)

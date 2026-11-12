@@ -867,6 +867,7 @@ def _find_reports_query(
     q_text: str | None = None,
     since=None,
     until=None,
+    external_job_key: str | None = None,
 ):
     """find_reports/facets 공용 WHERE 절 빌더 — 모든 필터를 서버(SQL)에서 건다."""
     from sqlalchemy import func as _f, or_
@@ -877,6 +878,9 @@ def _find_reports_query(
         stmt = stmt.where(ImpactReport.session_id == session_id)
     if kind:
         stmt = stmt.where(ImpactReport.kind == kind)
+    if external_job_key:
+        # 후처리 예약이 반입한 리포트의 잡 키 `stcx:<Slurm 잡 id>` — 정확히 같음(2026-11-12, 포털 낙하 파이프라인 (b))
+        stmt = stmt.where(ImpactReport.external_job_key == external_job_key)
     if kfile_id is not None:
         stmt = stmt.where(ImpactReport.source_kfile_id == kfile_id)
     if focus:
@@ -940,7 +944,7 @@ async def find_reports(
 
     필터(kwargs): kind·project(eng_meta OR project_name)·dev_rev·variation·doe·
     kfile_id·focus·doe_strategy·scenario_type·drop_height(±height_tol)·severity·
-    min_worst_stress·min_worst_g·has_part·q_text·since·until.
+    min_worst_stress·min_worst_g·has_part·q_text·since·until·external_job_key.
     """
     stmt = _find_reports_query(user_id, is_admin=is_admin, affiliation=affiliation, **filters)
     col = _REPORT_SORTS.get(sort, ImpactReport.created_at)

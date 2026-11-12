@@ -38,7 +38,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `run_operation` | session_id, operation, args | POST /sessions/{id}/jobs | 오퍼레이션 실행(비동기 Job) → job_id |
-| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그 |
+| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그. 외부 잡(stcx · 후처리 예약)이면 `external` 요약 — `{kind, cluster_state, ontology: {state, why?}}`(가린 꼴 · 원본 external_ref 는 안 나간다) |
 | `list_session_jobs` | session_id | GET /sessions/{id}/jobs | 세션의 Job 이력 |
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
@@ -65,7 +65,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | — (REST 전용) | file, kfile?, scenario?, session_id?/session_name?, kind?, project?, … (multipart, .gz 가능) | POST /reports/intake | **원샷 반입** — (세션 생성/지정)+K파일+리포트+scenario 를 한 호출로. 대용량은 여기로 |
 | `list_reports` | session_id, kfile_id? | GET /sessions/{id}/reports | 세션의 리포트 목록(kfile_id=그 K에 매달린 것만) |
 | `report_facets` | — | GET /reports/facets | 검색 facet — 어떤 kind·과제·rev·방향컨셉·초점·심각도·높이가 있나 + 건수(먼저 '뭐가 있나') |
-| `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |
+| `find_reports` | kind?·project?·dev_rev?·variation?·doe?·focus?·doe_strategy?·scenario_type?·drop_height?·severity?·min_worst_stress?·min_worst_g?·has_part?·q?·since/until?·session_id?·kfile_id?·external_job_key?·sort·order·limit | GET /reports | 조건으로 리포트 검색(전 세션, 서버 다축 필터). 목표→리포트 특정 |
 | `report_query` | report_id, part_id?·category?·angle_name?·near_roll/pitch+angle_tol_deg?(yaw 무시)·metric?·min/max_value?·sort·limit | GET /reports/{id}/query | 리포트 내부 fact 드릴다운(부품×각도×물리량×값, 서버 필터) |
 | `report_blocks` | report_id | GET /reports/{id}/blocks | 임베드 블록 **전수** 목록 — 이름·형태·크기·`read_by_parser`(정규화가 아직 해석 안 하는 것도 다 보인다) |
 | `report_block` | report_id, name, path?·limit?·max_bytes? | GET /reports/{id}/blocks/{name} | 블록 하나(또는 `a.b.0.c` 하위) — 무엇이든 끝까지 되짚는다. 크면 잘라서 **잘랐다고 말한다** |
@@ -150,7 +150,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |
-| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) |
+| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 리포트가 실어 온 후처리 판 · 수 · 마지막 시각) |
 | `system_capabilities` | — | GET /system/capabilities | 기능 카탈로그 + 웹/MCP 패리티 + 연결 힌트 |
 
 > 표준 워크플로: `create_session` → `upload_*` → `describe_operation` → `run_operation`

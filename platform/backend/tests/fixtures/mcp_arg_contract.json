@@ -1,5 +1,5 @@
 {
- "_note": "MCP 도구 인자 계약 — 설명을 달기 전(2026-10-31, origin/main d3d777c 뒤 판)에 FastMCP 목록에서 뜬 형 · 기본값 · 필수 · 순서. 설명(description)과 pydantic 이 이름으로 만드는 title 은 뺐다. 포털 요청 arg-descriptions §2-3 · §5(형 · 기본값 · 필수 · 순서는 그대로).",
+ "_note": "MCP 도구 인자 계약 — 설명을 달기 전(2026-10-31, origin/main d3d777c 뒤 판)에 FastMCP 목록에서 뜬 형 · 기본값 · 필수 · 순서. 설명(description)과 pydantic 이 이름으로 만드는 title 은 뺐다. 포털 요청 arg-descriptions §2-3 · §5(형 · 기본값 · 필수 · 순서는 그대로). · 2026-11-12 find_reports 에 external_job_key 를 kfile_id 뒤에 덧붙였다(포털 낙하 파이프라인 (b) — 덧붙이기만, 기존 인자 불변).",
  "tools": {
   "create_session": {
    "args": [
@@ -274,6 +274,20 @@
       "anyOf": [
        {
         "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null
+     }
+    },
+    {
+     "name": "external_job_key",
+     "schema": {
+      "anyOf": [
+       {
+        "type": "string"
        },
        {
         "type": "null"

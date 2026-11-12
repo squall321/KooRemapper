@@ -209,7 +209,9 @@ async def whoami(ctx: Context) -> dict:
 
 @mcp.tool()
 async def system_status(ctx: Context) -> dict:
-    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수). / Platform health + worker queue."""
+    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수) + `postprocess_versions` — 최근 90일 리포트가 실어 온
+    후처리 판(`ontology.producer` 의 name·version · 수 · 마지막 시각). stcx 에 닿지 않고도 운영에서 어느 후처리 판이
+    도는지 본다(None = 못 셌다, [] = 그 기간에 꾸러미 실린 리포트가 없다). / Platform health + worker queue."""
     return await _get(ctx, "/system/status")
 
 
@@ -353,6 +355,8 @@ async def run_operation(
 @mcp.tool()
 async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict:
     """Job 상태/진행/exit_code/산출 파일. include_logs=true 면 stdout/stderr 일부도.
+    외부 잡(stcx 제출 · 후처리 예약)이면 `external` 에 요약이 온다 — `{kind, cluster_state, ontology: {state, why?}}`
+    (경로·토큰은 가린 꼴). 반입된 리포트는 `find_reports(external_job_key='stcx:<Slurm 잡 id>')` 로 찾는다.
     `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는 경고 등이다
     (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
     job = await _get(ctx, f"/jobs/{job_id}")
@@ -1505,6 +1509,8 @@ async def find_reports(
     session_id: Annotated[str | None, Field(description="세션 id — 이 세션의 리포트만(list_sessions 의 id).")] = None,
     kfile_id: Annotated[int | None, Field(description="K파일 id — 이 K파일(세션 파일)에서 나온 리포트만"
                                                       "(get_session 의 files[].id).")] = None,
+    external_job_key: Annotated[str | None, Field(description="외부 잡 키 — 후처리 예약이 반입한 리포트의 잡 키 "
+                                                              "`stcx:<Slurm 잡 id>`(정확히 같음). get_job 의 external 과 짝.")] = None,
     sort: Annotated[str, Field(description=f"정렬 기준 — {_one_of(FIND_SORTS)} 중 하나.")] = "created_at",
     order: Annotated[str, Field(description=f"정렬 방향 — {_one_of(SORT_ORDERS)}.")] = "desc",
     limit: Annotated[int, Field(description=f"최대 건수(1~{FIND_LIMIT_MAX}). 결과가 이만큼이면 truncated:true — "
@@ -1518,6 +1524,7 @@ async def find_reports(
     - focus(초점 예 camera-detail), doe_strategy(cuboid_26·fibonacci_162 등), scenario_type
     - drop_height(특정 높이), severity(이 심각도 이상 소견 보유), min_worst_stress/min_worst_g
     - has_part(그 부품명 포함), q(라벨/과제 텍스트), since/until(ISO), session_id, kfile_id
+    - external_job_key(후처리 예약이 반입한 리포트 — `stcx:<Slurm 잡 id>`)
     - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라.
     ★0 건이어도 **빈 봉투**를 준다(KR-08) — `{items:[], total:0, reason:'리포트 없음'}`. 빈 출력이 아니라
     「이 조건에 맞는 리포트가 없다」 는 뜻이다(도구 실패와 구분된다). `total==limit` 이면 더 있을 수 있다(truncated)."""
@@ -1528,7 +1535,7 @@ async def find_reports(
         "drop_height": drop_height, "severity": severity,
         "min_worst_stress": min_worst_stress, "min_worst_g": min_worst_g,
         "has_part": has_part, "q": q, "since": since, "until": until,
-        "session_id": session_id, "kfile_id": kfile_id,
+        "session_id": session_id, "kfile_id": kfile_id, "external_job_key": external_job_key,
     }.items():
         if v is not None:
             params[k] = v

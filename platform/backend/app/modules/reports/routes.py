@@ -400,6 +400,8 @@ async def find_reports(
     q: str | None = Query(default=None, description="라벨/과제 텍스트 검색"),
     since: str | None = Query(default=None, description="created_at ≥ (ISO)"),
     until: str | None = Query(default=None, description="created_at ≤ (ISO)"),
+    external_job_key: str | None = Query(default=None, max_length=64,
+                                         description="후처리 예약이 반입한 리포트의 잡 키(stcx:<Slurm 잡 id>) — 정확히 같음"),
     sort: str = Query("created_at", pattern="^(created_at|worst_stress|worst_g|drop_height)$"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(100, ge=1, le=500),
@@ -423,6 +425,7 @@ async def find_reports(
         min_worst_stress=min_worst_stress, min_worst_g=min_worst_g,
         has_part=has_part, q_text=q,
         since=_parse_dt(since, "since"), until=_parse_dt(until, "until"),
+        external_job_key=external_job_key,
     )
     return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
 
