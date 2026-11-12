@@ -126,6 +126,7 @@ class _Record(BaseHTTPRequestHandler):
 # 경로에 사용자 값을 넣는 도구 — (이름, 값 하나로 인자 만들기). 과제 · 리포트 · 세션 · 레시피 · 케이스 · 객체가 모두 든다.
 PATH_CALLS = (
     ("report_summary", lambda v: {"report_id": v}),
+    ("delete_report", lambda v: {"report_id": v}),
     ("report_revision", lambda v: {"report_id": v}),
     ("unlink_report_revision", lambda v: {"report_id": v}),
     ("clear_report_unlink", lambda v: {"report_id": v}),
@@ -156,7 +157,15 @@ def paths(values: list[str]) -> dict:
                 err = f"{type(exc).__name__}: {exc}"
             calls.setdefault(name, {})[v] = {"seen": list(srv.seen), "error": err}
     srv.shutdown()
-    return {"calls": calls, "seg": {v: server._seg(v) for v in values}}
+
+    def enc(fn, v):
+        try:
+            return fn(v)
+        except ValueError as exc:            # `/` · `\` 는 id 칸에서 거절된다(재검토 11-12 rr4)
+            return f"REFUSED: {exc}"
+
+    return {"calls": calls, "seg": {v: enc(server._seg, v) for v in values},
+            "seg_key": {v: enc(server._seg_key, v) for v in values}}
 
 
 if __name__ == "__main__":

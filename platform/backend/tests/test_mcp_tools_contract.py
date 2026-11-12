@@ -184,13 +184,20 @@ def test_the_cae_allowed_values_are_the_backend_constraints():
     assert c["CAE_SEVERITIES"] == ranked, "판정은 높은 것부터 — 소견만 쓰는 INFO 는 파트 판정에 없다"
 
 
-# ── 경로 칸 감싸기(검토 반영 11-11) ──────────────────────────────────────────────
+# ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────
 # 예전엔 경로에 사용자 값을 그대로 넣어 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 이 뒤를 자르고, `..` 이 남의 길로
-# 갔다. 이제 경로의 사용자 값은 모두 `_seg(…)`(quote safe='' + 점 칸 감싸기)를 지난다.
+# 갔다. 이제 경로의 사용자 값은 모두 `_seg(…)`(quote safe='' + 점 칸 감싸기)를 지나고, ★`/` · `\` 가 든 값은 거절한다 — 백엔드
+# (uvicorn)는 `%2F` 를 `/` 로 풀어 그 길로 라우팅하므로 감싸도 칸 하나가 아니었다(rr4 — `delete_report(id+'/revision')` 가 끊기 라우트로).
+# 과제명 · 객체 key 는 `/` 가 들 수 있고 받는 라우트가 `{…:path}` 라 `_seg_key`(예전 감싸기 그대로)를 쓴다 — 그 셋만.
+
+KEY_PATHS = {"/ontology/tasks/{_seg_key(task_key)}/revisions", "/ontology/tasks/{_seg_key(task_key)}/compare",
+             "/ontology/objects/{_seg(type_slug)}/{_seg_key(key)}"}
+
 
 def test_every_path_f_string_wraps_its_values_in_seg():
-    """정적 — server.py 의 경로 f-문자열(`f"/…"`)에 든 값은 하나도 빠짐없이 `_seg(…)` 다(새 도구가 빠뜨리면 여기서 빨개진다)."""
-    bad, n = [], 0
+    """정적 — server.py 의 경로 f-문자열(`f"/…"`)에 든 값은 하나도 빠짐없이 `_seg(…)` 다(새 도구가 빠뜨리면 여기서 빨개진다). `/` 를
+    받는 `_seg_key(…)` 는 `{…:path}` 라우트 셋에만 — 다른 칸에 쓰면 `/` 가 다른 라우트로 샌다."""
+    bad, keyed, n = [], set(), 0
     for node in ast.walk(ast.parse(SERVER.read_text(encoding="utf-8"))):
         if not (isinstance(node, ast.JoinedStr) and node.values and isinstance(node.values[0], ast.Constant)
                 and str(node.values[0].value).startswith("/")):
@@ -199,35 +206,48 @@ def test_every_path_f_string_wraps_its_values_in_seg():
             if isinstance(v, ast.FormattedValue):
                 n += 1
                 call = v.value
-                if not (isinstance(call, ast.Call) and getattr(call.func, "id", "") == "_seg"):
+                name = getattr(call.func, "id", "") if isinstance(call, ast.Call) else ""
+                if name == "_seg_key":
+                    keyed.add(ast.unparse(node)[2:-1])
+                elif name != "_seg":
                     bad.append(ast.unparse(node))
     assert n >= 80 and not bad, (n, bad)
+    assert keyed == KEY_PATHS, keyed
 
 
-NASTY = ("01AB?x", "a/../../sessions/S1", "..", ".", "id#frag", "with space")
-PATHS = {   # 도구 → 백엔드가 받아야 할 경로(값 s 는 감싼 칸)
+NASTY = ("01AB?x", "a/../../sessions/S1", "..", ".", "id#frag", "with space", "a\\b")
+REFUSED = {"a/../../sessions/S1", "a\\b"}      # id 칸에서 거절 — 리포트 · 세션 · 잡 · 파일 id 에는 `/` · `\` 가 없다
+PATHS = {   # 도구 → 백엔드가 받아야 할 경로(s 는 `_seg` 로 감싼 칸, k 는 `_seg_key` 로 감싼 key)
     "report_summary": "/api/v1/reports/{s}",
+    "delete_report": "/api/v1/reports/{s}",
     "report_revision": "/api/v1/reports/{s}/revision",
     "unlink_report_revision": "/api/v1/reports/{s}/revision",
     "clear_report_unlink": "/api/v1/reports/{s}/revision/unlinked",
     "report_case": "/api/v1/reports/{s}/cases/{s}",
     "get_session": "/api/v1/sessions/{s}",
-    "task_revisions": "/api/v1/ontology/tasks/{s}/revisions",
-    "compare_task_revisions": "/api/v1/ontology/tasks/{s}/compare",
-    "ontology_object": "/api/v1/ontology/objects/{s}/{s}",
+    "task_revisions": "/api/v1/ontology/tasks/{k}/revisions",
+    "compare_task_revisions": "/api/v1/ontology/tasks/{k}/compare",
+    "ontology_object": "/api/v1/ontology/objects/{s}/{k}",
     "recipe_get": "/api/v1/recipes/{s}",
 }
 
 
 @needs_mcp
 def test_nasty_ids_reach_the_backend_as_one_encoded_segment():
-    """`?` · `/` · `..` · `.` · `#` · 빈칸이 든 값이 경로 칸 **하나**로 그대로 간다 — 다른 길(리포트 지우기 · 남의 세션)로 새지 않는다."""
+    """`?` · `..` · `.` · `#` · 빈칸이 든 값이 경로 칸 **하나**로 그대로 간다 — 다른 길(리포트 지우기 · 남의 세션)로 새지 않는다.
+    `/` · `\\` 가 든 id 는 **보내지 않고 거절**한다(백엔드가 `%2F` 를 풀어 다른 라우트로 간다 — 재검토 rr4). `/` 가 들 수 있는 과제명 ·
+    객체 key 는 `{…:path}` 라우트로 감싼 그대로 간다."""
     got = _probe("paths", *NASTY)
-    assert got["seg"] == {"01AB?x": "01AB%3Fx", "a/../../sessions/S1": "a%2F..%2F..%2Fsessions%2FS1", "..": "%2E%2E",
-                          ".": "%2E", "id#frag": "id%23frag", "with space": "with%20space"}, got["seg"]
+    common = {"01AB?x": "01AB%3Fx", "..": "%2E%2E", ".": "%2E", "id#frag": "id%23frag", "with space": "with%20space"}
+    assert {v: e for v, e in got["seg"].items() if v not in REFUSED} == common, got["seg"]
+    assert all(got["seg"][v].startswith("REFUSED: ") and "경로 값" in got["seg"][v] for v in REFUSED), got["seg"]
+    assert got["seg_key"] == {**common, "a/../../sessions/S1": "a%2F..%2F..%2Fsessions%2FS1", "a\\b": "a%5Cb"}, got["seg_key"]
     assert set(got["calls"]) == set(PATHS), sorted(got["calls"])
     for tool, per in got["calls"].items():
         for v, rec in per.items():
-            want = PATHS[tool].format(s=got["seg"][v])
             sent = [p for _, p in rec["seen"]]
+            if v in REFUSED and "{s}" in PATHS[tool]:
+                assert sent == [] and "경로 값" in (rec["error"] or ""), (tool, v, sent, rec["error"])
+                continue
+            want = PATHS[tool].format(s=got["seg"][v], k=got["seg_key"][v])
             assert sent and sent[0] == want, (tool, v, sent, rec["error"])

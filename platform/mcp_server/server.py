@@ -146,10 +146,22 @@ def _forward_headers(ctx: Context) -> dict:
 def _seg(value) -> str:
     """사용자 값을 경로 칸 **하나**로 — `quote(…, safe='')` 에 칸 전체가 `.`·`..` 인 것까지 감싼다(httpx 가 점 칸을 접는다).
 
-    감싸지 않으면 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 은 뒤를 잘라, `x/../../sessions/S` 는 남의 길로 간다
-    (검토 반영 11-11). 경로에 들어가는 사용자 값(리포트 · 세션 · 잡 · 과제 · 개정 · 레시피 · 케이스 …)은 모두 이것을 지난다 —
-    `tests/test_mcp_tools_contract.py` 가 f-문자열 경로를 훑어 못박는다.
+    감싸지 않으면 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 은 뒤를 잘라 다른 길로 간다(검토 반영 11-11). 경로에
+    들어가는 사용자 값(리포트 · 세션 · 잡 · 레시피 · 케이스 …)은 모두 이것을 지난다 — `tests/test_mcp_tools_contract.py` 가 f-문자열
+    경로를 훑어 못박는다. ★`/` · `\\` 가 든 값은 **거절한다**(ValueError — 보내지 않는다). 감싸도 백엔드(uvicorn)가 `%2F` 를 `/` 로
+    풀어 그 길로 라우팅한다(재검토 11-12 rr4 — `delete_report(id+'/revision')` 가 끊기 라우트로 갔다). 리포트 · 세션 · 잡 · 파일 id 에는
+    이 글자가 없다. `/` 가 들 수 있는 과제명 · 객체 key 만 `_seg_key` 를 쓴다(받는 라우트가 `{…:path}`).
     """
+    s = str(value)
+    if "/" in s or "\\" in s:
+        raise ValueError(f"경로 값에 '/' · '\\' 를 쓸 수 없다(id 에는 없는 글자다): {s!r}")
+    return _seg_key(s)
+
+
+def _seg_key(value) -> str:
+    """과제명 · 객체 key — `/` 가 들 수 있다(허브의 과제명). 받는 라우트가 `{…:path}` 라 백엔드가 `%2F` 를 풀어도 같은 라우트가
+    통째로 받는다. 감싸기는 `_seg` 와 같다(점 칸 포함). `task_revisions` · `compare_task_revisions` · `ontology_object` 의 key 밖에
+    쓰지 않는다(다른 칸에 쓰면 `/` 가 다른 라우트로 샌다 — 시험이 못박는다)."""
     s = quote(str(value), safe="")
     return s.replace(".", "%2E") if s in (".", "..") else s
 
@@ -1808,7 +1820,7 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
     그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
     ★판은 다 보이지만 판마다 리포트는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 온다 — 시스템 관리자는 전부(`scope`).
     / Revision chain; task_found:false means the task is unknown (not just empty). Report ids cover only reports you can read."""
-    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/revisions")
+    return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/revisions")
 
 
 @mcp.tool()
@@ -1898,7 +1910,7 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
     ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
     끝이 리포트인 선(개정에 달린 리포트)은 읽을 수 있는 리포트만 보인다(`scope`).
     / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
-    return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg(key)}")
+    return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg_key(key)}")
 
 
 @mcp.tool()
@@ -1933,7 +1945,7 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
     ★리포트 줄 · 수치(최악값 · 심각도 · 케이스 · `measured_from`)는 **읽을 수 있는 리포트(소유 · 같은 소속)만**으로 센다 —
     판은 다 보이고 시스템 관리자는 전부다(`scope`: all · readable). 전사 수가 아닐 수 있다.
     / Revisions of one task side by side; report rows and numbers cover only reports you can read (scope)."""
-    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/compare")
+    return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/compare")
 
 
 @mcp.tool()
