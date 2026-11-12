@@ -22,6 +22,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import OntoSyncRun
 from app.runner.sp_core import SpCoreClient, sync_all
+from app.shared.errors import short_error
 
 logger = logging.getLogger("koorm.worker")
 
@@ -124,7 +125,7 @@ async def _link_tasks(db) -> dict:
     except Exception as exc:                           # noqa: BLE001 — 잇기 결함이 받기를 무르게 하면 안 된다
         await db.rollback()
         logger.exception("plm task links failed")
-        return {"scope": "all", "error": f"{type(exc).__name__}: {exc}"[:500]}
+        return {"scope": "all", "error": short_error(exc)}               # 짧은 꼴 — 전문은 위 로그(재검토 11-12)
 
 
 async def full_due(now: datetime | None = None) -> bool:
@@ -171,9 +172,8 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
                         got["reflected"] = await onto.reflect_after_sync(db)
                 except Exception as exc:               # noqa: BLE001
                     logger.exception("plm reflect failed")
-                    got["reflected"] = {"error": f"{type(exc).__name__}: {exc}"}
-                    got["problems"] = [*(got.get("problems") or []),
-                                       f"층 2 반영 실패 — {type(exc).__name__}: {exc}"]
+                    got["reflected"] = {"error": short_error(exc)}        # 짧은 꼴 — 전문은 위 로그(재검토 11-12)
+                    got["problems"] = [*(got.get("problems") or []), f"층 2 반영 실패 — {short_error(exc)}"]
                     if got.get("result") == "ok":
                         got["result"] = "needs_check"      # ok 는 그대로 — 받기는 끝까지 돌았다(sync_all 과 같은 뜻)
                 # 받은 것은 **커밋한다** — 멈춘 실행도 끝까지 받은 흐름의 기준 시각은 옮겨 둔다(다음 실행이 거기서 잇는다).

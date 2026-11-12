@@ -26,6 +26,7 @@ from sqlalchemy.exc import DBAPIError
 from app.models import (SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias,
                         OntoObject, OntoPreviousKey, OntoRelation)
 from app.reports.datahub import DataHubError, parse_stage
+from app.shared.errors import short_error
 
 logger = logging.getLogger("koorm.ontology")
 
@@ -998,7 +999,7 @@ async def link_report(db, report: ImpactReport) -> dict:
         except Exception:              # noqa: BLE001
             await db.rollback()
             await db.refresh(report)   # rollback 은 모든 행을 만료시킨다 — 부르는 쪽이 리포트를 계속 읽는다
-        return {"scope": "reports", "error": f"{type(exc).__name__}: {exc}"[:500]}
+        return {"scope": "reports", "error": short_error(exc)}     # 짧은 꼴 — SQL 문 · 값은 싣지 않는다(전문은 위 로그)
 
 
 # ── 되돌리기 ───────────────────────────────────────────────────────────────

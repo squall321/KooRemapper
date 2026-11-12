@@ -47,12 +47,12 @@ from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import and_, delete, func, select, update
-from sqlalchemy.exc import StatementError
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import SOURCE_HUB, SOURCE_SELF, ImpactReport, OntoAlias, OntoObject, OntoRelation
 from app.modules.ontology.services import hub_aliases, normalize, renamed_keys
 from app.reports.onto_package import VOCAB_DIR
+from app.shared.errors import short_error  # noqa: F401 — 재수출(app/shared/errors.py 로 옮겼다 — 부르는 쪽은 bridges.short_error 그대로)
 
 logger = logging.getLogger("koorm.reports")
 
@@ -99,24 +99,6 @@ class Bridge:
 
 class ReportGone(Exception):
     """잠그려던 리포트 행이 없다 — 그사이 지워졌다(지우기가 굳은 뒤 차례가 왔다). 부르는 쪽은 404 로 말한다(검토 2차 11-11 항목 3)."""
-
-
-# 응답 · 원장에 싣지 않는 줄 — SQL 문 · 매개변수 · DETAIL(값이 든다) · 배경 링크 · autoflush 안내
-_NOISE = ("[SQL", "[parameters", "DETAIL:", "(Background on this error", "(raised as a result of Query-invoked autoflush")
-
-
-def short_error(exc: BaseException, limit: int = 300) -> str:
-    """응답 · 7-1 원장에 싣는 오류의 짧은 꼴 — 「클래스: 한 줄」(`limit` 자 안). SQL 문 · 매개변수 · DETAIL · 배경 링크는 싣지 않는다 —
-    전문은 서버 로그(`logger.exception`)에 남긴다. 예전에는 SQLAlchemy 오류 전문(약 1.6 KB — 문장과 값까지)이 `bridges.error` 로 API
-    응답과 7-1 원장에 실렸다(검토 2차 11-11 항목 7)."""
-    inner = exc.orig if isinstance(exc, StatementError) and exc.orig is not None else None   # 드라이버 오류 — 문장 없이 까닭만
-    text = str(inner if inner is not None else exc)
-    line = next((ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith(_NOISE)), "")
-    line = re.sub(r"\s*\(Background on this error at: [^)]*\)\s*$", "", line)
-    m = re.match(r"<class '(?:[\w.]+\.)?(\w+)'>:\s*(.*)", line)     # asyncpg 어댑터 꼴 「<class 'asyncpg…Error'>: 까닭」
-    if m:
-        line = m.group(2) if m.group(1) == type(exc).__name__ else f"{m.group(1)}: {m.group(2)}"
-    return (f"{type(exc).__name__}: {line}" if line else type(exc).__name__)[:limit]
 
 
 @lru_cache(maxsize=1)

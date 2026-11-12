@@ -310,6 +310,26 @@ async def test_a_broken_link_report_keeps_the_report_and_says_why(db, monkeypatc
         await _drop(db, u, s)
 
 
+async def test_a_database_error_in_the_import_link_is_reported_in_the_short_form(db, monkeypatch):
+    """반입 뒤 잇기가 DB 쪽에서 깨지면 `task_links.error` 는 짧은 꼴(「클래스: 한 줄」)이다 — SQL 문 · 매개변수 · 배경 링크는 응답 ·
+    7-1 원장에 싣지 않는다(재검토 11-12 — 예전엔 SQLAlchemy 오류 전문 500 자가 실렸다). 전문은 서버 로그에."""
+    from sqlalchemy import text as sql
+
+    async def broken(sdb, **_kw):
+        await sdb.execute(sql("select 1/0 as rr_short_error_probe"))
+
+    monkeypatch.setattr(onto, "auto_link_tasks", broken)
+    u, s = await _owner(db, commit=True)
+    try:
+        r = await _rep(db, s, project=f"AL-{_tag()}", code="dv1", commit=True)
+        got = await onto.link_report(db, r)
+        err = got["error"]
+        assert "division by zero" in err and len(err) <= 300, err
+        assert "[SQL" not in err and "rr_short_error_probe" not in err and "sqlalche.me" not in err, err
+    finally:
+        await _drop(db, u, s)
+
+
 async def test_with_the_feature_off_the_import_does_not_link(db, monkeypatch):
     """과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 반입 뒤 잇기를 하지 않고 그렇게 말한다 — 라우트가 거절하는 것과 같은 판정."""
     from app.config import settings
