@@ -488,6 +488,28 @@ async def test_a_busy_lock_after_a_receive_skips_the_link_and_logs_it(db, caplog
     assert any("plm task links skipped" in r.getMessage() for r in caplog.records), caplog.text
 
 
+async def test_with_the_feature_off_a_receive_does_not_link(db, monkeypatch):
+    """받기는 허브 설정만 보고 돈다(`plm_sync.enabled`). 과제·개정 기능을 끄면(KOORM_ONTOLOGY=0) 받기 뒤 자동 잇기도 하지 않고 그렇게
+    말한다 — 반입 뒤 잇기 · 라우트와 같은 판정(재검토 11-12 — 예전엔 꺼도 리포트 전부를 이었고, 라우트는 409 라 끊지도 못했다)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "0")
+    called = []
+
+    async def spy(_db, **kw):
+        called.append(kw)
+        return {"scope": "all", "linked": 0}
+
+    async def yes(_db):
+        return True
+
+    monkeypatch.setattr(onto, "auto_link_tasks", spy)
+    monkeypatch.setattr(plm_sync, "try_lock", yes)
+    got = await plm_sync._link_tasks(db)
+    await db.rollback()
+    assert called == [], "기능이 꺼져 있는데 받기 뒤 자동 잇기를 불렀다"
+    assert got["skipped"] == "off" and "KOORM_ONTOLOGY=0" in got["detail"], got
+
+
 async def test_a_broken_link_after_a_receive_keeps_what_was_received(db, hub_on, monkeypatch):
     async def boom(_db, **_kw):
         raise RuntimeError("잇기 결함")

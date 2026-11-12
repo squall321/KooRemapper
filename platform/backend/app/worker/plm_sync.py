@@ -103,8 +103,15 @@ async def _link_tasks(db) -> dict:
 
     커밋이 받기 잠금(트랜잭션 잠금)을 풀었으므로 새 트랜잭션에서 다시 건다 — 잇기도 층 2 쓰기다(개정 · 리포트 선). 그새 다른
     받기 · 합친 과제 옮기기 · 관리자 일괄 적용이 쥐었으면 건너뛰고 로그에 한 줄 남긴다(다음 받기가 전부를 다시 본다).
+    ★받기 자체는 허브 설정만 보고 돈다(`enabled`) — 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음) 잇지 않고
+    `skipped: off` 다(반입 뒤 잇기 · 라우트와 같은 판정 — 재검토 11-12). 층 2 반영(`reflect_after_sync` — 허브 이름 바뀜 옮기기)은
+    예전처럼 스위치와 따로 돈다.
     """
     from app.modules.ontology import services as onto
+    from app.shared.features import ontology_state
+    st = ontology_state()
+    if not st["enabled"]:
+        return {"scope": "all", "skipped": "off", "detail": f"과제·개정 기능이 꺼져 있다 — {st['reason']}"}
     try:
         if not await try_lock(db):
             await db.rollback()

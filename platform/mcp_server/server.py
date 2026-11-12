@@ -1860,6 +1860,7 @@ async def ontology_sync_state(ctx: Context) -> dict:
     `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
     `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
     못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`) · 사람이 끊어 건너뜀(`skipped_unlinked`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
+    과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 받기는 돌아도 잇지 않는다 — `skipped: off`.
     받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
     return await _get(ctx, "/ontology/sync")
 
@@ -1902,7 +1903,7 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 **과제 하나로 모일 때만**이다 — 엇갈리면(`ambiguous: true`) 후보다.
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
-    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
+    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(과제·개정 기능이 켜져 있을 때 · 사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
     `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
     항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;

@@ -289,7 +289,9 @@ async def test_a_hand_confirm_of_a_revision_another_transaction_is_creating_succ
 
 async def test_an_auto_link_round_with_a_colliding_new_revision_keeps_every_link(db, monkeypatch):
     """받기 뒤 자동 잇기 — 리포트 하나의 판이 다른 트랜잭션의 새 판과 겹쳐도 회차가 되감기지 않는다(다른 리포트까지 잃었다)."""
+    from app.config import settings
     from app.worker import plm_sync
+    monkeypatch.setattr(settings, "ontology", "1")              # 받기 뒤 잇기는 과제·개정 기능이 켜져 있을 때만 돈다
     t = _tag()
     task, other = f"RA-{t}", f"RB-{t}"
     uid, sid = await _owner(db)
