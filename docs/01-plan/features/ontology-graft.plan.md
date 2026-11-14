@@ -260,6 +260,11 @@ accounts 31회, permissions 20회). 그런데 —
 | 관계 `supersedes` | `dev_revision` → `dev_revision` (many_to_one · 순환 금지) | 앞 판 — 줄의 순서. **StepForge 와 같은 이름** |
 | 관계 `measured_at` | `impact_report` → `dev_revision` | 이 리포트가 어느 판을 쟀나 |
 
+- (2026-11-14 덧붙임) 위 표의 「StepForge 와 같은 이름」 은 이제 **이름만 같다**는 뜻이다. StepForge
+  의 두 관계는 끝 타입이 `cad_revision` 이고 그쪽 `supersedes` 는 transitive 가 아니다 — 정의가
+  다르다. 맥락 노트 결정 2 의 「그래야 나중에 한 질의로 묻는다」 는 거뒀다(11-12 사용자 결정
+  「설명만 고치고 둔다」 — 우리 정의는 그대로 두고 설명 글만 고쳤다). 한 허브에 두 앱 정의를 함께
+  넣기 전에 맞춰야 한다 — `corelink-src08-11.plan.md` 의 「허브에 올릴 때 알릴 것」.
 - ★**`rev_seq` 를 데이터로 둔다.** 지금 순서는 정규식의 나열 순서(`pre|dv|pv|pra|mp`)에
   **암묵**이다. SP 가 이 자리에서 배운 교훈이 문서에 적혀 있다 — "메타가 데이터에 있어야
   하는 이유: 코드에 암묵이면 화면도 MCP 도 그 의미를 알 방법이 없다. ReportArchive 가 `p55`
