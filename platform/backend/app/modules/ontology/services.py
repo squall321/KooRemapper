@@ -71,7 +71,7 @@ def _names_held(db) -> bool:
     return ref is not None and tx is not None and ref() is tx
 
 
-async def lock_reports(db, ids) -> set[str]:
+async def lock_reports(db, ids, *, wait: bool = True) -> set[str]:
     """리포트 행을 id 차례로 잠근다(`SELECT … ORDER BY id FOR UPDATE`, 트랜잭션이 끝날 때 풀린다).
 
     ★리포트 선(리포트 → 개정)을 고치는 **모든 길**이 다른 행을 건드리기 전에 이것부터 한다 — 사람 확정 · 끊기 · 끊은 기록 지우기 ·
@@ -82,23 +82,25 @@ async def lock_reports(db, ids) -> set[str]:
     ★판 이름을 이미 쥔 트랜잭션은 리포트 행을 **기다리지 않는다**(NOWAIT) — 그 리포트를 쥐고 판 이름을 기다리는 길(손 확정 · 인제스트
     때 잇기)과 교착한다(재검토 11-12 rr5 — 이름 바뀜 옮기기가 앞 과제의 판을 쥔 채 뒤 과제에 그새 이어진 리포트를 기다렸다). 못 잠그면
     그 저장점만 되감고 `ReportsBusy` 다(부르는 쪽 — 옮기기 — 가 미룬다). 이미 쥔 행은 NOWAIT 이어도 그대로 잠긴다.
+    `wait=False` 면 판 이름을 쥐기 전에도 기다리지 않는다 — 관리자가 누른 합침 옮기기가 쓴다(재검토 11-14 F-08 — 누름이 그 리포트를
+    쥔 트랜잭션이 끝날 때까지 답 없이 기다렸다).
     """
     keys = sorted({str(i) for i in ids if i})
     if not keys:
         return set()
     stmt = select(ImpactReport.id).where(ImpactReport.id.in_(keys)).order_by(ImpactReport.id)
-    if not _names_held(db):
+    if wait and not _names_held(db):
         return set((await db.execute(stmt.with_for_update())).scalars().all())
     try:
         async with db.begin_nested():
             return set((await db.execute(stmt.with_for_update(nowait=True))).scalars().all())
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) == "55P03":          # lock_not_available
-            raise ReportsBusy("다른 트랜잭션이 쥔 리포트가 있다") from exc
+            raise ReportsBusy("누가 지금 고치는 중인 리포트가 있다") from exc
         raise
 
 
-async def lock_revision_names(db, keys) -> None:
+async def lock_revision_names(db, keys, *, wait: bool = True) -> None:
     """판 **이름** 잠금 — 아직 없는 판 key 도 잠근다(`pg_advisory_xact_lock`, 트랜잭션이 끝날 때 풀린다).
 
     리포트 행 잠금은 리포트마다라 **다른 리포트 둘**이 같은 새 판을 같은 순간 처음 만들면 서로 막지 못했다 — 둘째가 유일 제약
@@ -107,10 +109,19 @@ async def lock_revision_names(db, keys) -> None:
     기다렸다가 그때의 판을 읽어 쓴다. 행이 아직 없을 수 있어 행 잠금(FOR UPDATE)으로는 못 한다(이름 잠금이라야 한다).
     ★잠금 차례 — 리포트 행 먼저(`lock_reports`), 그다음 판 이름(key 차례). 두 정수 꼴(`hashtext('dynaforge.rev')` · `hashtext(key)`)이라
     받기 잠금(정수 하나 꼴 — `plm_sync.try_lock`)과 열쇠 공간이 겹치지 않는다.
+    `wait=False` 면 남이 쥔 이름을 기다리지 않는다(`pg_try_advisory_xact_lock`) — 하나라도 못 쥐면 이번에 쥔 이름을 다 놓고(저장점을
+    되감으면 그 안에서 쥔 이름이 풀린다) `ReportsBusy` 다. 관리자가 누른 합침 옮기기가 쓴다(재검토 11-14 F-08).
     """
     keys = sorted({str(k) for k in keys if k})
-    for k in keys:
-        await db.execute(text("select pg_advisory_xact_lock(hashtext('dynaforge.rev'), hashtext(:k))"), {"k": k})
+    if wait:
+        for k in keys:
+            await db.execute(text("select pg_advisory_xact_lock(hashtext('dynaforge.rev'), hashtext(:k))"), {"k": k})
+    else:
+        async with db.begin_nested():
+            for k in keys:
+                if not (await db.execute(text(
+                        "select pg_try_advisory_xact_lock(hashtext('dynaforge.rev'), hashtext(:k))"), {"k": k})).scalar():
+                    raise ReportsBusy("누가 지금 고치는 중인 판이 있다")
     if keys:
         db.info[_NAMES_HELD] = weakref.ref(db.sync_session.get_transaction())   # 이 트랜잭션은 이제 리포트를 기다리지 않는다
 
@@ -1432,7 +1443,8 @@ async def _stamp_old_machine_lines(db, key: str) -> None:
     await db.flush()
 
 
-async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", reason: str = "") -> dict:
+async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", reason: str = "",
+                              wait: bool = True) -> dict:
     """과제 A 에 매달린 **우리 것**(개정 · 별칭)을 과제 B 로 옮긴다 — 식별자 바뀜(저절로)과 합침(관리자)이 함께 쓴다.
 
     개정 key 는 `<과제>@<코드>` 라 과제가 바뀌면 key 도 바뀐다 — 같은 개정 행의 key 만 바꾸고 선의 끝을 따라 옮긴다.
@@ -1450,6 +1462,8 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
     `rev_source` · `decided_by` · `note` 가 사라졌다, 재검토 11-12 rr6) 그새 이어진 리포트(늦게 온 선)도 잠근다. 판 이름을 쥔 뒤에는
     리포트를 기다리지 않는다(NOWAIT) — 늦게 온 리포트를 다른 트랜잭션이 쥐고 있거나 그새 옮길 판이 달라졌으면 **아무것도 쓰지 않고**
     `deferred` 로 돌려준다(이름 바뀜은 다음 받기가, 합침은 관리자가 다시 누른다 — rr5 의 교착 대신).
+    `wait=False`(관리자가 누른 합침 옮기기)면 ① · ② 도 기다리지 않는다 — 그 과제의 리포트나 판을 다른 트랜잭션이 쥐고 있으면 바로
+    `deferred` 다(재검토 11-14 F-08 — 누름이 그 트랜잭션이 끝날 때까지 답 없이 기다렸다). 까닭은 `detail` 에 일어난 그대로 적힌다.
     """
     from_key, to_key = (from_key or "").strip(), (to_key or "").strip()
     done: dict[str, Any] = {"from": from_key, "to": to_key, "revisions": 0, "collapsed": 0,
@@ -1460,8 +1474,8 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
     # 옛 key 와 새 key — 리포트 행도 판 이름도 이 둘을 다 잠근다(접으면 새 key 판의 칸 · 옛 선에도 쓴다)
     names = [k for k, _ in first] + [revision_key(to_key, c) for _, c in first]
     try:
-        held = await lock_reports(db, await _reports_on(db, names))
-        await lock_revision_names(db, names)
+        held = await lock_reports(db, await _reports_on(db, names), wait=wait)
+        await lock_revision_names(db, names, wait=wait)
         revs = await _task_revisions(db, [from_key])
         if [r.key for r in revs] != [k for k, _ in first]:
             raise ReportsBusy("옮길 판이 그새 달라졌다")
@@ -1575,6 +1589,8 @@ async def move_merged_task(db, key: str, *, by: str = "", note: str = "") -> dic
     """관리자가 누른 「B 로 옮기기」 — 허브가 합친 과제(A)의 우리 것을 합쳐진 곳(끝까지 따라간 B)으로.
 
     받는 곳은 허브가 정한 것뿐이다 — 고를 칸을 두지 않는다(사람이 고르는 것은 「옮길까」 이지 「어디로」 가 아니다).
+    누름은 **기다리지 않는다** — 그 과제의 리포트 · 판을 다른 트랜잭션이 쥐고 있거나 옮길 판이 그새 달라졌으면 아무것도 옮기지 않고
+    `busy` 로 돌려준다(까닭은 `detail` 에 일어난 그대로 — 재검토 11-14 F-08, 예전엔 끝없이 기다리거나 일어나지 않은 까닭을 댔다).
     """
     row = await _hub_task(db, (key or "").strip())
     if row is None or not row.deleted or not row.merged_into or row.hidden:
@@ -1583,10 +1599,11 @@ async def move_merged_task(db, key: str, *, by: str = "", note: str = "") -> dic
     if end is None or end.deleted:
         return {"ok": False, "error": "target_gone", "into": into,
                 "detail": f"합쳐진 곳 {into!r} 도 허브에 살아 있지 않다 — 옮길 곳이 없다"}
-    got = await move_task_revisions(db, row.key, into, by=by, reason=MOVE_MERGE + (f" — {note}" if note else ""))
+    got = await move_task_revisions(db, row.key, into, by=by, reason=MOVE_MERGE + (f" — {note}" if note else ""),
+                                    wait=False)
     if got["deferred"]:
         return {"ok": False, "error": "busy", "into": into,
-                "detail": f"{got['detail']} — 그 과제의 리포트를 누가 고치는 중이다. 잠시 뒤 다시 누른다"}
+                "detail": f"{got['detail']}. 잠시 뒤 다시 누른다"}
     return {"ok": True, **got}
 
 

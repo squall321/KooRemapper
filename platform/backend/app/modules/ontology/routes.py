@@ -531,7 +531,9 @@ async def move_merged(task_key: str, body: MoveIn, actor: User = Depends(require
                       db: AsyncSession = Depends(get_db)):
     """합쳐진 과제(A)의 우리 것을 허브가 정한 곳(B)으로 옮긴다(사용자 결정 10-30 「알리고 사람이 옮긴다」).
 
-    받는 중이면 거절한다 — 받기의 층 2 반영과 같은 표를 고친다(규칙 14 의 잠금을 함께 건다)."""
+    받는 중이면 거절한다 — 받기의 층 2 반영과 같은 표를 고친다(규칙 14 의 잠금을 함께 건다).
+    그 과제의 리포트 · 판을 누가 고치는 중이거나 옮길 판이 그새 달라졌어도 409 `busy` 다 — 기다리지 않고 아무것도 옮기지 않는다(다시
+    누른다. 까닭은 문구에 일어난 그대로 적힌다)."""
     from app.worker import plm_sync
     if not await plm_sync.try_lock(db):
         raise HTTPException(status.HTTP_409_CONFLICT, "busy: 지금 받는 중입니다 — 끝난 뒤 다시 누르세요")

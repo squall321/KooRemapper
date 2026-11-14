@@ -685,3 +685,144 @@ async def test_the_panel_hears_of_a_merge_and_only_an_admin_moves_it(db):
             assert d2["linked"]["key"] == f"{b}@dv1" and d2["mismatch"]["kind"] == "merged", d2
     finally:
         await _wipe(db, t, owner, admin, session_id=sid)
+
+
+# ── 합친 과제 옮기기가 다른 트랜잭션과 겹칠 때(재검토 11-14 F-08) — 두 세션을 실제로 겹친다 ─────────────
+
+async def _merged_case(db, t: str, users: list, sid: str):
+    """합쳐진 과제 A(리포트 하나가 `A@dv1` 에 사람 선) · 살아 있는 B · 주인 · 관리자를 **커밋해** 둔다 — 치우는 것은 부른 쪽 `_wipe`.
+
+    만든 사용자는 만드는 대로 `users` 에 담는다 — 중간에 깨져도 부른 쪽이 그때까지 만든 것을 치운다."""
+    from app.shared import storage
+    a, b = f"L2A-{t}", f"L2B-{t}"
+    users.append(await _user(db))
+    users.append(await _user(db, admin=True))
+    owner, admin = users
+    db.add(Session(id=sid, user_id=owner.id, name="l2", storage_path=storage.session_rel_dir(owner.id, sid)))
+    await db.commit()
+    await _task(db, a)
+    await _task(db, b)
+    rep = ImpactReport(id=ulid.new().str, session_id=sid, user_id=owner.id, kind="sphere",
+                       eng_meta={"project": a, "dev_revision": {"code": "dv1"}}, n_cases=0)
+    db.add(rep)
+    await db.flush()
+    await _rev(db, rep, a, "dv1")
+    await _hub(db, onto.TYPE_TASK, {"key": a, "deleted": True, "merged_into": b, "updated_at": "T2"})
+    await db.commit()
+    return a, b, rep, admin
+
+
+async def _late_report(db, sid: str, user_id: int) -> str:
+    """그 세션에 아직 아무 판에도 안 이어진 리포트 하나를 커밋해 둔다(치우는 것은 `_wipe` — 세션째)."""
+    rep = ImpactReport(id=ulid.new().str, session_id=sid, user_id=user_id, kind="sphere", n_cases=0)
+    db.add(rep)
+    await db.commit()
+    return rep.id
+
+
+@pytest.mark.usefixtures("own_sync_lock")
+async def test_a_move_pressed_while_a_report_is_held_answers_busy_at_once(db):
+    """합친 과제 옮기기는 그 과제의 리포트를 다른 트랜잭션이 쥐고 있으면 **기다리지 않고** 409 `busy` 다(아무것도 안 옮긴다) — 놓인 뒤
+    다시 누르면 옮긴다. 예전엔 첫 리포트 잠금이 기다려서, 누름이 그 트랜잭션이 끝날 때까지 답이 없었다."""
+    import asyncio
+
+    import httpx
+
+    from app.database import SessionLocal
+    from app.shared.auth import get_current_user
+    t, users, sid = _tag(), [], ulid.new().str
+    try:
+        a, _, rep, admin = await _merged_case(db, t, users, sid)
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: admin
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c, SessionLocal() as other:
+            await onto.lock_reports(other, [rep.id])     # 메타 고침 · 손 확정 · 반입 때 잇기가 맨 먼저 하는 일 — 커밋 전이다
+            press = asyncio.ensure_future(c.post(f"{P}/ontology/merged-tasks/{a}/move", json={}))
+            try:
+                done, _ = await asyncio.wait({press}, timeout=5.0)
+            finally:
+                await other.rollback()                   # 놓는다 — 기다리던 누름이 있으면 여기서 풀린다
+            r = await asyncio.wait_for(press, 30)
+            assert done, f"누름이 리포트 행을 기다렸다(놓인 뒤의 답 {r.status_code}) — 409 busy 로 바로 답해야 한다"
+            msg = r.json()["message"]
+            assert r.status_code == 409 and msg.startswith("busy: ") and "고치는 중인 리포트" in msg, (r.status_code, r.text[:300])
+            listed = (await c.get(f"{P}/ontology/merged-tasks")).json()["data"]
+            assert [m["revisions"] for m in listed if m["key"] == a] == [[f"{a}@dv1"]], "busy 로 답하고도 옮겼다"
+            again = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
+            assert again.status_code == 200 and again.json()["data"]["revisions"] == 1, again.text[:300]
+    finally:
+        await _wipe(db, t, *users, session_id=sid)
+
+
+@pytest.mark.usefixtures("own_sync_lock")
+async def test_a_move_pressed_while_a_revision_is_held_answers_busy_at_once_then_carries_the_late_line(db):
+    """옮길 판의 **이름**을 다른 트랜잭션이 쥐고 있어도(새 리포트를 그 판에 손으로 확정하는 중 — 커밋 전) 누름은 기다리지 않고 409
+    `busy` 다. 그 트랜잭션이 끝난 뒤 다시 누르면 그새 이어진 선까지 옮긴다."""
+    import asyncio
+
+    import httpx
+
+    from app.database import SessionLocal
+    from app.shared.auth import get_current_user
+    t, users, sid = _tag(), [], ulid.new().str
+    try:
+        a, b, _, admin = await _merged_case(db, t, users, sid)
+        late = await _late_report(db, sid, users[0].id)
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: admin
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c, SessionLocal() as other:
+            await _rev(other, await other.get(ImpactReport, late), a, "dv1")     # 커밋 전 — 그 리포트 행과 판 이름 A@dv1 을 쥔다
+            press = asyncio.ensure_future(c.post(f"{P}/ontology/merged-tasks/{a}/move", json={}))
+            try:
+                done, _ = await asyncio.wait({press}, timeout=5.0)
+                await other.commit()                     # 손 확정이 끝난다 — 기다리던 누름이 있으면 여기서 풀린다
+            finally:
+                await other.rollback()
+            r = await asyncio.wait_for(press, 30)
+            assert done, f"누름이 판 이름을 기다렸다(놓인 뒤의 답 {r.status_code}) — 409 busy 로 바로 답해야 한다"
+            msg = r.json()["message"]
+            assert r.status_code == 409 and msg.startswith("busy: ") and "고치는 중인 판" in msg, (r.status_code, r.text[:300])
+            again = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
+            assert again.status_code == 200 and again.json()["data"]["revisions"] == 1, again.text[:300]
+            app.dependency_overrides[get_current_user] = lambda: users[0]
+            d = (await c.get(f"{P}/reports/{late}/revision")).json()["data"]
+            assert d["linked"]["key"] == f"{b}@dv1", d["linked"]                 # 그새 이어진 선도 함께 옮겨 갔다
+    finally:
+        await _wipe(db, t, *users, session_id=sid)
+
+
+@pytest.mark.usefixtures("own_sync_lock")
+async def test_a_move_whose_revisions_changed_meanwhile_says_so_and_moves_on_the_next_press(db, monkeypatch):
+    """누름이 옮길 판을 읽은 뒤 잠그기 전에 그 과제에 새 판이 생기면 아무것도 옮기지 않고 409 `busy` 다 — 까닭은 「옮길 판이 그새
+    달라졌다」 이지 「누가 고치는 중」 이 아니다(예전엔 일어나지 않은 까닭을 댔다). 다시 누르면 새 판까지 옮긴다."""
+    import httpx
+
+    from app.database import SessionLocal
+    from app.shared.auth import get_current_user
+    t, users, sid = _tag(), [], ulid.new().str
+    try:
+        a, _, _, admin = await _merged_case(db, t, users, sid)
+        late = await _late_report(db, sid, users[0].id)
+        real, slipped = onto.lock_revision_names, []
+
+        async def slip_in_a_new_revision(sdb, keys, **kw):
+            """옮기기가 판 이름을 잠그려는 바로 그때 — 다른 트랜잭션이 그 과제의 새 판 A@dv2 를 만들어 커밋한다(한 번만)."""
+            if not slipped:
+                slipped.append(True)
+                async with SessionLocal() as other:
+                    await _rev(other, await other.get(ImpactReport, late), a, "dv2")
+                    await other.commit()
+            return await real(sdb, keys, **kw)
+
+        monkeypatch.setattr(onto, "lock_revision_names", slip_in_a_new_revision)
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: admin
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+            r = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
+            msg = r.json()["message"]
+            assert slipped and r.status_code == 409 and msg.startswith("busy: ") and "달라졌다" in msg, (r.status_code, r.text[:300])
+            assert "고치는 중" not in msg, f"일어나지 않은 까닭을 댔다: {msg}"
+            again = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
+            assert again.status_code == 200 and again.json()["data"]["revisions"] == 2, again.text[:300]
+    finally:
+        await _wipe(db, t, *users, session_id=sid)
