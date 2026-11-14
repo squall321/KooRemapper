@@ -7,8 +7,8 @@
 이제 리포트 선을 고치는 모든 길이 리포트 행을 먼저 잠그고(id 차례) 잠근 뒤에 다시 읽는다. 겹친 쪽은 기다렸다가 그때의 상태로 한다.
 
 두 세션을 실제로 겹친다(공유 dev DB) — 이 시험의 행만 만들고 치운다. 주인(`_owner`)을 만든 뒤의 준비는 모두 `try:` 안에서 한다 — 준비가
-깨져도 `finally` 가 적어 둔 id 로 치워 아무것도 남기지 않는다(재검토 11-14 F-18). 기다림은 「1초 뒤에도 안 끝났다」 로 잰다 — 잠금이
-있으면 상대가 커밋하기 전에는 끝날 수 없다.
+깨져도 `finally` 가 적어 둔 id 로 치워 아무것도 남기지 않는다(재검토 11-14 F-18). 기다림은 「1초 뒤에도 안 끝났다」 로 재거나(잠금이
+있으면 상대가 커밋하기 전에는 끝날 수 없다) DB 가 보이는 기다림으로 잰다(`_waits_on` — 잠금이 없을 때의 답도 재는 길이에 달리지 않는다).
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.database import SessionLocal
 from app.models import ImpactReport, OntoAlias, OntoObject, OntoRelation, Session, SessionFile, User
@@ -117,6 +117,20 @@ async def _in_other_session(fn):
             return "error", f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
+async def _waits_on(holder, job) -> bool:
+    """`job` 이 `holder`(커밋 전인 세션)가 쥔 잠금을 기다리는 것이 DB 에 보이면 True, 기다리지 않고 끝나면 False. 「1초 뒤」 와 달리 잠금이
+    없을 때의 답(False)도 재는 길이에 달리지 않는다 — 끝날 때까지 본다. `pg_locks` 로 본다(`pg_stat_activity` 는 트랜잭션 안에서 처음
+    읽은 때로 굳어, 쥔 쪽 세션에서는 그 뒤에 온 기다림이 안 보인다)."""
+    waiting = text("select count(*) from pg_locks where not granted and pg_backend_pid() = any(pg_blocking_pids(pid))")
+    for _ in range(600):                                          # 30초 — 기다림도 끝도 안 보일 때만 닿는 안전망
+        if job.done():
+            return False
+        if (await holder.execute(waiting)).scalar():
+            return True
+        await asyncio.sleep(0.05)
+    return False
+
+
 async def test_a_hand_confirm_during_an_open_auto_link_waits_and_leaves_one_link(db):
     """R11 — 사람이 손으로 확정(PUT)하면 자동 잇기가 커밋할 때까지 기다렸다가 그때의 선을 떼고 잇는다. 선은 하나다."""
     t = _tag()
@@ -204,6 +218,37 @@ async def test_an_unlink_landing_after_the_auto_links_first_look_is_respected(db
         assert fired, "끊기가 끼어들지 않았다 — 시험이 틀렸다"
         assert (got["skipped_unlinked"], got["linked"]) == (1, 0), got
         assert await _live(rid) == [] and await _marks(rid) == [f"{code}@dv1"], "자동 잇기가 그새 끊은 기록을 지우고 다시 이었다"
+    finally:
+        await db.rollback()
+        await _drop(uid, sid, [task, code])
+
+
+async def test_a_same_value_meta_save_during_an_open_auto_link_waits_and_writes_nothing(db):
+    """값이 같은 메타 저장(바뀌는 열이 없어 제 UPDATE 로 리포트 행을 쥐지 않는다)의 잇기도 리포트 행을 **먼저** 잠그고 그 뒤에 선을
+    읽는다 — 커밋 전인 자동 잇기를 기다렸다가 `already` 로 아무것도 쓰지 않는다. 읽은 뒤에 잠그면 자동 잇기 전의 선을 보고 `set_revision`
+    으로 가서, 회차가 방금 이은 선의 `linked_at` 을 다시 찍는다(재검토 11-14 — 이 차례를 뒤집어도 빨개지는 시험이 없었다)."""
+    t = _tag()
+    task, code = f"RS-{t}", f"RSC-{t}"
+    uid, sid = await _owner(db)
+    try:
+        rid = await _rep(db, uid, sid, project=code, code="dv1")
+        await _open_auto_link(db, task, code, rid)
+        line = select(OntoRelation.properties).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+            OntoRelation.src_key == rid, OntoRelation.deleted.is_(False))
+        made = (await db.execute(line)).scalar_one()              # 회차가 이은 선의 표시(커밋 전 — 회차의 트랜잭션에서 읽는다)
+
+        async def save(other):                                    # 바뀌는 열이 없는 메타 저장이 하는 일은 이 잇기뿐이다
+            return await onto.link_from_eng_meta(other, await other.get(ImpactReport, rid))
+
+        job = asyncio.create_task(_in_other_session(save))
+        blocked = await _waits_on(db, job)
+        await db.commit()                                         # 자동 잇기가 끝난다
+        outcome = await asyncio.wait_for(job, 30)
+        assert blocked, "값이 같은 메타 저장이 커밋 전인 자동 잇기를 기다리지 않았다"
+        assert outcome == ("ok", {"ok": True, "key": f"{task}@dv1", "already": True}), outcome
+        async with SessionLocal() as f:
+            assert (await f.execute(line)).scalar_one() == made, "아무것도 안 쓴다던 저장이 회차가 이은 선의 표시를 다시 찍었다"
     finally:
         await db.rollback()
         await _drop(uid, sid, [task, code])
@@ -428,6 +473,83 @@ async def test_the_rename_loop_never_waits_on_a_report_while_holding_revisions_a
         assert again["deferred"] == 0 and await _live(y) == [f"{new2}@dv1"], (again, await _live(y))
     finally:
         await db.rollback()
+        await _drop(uid, sid, [old1, new1, old2, new2])
+
+
+async def test_a_move_defers_when_a_report_linked_after_its_first_look_is_held_by_another_hand(db, monkeypatch):
+    """옮기기는 판 이름을 쥔 뒤 그새 이어진 리포트(늦게 온 선)도 잠근다 — 판 이름을 쥐었으니 기다리지 않는다(NOWAIT). 그 리포트를 다른
+    트랜잭션이 쥐고 있으면 아무것도 옮기지 않고 미룬다(`deferred`) — 놓인 뒤 다시 옮기면 늦게 온 선까지 간다. 이 잠금이 없으면 남이
+    고치는 중인 리포트의 선을 그 밑에서 옮긴다(재검토 11-14 — 이 잠금을 빼도 빨개지는 시험이 없었다)."""
+    t = _tag()
+    old, new = f"RK-{t}", f"RKN-{t}"
+    uid, sid = await _owner(db)
+    holder = SessionLocal()
+    try:
+        x = await _rep(db, uid, sid, project="", code="")
+        z = await _rep(db, uid, sid, project="", code="")
+        async with SessionLocal() as s:                          # X 는 old@dv1 에 있다(손 확정)
+            assert (await onto.set_revision(s, await s.get(ImpactReport, x), task_key=old, code="dv1",
+                                            decided_by="kim@x", source="manual"))["ok"]
+            await s.commit()
+        real, fired = onto.lock_revision_names, []
+
+        async def late_line_then_held(sdb, keys, **kw):
+            if not fired:                                        # 옮기기가 X 를 잠그고 판 이름을 잠그려는 바로 그때(한 번만)
+                fired.append(1)
+                async with SessionLocal() as s:                  # Z 가 그 판에 이어진다(커밋)
+                    assert (await onto.set_revision(s, await s.get(ImpactReport, z), task_key=old, code="dv1",
+                                                    decided_by="kim@x", source="manual"))["ok"]
+                    await s.commit()
+                await onto.lock_reports(holder, [z])             # 다른 손이 Z 를 쥔다(메타 고침 · 손 확정이 맨 먼저 하는 일 — 커밋 전)
+            return await real(sdb, keys, **kw)
+
+        monkeypatch.setattr(onto, "lock_revision_names", late_line_then_held)
+        got = await onto.move_task_revisions(db, old, new, by="admin@x", reason=onto.MOVE_MERGE)
+        await db.commit()
+        assert fired, "늦게 온 선이 끼어들지 않았다 — 시험이 틀렸다"
+        assert got["deferred"] and "고치는 중인 리포트" in got["detail"], f"남이 쥔 리포트의 선을 옮겼다 — {got}"
+        assert (await _live(x), await _live(z)) == ([f"{old}@dv1"], [f"{old}@dv1"]), "미룬다면서 옮겼다"
+        await holder.rollback()                                  # 그 손이 놓는다
+        again = await onto.move_task_revisions(db, old, new, by="admin@x", reason=onto.MOVE_MERGE)
+        await db.commit()
+        assert not again["deferred"] and (await _live(x), await _live(z)) == ([f"{new}@dv1"], [f"{new}@dv1"]), again
+    finally:
+        await db.rollback()
+        await holder.close()
+        await _drop(uid, sid, [old, new])
+
+
+async def test_the_rename_round_waits_for_a_hand_holding_a_later_tasks_report_and_moves_every_task(db, monkeypatch):
+    """이름 바뀜 옮기기(받기 뒤 층 2)는 옮길 선이 달린 리포트 행을 과제를 옮기기 **전에 한꺼번에** 잠근다 — 아직 판 이름을 쥐지 않아
+    기다려도 된다. 뒤 과제의 리포트를 다른 트랜잭션이 쥐고 있으면 기다렸다가 과제를 다 옮긴다. 이 잠금이 없으면 앞 과제의 판 이름을 쥔
+    뒤에야 그 리포트를 만나, 기다리지 못하고 뒤 과제를 다음 받기로 미룬다(재검토 11-14 — 이 잠금을 빼도 빨개지는 시험이 없었다)."""
+    t = _tag()
+    old1, new1, old2, new2 = f"RP1-{t}", f"RQ1-{t}", f"RP2-{t}", f"RQ2-{t}"
+    uid, sid = await _owner(db)
+    holder = SessionLocal()
+    try:
+        a = await _rep(db, uid, sid, project="", code="")
+        y = await _rep(db, uid, sid, project="", code="")
+        for rid, task in ((a, old1), (y, old2)):
+            async with SessionLocal() as s:
+                assert (await onto.set_revision(s, await s.get(ImpactReport, rid), task_key=task, code="dv1",
+                                                decided_by="kim@x", source="manual"))["ok"]
+                await s.commit()
+
+        async def mine(_db, type_slug):                          # 받은 사본 전체 대신 이 시험의 이름 바뀜 둘만(공유 DB)
+            return {old1: new1, old2: new2} if type_slug == onto.TYPE_TASK else {}
+
+        monkeypatch.setattr(onto, "renamed_keys", mine)
+        await onto.lock_reports(holder, [y])                     # 다른 손이 뒤 과제의 리포트를 쥔다(커밋 전)
+        job = asyncio.create_task(_in_other_session(onto.reflect_after_sync))
+        blocked = await _waits_on(holder, job)
+        await holder.rollback()                                  # 그 손이 놓는다
+        outcome = await asyncio.wait_for(job, 30)
+        assert blocked, "이름 바뀜 옮기기가 뒤 과제의 리포트를 쥔 손을 기다리지 않았다"
+        assert outcome[0] == "ok" and (outcome[1]["renamed"], outcome[1]["deferred"]) == (2, 0), outcome
+        assert (await _live(a), await _live(y)) == ([f"{new1}@dv1"], [f"{new2}@dv1"])
+    finally:
+        await holder.close()
         await _drop(uid, sid, [old1, new1, old2, new2])
 
 
