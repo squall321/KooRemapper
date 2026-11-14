@@ -653,7 +653,8 @@ async def test_the_hub_error_text_on_type_rows_reaches_only_a_system_admin(db):
         else:
             assert got["plain"][2] is None, got
     finally:
-        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug.in_(mine)))
+        # 이 시험이 넣은 줄만, 제 글(`raw`)이 그대로일 때만 지운다 — 그새 진짜 받기가 고쳐 쓴 과제 타입 줄은 남긴다(재검토 11-14 P-07)
+        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug.in_(mine), OntoSyncState.last_error == raw))
         await db.commit()
         await _drop(db, a, sa)
         await _drop(db, u, s)
