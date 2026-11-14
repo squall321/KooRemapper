@@ -112,6 +112,7 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   받는 쪽은 규칙 6(모르는 칸도 담는다 · 참조 칸 값은 key 로 둔다)이라 판 표시만 바꿨다. StepForge 는 7744159(v0.4.83 — 키트 · coreapi 같음)라 알렸다.
     #   11-14 e2676ad → 13e6b02(v0.4.85 · ls-remote 로 main 끝 확인) — 뜻으로 찾기 리랭크(ADR 0072). 키트 2026-11-06 그대로 · coreapi · ontology 는 diff 0
     #   — 받는 쪽에 닿는 것이 없다. main 이 포털 부탁으로 동결(bc022d9)이라 가지 corelink-int 에서 먼저 올렸다. StepForge 는 7744159 라 알렸다(11-14).
+    #   StepForge 도 같은 날 따라왔다(그쪽 통합 갈래 land/b7 의 1ed5644d — 서브모듈 가리킴 13e6b02 확인 · 그쪽 main 은 동결이라 아직 7744159).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
