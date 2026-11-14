@@ -1260,6 +1260,50 @@ async def test_a_dangling_alias_beside_a_hub_match_is_undecided_and_nothing_is_w
         await db.rollback()
 
 
+async def test_an_alias_to_a_name_the_hub_renamed_follows_the_rename_and_one_to_a_merged_task_does_not(db):
+    """사람이 붙인 별칭의 끝이 허브가 이름을 바꾼 **옛 과제명**이면 지금 이름의 과제로 본다(재검토 11-14 F-05) — 리포트에 적힌 이름을 풀
+    때와 같다. 예전엔 「끝이 거울에 없는 별칭」 으로 읽혀 그 이름의 리포트를 잇지 못했다. 이런 별칭은 이름이 바뀐 뒤 옛 이름으로 붙였거나
+    이름 바뀜 옮기기가 미뤄진 동안 생기고, 다음 받기가 별칭 표를 새 key 로 고쳐 쓴다(10-30 결정 — 별칭 표의 대상도 저절로 옮긴다).
+    합쳐 없어진 과제를 가리키는 별칭은 여전히 `alias_missing` 이다 — 합침은 저절로 따라가지 않는다(알리고 사람이 옮긴다)."""
+    t = _tag()
+    a, n, m, into = f"AL-{t}", f"ALN-{t}", f"ALM-{t}", f"ALT-{t}"
+    word, word2 = f"별칭-{t}", f"별칭2-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, a)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": n, "label": f"과제 {n}", "status": "active", "updated_at": "T2",
+                                                      "renamed_from": a, "previous_keys": [a]}])
+        assert (await onto.confirm_alias(db, alias=word, key=a, by="kim@x"))["ok"]      # 이름이 바뀐 뒤 옛 이름으로 붙였다
+        assert await onto.resolve_task(db, word) == (n, "alias"), "옛 과제명을 가리키는 별칭을 지금 이름으로 풀지 않았다"
+        r = await _rep(db, s, project=word, code="dv1")
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id])))["plan"][0]
+        assert (entry["verdict"], entry["task_key"], entry["how"]) == ("links", n, "alias"), entry
+        assert "alias_missing" not in entry, entry
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] and got["key"] == f"{n}@dv1", got
+        assert await _linked(db, r.id) == [f"{n}@dv1"]
+        assert (await _edge_of(db, r.id)).properties["link_source"] == onto.SOURCE_RULE
+        for k in (a, word):
+            assert await _rev(db, f"{k}@dv1") is None, f"옛 이름 · 별칭 글자로 판 {k}@dv1 을 만들었다"
+        assert await onto.mismatch(db, r) is None
+        # 다음 받기가 별칭 표를 새 key 로 고쳐 쓴다 — 그 뒤에도 같은 과제로 풀린다
+        assert (await onto.reflect_after_sync(db))["aliases"] >= 1
+        assert (await db.execute(select(OntoAlias.key).where(OntoAlias.alias == word))).scalar_one() == n
+        assert await onto.resolve_task(db, word) == (n, "alias")
+
+        await _task(db, m)
+        await _task(db, into)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": m, "deleted": True, "merged_into": into, "status": "active",
+                                                      "updated_at": "T2"}])
+        assert (await onto.confirm_alias(db, alias=word2, key=m, by="kim@x"))["ok"]
+        assert await onto.resolve_task(db, word2) == ("", ""), "합쳐 없어진 과제를 가리키는 별칭을 저절로 따라갔다"
+        r2 = await _rep(db, s, project=word2, code="dv1")
+        entry2 = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r2.id])))["plan"][0]
+        assert entry2["verdict"] != "links" and entry2["alias_missing"] == m, entry2
+    finally:
+        await db.rollback()
+
+
 async def test_label_only_deprecated_and_deleted_names_follow_the_same_judgement_at_ingest(db):
     """판정 함수를 같이 쓰니 「그렇게 된다」 고 읽지 않고 인제스트 때 잇기로 돌려 본다 — 자동 잇기가 가르는 나머지 갈래 넷.
     ① 이름(label)만 같은 과제 — 허브가 아는 이름이지만 이름만으로는 잇지 않는다(`undecided`). ② 그만 쓴(deprecated) 과제 여럿이 같은

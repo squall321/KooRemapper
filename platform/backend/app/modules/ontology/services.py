@@ -592,6 +592,9 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     맞아도 잇지 않고 후보로 낸다. 그 끝은 거울에 없어 고를 수 없으니 후보로 내지 않는다(SRC-08 다리와 같은 규칙 — 재검토 11-12, 예전엔
     거울에 없는 그 key 로 풀렸다). 그 별칭**만** 맞는 이름은 거울의 과제를 가리키는 원천이 없다 — 자동 잇기 · 미리 보기는 잇지 않고
     까닭(`alias_missing`)을 보이고, 인제스트 때 잇기(`link_from_eng_meta`)는 허브가 모르는 이름으로 보고 수동 메타 글자 그대로 잇는다.
+    끝이 허브가 이름을 바꾼 **옛 과제명**이면 없는 것이 아니다 — 지금 이름의 과제로 본다(리포트의 이름을 풀 때와 같다. 재검토 11-14 F-05 —
+    예전엔 끝이 없는 별칭으로 읽혀 잇지 못했다. 별칭 표는 다음 받기가 새 key 로 고쳐 쓴다). 합쳐 없어진 과제는 따라가지 않는다(알리고
+    사람이 옮긴다 — 10-30).
     """
     free = (free or "").strip()
     if not free:
@@ -607,7 +610,8 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     al = (await db.execute(select(OntoAlias.key).where(
         OntoAlias.type_slug == TYPE_TASK, OntoAlias.alias == free))).scalar_one_or_none()
     if al is not None:
-        out.append((al, "alias" if await task_exists(db, al) else "alias_missing"))
+        al_now = await current_key(db, TYPE_TASK, al)      # 옛 과제명에 붙인 별칭 — 허브가 바꾼 지금 이름으로(F-05)
+        out.append((al_now, "alias") if await task_exists(db, al_now) else (al, "alias_missing"))
     out += [(t.key, "hub_alias") for t in (await db.execute(select(OntoObject).where(
         *live, OntoObject.properties["aliases"].contains([free])).order_by(OntoObject.key))).scalars()
         if free in hub_aliases(t)]
