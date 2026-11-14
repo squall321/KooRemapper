@@ -367,6 +367,204 @@ def test_our_definition_values_fit_what_sp_stores():
         and any("꼴이 아니다" in g for g in got), got
 
 
+# ── ⑤ SP 가 종류 · 빈 값 · 규칙으로 거절하는 자리 — 글자 길이와 허용값 너머(재검토 11-14 결함 3c) ─────────────────
+# 정의 파일을 한 군데씩 바꾼 162벌 가운데 SP 의 진짜 계획(importer.plan, 13e6b02 · 빈 허브)이 113벌을 거절했는데, 그중 36벌에서
+# 이 파일이 초록이었다 — 종류가 다른 값(참/거짓 칸의 글자 · 숫자 칸의 글자) · 비울 수 없는 칸의 null · 묶음의 색과 상위 묶음 · 투영 타입의 원 표 · accept ·
+# 목록 화면이 가리키는 자리 · 재귀 관계. ④ 는 글자 칸의 길이 · 허용값 · slug/key 꼴까지 본다 — 여기는 그 나머지를 **빈 허브가
+# 하는 대로** 본다. 값의 종류 · 빈 값, 묶음의 색 · 상위 묶음, accept, 재귀 관계는 SP 의 규칙을 그대로 옮겼다.
+# 화면(list_view · form_view · detail_view) · 투영 타입(kind_class=system · system_source) · 인터페이스(최상위 interfaces)의 규칙은
+# 옮기지 않았다 — 우리 파일이 그것을 **안 쓴다**는 것만 못박는다(이 절의 마지막 시험). 화면은 SP 의 views.validate_* 가 모르는 항목 ·
+# 가리키는 자리 · 정렬 · 트리 · 롤업 · 폼의 묶음(sections)까지 보고, 원 표 이름은 SP 가 띄울 때 채우는 등록부(shared/system_sources)에
+# 있어야 하고, 인터페이스는 제 칸 목록과 구현 타입 맞추기가 따로 있다 — 옮기면 그쪽 코드를 여기 다시 짓는 셈이다. 쓰기 시작하는 날
+# 그 시험이 빨개지고, 그때 규칙을 옮긴다. 허브에 든 것에 달린 판정은 파일만으로 알 수 없다 — 있던 관계는 안 적은 acyclic 이
+# 저장값을 따르고, 허브에만 있는 상위 묶음은 빈 허브만 거절한다. SP 가 따로 규칙을 둔 키 가운데 우리 검사기가 모르는 것(revision_key ·
+# quantity_key · lineage_source · interface_slugs)은 ① 의 「모르는 키가 남았다」 가 잡는다 — 검사기에 그 키를 들이는 날 그 규칙도 옮긴다.
+
+# `_field_errors` 가 칸의 종류를 가르는 대로 — Text 도 글자(String 의 하위형)이고, 그 밖(JSONB …)은 안 본다
+_SP_KIND = {"String": str, "Text": str, "Boolean": bool, "Integer": int, "Float": (int, float)}
+
+
+def _sp_named(path: Path, name: str):
+    """SP 소스의 모듈 수준 이름 하나 — 리터럴은 그 값, `re.compile("…")` 은 그 꼴(글자). AST 로 읽는다(import 하지 않는다)."""
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == name:
+            return node.value.args[0].value if isinstance(node.value, ast.Call) else ast.literal_eval(node.value)
+    raise AssertionError(f"SP {path.name} 에 {name} 이 없다")
+
+
+def _sp_column_kinds() -> dict[str, dict[str, tuple[str | None, bool]]]:
+    """SP models.py 의 표마다 (칸 → 종류 이름 · 비울 수 있나). 비울 수 있나는 SQLAlchemy 가 정하는 대로 읽는다 —
+    `nullable=` 을 적었으면 그 값, 안 적었으면 `Mapped[… | None]` 인가."""
+    tables: dict[str, dict[str, tuple[str | None, bool]]] = {}
+    for node in ast.parse(SP_MODELS.read_text(encoding="utf-8")).body:
+        if not (isinstance(node, ast.ClassDef) and node.name in (*_SP_TABLE_OF.values(), "PropertyDef")):
+            continue
+        cols = tables.setdefault(node.name, {})
+        for st in node.body:
+            call = st.value if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) else None
+            if not (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "mapped_column" and call.args):
+                continue
+            kind = call.args[0].func if isinstance(call.args[0], ast.Call) else call.args[0]
+            said = [k.value.value for k in call.keywords if k.arg == "nullable"]
+            optional = any(isinstance(n, ast.Constant) and n.value is None for n in ast.walk(st.annotation))
+            cols[st.target.id] = (getattr(kind, "id", None), said[0] if said else optional)
+    return tables
+
+
+def _wrong_kind_for_sp(doc: dict, kinds, shapes) -> list[str]:
+    """SP 가져오기가 값의 종류 때문에 거절할 자리 — `_field_errors` 의 차례 그대로(목록 · 표 · slug 칸은 null 을 받는다). 한 자리에 한 줄."""
+    lists, dicts, slugs = shapes
+    bad: list[str] = []
+
+    def check(where: str, one: dict, table: str) -> None:
+        for name, value in one.items():
+            if name in ("slug", "key", "properties") or (table == "NavGroup" and name == "color"):
+                continue                                  # 묶음의 색은 `_field_errors` 밖이다 — 아래 규칙(group_color_error)이 본다
+            if name in lists:
+                ok = value is None or (isinstance(value, list) and all(isinstance(v, str) for v in value))
+            elif name in dicts:
+                ok = value is None or isinstance(value, dict)
+            elif name in slugs:
+                ok = value is None or isinstance(value, str)
+            elif name not in kinds[table]:
+                continue
+            elif value is None:
+                ok = kinds[table][name][1]
+            else:                                         # 참/거짓은 정수 · 숫자로 안 친다
+                want = _SP_KIND.get(kinds[table][name][0])
+                ok = want is None or (isinstance(value, want) and (want is bool or not isinstance(value, bool)))
+            if not ok:
+                bad.append(f"{where}.{name}={value!r} — " + ("비울 수 없다" if value is None else "종류가 틀렸다"))
+
+    for kind, table in _SP_TABLE_OF.items():
+        for one in doc.get(kind) or []:
+            check(f"{kind}/{one.get('slug')}", one, table)
+            for prop in one.get("properties") or []:
+                check(f"{kind}/{one.get('slug')}.{prop.get('key')}", prop, "PropertyDef")
+    return bad
+
+
+def test_our_definition_values_are_the_kind_sp_columns_take():
+    """길이가 맞아도 SP 는 종류에서 거절한다 — 참/거짓 칸의 글자, 숫자 칸의 글자, 비울 수 없는 칸의 null. 우리 파일의 모든 값이 제 칸의 종류여야 한다."""
+    if not (SP_MODELS.exists() and SP_IMPORTER.exists()):
+        pytest.skip(f"submodule 이 없다: {SP_MODELS}")
+    kinds = _sp_column_kinds()
+    shapes = [_sp_named(SP_IMPORTER, name) for name in ("LIST_FIELDS", "DICT_FIELDS", "SLUG_FIELDS")]
+    assert (kinds["RelationType"]["transitive"], kinds["PropertyDef"]["min_value"], kinds["NavGroup"]["sort_order"],
+            kinds["ObjectType"]["description"]) == (("Boolean", False), ("Float", True), ("Integer", False), ("Text", False)), \
+        "SP 표의 칸 종류 · 비울 수 있나를 다 읽지 못했다"
+    assert "enum_options" in shapes[0] and "list_view" in shapes[1] and "nav_group_slug" in shapes[2]
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _wrong_kind_for_sp(doc, kinds, shapes) == []
+    # 판별력 — 틀린 종류와 비울 수 없는 칸의 null 을 자리마다 잡는다
+    prop = {"key": "p", "label": "P", "data_type": "number", "required": "yes", "sort_order": "3", "min_value": True,
+            "help": None, "enum_options": "a,b"}
+    got = _wrong_kind_for_sp({"groups": [{"slug": "g", "label": None, "sort_order": True}],
+                              "types": [{"slug": "t", "label": "T", "list_view": ["code"], "properties": [prop]}],
+                              "relation_types": [{"slug": "r", "label": "R", "transitive": "false", "description": None,
+                                                  "src_type_slugs": ["t", 7]}]}, kinds, shapes)
+    assert sorted(g.split("=")[0].rsplit(".", 1)[1] for g in got) == sorted(
+        ["label", "sort_order", "list_view", "required", "sort_order", "min_value", "help", "enum_options",
+         "transitive", "description", "src_type_slugs"]), got
+    # SP 가 받는 이웃은 안 잡는다 — 정수로 적은 숫자 칸 · 비워도 되는 칸의 null · 목록 · 표 · slug 칸의 null · 묶음 색의 null
+    prop = {"key": "p", "label": "P", "data_type": "number", "min_value": 0, "max_value": 9.5, "decimals": None,
+            "enum_options": None, "default_value": {"a": 1}}
+    assert _wrong_kind_for_sp({"groups": [{"slug": "g", "label": "G", "color": None}],
+                               "types": [{"slug": "t", "label": "T", "list_view": None, "nav_group_slug": None,
+                                          "properties": [prop]}]}, kinds, shapes) == []
+
+
+def _refused_by_sp_rules(doc: dict, color_re: str) -> list[str]:
+    """SP 의 계획이 규칙으로 거절할 자리 — 빈 허브에서. 규칙마다 그쪽 함수 이름을 곁에 적는다. 한 자리에 한 줄."""
+    import re
+    bad: list[str] = []
+    groups = [g for g in doc.get("groups") or [] if g.get("slug")]
+    known = {str(g["slug"]) for g in groups}
+    parent_of = {str(g["slug"]): g["parent_slug"] or None for g in groups if "parent_slug" in g}
+    for g in groups:
+        slug, color, parent = str(g["slug"]), str(g.get("color") or "").strip(), str(g.get("parent_slug") or "")
+        if color and not re.match(color_re, color):           # services.group_color_error — 비운 색은 받는다
+            bad.append(f"groups/{slug}.color={g['color']!r} 는 #rrggbb 가 아니다")
+        # services.group_parent_error — 자기 자신 · 없는 묶음 · 이미 상위가 있는 묶음은 상위가 못 되고, 아래에 묶음을 둔 묶음은
+        # 상위를 못 갖는다(묶음은 두 단계까지)
+        if parent and (parent == slug or parent not in known or parent_of.get(parent) or slug in parent_of.values()):
+            bad.append(f"groups/{slug}.parent_slug={parent!r} 는 상위 묶음이 못 된다")
+    for kind in ("types", "relation_types"):
+        for one in doc.get(kind) or []:
+            # importer._plan_properties — accept 는 파일 속성에만 적는다(종류를 안 적은 속성은 허브의 저장값을 따른다 — 빈 허브에는 없다)
+            bad += [f"{kind}/{one.get('slug')}.{p.get('key')} accept 는 file 속성에만 쓴다" for p in one.get("properties") or []
+                    if p.get("accept") is not None and p.get("data_type") != "file"]
+    for r in doc.get("relation_types") or []:
+        transitive = bool(r.get("transitive", False))         # importer._relation_flags — 안 적은 acyclic 은 transitive 를 따른다
+        if transitive and not bool(r.get("acyclic", transitive)):
+            bad.append(f"relation_types/{r.get('slug')} 재귀로 펼치는데(transitive) 순환을 안 막는다(acyclic)")
+    return bad
+
+
+def test_our_definition_passes_the_rules_sp_plans_with():
+    """종류까지 맞아도 SP 의 계획은 규칙으로 거절한다 — 묶음의 색 · 상위 묶음, accept, 재귀 관계."""
+    if not SP_SERVICES.exists():
+        pytest.skip(f"submodule 이 없다: {SP_SERVICES}")
+    color_re = _sp_named(SP_SERVICES, "COLOR_RE")
+    assert "#" in color_re, "SP 의 색 꼴을 읽지 못했다"
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _refused_by_sp_rules(doc, color_re) == []
+    # 판별력 — 규칙마다 하나씩 어긴 것을 자리마다 잡는다
+    shot = {"key": "shot", "label": "그림", "data_type": "text", "accept": "image"}
+    got = _refused_by_sp_rules({
+        "groups": [{"slug": "g", "label": "G", "color": "red", "parent_slug": "nope"}],
+        "types": [{"slug": "t", "label": "T", "properties": [shot]}],
+        "relation_types": [{"slug": "r", "label": "R", "transitive": True, "acyclic": False}]}, color_re)
+    assert len(got) == 4 and all(any(word in g for g in got) for word in (".color=", ".parent_slug=", "accept", "acyclic")), got
+
+    def no_parent_for(*pairs: tuple[str, str | None]) -> list[str]:
+        groups = [{"slug": slug, "label": slug, **({"parent_slug": parent} if parent else {})} for slug, parent in pairs]
+        return [g.split(".parent_slug")[0] for g in _refused_by_sp_rules({"groups": groups}, color_re)]
+
+    # 상위 묶음의 네 갈래 — 자기 자신 · 없는 묶음, 세 단계에서는 가운데(아래에 묶음을 뒀다)와 맨 아래(상위가 이미 상위를 가졌다)가 다 걸린다
+    assert no_parent_for(("a", "a")) == ["groups/a"] and no_parent_for(("a", "nope")) == ["groups/a"]
+    assert no_parent_for(("top", None), ("mid", "top"), ("leaf", "mid")) == ["groups/mid", "groups/leaf"]
+    # SP 가 받는 이웃은 안 잡는다 — 대문자 색 · 비운 색 · 두 단계 묶음 · 파일 속성의 accept · acyclic 을 안 적은 재귀 관계
+    assert _refused_by_sp_rules({
+        "groups": [{"slug": "top", "label": "위", "color": ""}, {"slug": "g", "label": "G", "color": "#8B5CF6", "parent_slug": "top"}],
+        "types": [{"slug": "t", "label": "T", "properties": [{**shot, "data_type": "file"}]}],
+        "relation_types": [{"slug": "r", "label": "R", "transitive": True}]}, color_re) == []
+
+
+def _uses_what_is_not_mirrored(doc: dict) -> list[str]:
+    """SP 규칙을 이 파일에 옮기지 않은 것을 정의가 쓰는 자리 — 화면 모양 · 투영 타입 · 인터페이스. 한 자리에 한 줄."""
+    # 빈 목록 · null 은 SP 도 지나친다 — 그 밖의 값은 목록이 아니어도 센다(importer._require_shape 가 모양이 틀렸다고 거절한다)
+    used = ["(최상위) interfaces"] if doc.get("interfaces") not in (None, []) else []
+    for t in doc.get("types") or []:
+        where = f"types/{t.get('slug')}"
+        # 빈 화면({} · null)은 SP 도 안 본다(views.validate_* 의 `if not spec`) — 채운 화면만 센다
+        used += [f"{where}.{name}" for name in ("list_view", "form_view", "detail_view") if t.get(name)]
+        # services.system_source_error 가 보는 두 칸 — 투영 종류이거나 원 표를 적었으면 센다
+        if str(t.get("kind_class") or "record") == "system" or str(t.get("system_source") or ""):
+            used.append(f"{where} kind_class={t.get('kind_class')!r} · system_source={t.get('system_source')!r}")
+    return used
+
+
+def test_our_definition_uses_nothing_whose_sp_rules_are_not_mirrored_here():
+    """화면 모양 · 투영 타입 · 인터페이스는 SP 규칙을 옮기지 않았다 — 정의가 그것을 쓰기 시작하면 이 파일은 SP 가 거절할 것을 초록으로
+    지나친다. 그래서 안 쓴다는 것을 못박는다(SP 가 받는 바른 화면에도 빨개진다 — 일부러다)."""
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _uses_what_is_not_mirrored(doc) == [], \
+        "정의가 화면 · 투영 타입 · 인터페이스를 쓰기 시작했다 — SP 의 그 규칙(views.validate_* · system_source_error · _plan_interfaces)을 먼저 옮긴다"
+    # 판별력 — 채운 화면 셋 · 투영 종류 · 원 표 · 인터페이스를 자리마다 잡는다
+    got = _uses_what_is_not_mirrored({"interfaces": [{"slug": "i", "label": "I"}], "types": [
+        {"slug": "a", "list_view": {"columns": ["key"]}, "form_view": {"sections": []}, "detail_view": {"sections": []}},
+        {"slug": "b", "kind_class": "system", "system_source": "user"}, {"slug": "c", "system_source": "user"},
+        {"slug": "d", "kind_class": "system"}]})
+    assert [g.split(" ")[0] for g in got] == ["(최상위)", "types/a.list_view", "types/a.form_view", "types/a.detail_view",
+                                               "types/b", "types/c", "types/d"], got
+    # 빈 화면 · 보통 종류 · 빈 인터페이스 목록(과 null)은 안 잡는다 — 목록이 아닌 interfaces 는 비어 있어도 잡는다
+    assert _uses_what_is_not_mirrored({"interfaces": [], "types": [
+        {"slug": "a", "list_view": {}, "form_view": None, "kind_class": "record", "system_source": ""},
+        {"slug": "b", "kind_class": "reference"}]}) == [] == _uses_what_is_not_mirrored({"interfaces": None})
+    assert _uses_what_is_not_mirrored({"interfaces": {}}) == ["(최상위) interfaces"]
+
+
 # ── 판별력 — 흠을 정말 잡는가 ──────────────────────────────────────────────
 
 def _doc(**kw):
