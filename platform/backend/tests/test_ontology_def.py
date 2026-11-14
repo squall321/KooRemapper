@@ -118,6 +118,16 @@ def test_the_revision_type_carries_what_the_plan_says():
             "status", "decided_by", "decided_at"} <= props
 
 
+def test_every_revision_source_the_code_writes_is_in_the_definition():
+    """판의 `rev_source` 로 코드가 쓰는 값은 모두 정의의 값 목록에 있다 — 기계가 허브 판정으로 만든 판은 `rule` 이다(자동 잇기 · 반입 · 메타
+    고침, `SOURCE_RULE`). 목록에 없으면 정의대로 읽는 쪽(허브 · 화면)이 모르는 값을 받는다(검토 11-14 — `rule` 이 빠져 있었다)."""
+    from app.modules.ontology import services as onto
+    doc, _ = load(OURS)
+    src = [p for p in doc["types"][0]["properties"] if p["key"] == "rev_source"][0]
+    assert {"eng_meta", onto.SOURCE_RULE, "manual"} <= set(src["enum_options"]), src["enum_options"]
+    assert "`rule`" in src["help"], src["help"]
+
+
 def test_the_sequence_is_data_not_code():
     """★순서를 정규식 나열에 암묵으로 두면 화면도 MCP 도 그 뜻을 알 방법이 없다."""
     doc, _ = load(OURS)

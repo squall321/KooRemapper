@@ -62,8 +62,8 @@
           "label": "개정 근거",
           "data_type": "enum",
           "required": true,
-          "enum_options": ["eng_meta", "report_embed", "hub_model_revision", "manual"],
-          "help": "이 개정 이름을 무엇을 보고 정했나. 기계는 후보를 내고 사람이 확정한다 — 그 확정이 재인제스트에 지워지지 않아야 하므로 근거를 남긴다."
+          "enum_options": ["eng_meta", "report_embed", "hub_model_revision", "manual", "rule"],
+          "help": "이 개정 이름을 무엇을 보고 정했나. 기계는 후보를 내고 사람이 확정한다 — 그 확정이 재인제스트에 지워지지 않아야 하므로 근거를 남긴다. 기계가 만든 판은 `rule`(과제 이름이 정확 일치 규칙으로 허브 과제 하나에 풀렸다)이거나 `eng_meta`(허브가 모르는 이름을 글자 그대로 받았다)다."
         },
         {
           "key": "status",
