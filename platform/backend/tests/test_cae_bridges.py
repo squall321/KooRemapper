@@ -187,6 +187,7 @@ def _pool(**kw) -> br._Pool:
             if key not in p.quiet:
                 p.names.append((key, br.normalize(text), how))
     p.ours.update(kw.get("ours", {}))
+    p.stray.update(kw.get("stray", {}))
     return p
 
 
@@ -259,6 +260,26 @@ def test_live_objects_decide_and_a_deprecated_one_counts_only_when_none_matches(
     assert f["verdict"] == "candidates" and [o["key"] for o in f["options"]] == ["L"], f
     g = br.match(_pool(objs={"D": "디"}, ours={"Bracket": "D"}, quiet={"D"}), "Bracket")
     assert (g["verdict"], g["key"], g["matched_by"], g["deprecated"]) == ("rule", "D", "alias", True), "별칭만 있고 살아 있는 맞음이 없다"
+
+
+def test_a_stray_alias_never_draws_a_line_and_shows_only_beside_a_live_exact_match():
+    """끝이 거울에 없는 우리 별칭이 걸린 글은 어느 갈래에서도 규칙 선이 안 된다 — 사람이 그 글을 다른 객체로 정했다는 기록이다.
+    ① 그만 쓴 객체 하나만 글자 그대로 맞음 → 못 붙임(별칭이 없으면 그 객체로 선이다 — 검토 3차 13a · 변이 g5) ② 살아 있는 객체가 글자
+    그대로 맞음 → 후보, 까닭에 별칭의 끝이 보인다 ③ 아무것도 안 맞음 → 못 붙임 ④ 살아 있는 객체가 느슨하게만 맞음 → 후보, 까닭은 느슨한
+    것뿐(별칭은 안 보인다 — 13b). 응답의 규칙 설명(`RULE_TEXT`)이 이 꼴을 말한다 — 동작을 바꾸면 그 글도 함께 바꾼다."""
+    stray = {"Frame": "GONE"}
+    a = br.match(_pool(objs={"D": "Frame"}, quiet={"D"}, stray=stray), "Frame")
+    assert (a["verdict"], a["options"]) == ("unmatched", []) and "key" not in a, a
+    assert br.match(_pool(objs={"D": "Frame"}, quiet={"D"}), "Frame")["verdict"] == "rule", "별칭이 없으면 그만 쓴 하나로 선이다"
+    b = br.match(_pool(objs={"A": "Frame"}, stray=stray), "Frame")
+    assert b["verdict"] == "candidates" and "key" not in b
+    assert [(o["key"], o["why"]) for o in b["options"]] == [("A", br._WHY_STRAY.format(key="GONE") + "(이름)")], b
+    c = br.match(_pool(objs={"Z": "Other"}, stray=stray), "Frame")
+    assert (c["verdict"], c["options"]) == ("unmatched", []), c
+    d = br.match(_pool(objs={"L": "frame"}, stray=stray), "Frame")
+    assert d["verdict"] == "candidates" and [(o["key"], o["why"]) for o in d["options"]] == [("L", br._WHY_SAME["label"])], d
+    assert "끝이 거울에 없는 우리 별칭이 걸려 있으면 못 붙임" in br.RULE_TEXT, "규칙 설명이 ① 을 말하지 않는다"
+    assert "살아 있는 객체가 글자 그대로 맞을 때만 후보 까닭에 보인다" in br.RULE_TEXT, "규칙 설명이 ② ~ ④ 를 말하지 않는다"
 
 
 @ON_SESSION_LOOP

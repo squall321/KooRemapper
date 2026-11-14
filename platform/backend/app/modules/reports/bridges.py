@@ -81,7 +81,8 @@ CANDIDATES_PER_OBJECT = 5
 MIN_CONTAINED = 2           # 품는 쪽 후보 — 짧은 쪽이 이보다 짧으면 아무 글에나 걸린다
 RULE_TEXT = ("규칙 선 = 해석 쪽 이름(파트 name · 소견 title · 캠페인 scenario_kind)이 살아 있는 코어 객체의 key · 이름 · 허브 별칭 · "
              "옛 key · 우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때. 그만 쓴(deprecated) 객체는 "
-             "살아 있는 객체가 하나도 안 맞을 때만 센다 — 글자 그대로 하나면 규칙 선(그 끝에 dst_deprecated), 여럿이면 못 붙임. "
+             "살아 있는 객체가 하나도 안 맞을 때만 센다 — 글자 그대로 하나면 규칙 선(그 끝에 dst_deprecated), 여럿이거나 끝이 거울에 없는 "
+             "우리 별칭이 걸려 있으면 못 붙임(그 별칭은 살아 있는 객체가 글자 그대로 맞을 때만 후보 까닭에 보인다). "
              "후보 = 여럿이 맞음(칸끼리 엇갈림 · 끝이 거울에 없거나 그만 쓴 객체인 우리 별칭 포함) · 구분기호와 대소문자만 다름 · 한쪽이 "
              "다른 쪽을 품음 — 선이 아니고 사람이 고른다(그만 쓴 객체는 후보로 안 낸다). "
              "사람 선은 다시 붙여도 남고, 가리키던 해석 객체가 사라지면 stale, 그 해석 쪽 이름이 바뀌면 drift.renamed 로 보인다(같은 짝을 "
@@ -270,7 +271,8 @@ def match(pool: _Pool, text: Any) -> dict:
     ranked = sorted(best.items(), key=lambda kv: (kv[1][0], kv[1][1], kv[0]))
     options = [{"key": k, "label": pool.labels.get(k, ""), "why": why} for k, (_, _, why) in ranked[:CANDIDATES_PER_OBJECT]]
     if not options:
-        # 살아 있는 것이 하나도 안 맞았다 — 그만 쓴 객체가 센다. 글자 그대로 하나면 선(보기에서 그만 씀 표시), 여럿이면 못 붙임
+        # 살아 있는 것이 하나도 안 맞았다 — 그만 쓴 객체가 센다. 글자 그대로 하나면 선(보기에서 그만 씀 표시), 여럿이거나 끝이 거울에
+        # 없는 우리 별칭이 걸려 있으면 못 붙임
         dead = {k: hows for k, hows in hits.items() if k in pool.quiet}
         if len(dead) == 1 and stray is None:
             (key, hows), = dead.items()
