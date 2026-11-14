@@ -467,11 +467,16 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
     rev = (await db.execute(select(OntoObject).where(
         OntoObject.type_slug == TYPE_REVISION, OntoObject.key == edge.dst_key))).scalar_one_or_none()
     props = (rev.properties or {}) if rev is not None else {}
+    # 이 리포트의 선을 누가 이었나(manual 사람 · rule 이름이 허브 과제 하나로 풀렸다 · eng_meta 허브가 모르는 이름을 글자 그대로). 판의
+    # rev_source 와 다르다(판은 나눠 쓴다). ★누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 manual 로 답한다 — 서버가 그
+    # 선을 사람 선으로 지키는 판정(`_human_link`)을 그대로 쓴다(재검토 11-14 F-15 — 화면의 ✓ 가 이 값을 본다. 예전엔 null 이라 손으로
+    # 확정한 옛 리포트에서 ✓ 가 사라졌는데 기계는 그 선을 옮기지 못했다). 기계 판의 옛 선은 적힌 것이 없어 null 이다
+    src = (edge.properties or {}).get("link_source")
+    if not src and _human_link(edge.properties, edge.dst_key,
+                               {edge.dst_key} if props.get("rev_source") == "manual" else set()):
+        src = "manual"
     return {"key": edge.dst_key, "task": str(props.get("task") or edge.dst_key.rsplit("@", 1)[0]),
-            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1],
-            # 이 리포트의 선을 누가 이었나(manual 사람 · rule 이름이 허브 과제 하나로 풀렸다 · eng_meta 허브가 모르는 이름을 글자
-            # 그대로 — 옛 선은 null). 판의 rev_source 와 다르다(판은 나눠 쓴다)
-            "source": (edge.properties or {}).get("link_source")}
+            "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1], "source": src}
 
 
 # ── 개정 줄 ────────────────────────────────────────────────────────────────

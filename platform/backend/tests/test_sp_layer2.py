@@ -54,6 +54,20 @@ async def _rev(db, rep: ImpactReport, task: str, code: str, **kw) -> str:
     return got["key"]
 
 
+async def _legacy(db, rep: ImpactReport) -> None:
+    """이 리포트의 선을 **옛 꼴**로 — 운영 main 이 쓴 선에는 누가 이었는지(`link_source`)가 없다(`properties` null)."""
+    edge = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+        OntoRelation.src_key == rep.id, OntoRelation.deleted.is_(False)))).scalar_one()
+    edge.properties = None
+    await db.flush()
+
+
+async def _machine(db, rep: ImpactReport, task: str, code: str, source: str = "eng_meta") -> dict:
+    """기계 길(인제스트의 글자 그대로 잇기 · 자동 잇기)로 잇는다 — 결과를 그대로 돌려준다(거절도 값이다)."""
+    return await onto.set_revision(db, rep, task_key=task, code=code, source=source)
+
+
 async def _our_edges(db, relation: str, **where) -> list[OntoRelation]:
     stmt = select(OntoRelation).where(OntoRelation.relation == relation, OntoRelation.source == "dynaforge",
                                       OntoRelation.deleted.is_(False))
@@ -127,6 +141,29 @@ async def test_a_rename_onto_a_revision_we_already_have_folds_into_it(db):
         assert [(x["code"], sorted(x["reports"])) for x in line] == [("dv1", sorted([ra.id, rb.id]))], line
         old = await _rev_obj(db, f"{a}@dv1")
         assert old is not None and old.deleted and old.merged_into == f"{b}@dv1", "접힌 판은 비활성으로 남는다"
+    finally:
+        await db.rollback()
+
+
+# ── 접을 때 사람이 정한 것은 남는다(재검토 11-14 F-01 · F-02 · F-15) ─────────────────────────
+
+async def test_an_old_line_on_a_persons_revision_reads_as_a_persons_line(db):
+    """운영 main 이 쓴 선에는 표시가 없다. 서버는 그 선을 「판이 사람 판이면 사람 선」 으로 지킨다(`_human_link`) — 패널이 읽는
+    `linked.source` 도 같은 답을 해야 한다. 안 그러면 배포 직후 사람이 확정해 둔 리포트 전부에서 ✓ 가 사라진다(재검토 11-14 F-15)."""
+    t = _tag()
+    a = f"L2A-{t}"
+    try:
+        await _task(db, a)
+        r_h, r_m = _report(), _report()
+        await _rev(db, r_h, a, "dv1")
+        assert (await _machine(db, r_m, a, "dv2"))["ok"]
+        await _legacy(db, r_h)
+        await _legacy(db, r_m)
+        assert (await onto.linked_revision(db, r_h))["source"] == "manual"
+        assert (await onto.linked_revision(db, r_m))["source"] is None, "기계 판의 옛 선은 누가 이었는지 적힌 것이 없다"
+        # 서버의 판정과 같은 답이다 — 기계는 사람 선을 못 옮기고, 기계 선은 옮긴다
+        assert (await _machine(db, r_h, a, "dv3", onto.SOURCE_RULE)).get("error") == "kept_manual"
+        assert (await _machine(db, r_m, a, "dv3", onto.SOURCE_RULE))["ok"]
     finally:
         await db.rollback()
 

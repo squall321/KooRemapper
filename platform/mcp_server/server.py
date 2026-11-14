@@ -1859,8 +1859,8 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     **버리지 않고** 보여 주는 것이다.
     ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
     `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
-    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로 — 반입 · 메타 고침), 옛 선은
-    null. 사람이 이은 선은 기계가 옮기지 않는다.
+    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로 — 반입 · 메타 고침). 누가
+    이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 사람이 이은 선은 기계가 옮기지 않는다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)
