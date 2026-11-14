@@ -309,7 +309,7 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         db.add(obj)
     else:
         # ★**사람의 확정을 기계가 덮지 않는다.** 이미 사람이 정한 개정을 자동 경로가 다시
-        #   지나가며 `rev_source` 를 `eng_meta` 로 되돌리면, 사람이 고친 사실이 사라진다.
+        #   지나가며 `rev_source` 를 기계 출처(`eng_meta` · `rule`)로 되돌리면, 사람이 고친 사실이 사라진다.
         was = (obj.properties or {}).get("rev_source")
         if was == "manual" and source != "manual":
             keep = {k: (obj.properties or {}).get(k)
@@ -330,8 +330,9 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         if old.dst_key != key:
             await db.delete(old)
     # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다. 선에 **누가 이었나**를 적는다(`link_source` —
-    # manual · eng_meta · rule, 사람이면 `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라
-    # 여러 리포트가 나눠 쓴다). 사람이 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
+    # manual 사람 · rule 이름이 정확 일치 규칙으로 허브 과제 하나에 풀렸다 · eng_meta 허브가 모르는 이름을 글자 그대로, 사람이면
+    # `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라 여러 리포트가 나눠 쓴다). 사람이
+    # 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
     stamp: dict[str, Any] = {"link_source": source, "linked_at": _now()}
     if source == "manual":
         stamp["linked_by"] = decided_by or ""
@@ -355,20 +356,56 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
 
 
 async def link_from_eng_meta(db, report: ImpactReport) -> dict:
-    """인제스트·PATCH 가 부르는 자동 경로. `eng_meta` 로 **찾거나 만들고** 잇는다.
+    """인제스트·PATCH 가 부르는 자동 경로. 수동 메타(`eng_meta`)의 과제 · 개정 코드로 **찾거나 만들고** 잇는다.
 
-    사람이 이미 정한 개정은 **건드리지 않는다**(`set_revision` 의 `manual` 보호). 사람이 끊은 리포트는 수동 메타를 고쳐도
+    ★판정은 자동 잇기(`auto_link_tasks`)와 **하나다**(사용자 결정 11-12 「허브에 있으면 판정을 따른다」) — 과제 이름을 같은 정확 일치
+    규칙(`exact_matches` · `_pick`)으로 본다. 예전엔 이 길만 글자 그대로 이어서 두 기계 길이 같은 리포트를 다른 판에 놓았다(반입마다
+    「과제코드@판」 헛 판 · 값이 같은 메타 저장이 rule 선을 되돌림 · 엇갈린 이름을 조용히 이음 — 재검토 11-12).
+    「허브가 아는 이름」 은 **거울에 있는 과제를 가리키는 원천이 하나라도 있는** 이름이다(`exact_matches` 가 낸 것 가운데
+    `alias_missing` 이 아닌 것 — 과제명 · 과제코드 · 옛 과제명 · 끝이 거울에 있는 우리 별칭 · 허브 별칭 · 이름(label)). 셋으로 가른다.
+      허브가 알고 과제 **하나로** 풀린다(과제명 · 과제코드 · 옛 과제명 · 별칭) — 그 과제의 판에 `rule` 로 잇는다. 이미 그 판에만
+        이어져 있으면 **아무것도 쓰지 않는다**(`already` — 선의 표시(`link_source` · `linked_at`)도 판도 다시 찍지 않는다).
+      허브가 아는데 하나로 정해지지 않는다(여러 과제에 걸린다 · 이름(label)만 같다 · 거울의 과제와 맞는데 우리 별칭은 거울에 없는
+        과제를 가리킨다 · 그만 쓴 과제 여럿) — **잇지 않는다**(`undecided`). 아무것도 쓰지 않는다 — 있던 기계 선도 옮기거나 떼지
+        않는다(어긋남은 `mismatch` 가 말한다).
+      허브가 **모른다**(거울의 과제를 가리키는 원천이 없다) — 예전처럼 수동 메타 **글자 그대로** `eng_meta` 로 잇는다. 허브 없는
+        박스(dev)와 허브에 아직 없는 과제는 동작이 그대로다. ★끝이 거울에 없는 우리 별칭**만** 맞는 이름도 허브가 모르는 이름이다 —
+        거울이 빈 박스에도 별칭은 생길 수 있어서(`confirm_alias` 는 끝이 거울에 있는지 보지 않는다) 그것을 엇갈림으로 세면 그 박스의
+        반입 동작이 바뀐다. 자동 잇기 · 미리 보기는 그대로다 — 그 이름을 `alias_missing` 으로 보이고, 글자 그대로 이은 선을 옮기지
+        않는다(별칭의 끝이 거울에 오면 그때 옮긴다).
+    그래서 선의 `link_source`(기계가 만든 판의 `rev_source` 도 같다)는 — `rule` 은 이름이 정확 일치 규칙으로 허브 과제 하나에 풀려 이은
+    것(반입 · 메타 고침 · 받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 는 허브가 모르는 이름을 글자 그대로 이은 것이다.
+    사람이 이미 정한 개정은 **건드리지 않는다**(`set_revision` 의 `kept_manual`). 사람이 끊은 리포트는 수동 메타를 고쳐도
     **다시 잇지 않는다** — `set_revision` 이 `unlinked` 로 거절하고, 메타 고침 자체는 그대로 저장된다(11-11).
     """
-    em = report.eng_meta or {}
-    task = str(em.get("project") or report.project_name or "").strip()
-    code = str((em.get("dev_revision") or {}).get("code") or "").strip()
+    task = report_free_task(report)
+    code = str(((report.eng_meta or {}).get("dev_revision") or {}).get("code") or "").strip()
     if not task or not code:
         return {"ok": False, "error": "nothing_to_link",
                 "detail": "eng_meta 에 과제와 dev_revision.code 가 둘 다 있어야 한다"}
-    # 허브가 바꾼 옛 과제명이면 지금 것으로 — 안 풀면 옛 key 로 개정이 새로 생겨 같은 판이 둘이 된다(층 2)
-    task = await current_key(db, TYPE_TASK, task)
-    return await set_revision(db, report, task_key=task, code=code, source="eng_meta")
+    found = await exact_matches(db, task)
+    if all(how == "alias_missing" for _, how in found):
+        # 허브가 모르는 이름(맞는 데가 아예 없거나, 끝이 거울에 없는 우리 별칭만 맞는다) — 예전 그대로 글자 그대로 잇는다. 허브가 바꾼
+        # 옛 과제명인데 바뀐 과제가 거울에 살아 있지 않을 때만 key 가 달라진다(지금 것으로 — 안 풀면 옛 key 로 개정이 새로 생겨 같은
+        # 판이 둘이 된다, 층 2).
+        task = await current_key(db, TYPE_TASK, task)
+        return await set_revision(db, report, task_key=task, code=code, source="eng_meta")
+    key, _how = _pick(found)
+    if not key:
+        return {"ok": False, "error": "undecided",
+                "detail": f"수동 메타의 과제 {task!r} 는 허브 과제와 맞는 데가 있지만 하나로 정해지지 않는다(여러 과제에 걸린다 · "
+                          "이름(label)만 같다 · 허브 과제와 맞는데 사람이 붙인 별칭은 거울에 없는 과제를 가리킨다) — 잇지 않았다(있던 "
+                          "선은 그대로 둔다). 과제 잇기 미리 보기가 이 이름을 후보(없으면 못 붙임)로 보인다 — 사람이 고른다"}
+    target = revision_key(key, code)
+    # 리포트 행을 먼저 잠그고 그 뒤에 선을 읽는다(다른 모든 길과 같은 차례 — `lock_reports`). 이미 그 판에만 이어져 있으면 쓰지
+    # 않는다 — 「이미 바르게 이은 선은 그대로 둔다」(자동 잇기의 `already` 와 같은 판정 · 같은 차례: 사람 선인지 보기 전에 가른다).
+    await lock_reports(db, [report.id])
+    live = set((await db.execute(select(OntoRelation.dst_key).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
+        OntoRelation.src_key == str(report.id), OntoRelation.deleted.is_(False)))).scalars().all())
+    if live == {target}:
+        return {"ok": True, "key": target, "already": True}
+    return await set_revision(db, report, task_key=key, code=code, source=SOURCE_RULE)
 
 
 # ── 어긋남 ─────────────────────────────────────────────────────────────────
@@ -378,6 +415,8 @@ async def mismatch(db, report: ImpactReport) -> dict | None:
 
     ★**관계가 정본**이다. 그러나 조용히 맞추지 않는다 — 맞추면 사람이 넣은 값과 저장된
     값이 달라지고 그 차이는 아무 데도 안 뜬다. 화면이 보여 주고 사람이 고른다.
+    「다르다」 는 글자가 아니라 **판정**으로 가른다(11-12) — 수동 메타의 이름(과제코드 · 별칭)이 기계 잇기와 같은 규칙으로 풀리는
+    과제의 그 판에 이어져 있으면 어긋남이 아니다. 허브가 이름을 바꿨거나 합친 사실(`renamed` · `merged`)은 그보다 먼저 말한다.
     """
     edge = (await db.execute(
         select(OntoRelation).where(OntoRelation.relation == REL_MEASURED,
@@ -406,6 +445,12 @@ async def mismatch(db, report: ImpactReport) -> dict | None:
     if st["state"] == "merged" and revision_key(st["into"], code) == linked:
         return {"kind": "merged", "linked": linked, "eng_meta": expected,
                 "said": f"수동 메타의 과제 {task!r} 는 허브에서 {st['into']!r} 로 합쳐졌다 — 이어진 개정은 옮겼다(수동 메타는 그대로 둔다)"}
+    # 수동 메타의 이름이 과제코드 · 별칭이고, 기계 잇기와 같은 판정(`exact_matches` · `_pick`)으로 풀리는 과제의 그 판에 이어져 있다 —
+    # 글자는 달라도 어긋남이 아니다(11-12 — 예전엔 글자만 견줘 바르게 이은 선에 「다르다」 경고가 떴다). 이름이 엇갈리면(하나로 안
+    # 풀리면) 여기서 걸리지 않아 아래 「다르다」 로 말한다 — 사람이 고른다.
+    key, _how = _pick(await exact_matches(db, task))
+    if key and revision_key(key, code) == linked:
+        return None
     return {"kind": "differs", "linked": linked, "eng_meta": expected,
             "said": "수동 메타와 이어진 개정이 다르다 — 관계가 정본이다"}
 
@@ -424,7 +469,8 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
     props = (rev.properties or {}) if rev is not None else {}
     return {"key": edge.dst_key, "task": str(props.get("task") or edge.dst_key.rsplit("@", 1)[0]),
             "code": props.get("code") or edge.dst_key.rsplit("@", 1)[-1],
-            # 이 리포트의 선을 누가 이었나(manual · eng_meta · rule — 옛 선은 null). 판의 rev_source 와 다르다(판은 나눠 쓴다)
+            # 이 리포트의 선을 누가 이었나(manual 사람 · rule 이름이 허브 과제 하나로 풀렸다 · eng_meta 허브가 모르는 이름을 글자
+            # 그대로 — 옛 선은 null). 판의 rev_source 와 다르다(판은 나눠 쓴다)
             "source": (edge.properties or {}).get("link_source")}
 
 
@@ -528,7 +574,8 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     같아 엇갈림이 됐다). 살아 있는 과제가 안 맞으면 그만 쓴 과제 하나는 예전처럼 잇고, 여럿이면 못 붙임이다(후보로도 내지 않는다).
     ★사람이 붙인 별칭의 끝이 거울에 없으면(허브에서 지워짐 · 합쳐짐 · 받은 적 없음) `alias_missing` — 엇갈림이다. 다른 원천이 한 과제로
     맞아도 잇지 않고 후보로 낸다. 그 끝은 거울에 없어 고를 수 없으니 후보로 내지 않는다(SRC-08 다리와 같은 규칙 — 재검토 11-12, 예전엔
-    거울에 없는 그 key 로 풀렸다).
+    거울에 없는 그 key 로 풀렸다). 그 별칭**만** 맞는 이름은 거울의 과제를 가리키는 원천이 없다 — 자동 잇기 · 미리 보기는 잇지 않고
+    까닭(`alias_missing`)을 보이고, 인제스트 때 잇기(`link_from_eng_meta`)는 허브가 모르는 이름으로 보고 수동 메타 글자 그대로 잇는다.
     """
     free = (free or "").strip()
     if not free:
@@ -558,7 +605,7 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
 
 
 def missing_alias(found: list[tuple[str, str]]) -> str | None:
-    """끝이 거울에 없는 사람의 별칭이 가리키는 key — 있으면 엇갈림이라 잇지 않는다(그 끝은 후보로도 안 낸다)."""
+    """끝이 거울에 없는 사람의 별칭이 가리키는 key — 있으면 엇갈림이라 그 이름을 허브 과제에 잇지 않는다(그 끝은 후보로도 안 낸다)."""
     return next((k for k, how in found if how == "alias_missing"), None)
 
 
@@ -720,7 +767,7 @@ def _task_item(r: OntoObject) -> dict:
 def report_free_task(report: ImpactReport) -> str:
     """리포트가 말하는 과제 — 수동 메타가 먼저, 없으면 리포트에 박힌 이름.
 
-    `services.py:232` 의 폴백과 **같은 순서**다. 두 벌이 되면 한쪽만 고쳐진다.
+    기계 잇기 둘(인제스트 · 메타 고침의 `link_from_eng_meta` · 자동 잇기의 계획)이 **이 하나**를 쓴다 — 두 벌이 되면 한쪽만 고쳐진다.
     """
     em = report.eng_meta or {}
     return str(em.get("project") or report.project_name or "").strip()
@@ -840,9 +887,14 @@ async def apply_task_links(db, *, only: list[str] | None = None) -> dict:
 
 # ── 과거 붙이기 자동 (SRC-09) ──────────────────────────────────────────────
 # 위 적용은 관리자 버튼이다. 받기(`plm_sync`) 뒤와 리포트 반입 뒤에는 「붙는 것」 만 **스스로** 잇는다 — 인제스트 때 잇기
-# (`link_from_eng_meta`)는 수동 메타 글자 그대로만 보므로, 뒤에 들어온 과제명 · 과제코드 · 별칭으로 늦게 풀리는 리포트가 남는다.
+# (`link_from_eng_meta`)도 같은 판정을 따르지만(11-12 — 예전엔 수동 메타 글자 그대로만 봤다) **그때의 거울**로 본 것이라, 뒤에 들어온
+# 과제명 · 과제코드 · 별칭으로 늦게 풀리는 리포트가 남는다(허브가 모르던 이름은 글자 그대로의 판에 있다가 받기 뒤에 옮겨진다).
+# 반입 뒤 잇기는 그래서 대개 `already` 로 세기만 한다 — 응답 · 잡 경고에 실을 수(후보 · 못 붙임)를 내고, 인제스트 때 잇기가 깨졌을
+# 때의 그물이다.
 
-SOURCE_RULE = "rule"        # 자동 잇기가 만든 개정의 `rev_source` — 정확 일치만 `rule` 로 잇는다(코어와 잇기 뼈대 규칙)
+# 정확 일치 규칙으로 허브 과제 하나에 풀려 이은 선(`link_source`) · 기계가 만든 판(`rev_source`)의 출처 — 자동 잇기 · 일괄 적용과,
+# 11-12 부터 인제스트 때 잇기 · 수동 메타 고침도 같은 값을 쓴다(코어와 잇기 뼈대 규칙 — 정확 일치만 `rule` 로 잇는다).
+SOURCE_RULE = "rule"
 _REFUSED_KEEP = 20          # 실행 기록에 남기는 거절 줄 상한 — 같은 결함이 수천 줄로 불어나지 않게
 
 
@@ -854,7 +906,8 @@ async def auto_link_tasks(db, *, report_ids: list[str] | None = None) -> dict:
       `skipped_unlinked` ★사람이 이 리포트의 연결을 끊었다(끊은 기록) — 다시 잇지 않는다(11-11). 손으로 다시 잇거나 기록을
                         지우면 풀린다
       `linked`          이었다(새로 · 기계가 이은 다른 판에서 옮김) — `rev_source=rule`
-      `already`         이미 그 판에 이어져 있다 — 쓰지 않는다(두 번째 실행은 아무것도 쓰지 않는다)
+      `already`         이미 그 판에 이어져 있다 — 쓰지 않는다(두 번째 실행은 아무것도 쓰지 않는다). 반입 뒤에는 대개 이것이다 —
+                        인제스트 때 잇기(`link_from_eng_meta`)가 같은 판정으로 먼저 이었다(11-12)
       `kept_manual`     ★사람이 **이 리포트를** 손으로 확정해 두었다(선의 `link_source=manual`) — 옮기지 않는다. 리포트마다
                         가른다(남이 자기 리포트를 같은 판에 확정했다고 내 기계 선이 굳지 않는다 — 검토 R5). set_revision 도
                         기계 출처면 같은 까닭으로 거절한다
@@ -984,8 +1037,8 @@ async def link_report(db, report: ImpactReport) -> dict:
     rid = report.id
     st = ontology_state()
     if not st["enabled"]:
-        # 기능이 꺼져 있으면 라우트처럼 하지 않는다(KOORM_ONTOLOGY=0 · 허브 설정 없음 — 검토 반영 11-11). 인제스트 때 잇기(수동 메타
-        # 글자 그대로 — `_link_revision`)는 이 스위치와 따로 예전대로 돈다.
+        # 기능이 꺼져 있으면 라우트처럼 하지 않는다(KOORM_ONTOLOGY=0 · 허브 설정 없음 — 검토 반영 11-11). 인제스트 때 잇기
+        # (`_link_revision`)는 이 스위치와 따로 예전대로 돈다 — 거울이 아는 이름은 판정대로, 모르는 이름(허브 없는 박스)은 글자 그대로.
         return {"scope": "reports", "skipped": "off", "detail": f"과제·개정 기능이 꺼져 있다 — {st['reason']}"}
     try:
         if not await plm_sync.try_lock(db):

@@ -210,19 +210,22 @@ export interface ReportRevisionOut {
   resolved_task: string | null
   resolved_how: string | null
   /** 이어진 개정(없으면 null) — 그 개정이 가리키는 과제와 함께 */
-  /** source — 이 리포트의 선을 누가 이었나(manual · eng_meta · rule, 옛 선은 null) */
+  /** source — 이 리포트의 선을 누가 이었나. manual 사람 · rule 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 · 받기 뒤 ·
+   *  일괄 적용) · eng_meta 기계(허브가 모르는 이름을 수동 메타 글자 그대로), 옛 선은 null */
   linked: { key: string; task: string; code: string; source?: string | null } | null
   /** 사람이 연결을 끊은 기록(11-11) — 있으면 자동 잇기 · 수동 메타 고침이 다시 잇지 않는다 */
   unlinked?: { by: string; at: string | null; was: string[] } | null
   task_state: TaskState | null
   /** 비어 있지 않으면 수동 메타와 이어진 개정이 **다르다**. 서버는 조용히 맞추지 않는다 —
-   *  화면이 보여 주고 사람이 고른다. `renamed` · `merged` 는 잘못이 아니다(수동 메타가 옛 이름). */
+   *  화면이 보여 주고 사람이 고른다. `renamed` · `merged` 는 잘못이 아니다(수동 메타가 옛 이름).
+   *  「다르다」 는 글자가 아니라 판정으로 가른다 — 과제코드 · 별칭으로 적힌 이름이 풀리는 과제의 판에 이어져 있으면 null 이다(11-12). */
   mismatch: { kind: 'differs' | 'eng_meta_missing' | 'renamed' | 'merged'; linked: string; eng_meta?: string; said: string } | null
   candidates: RevisionCandidate[]
   task_candidates: TaskCandidate[]
   /** 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 둔다 */
   ambiguous?: boolean
-  /** 사람이 붙인 별칭의 끝(과제)이 거울에 없다 — 엇갈림이라 잇지 않았다(재검토 11-12) */
+  /** 사람이 붙인 별칭의 끝(과제)이 거울에 없다 — 그 별칭으로는 허브 과제에 잇지 않았다(재검토 11-12). 그 별칭만 맞는 이름이면
+   *  리포트는 글자 그대로의 판에 있을 수 있다(source 가 eng_meta) */
   alias_missing?: string | null
 }
 export async function reportRevision(reportId: string, taskKey?: string): Promise<ReportRevisionOut> {

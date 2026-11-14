@@ -94,7 +94,8 @@ async def _drop(uid: int, sid: str, keys=()) -> None:
 
 
 async def _open_auto_link(db, task: str, code: str, rid: str) -> None:
-    """리포트는 인제스트 때 잇기로 「과제코드 글자 그대로의 판」 에 있고, 허브가 그 코드의 과제를 냈다 — 자동 잇기가 옮기고 **커밋 전**."""
+    """리포트는 인제스트 때 잇기로 「과제코드 글자 그대로의 판」 에 있고(그때는 허브가 모르던 이름이다 — 허브가 이미 아는 과제코드면
+    처음부터 그 과제의 판에 잇는다, 11-12), 그 뒤 허브가 그 코드의 과제를 냈다 — 자동 잇기가 옮기고 **커밋 전**."""
     async with SessionLocal() as s:
         rep = await s.get(ImpactReport, rid)
         assert (await onto.link_from_eng_meta(s, rep))["ok"]

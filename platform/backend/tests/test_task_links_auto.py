@@ -5,6 +5,8 @@
   ② ★사람이 정한 판에 이어진 리포트는 옮기지 않는다 — `set_revision` 의 manual 보호는 판 칸만 지키고 리포트 선은 옮긴다.
   ③ 반입 · 받기를 **먼저 굳히고** 돈다 — 잇기가 깨져도 리포트 · 받은 행은 남고, 경고(반입 응답 · 잡) · 「확인 필요」(받기)로 알린다.
   ④ 받기 뒤 수는 리포트 전부를 센 것이라 관리자에게만 보인다(SRC-10 · 10-31 과 같은 까닭).
+(11-12) 인제스트 때 잇기 · 수동 메타 고침(`link_from_eng_meta`)도 같은 판정을 따른다(사용자 결정 「허브에 있으면 판정을 따른다」) —
+허브에서 풀리는 이름은 그 과제의 판에 `rule` 로, 엇갈리면 잇지 않고, 허브가 모르는 이름만 글자 그대로 `eng_meta` 로. 맨 아래 ⑦.
 
 시험 DB 는 떠 있는 dev 워커의 DB 다 — 서비스 시험은 한 트랜잭션 안에서 돌리고 되돌린다. 커밋하는 시험(반입 · 받기)은 고유한
 과제명 · 과제코드를 쓰고 치운다. 받기 시험은 전부를 보는 호출(report_ids=None)이 나가는지만 잡고 실제로는 이 시험의 리포트만 잇는다
@@ -186,8 +188,9 @@ async def test_a_report_on_a_human_revision_is_never_moved(db):
 
 
 async def test_a_machine_link_moves_to_the_task_it_now_resolves_to(db):
-    """인제스트 때 잇기는 수동 메타 글자 그대로다 — 과제코드로 적힌 리포트는 「없는 과제」 에 붙어 있다가, 허브가 그 코드의 과제를
-    내면 받기 뒤 자동 잇기가 정본 과제로 옮긴다(SRC-09 의 까닭). 옛 판 객체는 지우지 않는다(set_revision 과 같다)."""
+    """허브가 아직 모르는 이름은 인제스트 때 잇기가 수동 메타 글자 그대로 잇는다 — 과제코드로 적힌 리포트는 「없는 과제」 에 붙어
+    있다가, 허브가 그 코드의 과제를 내면 받기 뒤 자동 잇기가 정본 과제로 옮긴다(SRC-09 의 까닭). 옛 판 객체는 지우지 않는다
+    (set_revision 과 같다). 허브가 이미 아는 과제코드면 처음부터 그 과제의 판에 잇는다(11-12 — 맨 아래 ⑦)."""
     t = _tag()
     task, code = f"AL-{t}", f"ALC-{t}"
     try:
@@ -214,7 +217,7 @@ async def test_someone_elses_confirm_does_not_freeze_my_machine_link(db):
         _, s1 = await _owner(db)
         _, s2 = await _owner(db)
         mine = await _rep(db, s1, project=code, code="dv1")
-        assert (await onto.link_from_eng_meta(db, mine))["ok"]                 # 기계 — 글자 그대로의 판
+        assert (await onto.link_from_eng_meta(db, mine))["ok"]                 # 기계 — 허브가 아직 모르는 이름이라 글자 그대로의 판
         theirs = await _rep(db, s2, project=code, code="dv1")
         assert (await onto.set_revision(db, theirs, task_key=code, code="dv1", decided_by="lee@x",
                                         source="manual"))["ok"]                  # 남이 같은 판에 손으로
@@ -366,7 +369,8 @@ async def test_a_busy_lock_skips_the_link_and_says_so(db):
 
 @needs_sphere
 async def test_an_import_links_the_report_through_its_task_code(db):
-    """종단 — `ingest_report` 가 굳힌 뒤 과제 잇기가 돈다(업로드 · 번들 · 7-1 반입이 모두 이 자리를 지난다)."""
+    """종단 — `ingest_report` 가 굳힌 뒤 과제 잇기가 돈다(업로드 · 번들 · 7-1 반입이 모두 이 자리를 지난다). 과제코드로 적힌 반입은
+    인제스트 때 잇기가 같은 판정으로 그 과제의 판에 바로 잇고(`rule`), 반입 뒤 잇기는 이미 이어진 것으로 센다(11-12)."""
     from app.modules.reports import services as rsvc
     t = _tag()
     task, code = f"AL-{t}", f"ALC-{t}"
@@ -377,11 +381,15 @@ async def test_an_import_links_the_report_through_its_task_code(db):
         rep = await rsvc.ingest_report(db, s, filename="Test_001_report.html", raw=_SPHERE.read_bytes(),
                                        project=code, dev_rev="dv1")
         links = rep.auto_task_links
-        assert (links["scope"], links["reports"], links["linked"]) == ("reports", 1, 1), links
+        # 인제스트 때 잇기가 같은 판정으로 먼저 이었다 — 반입 뒤 잇기는 `already` 로 센다(11-12 결정. 예전엔 글자 그대로의
+        # 「과제코드@판」 에 먼저 잇고 반입 뒤 잇기가 옮겨 `linked` 1 이었다)
+        assert (links["scope"], links["reports"], links["linked"], links["already"]) == ("reports", 1, 0, 1), links
         assert [(x["code"], x["reports"], x["rev_source"]) for x in await onto.history(db, task)] == \
             [("dv1", [rep.id], "rule")]
-        # 인제스트 때 잇기(글자 그대로)가 먼저 만든 판에서 옮겨졌다 — 옛 판은 빈 채로 남는다
-        assert [(x["code"], x["reports"]) for x in await onto.history(db, code)] == [("dv1", [])]
+        assert (await onto.linked_revision(db, rep))["source"] == onto.SOURCE_RULE
+        # 「과제코드@판」 헛 판을 만들지 않는다(예전엔 먼저 만들고 옮겨, 빈 판이 반입마다 남았다)
+        assert await onto.history(db, code) == [] and await _rev(db, f"{code}@dv1") is None
+        assert await onto.mismatch(db, rep) is None, "과제코드로 바르게 이은 선에 「다르다」 경고가 떴다"
     finally:
         await _drop(db, u, s, keys=[task, code])
 
@@ -403,7 +411,7 @@ async def test_a_broken_link_never_undoes_the_ingest(db, monkeypatch):
         assert rep.n_cases > 0
         async with SessionLocal() as fresh:
             assert await fresh.get(ImpactReport, rep.id) is not None, "잇기 결함이 반입을 되감았다"
-        # 인제스트 때 잇기(수동 메타 글자 그대로)는 반입과 함께 굳었다
+        # 인제스트 때 잇기(허브가 모르는 이름이라 수동 메타 글자 그대로)는 반입과 함께 굳었다
         line = await onto.history(db, task)
         assert [(x["code"], x["reports"]) for x in line] == [("dv1", [rep.id])], line
     finally:
@@ -705,7 +713,7 @@ async def test_relinking_by_hand_clears_the_record(db):
         r = await _rep(db, s, project=task, code="dv1")
         assert (await onto.auto_link_tasks(db, report_ids=[r.id]))["linked"] == 1
         assert (await onto.unlink_revision(db, r, by="kim@x"))["ok"]
-        # 기계는 막힌다 — 인제스트 때 잇기(수동 메타 글자 그대로)도
+        # 기계는 막힌다 — 인제스트 때 잇기 · 수동 메타 고침의 길(`link_from_eng_meta`)도
         refused = await onto.link_from_eng_meta(db, r)
         assert refused["ok"] is False and refused["error"] == "unlinked", refused
         # 사람이 손으로 같은 판에 다시 잇는다 — 기록이 지워지고, 되살린 선에 끊은 사람 · 때가 남지 않는다
@@ -984,3 +992,429 @@ async def test_the_admin_apply_is_refused_while_a_receive_holds_the_lock(db):
         assert r.status_code == 409 and "busy" in r.json()["message"], (r.status_code, r.text[:200])
     finally:
         await _drop(db, a, sa)
+
+
+
+# ── ⑦ 기계 잇기의 판정은 하나다(사용자 결정 11-12 「허브에 있으면 판정을 따른다」) ───────────────────────
+# 인제스트 때 잇기 · 수동 메타 고침(`link_from_eng_meta`)도 자동 잇기와 같은 판정을 따른다. 허브에서 풀리는 이름은 그 과제의 판에
+# `rule` 로 잇고, 엇갈리면 잇지 않고(있던 선은 그대로 둔다), 허브가 아예 모르는 이름만 예전처럼 글자 그대로 `eng_meta` 로 잇는다.
+# 「허브가 아는 이름」 은 거울에 있는 과제를 가리키는 원천이 하나라도 있는 이름이다 — 끝이 거울에 없는 우리 별칭만 맞는 이름은 허브가
+# 모르는 이름이다(거울이 빈 박스에도 별칭은 생길 수 있다 — 그 박스의 반입 동작이 바뀌면 안 된다).
+# 예전엔 두 길이 따로 봤다 — 반입마다 「과제코드@판」 헛 판이 남고, 값이 같은 메타 저장이 rule 선을 그리로 되돌리고, 엇갈린 이름을
+# 글자 그대로 조용히 이었다(재검토 11-12 rr2 · rr2c).
+
+async def _edge_of(db, rid: str) -> OntoRelation:
+    """이 리포트의 살아 있는 선 하나(표시 — `link_source` · `linked_at` — 를 견줄 때 쓴다)."""
+    return (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+        OntoRelation.src_key == rid, OntoRelation.deleted.is_(False))
+        .execution_options(populate_existing=True))).scalar_one()
+
+
+async def test_a_name_the_hub_does_not_know_is_linked_literally_as_before(db):
+    """허브가 모르는 이름(거울에 과제명 · 과제코드 · 옛 과제명 · 별칭 · 이름 어느 것으로도 없다) — 예전처럼 수동 메타 글자 그대로 잇고
+    `eng_meta` 로 적는다. 허브 없는 박스(dev)와 허브에 아직 없는 과제는 동작이 그대로다."""
+    t = _tag()
+    free = f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        r = await _rep(db, s, project=free, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] and got["key"] == f"{free}@dv1" and got["task_unverified"], got
+        assert await _linked(db, r.id) == [f"{free}@dv1"]
+        assert (await _edge_of(db, r.id)).properties["link_source"] == "eng_meta"
+        assert (await _rev(db, f"{free}@dv1")).properties["rev_source"] == "eng_meta"
+        assert (await onto.linked_revision(db, r))["source"] == "eng_meta"
+        assert await onto.mismatch(db, r) is None
+        after = await onto.auto_link_tasks(db, report_ids=[r.id])       # 반입 뒤 잇기는 못 붙임으로 세기만 한다 — 선은 그대로다
+        assert (after["linked"], after["already"], after["unmatched"]) == (0, 0, 1), after
+        assert await _linked(db, r.id) == [f"{free}@dv1"]
+    finally:
+        await db.rollback()
+
+
+async def test_a_task_code_name_links_straight_to_its_task_and_a_same_value_edit_changes_nothing(db):
+    """과제코드로 적힌 리포트 — 인제스트 때 잇기가 자동 잇기와 같은 판정으로 그 과제의 판에 바로 잇는다(`rule`). 「과제코드@판」 헛 판을
+    만들지 않고, 반입 뒤 잇기는 `already` 로 세고, 값이 같은 메타 저장(화면에서 「저장」 만 누름)은 선도 그 표시(`linked_at`)도 판도
+    건드리지 않는다(재검토 11-12 rr2 — 예전엔 글자 그대로 `과제코드@판` 을 먼저 만들었고, 값이 같은 저장이 rule 선을 그리로 되돌렸다)."""
+    from types import SimpleNamespace
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)      # 빨간 실행에서도 치울 수 있게 id 를 먼저 적어 둔다
+    try:
+        await _task(db, task, task_code=code)
+        await db.commit()
+        r = await _rep(db, s, project=code, code="dv1", commit=True)
+        await rsvc._link_revision(db, r)                           # ingest_report 의 차례 — 넣고 커밋 전에 잇기
+        await db.commit()
+        assert await _linked(db, r.id) == [f"{task}@dv1"], "과제코드로 풀리는 이름을 글자 그대로 이었다"
+        assert await _rev(db, f"{code}@dv1") is None, "「과제코드@판」 헛 판을 만들었다"
+        before = dict((await _edge_of(db, r.id)).properties)
+        rev_before = dict((await _rev(db, f"{task}@dv1")).properties)
+        assert (before["link_source"], rev_before["rev_source"]) == (onto.SOURCE_RULE, onto.SOURCE_RULE), (before, rev_before)
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])    # 반입 뒤 잇기 — 이미 이어져 있다
+        await db.commit()
+        assert (got["linked"], got["already"]) == (0, 1), got
+
+        r = await rsvc.update_report_meta(db, r, dev_rev="dv1")    # 값이 같은 고침
+        assert await _linked(db, r.id) == [f"{task}@dv1"], "값이 같은 메타 고침이 선을 옮겼다"
+        assert dict((await _edge_of(db, r.id)).properties) == before, "값이 같은 메타 고침이 선의 표시를 다시 찍었다"
+        assert dict((await _rev(db, f"{task}@dv1")).properties) == rev_before, "값이 같은 메타 고침이 판을 다시 썼다"
+        assert await _rev(db, f"{code}@dv1") is None
+        assert await onto.mismatch(db, r) is None, "과제코드로 바르게 이어진 선을 어긋남으로 말했다"
+    finally:
+        await _drop(db, *mine, keys=[task, code])
+
+
+async def test_an_alias_line_stays_when_a_hub_task_later_takes_the_alias_text(db):
+    """사람이 별칭 X → A 를 적었고 리포트가 X 로 들어와 A 의 판에 이어졌다. 나중에 허브가 key 가 X 인 과제를 내면 그 이름은 엇갈림
+    (후보)이 된다 — 자동 잇기도 값이 같은 메타 저장도 선을 X 의 판으로 옮기지 않는다(재검토 11-12 rr2c — 예전엔 「저장」 한 번이
+    글자 그대로 X@판으로 옮겼다). 엇갈린 동안 화면은 「다르다」 로 말한다 — 사람이 고른다."""
+    from types import SimpleNamespace
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    a, x = f"AL-{t}", f"ALX-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
+    try:
+        await _task(db, a)
+        assert (await onto.confirm_alias(db, alias=x, key=a, by="kim@x"))["ok"]
+        await db.commit()
+        r = await _rep(db, s, project=x, code="dv1", commit=True)
+        await rsvc._link_revision(db, r)
+        await db.commit()
+        assert await _linked(db, r.id) == [f"{a}@dv1"], "별칭으로 풀리는 이름을 글자 그대로 이었다"
+        assert await _rev(db, f"{x}@dv1") is None
+        assert await onto.mismatch(db, r) is None, "별칭으로 바르게 이어진 선을 어긋남으로 말했다"
+
+        await _task(db, x)                                         # 나중에 허브가 같은 글자의 과제를 낸다(R8)
+        await db.commit()
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        await db.commit()
+        assert (got["linked"], got["already"], got["candidates"]) == (0, 0, 1), got
+        r = await rsvc.update_report_meta(db, r, dev_rev="dv1")    # 값이 같은 저장
+        assert await _linked(db, r.id) == [f"{a}@dv1"], "메타 저장 한 번이 별칭으로 이은 리포트를 같은 글자의 허브 과제로 옮겼다"
+        assert await _rev(db, f"{x}@dv1") is None, "엇갈린 이름의 판을 만들었다"
+        assert (await onto.mismatch(db, r))["kind"] == "differs"
+    finally:
+        await _drop(db, *mine, keys=[a, x])
+
+
+async def test_a_name_that_disagrees_is_not_linked_and_shows_as_a_candidate(db):
+    """엇갈린 이름(사람이 붙인 별칭 X → A 와 key 가 X 인 허브 과제) — 인제스트 때 잇기도 잇지 않는다(`undecided`). 아무것도 쓰지
+    않는다 — 판도 선도 만들지 않고, 미리 보기에 후보(엇갈림)로 보여 사람이 고른다(재검토 11-12 rr2 — 예전엔 글자 그대로 X 의 판에
+    조용히 이었다)."""
+    t = _tag()
+    a, x = f"AL-{t}", f"ALX-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, a)
+        await _task(db, x)
+        assert (await onto.confirm_alias(db, alias=x, key=a, by="kim@x"))["ok"]
+        r = await _rep(db, s, project=x, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] is False and got["error"] == "undecided", got
+        assert await _linked(db, r.id) == [], "엇갈린 이름을 조용히 이었다"
+        assert await _rev(db, f"{x}@dv1") is None and await _rev(db, f"{a}@dv1") is None, "잇지도 않을 판을 만들었다"
+        after = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (after["linked"], after["already"], after["candidates"]) == (0, 0, 1), after
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id])))["plan"][0]
+        assert entry["verdict"] == "proposal" and entry["ambiguous"], entry
+        assert {a, x} <= {c["key"] for c in entry["candidates"]}, entry
+    finally:
+        await db.rollback()
+
+
+@needs_sphere
+async def test_an_import_with_an_undecided_name_makes_no_line_and_counts_a_candidate(db):
+    """종단 — 과제코드가 두 과제에 걸린 이름으로 반입한다. 리포트는 들어오고 수동 메타도 그대로 저장되지만 선은 없다. 반입 응답의
+    `task_links` 는 후보 하나로 세고, 미리 보기는 그 이름을 후보(엇갈림)로 보인다."""
+    from types import SimpleNamespace
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    b, c, code = f"ALB-{t}", f"ALD-{t}", f"ALC-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
+    try:
+        await _task(db, b, task_code=code)
+        await _task(db, c, task_code=code)
+        await db.commit()
+        rep = await rsvc.ingest_report(db, s, filename="Test_001_report.html", raw=_SPHERE.read_bytes(),
+                                       project=code, dev_rev="dv1")
+        assert rep.n_cases > 0 and rep.eng_meta["project"] == code, "잇지 못한다고 반입 · 수동 메타를 잃었다"
+        links = rep.auto_task_links
+        assert (links["reports"], links["linked"], links["already"], links["candidates"]) == (1, 0, 0, 1), links
+        assert await _linked(db, rep.id) == [], "엇갈린 이름을 반입 때 조용히 이었다"
+        for k in (b, c, code):
+            assert await _rev(db, f"{k}@dv1") is None, f"잇지도 않을 판 {k}@dv1 을 만들었다"
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([rep.id])))["plan"][0]
+        assert entry["verdict"] == "proposal" and entry["ambiguous"], entry
+        assert await onto.mismatch(db, rep) is None                # 선이 없으면 어긋남도 없다
+    finally:
+        await _drop(db, *mine, keys=[b, c, code])
+
+
+async def test_a_metadata_edit_to_an_undecided_name_leaves_the_machine_line_where_it_is(db):
+    """기계가 이은 리포트의 과제를 엇갈린 이름으로 고친다 — 메타는 저장되고, 옛 기계 선은 옮기지도 떼지도 않는다(그 이름의 판도
+    만들지 않는다). 화면은 「수동 메타와 이어진 개정이 다르다」 로 말하고 미리 보기는 그 이름을 후보로 보인다 — 사람이 고른다."""
+    from types import SimpleNamespace
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    a, b, c, code = f"AL-{t}", f"ALB-{t}", f"ALD-{t}", f"ALC-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
+    try:
+        await _task(db, a)
+        await _task(db, b, task_code=code)
+        await _task(db, c, task_code=code)
+        await db.commit()
+        r = await _rep(db, s, project=a, code="dv1", commit=True)
+        await rsvc._link_revision(db, r)
+        await db.commit()
+        assert await _linked(db, r.id) == [f"{a}@dv1"]
+        before = dict((await _edge_of(db, r.id)).properties)
+
+        r = await rsvc.update_report_meta(db, r, project=code)
+        assert r.eng_meta["project"] == code, "메타 고침 자체는 저장된다"
+        assert await _linked(db, r.id) == [f"{a}@dv1"], "엇갈린 이름으로 고쳤는데 옛 기계 선을 옮기거나 뗐다"
+        assert dict((await _edge_of(db, r.id)).properties) == before
+        assert await _rev(db, f"{code}@dv1") is None, "엇갈린 이름의 판을 만들었다"
+        mm = await onto.mismatch(db, r)
+        assert mm["kind"] == "differs" and mm["linked"] == f"{a}@dv1", mm
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id])))["plan"][0]
+        assert entry["verdict"] == "proposal" and entry["ambiguous"], entry
+    finally:
+        await _drop(db, *mine, keys=[a, b, c, code])
+
+
+async def test_a_name_whose_only_match_is_an_alias_to_a_task_not_in_the_mirror_is_linked_literally(db):
+    """끝이 거울에 없는 우리 별칭**만** 맞는 이름(허브에서 지워짐 · 받은 적 없음)은 허브가 모르는 이름이다 — 인제스트 때 잇기는 예전처럼
+    글자 그대로 `eng_meta` 로 잇는다. 거울이 빈 박스(dev)에도 별칭은 생길 수 있다(`confirm_alias` 는 끝이 거울에 있는지 보지 않는다) —
+    그 박스의 반입 동작이 바뀌면 안 된다(사용자 결정 11-12 「허브 없는 박스는 동작이 그대로다」). 미리 보기는 여전히 `alias_missing`
+    으로 까닭을 보이고, 뒤이은 자동 잇기(반입 뒤 · 받기 뒤 — 같은 함수)는 그 선을 옮기지도 떼지도 다시 찍지도 않는다."""
+    t = _tag()
+    word, gone = f"별칭-{t}", f"AL-{t}"
+    try:
+        _, s = await _owner(db)
+        assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim@x"))["ok"]
+        r = await _rep(db, s, project=word, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] and got["key"] == f"{word}@dv1" and got["task_unverified"], got
+        assert await _linked(db, r.id) == [f"{word}@dv1"], "끝이 거울에 없는 별칭뿐인 이름을 예전처럼 글자 그대로 잇지 않았다"
+        edge = dict((await _edge_of(db, r.id)).properties)
+        assert edge["link_source"] == "eng_meta", edge
+        assert (await _rev(db, f"{word}@dv1")).properties["rev_source"] == "eng_meta"
+        assert await _rev(db, f"{gone}@dv1") is None, "거울에 없는 별칭의 끝으로 판을 만들었다"
+        assert await onto.mismatch(db, r) is None                   # 글자 그대로 이은 선은 어긋남이 아니다
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id])))["plan"][0]
+        assert entry["verdict"] != "links" and entry["alias_missing"] == gone, entry
+        after = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (after["linked"], after["already"], after["candidates"] + after["unmatched"]) == (0, 0, 1), after
+        assert await _linked(db, r.id) == [f"{word}@dv1"], "자동 잇기가 글자 그대로 이은 선을 옮기거나 뗐다"
+        assert dict((await _edge_of(db, r.id)).properties) == edge, "자동 잇기가 선의 표시를 다시 찍었다"
+        # 별칭의 끝이 거울에 오면(받기) 여느 늦게 풀리는 이름처럼 자동 잇기가 그 과제의 판으로 옮긴다 — 글자 그대로의 선은 막다른 길이 아니다
+        await _task(db, gone)
+        moved = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert moved["linked"] == 1 and await _linked(db, r.id) == [f"{gone}@dv1"], moved
+        assert (await _edge_of(db, r.id)).properties["link_source"] == onto.SOURCE_RULE
+        assert await onto.mismatch(db, r) is None
+    finally:
+        await db.rollback()
+
+
+async def test_a_dangling_alias_beside_a_hub_match_is_undecided_and_nothing_is_written(db):
+    """끝이 거울에 없는 우리 별칭과 거울의 과제를 가리키는 다른 원천(과제코드)이 **함께** 맞는다 — 허브가 아는 이름이고 둘이 엇갈린다.
+    인제스트 때 잇기도 자동 잇기와 같은 판정으로 잇지 않는다(`undecided` — 판도 선도 쓰지 않는다. 별칭만 맞을 때와 달리 글자 그대로
+    잇지도 않는다). 미리 보기는 그 과제를 후보로, 별칭의 끝을 `alias_missing` 으로 보인다 — 사람이 별칭을 떼거나 고른다."""
+    t = _tag()
+    task, word, gone = f"AL-{t}", f"ALC-{t}", f"ALG-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task, task_code=word)
+        assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim@x"))["ok"]
+        r = await _rep(db, s, project=word, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] is False and got["error"] == "undecided", got
+        assert await _linked(db, r.id) == [], "끝 없는 별칭과 엇갈린 이름을 이었다"
+        for k in (word, task, gone):
+            assert await _rev(db, f"{k}@dv1") is None, f"잇지도 않을 판 {k}@dv1 을 만들었다"
+        after = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (after["linked"], after["already"], after["candidates"]) == (0, 0, 1), after
+        entry = (await onto.plan_task_links(db, scope=ImpactReport.id.in_([r.id])))["plan"][0]
+        assert entry["verdict"] == "proposal" and entry["ambiguous"] and entry["alias_missing"] == gone, entry
+        assert [c["key"] for c in entry["candidates"] if c["rank"] == -1] == [task], entry
+    finally:
+        await db.rollback()
+
+
+async def test_a_receive_leaves_a_line_linked_literally_through_a_dangling_alias_where_it_is(db, hub_on, monkeypatch):
+    """받기 한 번을 끝까지 돌려도(층 1 받기 → 층 2 반영 → 커밋 → 받기 뒤 자동 잇기) 끝이 거울에 없는 별칭만 맞아 글자 그대로 이은 선은
+    그대로다 — 옮기지도 떼지도 다시 찍지도 않고 수로만 센다(자동 잇기는 그 이름을 잇지 않는다 — 판정 그대로). 받기가 그 별칭의 끝을
+    가져오면 그때 그 과제의 판으로 옮긴다(`rule`) — 같은 받기 길이 이 리포트를 정말 본다는 대조이기도 하다."""
+    from types import SimpleNamespace
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    word, gone, other = f"별칭-{t}", f"AL-{t}", f"ALO-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)      # 빨간 실행에서도 치울 수 있게 id 를 먼저 적어 둔다
+    runs: list[int] = []
+    try:
+        assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim@x"))["ok"]
+        await db.commit()
+        r = await _rep(db, s, project=word, code="dv1", commit=True)
+        rid = r.id
+        await rsvc._link_revision(db, r)                           # 반입 때 — 허브가 모르는 이름이라 글자 그대로
+        await db.commit()
+        assert await _linked(db, rid) == [f"{word}@dv1"]
+        before = dict((await _edge_of(db, rid)).properties)
+        assert before["link_source"] == "eng_meta", before
+        real = onto.auto_link_tasks
+
+        async def mine_only(sdb, *, report_ids=None):
+            assert report_ids is None
+            return await real(sdb, report_ids=[rid])               # 공유 DB 의 남의 리포트는 건드리지 않는다
+
+        monkeypatch.setattr(onto, "auto_link_tasks", mine_only)
+        monkeypatch.setattr(plm_sync, "sync_all", _fake_receive(other, f"ALOC-{t}"))    # 이 이름과 상관없는 과제를 받는다
+        first = await plm_sync.sync_once(client=object())
+        runs.append(first["run_id"])
+        assert first["result"] == "ok", first
+        links = first["task_links"]
+        assert (links["linked"], links["already"], links["candidates"] + links["unmatched"]) == (0, 0, 1), links
+        assert await _linked(db, rid) == [f"{word}@dv1"], "받기가 글자 그대로 이은 선을 옮기거나 뗐다"
+        assert dict((await _edge_of(db, rid)).properties) == before, "받기가 선의 표시를 다시 찍었다"
+
+        monkeypatch.setattr(plm_sync, "sync_all", _fake_receive(gone, f"ALGC-{t}"))     # 별칭의 끝이 거울에 온다
+        second = await plm_sync.sync_once(client=object())
+        runs.append(second["run_id"])
+        assert second["task_links"]["linked"] == 1, second["task_links"]
+        assert await _linked(db, rid) == [f"{gone}@dv1"]
+        assert (await _edge_of(db, rid)).properties["link_source"] == onto.SOURCE_RULE
+    finally:
+        await _drop(db, *mine, keys=[word, gone, other], runs=runs)
+
+
+async def test_a_line_resolved_by_task_code_or_alias_is_not_a_mismatch(db):
+    """수동 메타가 과제코드 · 별칭으로 적혀 있고 그 이름이 풀리는 과제의 판에 이어져 있으면 어긋남이 아니다 — 예전엔 글자만 견줘
+    「수동 메타와 이어진 개정이 다르다」 는 경고가 떴다. 판이 정말 다르면 여전히 `differs` 다."""
+    t = _tag()
+    task, code, word = f"AL-{t}", f"ALC-{t}", f"별칭-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task, task_code=code)
+        assert (await onto.confirm_alias(db, alias=word, key=task, by="kim@x"))["ok"]
+        by_code = await _rep(db, s, project=code, code="dv1")
+        by_alias = await _rep(db, s, project=word, code="dv2")
+        got = await onto.auto_link_tasks(db, report_ids=[by_code.id, by_alias.id])
+        assert got["linked"] == 2, got
+        assert await _linked(db, by_code.id) == [f"{task}@dv1"] and await _linked(db, by_alias.id) == [f"{task}@dv2"]
+        assert await onto.mismatch(db, by_code) is None, "과제코드로 바르게 이어진 선을 어긋남으로 말했다"
+        assert await onto.mismatch(db, by_alias) is None, "별칭으로 바르게 이어진 선을 어긋남으로 말했다"
+        by_code.eng_meta = {"project": code, "dev_revision": {"code": "pv2"}}     # 수동 메타가 다른 판을 말한다
+        await db.flush()
+        mm = await onto.mismatch(db, by_code)
+        assert mm["kind"] == "differs" and mm["linked"] == f"{task}@dv1", mm
+    finally:
+        await db.rollback()
+
+
+async def test_renamed_and_merged_names_are_still_reported_on_a_machine_line(db):
+    """허브가 과제명을 바꿨거나 합친 사실은 여전히 그대로 말한다(`renamed` · `merged`) — 「풀리는 과제의 판이면 어긋남이 아니다」 가 그
+    알림을 삼키지 않는다. 옛 과제명은 허브에서 풀리는 이름이라 `rule` 로 잇고, 합쳐 없어진 과제명은 허브가 풀어 주지 않는 이름이라
+    예전처럼 글자 그대로 잇는다(합친 과제는 알리고 사람이 옮긴다 — 10-30)."""
+    t = _tag()
+    a, b, m, n = f"AL-{t}", f"ALN-{t}", f"ALM-{t}", f"ALT-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, a)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": b, "label": f"과제 {b}", "status": "active", "updated_at": "T2",
+                                                      "renamed_from": a, "previous_keys": [a]}])
+        r = await _rep(db, s, project=a, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] and got["key"] == f"{b}@dv1", got
+        assert (await onto.linked_revision(db, r))["source"] == onto.SOURCE_RULE, "옛 과제명은 허브에서 풀리는 이름이다"
+        assert await _rev(db, f"{a}@dv1") is None
+        mm = await onto.mismatch(db, r)
+        assert mm and mm["kind"] == "renamed", mm
+
+        await _task(db, m)
+        await _task(db, n)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": m, "deleted": True, "merged_into": n, "status": "active",
+                                                      "updated_at": "T2"}])
+        r2 = await _rep(db, s, project=m, code="dv1")
+        got2 = await onto.link_from_eng_meta(db, r2)
+        assert got2["ok"] and got2["key"] == f"{m}@dv1", got2       # 합쳐 없어진 이름 — 글자 그대로(예전과 같다)
+        assert (await onto.linked_revision(db, r2))["source"] == "eng_meta"
+        moved = await onto.move_merged_task(db, m, by="admin@x")
+        assert moved["ok"], moved
+        assert await _linked(db, r2.id) == [f"{n}@dv1"]
+        mm2 = await onto.mismatch(db, r2)
+        assert mm2 and mm2["kind"] == "merged", mm2
+    finally:
+        await db.rollback()
+
+
+async def test_the_resolved_branch_still_refuses_a_confirmed_and_an_unlinked_report(db):
+    """풀리는 이름의 길도 `set_revision` 의 거절을 그대로 지난다 — 사람이 이 리포트를 다른 판에 확정했으면 `kept_manual`, 사람이
+    끊었으면 `unlinked`. 거절된 길은 판을 만들지 않는다."""
+    t = _tag()
+    task, code = f"AL-{t}", f"ALC-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task, task_code=code)
+        held = await _rep(db, s, project=code, code="dv1")
+        assert (await onto.set_revision(db, held, task_key=task, code="pv1", decided_by="kim@x", source="manual"))["ok"]
+        refused = await onto.link_from_eng_meta(db, held)
+        assert refused["ok"] is False and refused["error"] == "kept_manual", refused
+        assert await _linked(db, held.id) == [f"{task}@pv1"], "사람이 확정한 판에서 옮겼다"
+        assert await _rev(db, f"{task}@dv1") is None and await _rev(db, f"{code}@dv1") is None, "쓰지 않을 판을 만들었다"
+
+        cut = await _rep(db, s, project=code, code="dv2")
+        first = await onto.link_from_eng_meta(db, cut)
+        assert first["ok"] and first["key"] == f"{task}@dv2", first
+        assert (await onto.unlink_revision(db, cut, by="kim@x"))["ok"]
+        again = await onto.link_from_eng_meta(db, cut)
+        assert again["ok"] is False and again["error"] == "unlinked", again
+        assert await _linked(db, cut.id) == [], "사람이 끊은 리포트를 다시 이었다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_line_already_on_the_resolved_revision_is_left_untouched(db):
+    """「이미 바르게 이은 선은 그대로 둔다」 — 풀린 과제의 판에 이미 이어져 있으면 아무것도 쓰지 않는다(`already`). 선의 표시
+    (`link_source` · `linked_at`)도 판도 다시 찍지 않는다 — 허브가 모르던 때 글자 그대로 이은 선(`eng_meta`)이 나중에 같은 과제로
+    풀려도 그 표시 그대로다(자동 잇기의 `already` 와 같다)."""
+    t = _tag()
+    task, code, late = f"AL-{t}", f"ALC-{t}", f"ALL-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task, task_code=code)
+        r = await _rep(db, s, project=code, code="dv1")
+        first = await onto.link_from_eng_meta(db, r)
+        assert first["ok"] and first["key"] == f"{task}@dv1" and not first.get("already"), first
+        edge, rev = dict((await _edge_of(db, r.id)).properties), dict((await _rev(db, f"{task}@dv1")).properties)
+        assert (edge["link_source"], rev["rev_source"]) == (onto.SOURCE_RULE, onto.SOURCE_RULE), (edge, rev)
+        again = await onto.link_from_eng_meta(db, r)
+        assert again["ok"] and again["key"] == f"{task}@dv1" and again.get("already") is True, again
+        assert dict((await _edge_of(db, r.id)).properties) == edge, "이미 바르게 이은 선을 다시 찍었다"
+        assert dict((await _rev(db, f"{task}@dv1")).properties) == rev, "이미 바르게 이은 판을 다시 썼다"
+
+        old = await _rep(db, s, project=late, code="dv1")              # 허브가 아직 모르는 이름 — 글자 그대로(eng_meta)
+        lit = await onto.link_from_eng_meta(db, old)
+        assert lit["ok"] and lit["task_unverified"], lit
+        edge2 = dict((await _edge_of(db, old.id)).properties)
+        assert edge2["link_source"] == "eng_meta", edge2
+        await _task(db, late)                                          # 나중에 허브가 그 이름의 과제를 낸다 — 같은 판이다
+        seen = await onto.link_from_eng_meta(db, old)
+        assert seen["ok"] and seen["key"] == f"{late}@dv1" and seen.get("already") is True, seen
+        assert dict((await _edge_of(db, old.id)).properties) == edge2, "같은 판인데 선의 표시를 바꿨다"
+        assert (await _rev(db, f"{late}@dv1")).properties["rev_source"] == "eng_meta"
+    finally:
+        await db.rollback()
