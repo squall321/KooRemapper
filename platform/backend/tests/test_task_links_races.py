@@ -388,7 +388,8 @@ async def test_the_rename_loop_never_waits_on_a_report_while_holding_revisions_a
     side: dict = {}
 
     async def hooked(sdb, keys):
-        if list(keys) == [f"{old2}@dv1"] and "t2" not in side:  # 뒤 과제 옮기기의 첫 보기 — 앞 과제의 판 이름은 이미 쥐었다
+        # 뒤 과제 옮기기의 첫 보기(옛 key 와 옮겨 갈 key 를 함께 본다) — 앞 과제의 판 이름은 이미 쥐었다
+        if list(keys) == [f"{old2}@dv1", f"{new2}@dv1"] and "t2" not in side:
             async with SessionLocal() as s:                      # Z 가 뒤 과제의 판에 이어진다(커밋)
                 assert (await onto.set_revision(s, await s.get(ImpactReport, z), task_key=old2, code="dv1",
                                                 decided_by="kim@x", source="manual"))["ok"]

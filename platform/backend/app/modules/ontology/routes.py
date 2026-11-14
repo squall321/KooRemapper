@@ -373,7 +373,8 @@ def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
         # plan_task_links 로 자기 것을 본다.
         counts.pop("task_links", None)
         if isinstance(counts.get("reflected"), dict):
-            # 층 2 반영은 **수**만 — 옮긴 리포트 수 · 반영 실패의 예외 원문(`error`) · 끊은 줄(`dropped`)은 관리자에게만(재검토 11-12)
+            # 층 2 반영은 **수**만 — 옮긴 리포트 수 · 반영 실패의 예외 원문(`error`) · 끊은 줄과 접을 때 남는 판에 못 옮긴 앞 판 줄
+            # (`dropped`)은 관리자에게만(재검토 11-12 · 11-14)
             counts["reflected"] = {k: v for k, v in counts["reflected"].items() if k in _REFLECTED_COUNTS}
     out = {"id": r.id, "started_at": r.started_at, "finished_at": r.finished_at, "mode": r.mode,
            "allow_shrink": r.allow_shrink, "trigger": r.trigger, "result": r.result, "revision": r.revision,
@@ -418,8 +419,9 @@ async def sync_state(
     읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
     수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 적용 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
     마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
-    ★오류 원문은 모두 시스템 관리자에게만이다(재검토 11-12) — 마지막 실행의 사유 줄 · `error` · 층 2 반영의 `error` · 끊은 줄(일반
-    사용자는 반영 수만 · `problem_count`), 타입 줄의 `last_error`(허브가 준 원문 — 일반 사용자는 `last_status` 까지).
+    ★오류 원문은 모두 시스템 관리자에게만이다(재검토 11-12) — 마지막 실행의 사유 줄 · `error` · 층 2 반영의 `error` · 끊은 줄과 접을 때
+    남는 판에 못 옮긴 앞 판 줄(`dropped` — 일반 사용자는 반영 수만 · `problem_count`), 타입 줄의 `last_error`(허브가 준 원문 — 일반
+    사용자는 `last_status` 까지).
 
     ★멈춘 타입(SRC-11) — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖인데 거울에 남은 타입은 타입 줄에 `stopped`
     (+ `stopped_why`)를 달고 `problems` 에 한 줄 싣는다. 타입 줄의 `last_status` 는 마지막으로 받았을 때의 기록이라 그대로 둔다 —

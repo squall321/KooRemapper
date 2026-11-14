@@ -1887,10 +1887,10 @@ async def ontology_sync_state(ctx: Context) -> dict:
     """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
     '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패.
     사유 수는 `last_run.problem_count` 다. ★오류 원문은 **시스템 관리자에게만** 온다 — 사유 줄(`last_run.problems` — 공개 안 된 타입 ·
-    「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄
-    (`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반 사용자에게는 빈 목록 · null 이고
-    `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` · `merged_waiting` · `deferred` — 리포트를
-    누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다.
+    「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄과
+    같은 판으로 접을 때 남는 판에 못 옮긴 앞 판 줄(`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반
+    사용자에게는 빈 목록 · null 이고 `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` ·
+    `merged_waiting` · `deferred` — 리포트를 누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다.
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는

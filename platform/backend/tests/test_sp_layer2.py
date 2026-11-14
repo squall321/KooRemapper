@@ -168,6 +168,165 @@ async def test_an_old_line_on_a_persons_revision_reads_as_a_persons_line(db):
         await db.rollback()
 
 
+async def test_a_fold_keeps_what_a_person_decided(db):
+    """A 가 B 로 바뀌었는데 B 에 같은 코드의 **기계 판**이 이미 있다(받기 전에 새 이름으로 반입이 왔다 · 미뤄진 옮기기 사이에 잇기가
+    돌았다). 접을 때 남는 판이 사람이 정한 것(누가 · 언제 · 메모 · 앞 판)을 받고, 사람이 이은 옛 선은 사람 선으로 남는다 — 예전엔 남는
+    판이 기계 판 그대로라 다음 자동 잇기가 사람의 옛 선을 옮겼다(재검토 11-14 F-01)."""
+    t = _tag()
+    a, b, c = f"L2A-{t}", f"L2B-{t}", f"L2C-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        await _task(db, c)
+        r_prev, r_h, r_m = _report(), _report(), _report()
+        prev = await _rev(db, r_prev, a, "pv1")
+        await _rev(db, r_h, a, "dv1", supersedes=prev, note="사람이 정했다")
+        assert (await _machine(db, r_m, b, "dv1"))["ok"]
+        await _legacy(db, r_h)                           # 둘 다 운영 main 이 쓴 꼴 — 표시가 없다
+        await _legacy(db, r_m)
+        was = dict((await _rev_obj(db, f"{a}@dv1")).properties)
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["collapsed"] >= 1 and not got["deferred"], got
+
+        kept = (await _rev_obj(db, f"{b}@dv1")).properties
+        assert [kept.get(k) for k in ("rev_source", "decided_by", "decided_at", "note")] == \
+               ["manual", "t@x", was["decided_at"], "사람이 정했다"], kept
+        line = {x["code"]: x for x in await onto.history(db, b)}
+        assert line["dv1"]["supersedes"] == f"{b}@pv1", "앞 판 선이 접힌 판에 남았다"
+        assert sorted(line["dv1"]["reports"]) == sorted([r_h.id, r_m.id]), line
+        # 사람의 옛 선은 사람 선으로 읽히고, 남는 판에 있던 기계의 옛 선은 기계 선 그대로다
+        assert (await onto.linked_revision(db, r_h))["source"] == "manual"
+        assert (await onto.linked_revision(db, r_m))["source"] == "eng_meta"
+        assert (await _machine(db, r_h, c, "dv2", onto.SOURCE_RULE)).get("error") == "kept_manual"
+        assert (await _machine(db, r_m, c, "dv2", onto.SOURCE_RULE))["ok"], "기계 선이 사람 선으로 굳었다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_machine_revision_folding_into_a_persons_keeps_its_old_line_a_machines(db):
+    """거꾸로 — A 쪽이 기계 판이고 B 쪽이 사람 판이다. 접으면 기계의 옛 선(표시 없음)이 사람 판에 얹힌다 — 예전엔 그때부터 사람 선으로
+    읽혀 자동 잇기가 다시는 못 옮겼다. 접기 전에 그 선에 기계가 이었다고 적는다(재검토 11-14 F-01 · F-02 의 뒷면)."""
+    t = _tag()
+    a, b, c = f"L2A-{t}", f"L2B-{t}", f"L2C-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        await _task(db, c)
+        r_m, r_h = _report(), _report()
+        assert (await _machine(db, r_m, a, "dv1"))["ok"]
+        await _rev(db, r_h, b, "dv1", note="B 쪽 사람")
+        await _legacy(db, r_m)
+        await _legacy(db, r_h)
+        was = dict((await _rev_obj(db, f"{b}@dv1")).properties)
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["collapsed"] >= 1 and not got["deferred"], got
+
+        kept = (await _rev_obj(db, f"{b}@dv1")).properties
+        assert [kept.get(k) for k in ("rev_source", "decided_by", "decided_at", "note")] == \
+               ["manual", "t@x", was["decided_at"], "B 쪽 사람"], kept
+        assert (await onto.linked_revision(db, r_m))["source"] == "eng_meta"
+        assert (await onto.linked_revision(db, r_h))["source"] == "manual"
+        assert (await _machine(db, r_h, c, "dv2", onto.SOURCE_RULE)).get("error") == "kept_manual"
+        assert (await _machine(db, r_m, c, "dv2", onto.SOURCE_RULE))["ok"], "기계 선이 사람 선으로 굳었다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_fold_of_two_persons_revisions_keeps_the_one_that_stays(db):
+    """둘 다 사람 판이면 남는 판의 것이 남는다(누가 · 메모 · 앞 판) — 접힌 판의 것은 그 판 행에 기록으로 남는다. 옛 선은 양쪽 다
+    사람 선이라 적을 것이 없다."""
+    t = _tag()
+    a, b = f"L2A-{t}", f"L2B-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        r_a1, r_a2, r_b1, r_b2 = _report(), _report(), _report(), _report()
+        a1 = await _rev(db, r_a1, a, "dv1")
+        assert (await onto.set_revision(db, r_a2, task_key=a, code="dv2", source="manual", decided_by="a@x",
+                                        note="A 쪽", supersedes=a1))["ok"]
+        b1 = await _rev(db, r_b1, b, "pv1")
+        assert (await onto.set_revision(db, r_b2, task_key=b, code="dv2", source="manual", decided_by="b@x",
+                                        note="B 쪽", supersedes=b1))["ok"]
+        await _legacy(db, r_a2)
+        await _legacy(db, r_b2)
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["revisions"] >= 1 and got["collapsed"] >= 1 and not got["deferred"], got
+
+        kept = (await _rev_obj(db, f"{b}@dv2")).properties
+        assert (kept.get("rev_source"), kept.get("decided_by"), kept.get("note")) == ("manual", "b@x", "B 쪽"), kept
+        folded = (await _rev_obj(db, f"{a}@dv2")).properties
+        assert (folded.get("decided_by"), folded.get("note")) == ("a@x", "A 쪽"), folded
+        line = {x["code"]: x for x in await onto.history(db, b)}
+        assert line["dv2"]["supersedes"] == b1, "남는 판의 앞 판이 바뀌었다"
+        ahead = [e.dst_key for e in await _our_edges(db, onto.REL_SUPERSEDES, src_key=f"{b}@dv2")]
+        assert ahead == [b1], "남는 판에 앞 판 선이 둘이 됐다"
+        assert f"{a}@dv2 → {b}@dv1" in got["dropped"], f"남는 판으로 못 옮긴 앞 판 선을 알리지 않았다: {got['dropped']}"
+        for rep in (r_a2, r_b2):
+            mine = await onto.linked_revision(db, rep)
+            assert (mine["key"], mine["source"]) == (f"{b}@dv2", "manual"), mine
+            assert (await _our_edges(db, onto.REL_MEASURED, src_key=rep.id))[0].properties is None, "옛 선에 뭔가 적었다"
+    finally:
+        await db.rollback()
+
+
+async def test_a_fold_of_two_machine_revisions_writes_nothing_on_the_old_lines(db):
+    """둘 다 기계 판이면 옛 선에 아무것도 적지 않는다 — 누가 이었는지 모르는 선은 모르는 채로 둔다(적는 것은 접어서 뜻이 바뀔
+    때뿐이다)."""
+    t = _tag()
+    a, b, c = f"L2A-{t}", f"L2B-{t}", f"L2C-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        await _task(db, c)
+        r1, r2 = _report(), _report()
+        assert (await _machine(db, r1, a, "dv1"))["ok"]
+        assert (await _machine(db, r2, b, "dv1"))["ok"]
+        await _legacy(db, r1)
+        await _legacy(db, r2)
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["collapsed"] >= 1 and not got["deferred"], got
+
+        assert (await _rev_obj(db, f"{b}@dv1")).properties.get("rev_source") == "eng_meta"
+        for rep in (r1, r2):
+            mine = await onto.linked_revision(db, rep)
+            assert (mine["key"], mine["source"]) == (f"{b}@dv1", None), mine
+            assert (await _machine(db, rep, c, "dv2", onto.SOURCE_RULE))["ok"]
+    finally:
+        await db.rollback()
+
+
+async def test_a_fold_carries_the_line_to_a_previous_revision_that_already_moved(db):
+    """앞 판이 먼저 옮겨진 차례(key 차례 — dv1 다음 dv2)에서도 앞 판 선이 남는 판으로 간다 — 그때 앞 판은 이미 새 이름이다."""
+    t = _tag()
+    a, b = f"L2A-{t}", f"L2B-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        r1, r2, r_m = _report(), _report(), _report()
+        first = await _rev(db, r1, a, "dv1")
+        await _rev(db, r2, a, "dv2", supersedes=first)
+        assert (await _machine(db, r_m, b, "dv2"))["ok"]
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["revisions"] >= 1 and got["collapsed"] >= 1 and not got["deferred"], got
+        assert not [d for d in got["dropped"] if t in d], got["dropped"]
+
+        line = {x["code"]: x for x in await onto.history(db, b)}
+        assert line["dv2"]["supersedes"] == f"{b}@dv1", line
+        assert await onto._chain_keys(db, f"{b}@dv2") == [f"{b}@dv2", f"{b}@dv1"]
+    finally:
+        await db.rollback()
+
+
 async def test_a_reused_old_key_is_not_resolved_away(db):
     """A→B 로 바뀐 뒤 허브가 A 라는 **새** 과제를 만들면 A 는 지금 key 다 — 옛 → 새 로 풀면 남의 개정을 옮긴다."""
     t = _tag()
@@ -273,6 +432,35 @@ async def test_a_merge_into_a_gone_task_is_refused(db):
         got = await onto.move_merged_task(db, a)
         assert not got["ok"] and got["error"] == "target_gone", got
         assert [x["code"] for x in await onto.history(db, a)] == ["dv1"], "거절했는데 옮겼다"
+    finally:
+        await db.rollback()
+
+
+async def test_moving_a_merged_task_keeps_a_persons_old_line_a_persons(db):
+    """합친 과제를 관리자가 옮길 때도 같다 — 받는 과제에 같은 코드의 기계 판이 있으면 사람이 정한 것이 그 판으로 가고, 사람의 옛
+    선은 사람 선으로 남는다. 예전엔 기계 판에 표시 없이 얹혀 다음 자동 잇기가 옮겼다(재검토 11-14 F-02)."""
+    t = _tag()
+    a, b, c = f"L2A-{t}", f"L2B-{t}", f"L2C-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        await _task(db, c)
+        r_h, r_m = _report(), _report()
+        await _rev(db, r_h, a, "dv1", note="사람이 정했다")
+        assert (await _machine(db, r_m, b, "dv1"))["ok"]
+        await _legacy(db, r_h)
+        await _legacy(db, r_m)
+        await _hub(db, onto.TYPE_TASK, {"key": a, "deleted": True, "merged_into": b, "updated_at": "T2"})
+
+        got = await onto.move_merged_task(db, a, by="admin@x")
+        assert got["ok"] and (got["collapsed"], got["reports"]) == (1, 1), got
+        kept = (await _rev_obj(db, f"{b}@dv1")).properties
+        assert (kept.get("rev_source"), kept.get("decided_by"), kept.get("note")) == ("manual", "t@x", "사람이 정했다"), kept
+        mine = await onto.linked_revision(db, r_h)
+        assert (mine["key"], mine["source"]) == (f"{b}@dv1", "manual"), mine
+        assert (await onto.linked_revision(db, r_m))["source"] == "eng_meta"
+        assert (await _machine(db, r_h, c, "dv2", onto.SOURCE_RULE)).get("error") == "kept_manual"
+        assert (await _machine(db, r_m, c, "dv2", onto.SOURCE_RULE))["ok"], "기계 선이 사람 선으로 굳었다"
     finally:
         await db.rollback()
 

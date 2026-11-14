@@ -1404,13 +1404,48 @@ async def _reports_on(db, keys: list[str]) -> list[str]:
         OntoRelation.deleted.is_(False)))).scalars().all()))
 
 
+async def _prev_of(db, key: str) -> str:
+    """이 판의 앞 판 key(살아 있는 `supersedes` 선 — 없으면 빈 문자열). `_chain_keys` 와 같은 자리를 읽는다."""
+    row = (await db.execute(select(OntoRelation).where(
+        OntoRelation.relation == REL_SUPERSEDES, OntoRelation.src_type == TYPE_REVISION,
+        OntoRelation.src_key == key, OntoRelation.deleted.is_(False)))).scalars().first()
+    return row.dst_key if row else ""
+
+
+async def _stamp_old_machine_lines(db, key: str) -> None:
+    """이 (기계) 판에 이어진 **옛 선**(누가 이었는지 `link_source` 가 없는 살아 있는 리포트 선)에 `eng_meta` 를 적는다 — 사람 판과
+    접히면 남는 판이 사람 판이라, 표시 없는 선이 그때부터 사람 선으로 읽힌다(`_human_link` 의 옛 선 규칙 — 재검토 11-14 F-01 · F-02).
+
+    표시를 안 적던 때(운영 main)의 기계 길은 인제스트 · 메타 고침의 글자 그대로 잇기 하나였고, 사람이 확정하면 그 판이 사람 판이
+    됐다(기계가 다시 지나가도 사람 판 그대로다) — 기계 판에 남은 표시 없는 선은 그 기계 길이 이은 것이다. 언제 이었는지는 모른다
+    (`linked_at` 은 적지 않는다). ★가리지 못하는 것 하나 — main 의 접기가 이미 기계 판으로 옮겨 놓은 사람 선은 여기서도 기계 선이다.
+    부르는 쪽이 그 리포트 행을 잠가 둔다(`move_task_revisions` 의 잠금 차례 ①).
+    """
+    await db.flush()
+    for e in (await db.execute(select(OntoRelation).where(
+            OntoRelation.relation == REL_MEASURED, OntoRelation.source == SOURCE_SELF,
+            OntoRelation.src_type == TYPE_REPORT, OntoRelation.dst_type == TYPE_REVISION,
+            OntoRelation.dst_key == key, OntoRelation.deleted.is_(False))
+            .execution_options(populate_existing=True))).scalars().all():
+        if not (e.properties or {}).get("link_source"):
+            e.properties = {**(e.properties or {}), "link_source": "eng_meta"}
+    await db.flush()
+
+
 async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", reason: str = "") -> dict:
     """과제 A 에 매달린 **우리 것**(개정 · 별칭)을 과제 B 로 옮긴다 — 식별자 바뀜(저절로)과 합침(관리자)이 함께 쓴다.
 
     개정 key 는 `<과제>@<코드>` 라 과제가 바뀌면 key 도 바뀐다 — 같은 개정 행의 key 만 바꾸고 선의 끝을 따라 옮긴다.
     ★B 에 같은 코드 개정이 이미 있으면 A 쪽 리포트 선(`measured_at`)과 A 쪽을 앞 판으로 둔 선만 B 개정으로 옮기고,
     A 쪽 개정은 지우지 않고 비활성(`merged_into`)으로 둔다 — 지우면 되돌릴 수 없다. 옮긴 사람 · 까닭은 개정 칸에 남긴다.
-    ★잠금 차례(다른 모든 길과 같다) — ① 옮길 판에 이어진 리포트 행(`lock_reports`) ② 판 이름(옛 key · 새 key — `lock_revision_names`)
+    ★그렇게 접을 때 **사람이 정한 것은 남는다**(재검토 11-14 F-01 · F-02) — A 쪽만 사람 판이면 남는 B 판이 사람이 정한 칸
+    (`rev_source` · `decided_by` · `decided_at` · `note`)을 받는다. 한쪽만 사람 판이면 기계 판 쪽의 옛 선(누가 이었는지 안 적힌 선)에
+    기계가 이었다고 먼저 적는다(`_stamp_old_machine_lines`) — 안 적으면 그 기계 선이 사람 판에 얹혀 사람 선으로 굳는다. 예전엔 반대로
+    사람의 옛 선이 기계 판에 얹혀 다음 자동 잇기가 옮겼다. A 쪽의 앞 판 선은 B 판에 앞 판이 없으면 B 판에 잇는다 — B 판에 다른 앞 판이
+    있거나 이으면 줄이 돌 때는 잇지 않고 `dropped` 에 적어 돌려준다(끊은 줄과 같은 자리 — 남는 판의 줄에서 빠진 것이다). `model` 은 B 판이
+    비어 있을 때만 받는다. 둘 다 사람 판이면 남는 판의 것이 남고, 접힌 판의 것은 그 판 행에 기록으로 남는다.
+    ★잠금 차례(다른 모든 길과 같다) — ① 옮길 판과 **옮겨 갈 자리의 판**에 이어진 리포트 행(`lock_reports` — 접으면 그 자리 판의 옛
+    선에도 적는다) ② 판 이름(옛 key · 새 key — `lock_revision_names`)
     ③ 이름을 쥔 뒤 판 행을 **새로 읽고**(기다리는 동안 사람이 판 칸을 고쳤을 수 있다 — 예전엔 잠그기 전에 읽은 판 객체로 덮어
     `rev_source` · `decided_by` · `note` 가 사라졌다, 재검토 11-12 rr6) 그새 이어진 리포트(늦게 온 선)도 잠근다. 판 이름을 쥔 뒤에는
     리포트를 기다리지 않는다(NOWAIT) — 늦게 온 리포트를 다른 트랜잭션이 쥐고 있거나 그새 옮길 판이 달라졌으면 **아무것도 쓰지 않고**
@@ -1422,17 +1457,21 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
     if not from_key or not to_key or from_key == to_key:
         return done
     first = await _task_revision_keys(db, [from_key])
+    # 옛 key 와 새 key — 리포트 행도 판 이름도 이 둘을 다 잠근다(접으면 새 key 판의 칸 · 옛 선에도 쓴다)
+    names = [k for k, _ in first] + [revision_key(to_key, c) for _, c in first]
     try:
-        held = await lock_reports(db, await _reports_on(db, [k for k, _ in first]))
-        await lock_revision_names(db, [k for k, _ in first] + [revision_key(to_key, c) for _, c in first])
+        held = await lock_reports(db, await _reports_on(db, names))
+        await lock_revision_names(db, names)
         revs = await _task_revisions(db, [from_key])
         if [r.key for r in revs] != [k for k, _ in first]:
             raise ReportsBusy("옮길 판이 그새 달라졌다")
-        await lock_reports(db, set(await _reports_on(db, [r.key for r in revs])) - held)
+        await lock_reports(db, set(await _reports_on(db, names)) - held)
     except ReportsBusy as exc:
         done["deferred"] = True
         done["detail"] = f"{exc} — 이번엔 옮기지 않았다"
         return done
+    # 이번에 함께 옮겨 가는 판의 옛 key → 새 key — 앞 판이 아직 옛 이름이어도(key 차례로 옮긴다) 같은 판인지 가릴 수 있다
+    going = {r.key: revision_key(to_key, _rev_code(r.key, r.properties)) for r in revs}
     for rev in revs:
         props = dict(rev.properties or {})
         code = _rev_code(rev.key, props)
@@ -1460,6 +1499,26 @@ async def move_task_revisions(db, from_key: str, to_key: str, *, by: str = "", r
             # B 에 같은 판이 있다 — 리포트와 「이것을 앞 판으로 둔 선」 만 그리로. A 쪽 개정은 비활성.
             if there.deleted:
                 there.deleted, there.merged_into = False, None
+            # ★사람이 정한 것은 남는다(재검토 11-14 F-01 · F-02). 차례가 요점이다 — 옛 선에 적기 → 남는 판의 칸 → 앞 판 선 → 선 옮기기.
+            tp = dict(there.properties or {})
+            mine_manual, there_manual = props.get("rev_source") == "manual", tp.get("rev_source") == "manual"
+            if mine_manual != there_manual:
+                # 한쪽만 사람 판 — 선이 섞이기 전에 기계 판 쪽의 옛 선에 기계가 이었다고 적는다. 남는 판은 어느 쪽이든 사람 판이 된다
+                await _stamp_old_machine_lines(db, new if mine_manual else old)
+            if mine_manual and not there_manual:
+                for k in ("rev_source", "decided_by", "decided_at", "note"):
+                    if props.get(k) is not None:
+                        tp[k] = props[k]
+            if props.get("model") and not tp.get("model"):
+                tp["model"] = props["model"]
+            there.properties = tp
+            prev, own = await _prev_of(db, old), await _prev_of(db, new)
+            if prev and going.get(prev, prev) != going.get(own, own):
+                if own or prev == new or new in await _chain_keys(db, prev):
+                    # 남는 판에 다른 앞 판이 있거나 이으면 줄이 돈다 — 잇지 않고 알린다(끊은 줄과 같은 자리로 돌려준다)
+                    done["dropped"].append(f"{old} → {prev}")
+                else:
+                    await _edge(db, REL_SUPERSEDES, TYPE_REVISION, new, TYPE_REVISION, prev)
             moved = await _repoint(db, old, new, incoming_only=True)
             rev.properties = props
             rev.deleted, rev.merged_into = True, new
@@ -1544,9 +1603,13 @@ async def reflect_after_sync(db) -> dict:
     if renamed:
         # 옮길 선이 달린 리포트 행을 **한꺼번에 · 한 번** 먼저 잠근다(아직 판 이름을 쥐지 않았다 — 기다려도 된다). 과제마다 옮기는 동안
         # 그새 새로 이어진 리포트는 기다리지 않고(판 이름을 쥐었다) 그 과제를 미룬다 — `deferred`, 다음 받기가 옮긴다(재검토 rr5).
-        # 판은 열만 읽는다 — 정체 맵에 옛 판 객체를 남기지 않는다(옮기기가 잠근 뒤 새로 읽는다).
-        keys = await _task_revision_keys(db, [old for old, _ in renamed])
-        await lock_reports(db, await _reports_on(db, [k for k, _ in keys]))
+        # 판은 열만 읽는다 — 정체 맵에 옛 판 객체를 남기지 않는다(옮기기가 잠근 뒤 새로 읽는다). 옮겨 갈 자리의 판(새 key)에 이어진
+        # 리포트도 함께 잠근다 — 접으면 그 판의 옛 선에도 적는다(`move_task_revisions` 의 잠금 차례 ①과 같은 범위).
+        names: list[str] = []
+        for old, new in renamed:
+            for k, code in await _task_revision_keys(db, [old]):
+                names += [k, revision_key(new, code)]
+        await lock_reports(db, await _reports_on(db, names))
     for old, new in renamed:
         got = await move_task_revisions(db, old, new, reason=MOVE_RENAME)
         if got["deferred"]:
