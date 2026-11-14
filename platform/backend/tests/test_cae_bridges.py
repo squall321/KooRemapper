@@ -1457,3 +1457,36 @@ async def test_a_package_listing_a_relation_twice_is_a_422_and_changes_nothing(d
         assert await _package_files(db, sid, rid) == files and _disk_files(uid, sid, rid) == disk
     finally:
         await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_a_422_that_names_package_keys_is_one_bounded_printable_line(db):
+    """422 본문은 꾸러미가 준 key 가 어떻든 찍히는 글자 한 줄 · 상한 안이다 — 겹친 관계의 까닭은 key 를 날것으로 실어 NUL · 줄바꿈 · 짝 없는
+    대리 문자가 응답에 그대로 나갔고, 2만 자 key 는 2만 자 본문이 됐다(검토 3차 11-14 결함 6b). 무슨 글자였는지는 풀어 쓴 꼴로 남는다."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    rid = rep.id
+    try:
+        pkg = _pkg()
+        part = next(o for o in pkg["objects"] if o["type"] == "cae_part")
+        side = next(r for r in pkg["relations"] if r["relation"] == "contact_side")
+        odd = "part/\x00줄\n바꿈\udcff/" + "k" * 20000
+        pkg["objects"].append({**part, "key": odd})
+        pkg["relations"] += [{**side, "dst": ["cae_part", odd]}, {**side, "dst": ["cae_part", odd]}]
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/reports/{rid}/cae",
+                             files={"file": ("report.ontology.json", json.dumps(pkg).encode(), "application/json")})
+        msg = r.json().get("message") or ""
+        assert r.status_code == 422 and "duplicate_relation" in msg, r.text[:400]
+        assert msg.isprintable() and len(msg) <= op.WHY_LIMIT + 40, (len(msg), msg[:300])
+        assert "part/\\x00줄\\n바꿈\\udcff/kkk" in msg and msg.endswith("한 번만 싣는다"), msg[:300]
+        assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
+    finally:
+        await _drop(db, u)

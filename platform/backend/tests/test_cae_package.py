@@ -213,6 +213,53 @@ def test_a_relation_listed_twice_is_refused_by_name():
     assert name(one) in msg and name(two) in msg, msg
 
 
+def _refusal(mutate, **kw) -> str:
+    pkg = copy.deepcopy(_pkg())
+    mutate(pkg)
+    with pytest.raises(op.OntoPackageError) as exc:
+        _check(pkg, **kw)
+    return str(exc.value)
+
+
+def _same_relation_twice(pkg, key):
+    """`key` 를 가진 파트를 하나 더 두고, 그 파트를 가리키는 같은 관계를 두 번 싣는다."""
+    side = next(r for r in pkg["relations"] if r["relation"] == "contact_side")
+    pkg["objects"].append({**copy.deepcopy(_obj(pkg, "cae_part")), "key": key})
+    pkg["relations"] += [{**copy.deepcopy(side), "dst": ["cae_part", key]} for _ in range(2)]
+
+
+def _same_object_twice(pkg, key):
+    big = {**copy.deepcopy(_obj(pkg, "cae_part")), "key": key}
+    pkg["objects"] += [big, copy.deepcopy(big)]
+
+
+def test_a_refusal_is_one_bounded_printable_line():
+    """까닭 문장은 꾸러미가 준 key · 값이 어떻든 찍히는 글자 한 줄 · 상한 안이다 — 그대로 422 본문 · 번들 `why` · 7-1 원장(JSONB) · 잡 경고에
+    실린다. 겹친 관계의 까닭은 key 를 날것으로 실어 NUL · 줄바꿈이 그대로 나갔고(7-1 원장 쓰기가 그 글자에 깨졌다), 2만 자 key 는 어느
+    거절에서나 2만 자 까닭이 됐다(검토 3차 11-14 결함 2e · 6b). 길면 가운데를 덜어 앞(어느 것)과 뒤(왜)를 남긴다."""
+    odd = _refusal(lambda p: _same_relation_twice(p, "part/\x00a\nb\udcff"))
+    assert odd.startswith("duplicate_relation") and odd.isprintable(), repr(odd)
+    assert "part/\\x00a\\nb\\udcff" in odd, odd          # 무슨 글자였는지는 풀어 쓴 꼴로 남는다
+    long = _refusal(lambda p: _same_relation_twice(p, "part/" + "k" * 20000))
+    assert len(long) <= op.WHY_LIMIT and long.startswith("duplicate_relation") and long.endswith("한 번만 싣는다"), long[:300]
+    older = _refusal(lambda p: _same_object_twice(p, "part/" + "k" * 20000))
+    assert len(older) <= op.WHY_LIMIT and older.startswith("cae_part 'part/kkk") and older.endswith("가 두 번 나온다"), older[:300]
+    name = _refusal(lambda p: p["source"]["html"].update(file="a\x00b\n.html"), html_sha256="f" * 64)
+    assert name.isprintable() and "이 리포트의 꾸러미가 아니다" in name, repr(name)
+
+
+def test_an_ordinary_refusal_reads_as_before():
+    """상한 안의 까닭은 한 글자도 바뀌지 않는다 — 실물 꾸러미의 key(가장 긴 것 35자)로 겹친 관계 일곱 곳을 말하는 문장이 그대로다."""
+    pkg = copy.deepcopy(_pkg())
+    pkg["relations"] += [copy.deepcopy(r) for r in pkg["relations"][:7]]
+    with pytest.raises(op.OntoPackageError) as exc:
+        _check(pkg)
+    msg = str(exc.value)
+    shown = " · ".join(f"{r['relation']} {r['src'][0]} {r['src'][1]} → {r['dst'][0]} {r['dst'][1]}" for r in pkg["relations"][:5])
+    assert msg == ("duplicate_relation — 같은 관계가 두 번 이상 나온다(7곳) — " + shown
+                   + " 외 2 — 만든 쪽은 같은 관계(이름 · 양 끝)를 한 번만 싣는다"), msg
+
+
 # ── 실물(다른 리포의 표본이 있을 때) ─────────────────────────────────────────
 
 @pytest.mark.skipif(not REAL.exists(), reason="KooD3plotReader 표본 없음")

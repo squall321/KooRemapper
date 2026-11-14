@@ -33,10 +33,25 @@ LOADED_TYPES = ("cae_campaign", "cae_part", "cae_contact", "cae_load_path", "cae
 SCENARIO_OF = {"sphere": "drop_all_angle", "impact": "impact_all_position", "deep": "single_run"}
 REPORT_TYPE = "impact_report"
 CAMPAIGN_REPORT = "campaign_report"
+WHY_LIMIT = 1000      # 까닭 한 줄의 상한(글자) — 꾸러미가 준 key · 값이 아무리 길어도 응답 · 원장 · 잡 경고가 부풀지 않는다
+
+
+def _one_line(text: str, limit: int = WHY_LIMIT) -> str:
+    """까닭을 찍히는 글자 한 줄 · `limit` 자 안으로 — 찍히지 않는 글자(NUL · 줄바꿈 · 짝 없는 대리 문자)는 `\\x00` 꼴로 풀어 쓰고, 길면
+    가운데를 덜어 앞(어느 것)과 뒤(왜)를 남긴다. 까닭은 422 본문 · 번들 `why` · 7-1 원장(JSONB) · 잡 경고에 그대로 실린다 — 날것의 NUL 은
+    JSONB 에 못 실려 7-1 원장 쓰기가 깨졌고, 2만 자 key 는 2만 자 까닭이 됐다(검토 3차 11-14 결함 2e · 6b)."""
+    text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii") for ch in text)
+    if len(text) <= limit:
+        return text
+    head = (limit - 3) * 2 // 3
+    return text[:head] + " … " + text[len(text) - (limit - 3 - head):]
 
 
 class OntoPackageError(ValueError):
-    """계약에 맞지 않는 꾸러미 — 까닭을 그대로 사람에게 보인다. 아무것도 싣지 않는다."""
+    """계약에 맞지 않는 꾸러미 — 까닭을 그대로 사람에게 보인다(찍히는 글자 한 줄 · `WHY_LIMIT` 자 안). 아무것도 싣지 않는다."""
+
+    def __init__(self, why: str = ""):
+        super().__init__(_one_line(str(why)))
 
 
 @lru_cache(maxsize=8)

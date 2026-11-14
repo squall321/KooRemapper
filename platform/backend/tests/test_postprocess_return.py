@@ -963,3 +963,31 @@ async def test_a_crash_in_the_package_step_is_recorded_and_warned(db, owner, slu
     assert j.status == "succeeded", j.error_summary
     assert j.external_ref["ontology"] == {"state": "failed", "why": "꾸러미 단계가 깨졌다 — RuntimeError: 꾸러미 단계가 깨졌다(시험)"}
     assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w for w in j.warnings or []), j.warnings
+
+
+@_aio
+@needs_sphere
+async def test_a_refusal_that_names_an_unprintable_key_is_still_recorded(db, owner, slurm, own_key):
+    """거절 까닭에 꾸러미의 key 가 실려도 원장에 남는다 — 겹친 관계의 key 에 NUL 이 있으면 예전에는 까닭이 그 글자를 날것으로 실어 원장(JSONB)
+    쓰기가 깨졌고, 잡은 표지도 경고도 없이 성공으로 끝났다(검토 3차 11-14 결함 2e). 2만 자 key 도 까닭을 부풀리지 않는다(6b)."""
+    from app.reports import onto_package as op
+    u, s = owner
+    raw = _SPHERE.read_bytes()
+    doc = json.loads(_package_for(raw))
+    part = next(o for o in doc["objects"] if o["type"] == "cae_part")
+    side = next(r for r in doc["relations"] if r["relation"] == "contact_side")
+    odd = "part/\x00줄\n바꿈/" + "k" * 20000
+    doc["objects"].append({**part, "key": odd})
+    doc["relations"] += [{**side, "dst": ["cae_part", odd]}, {**side, "dst": ["cae_part", odd]}]
+    pkg = json.dumps(doc).encode()
+    m = _manifest(raw)
+    m["reports"][0]["ontology"] = _onto_field(pkg)
+    slurm.manifest, slurm.files[REPORT], slurm.files[ONTO] = m, raw, pkg
+    j = await _scan_one(db, await _reserved(db, u, s))
+    assert j.status == "succeeded", j.error_summary
+    onto = (j.external_ref or {}).get("ontology")
+    assert onto and onto["state"] == "failed" and "duplicate_relation" in onto["why"], onto
+    assert onto["why"].isprintable() and len(onto["why"]) <= op.WHY_LIMIT + 40, (len(onto["why"]), onto["why"][:300])
+    assert any("해석 온톨로지 꾸러미를 싣지 못했다" in w and "duplicate_relation" in w for w in j.warnings or []), j.warnings
+    rid = j.external_ref["report_ids"][0]
+    assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
