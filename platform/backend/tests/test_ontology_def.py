@@ -111,6 +111,18 @@ def test_the_bridge_sources_are_in_the_cae_vocabulary_which_we_do_not_edit():
     assert not [r["slug"] for r in cae["relation_types"] if set(r.get("dst_type_slugs") or []) & hub_ends]
 
 
+def test_the_bridge_descriptions_state_the_rule_the_matcher_runs():
+    """`indicates` · `follows_method` 의 설명은 허브에 실린다 — 규칙 선을 말하는 글이 지금 견줌(`bridges.match`)과 같아야 한다(검토 3차 12).
+    살아 있는 객체가 정하고 그만 쓴 객체는 살아 있는 것이 하나도 안 맞을 때만 센다(사용자 결정 11-12). 과제 잇기와는 갈리는 자리가 있어
+    (bridges 머리말) 「과제 잇기의 정확과 같다」 고 하지 않는다. `maps_to` 는 공유 블록이라 규칙을 앱 문서로 넘긴다 — 여기서 보지 않는다."""
+    doc, _ = load(OURS)
+    rels = {r["slug"]: r for r in doc["relation_types"]}
+    for slug in ("indicates", "follows_method"):
+        text = rels[slug]["description"]
+        assert "살아 있는 코어 객체" in text and "그만 쓴(deprecated) 객체는 살아 있는 객체가 하나도 안 맞을 때만" in text, slug
+        assert "과제 잇기의" not in text, f"{slug} 설명이 과제 잇기와 같다고 아직 말한다"
+
+
 def test_the_revision_type_carries_what_the_plan_says():
     doc, _ = load(OURS)
     props = {p["key"] for p in doc["types"][0]["properties"]}
@@ -164,6 +176,8 @@ def test_the_revision_relations_share_names_with_stepforge_but_not_definitions()
         text = rels[slug]["description"]
         assert "다른 정의" in text and "cad_revision" in text and "맞춰야 한다" in text, (slug, text)
         assert "한 질의" not in text, f"{slug} 설명이 거둔 약속(한 질의로 두 앱)을 아직 한다"
+    kind = doc["types"][0]["description"]
+    assert "똑같이 쓴다" not in kind and "정의가 다르다" in kind, "타입 설명이 두 관계 이름을 아직 「똑같이 쓴다」 고 한다(검토 3차 12)"
 
 
 def test_the_revision_chain_cannot_loop():
