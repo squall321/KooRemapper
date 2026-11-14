@@ -1253,6 +1253,52 @@ async def test_a_dangling_alias_beside_a_hub_match_is_undecided_and_nothing_is_w
         await db.rollback()
 
 
+async def test_label_only_deprecated_and_deleted_names_follow_the_same_judgement_at_ingest(db):
+    """판정 함수를 같이 쓰니 「그렇게 된다」 고 읽지 않고 인제스트 때 잇기로 돌려 본다 — 자동 잇기가 가르는 나머지 갈래 넷.
+    ① 이름(label)만 같은 과제 — 허브가 아는 이름이지만 이름만으로는 잇지 않는다(`undecided`). ② 그만 쓴(deprecated) 과제 여럿이 같은
+    과제코드 — 못 정한다(`undecided`). ③ 그만 쓴 과제 하나뿐(살아 있는 과제는 안 맞는다) — 그 과제의 판에 `rule` 로 잇는다(예전엔
+    「과제코드@판」 헛 판). ④ 거울에서 지워진 과제만 맞는 이름 — 허브가 모르는 이름이라 예전처럼 글자 그대로(`eng_meta`)."""
+    t = _tag()
+    lab, d1, d2, dcode = f"AL-{t}", f"ALD1-{t}", f"ALD2-{t}", f"ALDC-{t}"
+    one, ocode, dead, xcode = f"ALO-{t}", f"ALOC-{t}", f"ALX-{t}", f"ALXC-{t}"
+
+    async def quiet(key: str, code: str) -> None:
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": key, "label": f"과제 {key}", "status": "deprecated",
+                                                      "updated_at": "T1", "properties": {"task_code": code}}])
+    try:
+        _, s = await _owner(db)
+        await _task(db, lab)                                        # 이름(label)은 「과제 <key>」 다
+        await quiet(d1, dcode)
+        await quiet(d2, dcode)
+        await quiet(one, ocode)
+        await _task(db, dead, task_code=xcode)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": dead, "deleted": True, "status": "active", "updated_at": "T2"}])
+
+        for name, why in ((f"과제 {lab}", "이름(label)만 같다"), (dcode, "그만 쓴 과제 여럿")):
+            r = await _rep(db, s, project=name, code="dv1")
+            got = await onto.link_from_eng_meta(db, r)
+            assert got["ok"] is False and got["error"] == "undecided", (why, got)
+            assert await _linked(db, r.id) == [], f"{why} — 이었다"
+            for k in (name, lab, d1, d2):
+                assert await _rev(db, f"{k}@dv1") is None, f"{why} — 잇지도 않을 판 {k}@dv1 을 만들었다"
+            after = await onto.auto_link_tasks(db, report_ids=[r.id])
+            assert (after["linked"], after["already"], after["candidates"] + after["unmatched"]) == (0, 0, 1), (why, after)
+
+        r3 = await _rep(db, s, project=ocode, code="dv1")
+        got3 = await onto.link_from_eng_meta(db, r3)
+        assert got3["ok"] and got3["key"] == f"{one}@dv1", got3
+        assert (await _edge_of(db, r3.id)).properties["link_source"] == onto.SOURCE_RULE
+        assert await _rev(db, f"{ocode}@dv1") is None, "과제코드 글자 그대로의 헛 판을 만들었다"
+
+        r4 = await _rep(db, s, project=xcode, code="dv1")
+        got4 = await onto.link_from_eng_meta(db, r4)
+        assert got4["ok"] and got4["key"] == f"{xcode}@dv1", got4
+        assert (await _edge_of(db, r4.id)).properties["link_source"] == "eng_meta", "지워진 과제만 맞는 이름을 판정으로 이었다"
+        assert await _rev(db, f"{dead}@dv1") is None
+    finally:
+        await db.rollback()
+
+
 async def test_a_receive_leaves_a_line_linked_literally_through_a_dangling_alias_where_it_is(db, hub_on, monkeypatch):
     """받기 한 번을 끝까지 돌려도(층 1 받기 → 층 2 반영 → 커밋 → 받기 뒤 자동 잇기) 끝이 거울에 없는 별칭만 맞아 글자 그대로 이은 선은
     그대로다 — 옮기지도 떼지도 다시 찍지도 않고 수로만 센다(자동 잇기는 그 이름을 잇지 않는다 — 판정 그대로). 받기가 그 별칭의 끝을
