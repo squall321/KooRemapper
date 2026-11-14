@@ -576,6 +576,20 @@ async def test_a_broken_link_after_a_receive_keeps_what_was_received(db, hub_on,
         await _drop(db, u, s, keys=[task, code], runs=runs)
 
 
+async def test_a_database_error_in_the_link_after_a_receive_is_recorded_in_the_short_form(db, monkeypatch):
+    """받기 뒤 잇기(`plm_sync._link_tasks`)가 DB 쪽에서 깨지면 돌려주는 `error` 는 짧은 꼴(「클래스: 한 줄」)이다 — 그 글이 실행 기록
+    `counts.task_links.error` 와 사유 줄 「과제 잇기 실패 — …」 에 그대로 실린다. SQL 문 · 매개변수 값 · 배경 링크는 싣지 않는다(전문은
+    서버 로그에 — 재검토 11-12. SRC-09~11 재검토 M8c — 전문으로 되돌려도 초록이었다)."""
+    from sqlalchemy import text as sql
+
+    async def broken(sdb, **_kw):
+        await sdb.execute(sql("select 1/0 as rr_short_error_probe where (:v)::text <> ''"), {"v": "rr_short_error_value"})
+
+    monkeypatch.setattr(onto, "auto_link_tasks", broken)
+    got = await plm_sync._link_tasks(db)
+    assert got == {"scope": "all", "error": "DBAPIError: DivisionByZeroError: division by zero"}, got
+
+
 # ── ④ 받기 뒤 수는 관리자에게만 ──────────────────────────────────────────────
 
 async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
@@ -1265,6 +1279,37 @@ async def test_a_dangling_alias_beside_a_hub_match_is_undecided_and_nothing_is_w
         await db.rollback()
 
 
+async def test_the_revision_view_names_an_alias_whose_task_is_not_in_the_mirror(db):
+    """리포트의 개정 보기(`GET /reports/{id}/revision`)의 `alias_missing` — 그런 별칭이 없으면 칸은 있고 null 이다. 사람이 붙인 별칭이
+    거울에 없는 과제를 가리키면 그 과제의 key 다(화면이 「이 별칭 때문에 허브 과제에 잇지 않았다」 를 보인다 — SRC-09~11 재검토 M7g:
+    이 칸을 응답에서 빼도 초록이었다)."""
+    from types import SimpleNamespace
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    word, gone = f"별칭-{t}", f"AL-{t}"
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)      # 빨간 실행에서도 치울 수 있게 id 를 먼저 적어 둔다
+    try:
+        r = await _rep(db, s, project=word, code="dv1", commit=True)
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        h = {"authorization": f"Bearer {security.create_access_token(u.id)}"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            before = await c.get(f"{P}/reports/{r.id}/revision", headers=h)
+            assert before.status_code == 200, before.text[:200]
+            b = before.json()["data"]
+            assert "alias_missing" in b and b["alias_missing"] is None, b
+            assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim@x"))["ok"]
+            await db.commit()
+            after = await c.get(f"{P}/reports/{r.id}/revision", headers=h)
+        assert after.status_code == 200 and after.json()["data"]["alias_missing"] == gone, after.text[:300]
+    finally:
+        await _drop(db, *mine, keys=[gone])
+
+
 async def test_an_alias_to_a_name_the_hub_renamed_follows_the_rename_and_one_to_a_merged_task_does_not(db):
     """사람이 붙인 별칭의 끝이 허브가 이름을 바꾼 **옛 과제명**이면 지금 이름의 과제로 본다(재검토 11-14 F-05) — 리포트에 적힌 이름을 풀
     때와 같다. 예전엔 「끝이 거울에 없는 별칭」 으로 읽혀 그 이름의 리포트를 잇지 못했다. 이런 별칭은 이름이 바뀐 뒤 옛 이름으로 붙였거나
@@ -1309,11 +1354,14 @@ async def test_an_alias_to_a_name_the_hub_renamed_follows_the_rename_and_one_to_
         await db.rollback()
 
 
-async def test_label_only_deprecated_and_deleted_names_follow_the_same_judgement_at_ingest(db):
+@pytest.mark.parametrize("case", ["label_only", "deprecated_many", "deprecated_one", "deleted_only"])
+async def test_label_only_deprecated_and_deleted_names_follow_the_same_judgement_at_ingest(db, case):
     """판정 함수를 같이 쓰니 「그렇게 된다」 고 읽지 않고 인제스트 때 잇기로 돌려 본다 — 자동 잇기가 가르는 나머지 갈래 넷.
     ① 이름(label)만 같은 과제 — 허브가 아는 이름이지만 이름만으로는 잇지 않는다(`undecided`). ② 그만 쓴(deprecated) 과제 여럿이 같은
     과제코드 — 못 정한다(`undecided`). ③ 그만 쓴 과제 하나뿐(살아 있는 과제는 안 맞는다) — 그 과제의 판에 `rule` 로 잇는다(예전엔
-    「과제코드@판」 헛 판). ④ 거울에서 지워진 과제만 맞는 이름 — 허브가 모르는 이름이라 예전처럼 글자 그대로(`eng_meta`)."""
+    「과제코드@판」 헛 판). ④ 거울에서 지워진 과제만 맞는 이름 — 허브가 모르는 이름이라 예전처럼 글자 그대로(`eng_meta`).
+    갈래마다 따로 돈다 — 앞 갈래가 빨개도 뒤 갈래를 잰다. 뒤이은 자동 잇기의 수도 갈래마다 오늘 값 그대로 잰다(후보와 못 붙임을 더한
+    수로 재면 그만 쓴 과제만 맞는 이름이 어느 칸에 세어지는지 가려진다 — 검토 「항목 2」 결과 4)."""
     t = _tag()
     lab, d1, d2, dcode = f"AL-{t}", f"ALD1-{t}", f"ALD2-{t}", f"ALDC-{t}"
     one, ocode, dead, xcode = f"ALO-{t}", f"ALOC-{t}", f"ALX-{t}", f"ALXC-{t}"
@@ -1330,27 +1378,31 @@ async def test_label_only_deprecated_and_deleted_names_follow_the_same_judgement
         await _task(db, dead, task_code=xcode)
         await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": dead, "deleted": True, "status": "active", "updated_at": "T2"}])
 
-        for name, why in ((f"과제 {lab}", "이름(label)만 같다"), (dcode, "그만 쓴 과제 여럿")):
-            r = await _rep(db, s, project=name, code="dv1")
-            got = await onto.link_from_eng_meta(db, r)
+        # 갈래마다 리포트에 적힌 이름과 뒤이은 자동 잇기가 세는 수(linked · already · candidates · unmatched)
+        name, why, counts = {
+            "label_only": (f"과제 {lab}", "이름(label)만 같다", (0, 0, 1, 0)),
+            # 그만 쓴 과제만 맞는 아래 두 갈래의 수는 오늘 동작이다 — 결정 대기(검토 「항목 2」 결과 4)
+            "deprecated_many": (dcode, "그만 쓴 과제 여럿", (0, 0, 0, 1)),
+            "deprecated_one": (ocode, "그만 쓴 과제 하나뿐", (0, 1, 0, 0)),
+            "deleted_only": (xcode, "지워진 과제만 맞는다", (0, 0, 0, 1)),
+        }[case]
+        r = await _rep(db, s, project=name, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        if case in ("label_only", "deprecated_many"):
             assert got["ok"] is False and got["error"] == "undecided", (why, got)
             assert await _linked(db, r.id) == [], f"{why} — 이었다"
             for k in (name, lab, d1, d2):
                 assert await _rev(db, f"{k}@dv1") is None, f"{why} — 잇지도 않을 판 {k}@dv1 을 만들었다"
-            after = await onto.auto_link_tasks(db, report_ids=[r.id])
-            assert (after["linked"], after["already"], after["candidates"] + after["unmatched"]) == (0, 0, 1), (why, after)
-
-        r3 = await _rep(db, s, project=ocode, code="dv1")
-        got3 = await onto.link_from_eng_meta(db, r3)
-        assert got3["ok"] and got3["key"] == f"{one}@dv1", got3
-        assert (await _edge_of(db, r3.id)).properties["link_source"] == onto.SOURCE_RULE
-        assert await _rev(db, f"{ocode}@dv1") is None, "과제코드 글자 그대로의 헛 판을 만들었다"
-
-        r4 = await _rep(db, s, project=xcode, code="dv1")
-        got4 = await onto.link_from_eng_meta(db, r4)
-        assert got4["ok"] and got4["key"] == f"{xcode}@dv1", got4
-        assert (await _edge_of(db, r4.id)).properties["link_source"] == "eng_meta", "지워진 과제만 맞는 이름을 판정으로 이었다"
-        assert await _rev(db, f"{dead}@dv1") is None
+        elif case == "deprecated_one":
+            assert got["ok"] and got["key"] == f"{one}@dv1", got
+            assert (await _edge_of(db, r.id)).properties["link_source"] == onto.SOURCE_RULE
+            assert await _rev(db, f"{ocode}@dv1") is None, "과제코드 글자 그대로의 헛 판을 만들었다"
+        else:
+            assert got["ok"] and got["key"] == f"{xcode}@dv1", got
+            assert (await _edge_of(db, r.id)).properties["link_source"] == "eng_meta", "지워진 과제만 맞는 이름을 판정으로 이었다"
+            assert await _rev(db, f"{dead}@dv1") is None
+        after = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert (after["linked"], after["already"], after["candidates"], after["unmatched"]) == counts, (why, after)
     finally:
         await db.rollback()
 
@@ -1520,3 +1572,79 @@ async def test_a_line_already_on_the_resolved_revision_is_left_untouched(db):
         assert (await _rev(db, f"{late}@dv1")).properties["rev_source"] == "eng_meta"
     finally:
         await db.rollback()
+
+
+@pytest.mark.parametrize("other", ["eng_meta", "manual"])
+async def test_a_report_with_a_second_live_line_is_not_answered_as_already(db, other):
+    """`already` 는 그 판**에만** 이어져 있을 때다(`live == {target}`) — 살아 있는 선이 둘(풀린 판 + 다른 판)인 리포트는 `already` 로
+    답하지 않고 여느 잇기(`set_revision`)를 지난다(재검토 11-14 「항목 2」 M10 — 「그 판이 살아 있는 선에 들어 있다」 로 바꿔도
+    초록이었다). 다른 선이 기계 선이면 떼고 풀린 판 하나만 남긴다(답은 처음 이을 때와 같다). 사람이 확정한 선이면 `kept_manual` 로
+    거절하고 둘 다 그대로 둔다."""
+    t = _tag()
+    task, code, stray = f"AL-{t}", f"ALC-{t}", f"ALS-{t}"
+    try:
+        _, s = await _owner(db)
+        await _task(db, task, task_code=code)
+        r = await _rep(db, s, project=code, code="dv1")
+        first = await onto.link_from_eng_meta(db, r)
+        assert first["ok"] and first["key"] == f"{task}@dv1" and not first.get("already"), first
+        db.add(OntoRelation(relation=onto.REL_MEASURED, src_type=onto.TYPE_REPORT, src_key=r.id,
+                            dst_type=onto.TYPE_REVISION, dst_key=f"{stray}@dv1", properties={"link_source": other}))
+        await db.flush()
+        assert await _linked(db, r.id) == [f"{task}@dv1", f"{stray}@dv1"]        # 전제 — 살아 있는 선이 둘이다
+        again = await onto.link_from_eng_meta(db, r)
+        if other == "manual":
+            assert again["ok"] is False and again["error"] == "kept_manual", again
+            assert await _linked(db, r.id) == [f"{task}@dv1", f"{stray}@dv1"], "사람이 확정한 선을 뗐다"
+        else:
+            assert again == first, again
+            assert await _linked(db, r.id) == [f"{task}@dv1"], "다른 판의 기계 선이 남았다"
+            assert (await _edge_of(db, r.id)).properties["link_source"] == onto.SOURCE_RULE
+    finally:
+        await db.rollback()
+
+
+@pytest.mark.parametrize("case", ["resolved", "undecided", "unknown"])
+async def test_a_metadata_save_over_rest_links_by_the_same_judgement(db, case):
+    """REST 로 끝까지 — 수동 메타 저장(`PATCH /reports/{id}`) 뒤 개정 보기(`GET /reports/{id}/revision`)의 `linked` 로 잰다(서비스
+    함수만 재면 라우트가 그 판정을 지나는지는 안 잡힌다 — 재검토 11-14 「항목 2」). 리포트 둘에 같은 이름을 적는다 — 선이 없는 것과
+    기계(`rule`)가 다른 과제의 판에 이어 둔 것.
+      resolved  — 허브가 과제 하나로 푸는 이름(과제코드) → 둘 다 그 과제의 판에, `rule`.
+      undecided — 허브가 알지만 못 정하는 이름(두 과제의 과제코드) → 새 선은 없고, 있던 `rule` 선은 그대로다(다른 이름으로
+                  이은 선이 남는다 — 지금 동작을 적은 것이고, 그 선을 둘지는 사용자 결정 대기다. 재검토 11-14 「항목 2」 결함 2).
+      unknown   — 허브가 모르는 이름 → 둘 다 글자 그대로의 판에, `eng_meta`."""
+    from types import SimpleNamespace
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    a, b, code, c1, c2, both, free = (f"AL-{t}", f"ALB-{t}", f"ALC-{t}", f"ALD-{t}", f"ALE-{t}", f"ALF-{t}", f"ALG-{t}")
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)      # 빨간 실행에서도 치울 수 있게 id 를 먼저 적어 둔다
+    try:
+        await _task(db, a)
+        await _task(db, b, task_code=code)
+        await _task(db, c1, task_code=both)
+        await _task(db, c2, task_code=both)
+        fresh = await _rep(db, s, commit=True)
+        held = await _rep(db, s, project=a, code="dv1", commit=True)
+        # 있던 기계 선은 자동 잇기로 만든다 — 인제스트 때 잇기(`link_from_eng_meta`)를 거치지 않게
+        assert (await onto.auto_link_tasks(db, report_ids=[held.id]))["linked"] == 1
+        await db.commit()
+        name, want = {"resolved": (code, (f"{b}@dv1", "rule")), "undecided": (both, None),
+                      "unknown": (free, (f"{free}@dv1", "eng_meta"))}[case]
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        h = {"authorization": f"Bearer {security.create_access_token(u.id)}"}
+        seen = {}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            for rep in (fresh, held):
+                saved = await c.patch(f"{P}/reports/{rep.id}", json={"project": name, "dev_rev": "dv1"}, headers=h)
+                view = await c.get(f"{P}/reports/{rep.id}/revision", headers=h)
+                assert saved.status_code == 200 and view.status_code == 200, (saved.text[:200], view.text[:200])
+                line = view.json()["data"]["linked"]
+                seen[rep.id] = (line["key"], line["source"]) if line else None
+        assert seen == {fresh.id: want, held.id: want or (f"{a}@dv1", "rule")}, (case, seen)
+    finally:
+        await _drop(db, *mine, keys=[a, b, code, c1, c2, both, free])

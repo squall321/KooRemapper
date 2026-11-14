@@ -196,6 +196,33 @@ async def test_a_broken_reflect_keeps_what_was_received_and_says_so(db, on, monk
         await _forget(db, slug, got, mark)
 
 
+async def test_a_database_error_in_the_reflect_is_recorded_in_the_short_form(db, on, monkeypatch):
+    """층 2 반영이 DB 쪽에서 깨지면 실행 기록의 `counts.reflected.error` 와 사유 줄(「층 2 반영 실패 — …」)은 짧은 꼴
+    (「클래스: 한 줄」)이다 — SQL 문 · 매개변수 값 · 배경 링크는 싣지 않는다(전문은 서버 로그에 — 재검토 11-12.
+    SRC-09~11 재검토 M8d — 전문으로 되돌려도 초록이었다)."""
+    from sqlalchemy import text as sql
+
+    from app.modules.ontology import services as onto
+
+    async def broken(sdb):
+        await sdb.execute(sql("select 1/0 as rr_short_error_probe where (:v)::text <> ''"),
+                          {"v": "rr_short_error_value"})
+
+    monkeypatch.setattr(onto, "reflect_after_sync", broken)
+    short = "DBAPIError: DivisionByZeroError: division by zero"
+    slug = f"t_{ulid.new().str.lower()}"
+    mark, got = await _cat_mark(db), None
+    try:
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        assert got["result"] == "needs_check", got
+        run = (await db.execute(select(OntoSyncRun).where(OntoSyncRun.id == got["run_id"])
+                                .execution_options(populate_existing=True))).scalar_one()
+        assert run.counts["reflected"] == {"error": short}, run.counts["reflected"]
+        assert [p for p in run.problems if "층 2 반영 실패" in p] == [f"층 2 반영 실패 — {short}"], run.problems
+    finally:
+        await _forget(db, slug, got, mark)
+
+
 def _reflect(**over):
     """층 2 반영을 흉내 낸다 — 옮긴 것 없이 수만 돌려준다(미룬 수는 시험이 넣는다)."""
     async def fake(_db):

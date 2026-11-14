@@ -281,6 +281,30 @@ async def test_an_alias_whose_task_is_missing_disagrees_and_never_links(db, tag)
         await _wipe(db, u, s, keys=[live, gone, word])
 
 
+async def test_a_missing_alias_beside_a_match_on_a_deprecated_task_only_still_disagrees(db, tag):
+    """끝이 거울에 없는 별칭과 **그만 쓴 과제만** 맞는 원천(과제코드)이 함께 맞으면 엇갈림을 그대로 둔다 — 그만 쓴 과제를 덜어 낸 뒤
+    남는 것이 `alias_missing` 뿐이면 덜어 내지 않는다(`exact_matches` 의 끝줄 — SRC-09~11 재검토 M7h: `alive or out` 으로 바꿔도
+    초록이었다). 덜어 내면 「허브가 모르는 이름」 으로 읽혀 인제스트 때 잇기가 글자 그대로의 헛 판에 잇는다. 오늘 답 그대로 잰다 —
+    후보는 없고(그만 쓴 과제는 후보로 내지 않는다) 엇갈림으로 보이고 잇지 않는다. 미리 보기가 못 붙임으로 세는 것은 오늘 동작이다
+    (결정 대기 — 검토 「항목 2」 결과 4)."""
+    from app.models import ImpactReport as IR
+    old, gone, code = f"D-{tag}", f"G-{tag}", f"C-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, old, task_code=code, status="deprecated")
+        assert (await onto.confirm_alias(db, alias=code, key=gone, by="kim"))["ok"]      # 끝이 거울에 없는 별칭
+        assert await onto.exact_matches(db, code) == [(old, "task_code"), (gone, "alias_missing")]
+        assert await onto.candidates_for(db, code) == ([], True)
+        r = await _report(db, s, project=code, code="dv1")
+        got = await onto.link_from_eng_meta(db, r)
+        assert got["ok"] is False and got["error"] == "undecided", got
+        e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+        seen = (e["verdict"], e["candidates"], e["ambiguous"], e.get("alias_missing"))
+        assert seen == ("unmatched", [], True, gone), e
+    finally:
+        await _wipe(db, u, s, keys=[old, gone, code])
+
+
 async def test_a_string_cannot_point_at_two_tasks(db, tag):
     """★한 문자열이 두 과제를 가리키면 그 데이터로는 아무 질문에도 답할 수 없다."""
     a, b = f"A-{tag}", f"B-{tag}"
