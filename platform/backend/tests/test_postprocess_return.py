@@ -370,7 +370,8 @@ async def _forget_task_links(db, *keys):
 @needs_sphere
 @_aio
 async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slurm, monkeypatch):
-    """반입 뒤 과제 잇기(SRC-09) — 예약 인자의 과제(여기선 과제코드)가 정본 과제로 풀리면 이어지고 원장(`task_links`)에 남는다."""
+    """반입 뒤 과제 잇기(SRC-09) — 예약 인자의 과제(여기선 과제코드)가 정본 과제로 풀리면 이어지고 원장(`task_links`)에 남는다.
+    11-12 부터 인제스트 때 잇기가 같은 판정으로 그 과제의 판에 먼저 잇는다 — 원장은 「이미 이어져 있다」(`already`)로 센다."""
     from app.config import settings
     from app.models import OntoRelation
     monkeypatch.setattr(settings, "ontology", "1")              # 반입 뒤 잇기는 과제·개정 기능이 켜져 있을 때만 돈다
@@ -386,12 +387,15 @@ async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slur
         await _poll(db, job)
         assert job.status == "succeeded", job.error_summary
         links = job.external_ref["task_links"]
-        assert (links["scope"], links["reports"], links["linked"]) == ("reports", 1, 1), links
+        # 인제스트 때 잇기가 먼저 이었다(11-12 결정 — 예전엔 글자 그대로의 「과제코드@판」 에 잇고 반입 뒤 잇기가 옮겨 `linked` 1 이었다)
+        assert (links["scope"], links["reports"], links["linked"], links["already"]) == ("reports", 1, 0, 1), links
         assert not [w for w in job.warnings or [] if "과제 잇기" in w]
         rid = job.external_ref["report_ids"][0]
         edges = (await db.execute(select(OntoRelation.dst_key).where(
             OntoRelation.relation == "measured_at", OntoRelation.src_key == rid))).scalars().all()
         assert edges == [f"{task}@dv1"], edges
+        assert (await db.execute(select(OntoObject.key).where(OntoObject.key == f"{code}@dv1"))).first() is None, \
+            "과제코드 글자 그대로의 헛 판을 만들었다"
     finally:
         await _forget_task_links(db, task, code)
 

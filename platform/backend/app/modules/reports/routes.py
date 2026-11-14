@@ -141,6 +141,10 @@ async def ingest_report(
 
     선택 동반물: scenario(시뮬 조건 scenario.json — 조건 요약 + template 로 K파일
     자동매칭), kfile_id(원본 K파일 수동 지정), project/dev_rev/variation/doe(과제 메타).
+
+    과제(project — 없으면 리포트에 박힌 과제 이름)와 dev_rev 가 있으면 반입 때 개정에 이어진다 — 받기 뒤 자동 잇기와 **같은 판정**이다
+    (11-12). 이름이 허브 과제 하나로 풀리면 그 과제의 판에, 허브 과제와 맞는데 하나로 정해지지 않으면 잇지 않고, 허브가 모르는 이름만
+    글자 그대로의 판에 잇는다. 응답의 `task_links` 는 그 뒤에 도는 반입 뒤 잇기가 센 수다(반입 때 이미 이어졌으면 `already`).
     """
     s = await _require_session(db, user, session_id)
     if kind is not None and kind not in _KINDS:
@@ -164,7 +168,9 @@ async def ingest_report(
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     return ok(
-        # 반입 뒤 과제 잇기 결과(SRC-09) — 이은 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 `error`(반입은 그대로다) · 기능이 꺼져 있으면 `skipped: off`
+        # 반입 뒤 과제 잇기 결과(SRC-09) — 이은 수 · 이미 이어진 수 · 후보 · 못 붙임 · 이름 없음, 깨졌으면 `error`(반입은 그대로다) ·
+        # 기능이 꺼져 있으면 `skipped: off`. 인제스트 때 잇기가 같은 판정으로 먼저 이으므로(11-12) 붙는 이름은 대개 `already` 1 이다 —
+        # `linked` 는 그 뒤에 새로 잇거나 옮긴 수다(예전엔 과제코드 · 별칭으로 적힌 반입을 글자 그대로 이은 뒤 여기서 옮겨 `linked` 1 이었다)
         {**ReportRead.model_validate(report).model_dump(), "task_links": getattr(report, "auto_task_links", None)},
         message=f"{report.kind} 리포트 인제스트 완료 ({report.n_cases} 케이스)",
         status_code=201,
@@ -330,7 +336,13 @@ async def patch_report_meta(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """과제명·rev·설계안·DOE·원본 K파일 링크를 수동 설정(부분 갱신)."""
+    """과제명·rev·설계안·DOE·원본 K파일 링크를 수동 설정(부분 갱신).
+
+    project 나 dev_rev 를 주면 **기계가 이은** 개정 연결이 따라간다 — 자동 잇기와 **같은 판정**이다(11-12). 이름이 허브 과제 하나로
+    풀리면 그 과제의 판으로(이미 거기면 그대로), 허브 과제와 맞는데 하나로 정해지지 않으면 어디로도 가지 않고(있던 연결은 그대로 —
+    `GET /reports/{id}/revision` 의 `mismatch` 가 말한다), 허브가 모르는 이름이면 글자 그대로의 판으로 간다. 사람이 확정한 연결 ·
+    사람이 끊은 리포트는 그대로다(메타만 저장된다). 설계안 · DOE 만 고치면 연결을 보지 않는다.
+    """
     r = await _require_owned_report(db, user, report_id)
     try:
         r = await svc.update_report_meta(

@@ -968,9 +968,15 @@ async def ingest_report(
     선택 동반물 — scenario_content: 시뮬 조건 scenario.json 텍스트(조건 요약 + template
     으로 세션 내 K파일 자동매칭 → 한 K에 여러 결과를 매달 수 있다), kfile_id: 원본
     K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1).
-    응답의 `task_links` — 반입 뒤 과제 잇기 결과다(과제명 · 과제코드 · 별칭이 글자 그대로 맞고 dev_rev 가 있으면 개정에 이어진다
-    — `linked`. 후보 · 못 붙임은 세기만 한다). 깨졌으면 `error` 가 오고 반입은 그대로다. 과제·개정 기능이 꺼져 있으면
-    `skipped: off` 다(잇지 않는다)."""
+    project(안 주면 리포트에 박힌 과제 이름)와 dev_rev 가 있으면 반입 때 개정에 이어진다 — 허브 받기 뒤 자동 잇기와 **같은 판정**이다.
+      · 이름(과제명 · 과제코드 · 옛 과제명 · 별칭)이 허브 과제 **하나로** 풀리면 그 과제의 판에 잇는다(`report_revision` 의
+        `linked.source` 가 `rule`).
+      · 허브 과제와 맞는데 하나로 정해지지 않으면(여러 과제에 걸린다 · 이름(label)만 같다) **잇지 않는다** — 후보(없으면 못 붙임)로
+        남는다(`plan_task_links` · `report_revision` 의 `task_candidates`).
+      · 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 잇는다(`eng_meta`).
+    응답의 `task_links` — 반입 뒤 과제 잇기가 센 수다. 반입 때 이미 이어졌으면 `already` 1 이다(`linked` 는 그 뒤에 새로 잇거나 옮긴
+    수 — 대개 0). 하나로 정해지지 않은 이름 · 허브가 모르는 이름은 `candidates` · `unmatched` 로 세기만 한다. 깨졌으면 `error` 가
+    오고 반입은 그대로다. 과제·개정 기능이 꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다(반입 때 잇기는 이 스위치와 따로 돈다)."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
@@ -1003,9 +1009,15 @@ async def update_report_meta(
     """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
     DOE·초점(focus 예 camera-detail)·원본 K파일 링크를 수동 설정한다(부분 갱신).
     설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제.
-    과제·개발단계를 고치면 **기계가 이은** 개정 연결만 따라간다 — ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고,
-    사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는 메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은
-    건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는 `clear_report_unlink`."""
+    project 나 dev_rev 를 주면 **기계가 이은** 개정 연결이 따라간다 — 허브 받기 뒤 자동 잇기와 **같은 판정**이다.
+      · 이름(과제명 · 과제코드 · 옛 과제명 · 별칭)이 허브 과제 **하나로** 풀리면 그 과제의 판으로 간다(이미 거기면 아무것도 바뀌지 않는다).
+      · 허브 과제와 맞는데 하나로 정해지지 않으면(여러 과제에 걸린다 · 이름(label)만 같다) **어디로도 가지 않는다** — 있던 연결은
+        그대로고, 메타와 다르면 `report_revision` 의 `mismatch` 가 말한다(후보는 그 `task_candidates` · `plan_task_links`).
+      · 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)으로 간다.
+      · 과제 이름(project 를 지우면 리포트에 박힌 과제 이름)이나 dev_rev 가 없으면 이을 것이 없다 — 있던 연결은 그대로다.
+    ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고, 사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는
+    메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은 건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는
+    `clear_report_unlink`."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
@@ -1832,18 +1844,23 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     """이 리포트가 어느 과제·개정인가(`linked`) + **어긋남** + **후보와 근거** + 그 과제의 허브 처지(`task_state`).
     `ambiguous: true` 면 글자 그대로 맞는 과제가 둘 이상이다(원천이 엇갈린다) — 풀지 않고 `task_candidates` 에 근거와 함께 둔다.
     그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다(살아 있는 과제의 일치를 막지 못한다).
-    `alias_missing` 은 사람이 붙인 별칭의 끝(과제)이 거울에 없다는 뜻이다 — 엇갈림이라 잇지 않았다(그 별칭을 떼고 다시 붙인다).
+    `alias_missing` 은 사람이 붙인 별칭의 끝(과제)이 거울에 없다는 뜻이다 — 그 별칭으로는 허브 과제에 잇지 않았다(그 별칭을 떼고 다시
+    붙인다). 이름이 그 별칭**만** 맞으면 허브가 모르는 이름이라 리포트는 글자 그대로의 판에 있을 수 있고(`linked.source` 가 `eng_meta`),
+    허브의 다른 과제와도 맞으면 엇갈림이라 아예 잇지 않는다.
 
     ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
     **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라. `kind` 가
     `renamed` · `merged` 면 잘못이 아니다 — 허브가 과제명을 바꿨거나 합쳤고 개정이 그리로 옮겨졌다(수동 메타는 옛 이름).
+    「다르다」 는 글자가 아니라 판정으로 가른다 — 수동 메타의 이름이 과제코드 · 별칭이어도 그것이 풀리는 과제의 그 판에 이어져 있으면
+    `mismatch` 는 비어 있다(`differs` 가 아니다).
     ★`task_state.state` — `merged` 면 「A 는 B(`into`)로 합쳐짐」 을 알려라. 옮기는 것은 **시스템 관리자**가 화면에서
     누른다(저절로 옮기지 않는다 — 사용자 결정). `gone` 은 허브에서 사라짐(사용 안 함), `deprecated` 는 그만 씀.
     `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
     **버리지 않고** 보여 주는 것이다.
     ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
-    `linked.source` 는 이 리포트의 선을 누가 이었나다(manual 사람 · eng_meta 인제스트 때 잇기 · rule 자동 잇기, 옛 선은 null) —
-    사람이 이은 선은 기계가 옮기지 않는다.
+    `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
+    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로 — 반입 · 메타 고침), 옛 선은
+    null. 사람이 이은 선은 기계가 옮기지 않는다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)
@@ -1924,11 +1941,16 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라. `links` 는 글자 그대로 맞는 원천(과제명 ·
     과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 **과제 하나로 모일 때만**이다 — 엇갈리면(`ambiguous: true`) 후보다.
     그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다 — 하나면 잇고, 여럿이면 못 붙임(후보로 내지 않는다).
-    항목의 `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어(지워짐 · 합쳐짐 · 받은 적 없음) 엇갈림이라 잇지 않았다.
+    항목의 `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어(지워짐 · 합쳐짐 · 받은 적 없음) 그 별칭으로는 잇지 않았다. 그
+    별칭**만** 맞는 이름은 허브가 모르는 이름이라 그 리포트는 반입 때 글자 그대로의 판에 이어져 있을 수 있다(자동 잇기는 그 선을 옮기지
+    않는다 — 별칭의 끝이 거울에 오면 옮긴다).
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
     ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(과제·개정 기능이 켜져 있을 때 · 사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
     `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
+    반입 때 잇기 · 수동 메타 고침(`update_report_meta`)도 **이 판정을 따른다** — `links` 의 이름은 반입 때 바로 그 과제의 판에 이어지고,
+    허브 과제와 맞는데 하나로 정해지지 않은 이름(엇갈림 · 이름만 같음)은 반입 때도 잇지 않는다. 허브가 모르는 이름(거울의 과제와 맞는 데가
+    없다)만 글자 그대로의 판에 이어져 있다가, 허브가 그 과제를 내거나 사람이 별칭을 붙인 뒤의 자동 잇기(받기 뒤 · 관리자 일괄 적용)가 옮긴다.
     항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
     a regular user's plan and counts cover only the reports they can read (scope=readable), a system admin sees all."""
@@ -1980,7 +2002,8 @@ async def confirm_task_alias(alias: str, task_key: str, ctx: Context,
                              note: str = "") -> dict:
     """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다 — 단 다른 정확 일치(과제명 ·
     과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous` — 그만 쓴
-    과제는 살아 있는 과제를 막지 못한다). 붙인 과제가 거울에 없으면(받기 전 · 허브에서 지워짐) 그 별칭으로는 잇지 않는다(`alias_missing`).
+    과제는 살아 있는 과제를 막지 못한다). 붙인 과제가 거울에 없으면(받기 전 · 허브에서 지워짐) 그 별칭으로는 잇지 않는다(`alias_missing`
+    — 그 별칭만 맞는 이름의 리포트는 반입 때 예전처럼 글자 그대로의 판에 이어지고, 붙인 과제가 거울에 오면 자동 잇기가 옮긴다).
 
     ★짐작으로 부르지 마라 — `plan_task_links` 의 후보와 **근거**를 사람에게 보여 주고 고른
     값을 넣어라. 한 문자열은 **한 과제만** 가리킨다(다른 곳에 붙어 있으면 거절된다).

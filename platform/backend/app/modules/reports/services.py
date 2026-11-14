@@ -328,6 +328,9 @@ async def ingest_report(
         ))
 
     # 개정 자동 잇기 — `eng_meta` 에 과제·코드가 있으면 찾거나 만들어 잇는다.
+    # 어디에 잇는지는 반입 뒤 · 받기 뒤 자동 잇기와 **같은 판정**이다(11-12 — `ontology.services.link_from_eng_meta`). 허브가 아는
+    # 이름이 과제 하나로 풀리면 그 과제의 판에(`rule`), 하나로 정해지지 않으면 **잇지 않고**(선 없이 들어간다 — 아래 반입 뒤 잇기가
+    # 후보 · 못 붙임으로 센다), 허브가 모르는 이름만 예전처럼 수동 메타 글자 그대로(`eng_meta`) 잇는다.
     # 커밋 **전에** 해서 한 트랜잭션으로 묶는다 — 리포트는 들어갔는데 선이 없는
     # 중간 상태를 만들지 않는다. 이을 것이 없으면(수동 메타 미기입) 조용히 지나간다.
     # ★이미 사람이 확정한 개정은 **건드리지 않는다**(`set_revision` 의 manual 보호).
@@ -335,6 +338,8 @@ async def ingest_report(
     await db.commit()
     await db.refresh(report)
     # SRC-09 — 반입을 굳힌 **뒤에** 과제 잇기(붙는 것만 · 이 리포트만). 깨져도 반입은 그대로고, 결과는 부르는 쪽이 응답 · 잡 경고에 싣는다.
+    # 위에서 같은 판정으로 이미 이었으면 `already` 로 센다(붙는 이름은 대개 그렇다 — 11-12). 후보 · 못 붙임 수를 내는 자리고, 위 잇기가
+    # 깨졌을 때(그 저장점만 되감긴다)의 그물이다.
     from app.modules.ontology import services as onto
     report.auto_task_links = await onto.link_report(db, report)
     if report.kind == "sphere":
@@ -478,8 +483,11 @@ async def update_report_meta(
     if kfile_id is not None:
         report.source_kfile_id = (await _resolve_session_kfile(db, report.session_id, kfile_id)).id
     if project is not None or dev_rev is not None:
-        # 과제·개정이 손으로 바뀌었다 — 기계가 이은 선만 따라간다. 사람이 이 리포트를 개정 화면에서 확정한 선 · 사람이 끊은
-        # 리포트는 set_revision 이 거절해 그대로 둔다(kept_manual · unlinked). 설계안 · DOE 만 고치면 선을 보지 않는다(검토 R3).
+        # 과제·개정이 손으로 바뀌었다 — 기계가 이은 선만 따라간다. 어디로 가는지는 자동 잇기와 **같은 판정**이다(11-12 —
+        # `ontology.services.link_from_eng_meta`). 허브가 아는 이름이 과제 하나로 풀리면 그 과제의 판으로(이미 거기면 아무것도 쓰지
+        # 않는다), 하나로 정해지지 않으면 **어디로도 가지 않는다**(있던 선은 그대로 — 어긋남은 `mismatch` 가 말한다), 허브가 모르는
+        # 이름이면 예전처럼 글자 그대로의 판으로. 사람이 이 리포트를 개정 화면에서 확정한 선 · 사람이 끊은 리포트는 set_revision 이
+        # 거절해 그대로 둔다(kept_manual · unlinked). 설계안 · DOE 만 고치면 선을 보지 않는다(검토 R3).
         await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)
@@ -1265,6 +1273,10 @@ async def _link_revision(db, report) -> None:
     리포트가 들어오는 길은 여럿이고(업로드 · 번들 · MCP) 과제 메타는 **선택**이다. 여기서
     예외를 올리면 메타를 안 채운 리포트가 **아예 안 들어온다** — 그것이 훨씬 비싸다.
     흠은 로그로만 남긴다(화면은 `ontology.services.mismatch` 가 따로 말한다).
+
+    어디에 잇는지는 `ontology.services.link_from_eng_meta` 가 정한다 — 자동 잇기와 **같은 판정**이다(11-12). 허브가 아는 이름이 과제
+    하나로 풀리면 그 과제의 판에, 하나로 정해지지 않으면 잇지 않고(`undecided` — 거절로 로그에 남고, 반입 뒤 잇기 · 미리 보기가 그
+    이름을 후보 · 못 붙임으로 보인다), 허브가 모르는 이름은 수동 메타 글자 그대로 잇는다.
     """
     from app.modules.ontology import services as onto
     # 리포트(인제스트) · 메타 고침(PATCH)은 바깥 트랜잭션에 먼저 굳히고 잇기만 저장점에 넣는다 — 잇기가 깨져도 그 저장점만 되감겨
