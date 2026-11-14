@@ -413,11 +413,15 @@ async def test_the_browse_routes_show_states_edges_and_old_keys(db):
         await _wipe(db, t, u)
 
 
+@pytest.mark.usefixtures("own_sync_lock")
 async def test_the_panel_hears_of_a_merge_and_only_an_admin_moves_it(db):
     import httpx
 
     from app.shared import storage
     from app.shared.auth import get_current_user
+    from app.worker import plm_sync
+    # 옮기기 라우트는 받기 잠금을 잡는다 — 진짜 이름이면 dev DB 의 다른 실행과 엮여 409 로 빨개진다(재검토 11-14 F-17)
+    assert plm_sync.LOCK_NAME.startswith("dynaforge.sp_core_sync.test."), plm_sync.LOCK_NAME
     t = _tag()
     a, b = f"L2A-{t}", f"L2B-{t}"
     owner, admin = await _user(db), await _user(db, admin=True)

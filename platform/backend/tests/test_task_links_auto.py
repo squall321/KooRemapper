@@ -34,7 +34,8 @@ from app.runner import sp_core
 from app.shared import security, storage
 from app.worker import plm_sync
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+# 받기 잠금은 시험마다 제 이름으로(`conftest.own_sync_lock`) — 진짜 받기를 돌리는 시험은 이 파일에 없다
+pytestmark = [pytest.mark.asyncio(loop_scope="session"), pytest.mark.usefixtures("own_sync_lock")]
 
 P = "/api/v1"
 _SPHERE = Path("/data/SmartTwinPostprocessor/lib/koo_sphere_report/examples/Test_001_report.html")
@@ -50,6 +51,12 @@ def ontology_on(monkeypatch):
 
 def _tag() -> str:
     return ulid.new().str.lower()          # 통째로 — 앞자리는 시각이라 잘라 쓰면 1초 안에 겹친다(시험 격리)
+
+
+async def test_this_file_takes_its_own_receive_lock():
+    """★받기 잠금은 DB 하나에 하나다 — 진짜 이름으로 잡으면 같은 dev DB 에서 도는 다른 시험 · 반입이 잠금을 쥔 순간 이 파일의 시험이
+    「busy」 로 빨개진다(재검토 11-14 F-17). 그래서 시험마다 제 이름을 쓴다(`conftest.own_sync_lock`) — 표지가 빠지면 여기서 걸린다."""
+    assert plm_sync.LOCK_NAME.startswith("dynaforge.sp_core_sync.test."), plm_sync.LOCK_NAME
 
 
 async def _owner(db, *, admin: bool = False, commit: bool = False):

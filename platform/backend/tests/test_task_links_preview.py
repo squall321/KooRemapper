@@ -23,7 +23,8 @@ from app.models import SOURCE_HUB, ImpactReport, OntoObject, OntoRelation, Sessi
 from app.modules.ontology.routes import require_ontology
 from app.shared import security, storage
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+# 받기 잠금은 시험마다 제 이름으로(`conftest.own_sync_lock`) — 진짜 받기를 돌리는 시험은 이 파일에 없다
+pytestmark = [pytest.mark.asyncio(loop_scope="session"), pytest.mark.usefixtures("own_sync_lock")]
 
 P = "/api/v1"
 SECRET = "src10-gateway-secret"
@@ -160,6 +161,12 @@ async def test_the_preview_writes_nothing_and_apply_stays_admin_only(world, db):
     edges = (await db.execute(select(OntoRelation).where(
         OntoRelation.src_type == "impact_report", OntoRelation.src_key == w["shared"].id))).scalars().all()
     assert edges == [], "미리 보기 · 거절된 적용이 선을 만들었다"
+
+
+async def test_this_file_takes_its_own_receive_lock():
+    """적용 라우트는 받기 잠금을 잡는다 — 진짜 이름이면 dev DB 의 다른 실행과 엮여 빨개진다(재검토 11-14 F-17). 표지가 빠지면 걸린다."""
+    from app.worker import plm_sync
+    assert plm_sync.LOCK_NAME.startswith("dynaforge.sp_core_sync.test."), plm_sync.LOCK_NAME
 
 
 async def test_no_token_is_still_refused(world):
