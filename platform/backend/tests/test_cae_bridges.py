@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -113,6 +114,7 @@ async def _mirror(db) -> None:
 
 
 _CREATED: list[int] = []      # 이 시험이 만든 사용자 id — 정리는 ORM 객체가 아니라 이 수로 한다(되감긴 세션의 객체는 만료돼 못 읽는다)
+_HOMES: list[Path] = []       # 그 사용자의 저장 자리(`storage/<사용자 id>`) — 만들 때 없던 것만 적고, 정리는 적힌 자리만 지운다
 
 
 async def _make(db, *, admin: bool = False, with_report: bool = True, shared: str | None = None):
@@ -122,6 +124,9 @@ async def _make(db, *, admin: bool = False, with_report: bool = True, shared: st
     await db.commit()
     await db.refresh(u)
     _CREATED.append(u.id)
+    home = storage.abs_path(str(u.id))
+    if not home.exists():       # 이미 있던 자리는 이 시험이 만든 것이 아니다 — 적지 않는다(지우지 않는다)
+        _HOMES.append(home)
     if not with_report:
         return u, None
     pkg = _pkg()
@@ -147,12 +152,17 @@ async def _make(db, *, admin: bool = False, with_report: bool = True, shared: st
 
 
 async def _drop(db, *users):
-    """만든 사용자를 지운다(세션 · 리포트 · 행 · 선은 FK 로 함께). 시험이 깨져 세션이 되감겼어도 지우도록 먼저 되감고 id 로 지운다."""
+    """만든 사용자를 지운다(세션 · 리포트 · 행 · 선은 FK 로 함께). 시험이 깨져 세션이 되감겼어도 지우도록 먼저 되감고 id 로 지운다.
+    그 사용자의 저장 자리(`_HOMES`)도 지운다 — 행만 지우면 시험이 놓은 꾸러미 · 리포트 파일이 `platform/storage` 에 남았다(검토 3차 11-14
+    결함 15)."""
     await db.rollback()
     ids, _CREATED[:] = list(_CREATED), []
+    homes, _HOMES[:] = list(_HOMES), []
     for uid in ids:
         await db.execute(delete(User).where(User.id == uid))
     await db.commit()
+    for home in homes:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 @pytest.fixture

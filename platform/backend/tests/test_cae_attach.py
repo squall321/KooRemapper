@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import sys
 import zipfile
 from pathlib import Path
@@ -22,11 +23,12 @@ from app.models import ImpactCase, ImpactReport, OntoObject, OntoRelation, Sessi
 from app.modules.reports import services as svc
 from app.reports import bundle as bundle_mod
 from app.reports.onto_package import OntoPackageError
-from app.shared import security
+from app.shared import security, storage
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 FIX = Path(__file__).with_name("fixtures") / "cae_package_v14_min.json"
 P = "/api/v1"
+_HOMES: list[Path] = []       # 만든 사용자의 저장 자리(`storage/<사용자 id>`) — 만들 때 없던 것만 적고, 정리는 적힌 자리만 지운다
 
 
 def _pkg() -> dict:
@@ -39,6 +41,9 @@ async def _make(db, *, admin: bool = False, with_report: bool = True):
     db.add(u)
     await db.commit()
     await db.refresh(u)
+    home = storage.abs_path(str(u.id))
+    if not home.exists():       # 이미 있던 자리는 이 시험이 만든 것이 아니다 — 적지 않는다(지우지 않는다)
+        _HOMES.append(home)
     if not with_report:
         return u, None
     pkg = _pkg()
@@ -66,6 +71,9 @@ async def _drop(db, *users):
         if u is not None:
             await db.execute(delete(User).where(User.id == u.id))
     await db.commit()
+    homes, _HOMES[:] = list(_HOMES), []     # 그 저장 자리도 — 행만 지우면 붙인 꾸러미 파일이 `platform/storage` 에 남았다(검토 3차 11-14 결함 15)
+    for home in homes:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 async def _rows(db, rid: str) -> tuple[int, int]:
