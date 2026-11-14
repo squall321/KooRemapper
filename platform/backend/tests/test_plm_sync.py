@@ -195,6 +195,49 @@ async def test_a_broken_reflect_keeps_what_was_received_and_says_so(db, on, monk
         await _forget(db, slug, got, mark)
 
 
+def _reflect(**over):
+    """층 2 반영을 흉내 낸다 — 옮긴 것 없이 수만 돌려준다(미룬 수는 시험이 넣는다)."""
+    async def fake(_db):
+        return {"renamed": 0, "revisions": 0, "collapsed": 0, "reports": 0, "aliases": 0, "models": 0,
+                "dropped": [], "merged_waiting": 0, "deferred": 0, **over}
+    return fake
+
+
+async def test_a_deferred_move_is_said_in_the_run_notes(db, on, monkeypatch):
+    """이름이 바뀐 과제의 개정 옮기기를 미뤘으면(그 리포트 · 판을 누가 고치고 있었다) 실행 기록의 알림 줄에 적는다 — 예전엔
+    `counts.reflected.deferred` 수 하나뿐이라 화면 어디에도 안 보였다(재검토 11-14 P-06). 결과는 그대로 정상이다 — 다음 받기가 옮긴다."""
+    from app.modules.ontology import services as onto
+
+    monkeypatch.setattr(onto, "reflect_after_sync", _reflect(deferred=2))
+    slug = f"t_{ulid.new().str.lower()}"
+    mark, got = await _cat_mark(db), None
+    try:
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        assert got["result"] == "ok", got
+        said = [n for n in got.get("notes") or [] if "미뤘다" in n]
+        assert len(said) == 1 and "2개" in said[0], got.get("notes")
+        run = (await db.execute(select(OntoSyncRun).where(OntoSyncRun.id == got["run_id"])
+                                .execution_options(populate_existing=True))).scalar_one()
+        assert said[0] in (run.notes or []) and run.result == "ok", (run.notes, run.result)
+    finally:
+        await _forget(db, slug, got, mark)
+
+
+async def test_a_run_that_deferred_nothing_says_nothing_about_it(db, on, monkeypatch):
+    """미룬 것이 없으면 그 줄도 없다 — 알림 줄은 일이 있을 때만 는다."""
+    from app.modules.ontology import services as onto
+
+    monkeypatch.setattr(onto, "reflect_after_sync", _reflect())
+    slug = f"t_{ulid.new().str.lower()}"
+    mark, got = await _cat_mark(db), None
+    try:
+        got = await plm_sync.sync_once(client=_one_task_hub(slug))
+        assert got["result"] == "ok", got
+        assert not [n for n in got.get("notes") or [] if "미뤘다" in n], got.get("notes")
+    finally:
+        await _forget(db, slug, got, mark)
+
+
 async def test_the_weekly_full_comes_due(db, monkeypatch):
     """주 1회 처음부터(10-30 사용자 「권장」) — 마지막으로 **끝까지 돈** 처음부터 받기에서 따진다. 0 이면 끈다.
 

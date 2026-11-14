@@ -176,6 +176,14 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
                     got["problems"] = [*(got.get("problems") or []), f"층 2 반영 실패 — {short_error(exc)}"]
                     if got.get("result") == "ok":
                         got["result"] = "needs_check"      # ok 는 그대로 — 받기는 끝까지 돌았다(sync_all 과 같은 뜻)
+                deferred = (got.get("reflected") or {}).get("deferred")
+                if deferred:
+                    # 미룬 옮기기는 실패가 아니다(다음 받기가 옮긴다) — 그래도 그 사이 그 과제의 개정은 옛 이름에 남아 있으니 실행 기록의
+                    # 알림 줄에 적는다. 예전엔 counts.reflected.deferred 수뿐이라 화면 어디에도 안 보였다(재검토 11-14 P-06)
+                    logger.warning("plm reflect deferred %s task(s) — 다음 받기가 옮긴다", deferred)
+                    got["notes"] = [*(got.get("notes") or []),
+                                    f"이름이 바뀐 과제 {deferred}개의 개정을 옮기지 못하고 미뤘다 — 그 과제의 리포트 · 판을 그때 누가 "
+                                    "고치고 있었다. 다음 받기가 옮긴다"]
                 # 받은 것은 **커밋한다** — 멈춘 실행도 끝까지 받은 흐름의 기준 시각은 옮겨 둔다(다음 실행이 거기서 잇는다).
                 await db.commit()
             except Exception as exc:                   # noqa: BLE001

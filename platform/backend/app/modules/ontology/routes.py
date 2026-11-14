@@ -421,7 +421,8 @@ async def sync_state(
     마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
     ★오류 원문은 모두 시스템 관리자에게만이다(재검토 11-12) — 마지막 실행의 사유 줄 · `error` · 층 2 반영의 `error` · 끊은 줄과 접을 때
     남는 판에 못 옮긴 앞 판 줄(`dropped` — 일반 사용자는 반영 수만 · `problem_count`), 타입 줄의 `last_error`(허브가 준 원문 — 일반
-    사용자는 `last_status` 까지).
+    사용자는 `last_status` 까지). 이름 바뀐 과제의 개정 옮기기를 미뤘으면 실행 기록의 알림 줄(`notes`)에 수만 적는다 — 알림 줄은 누구나
+    본다(재검토 11-14).
 
     ★멈춘 타입(SRC-11) — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖인데 거울에 남은 타입은 타입 줄에 `stopped`
     (+ `stopped_why`)를 달고 `problems` 에 한 줄 싣는다. 타입 줄의 `last_status` 는 마지막으로 받았을 때의 기록이라 그대로 둔다 —

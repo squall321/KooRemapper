@@ -1890,7 +1890,8 @@ async def ontology_sync_state(ctx: Context) -> dict:
     「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄과
     같은 판으로 접을 때 남는 판에 못 옮긴 앞 판 줄(`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반
     사용자에게는 빈 목록 · null 이고 `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` ·
-    `merged_waiting` · `deferred` — 리포트를 누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다.
+    `merged_waiting` · `deferred` — 리포트를 누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다. 미뤘으면
+    `last_run.notes` 에도 한 줄 적힌다(수만 — 누구나 본다).
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
