@@ -66,10 +66,13 @@ def stopped_types(slugs, *, opened: set[str] | None) -> dict[str, str]:
 # 규칙 14 — 두 실행이 겹치지 않게(워커 주기와 관리자 버튼은 다른 프로세스다). 트랜잭션 advisory 잠금이라 커밋 ·
 # 실패 때 저절로 풀린다 — 세션 잠금은 풀에서 연결이 바뀌면 다른 연결로 풀려 남는다.
 LOCK_NAME = "dynaforge.sp_core_sync"
+# 이 잠금을 쥐는 길 전부 — 못 쥐어 건너뛰거나 거절하는 문구가 함께 쓴다. 문구마다 따로 적다가 새로 생긴 길(리포트 하나의 과제 잇기)이
+# 빠져, 반입끼리 겹친 것을 받기 탓으로 말했다(재검토 11-14 F-14). 쥐는 길을 더하면 여기에 더한다.
+LOCK_HOLDERS = "받기(뒤따르는 자동 잇기까지) · 합친 과제 옮기기 · 관리자 일괄 적용 · 리포트 하나의 과제 잇기(반입 뒤 · 끊은 기록을 지운 뒤)"
 
 
 async def try_lock(db) -> bool:
-    """이 트랜잭션에 받기 잠금을 건다(못 걸면 `False` — 누가 받는 중이다). 층 2 를 손으로 고치는 길(합친 과제 옮기기)도 건다."""
+    """이 트랜잭션에 받기 잠금을 건다(못 걸면 `False` — `LOCK_HOLDERS` 가운데 하나가 쥐고 있다)."""
     return bool((await db.execute(text("SELECT pg_try_advisory_xact_lock(hashtext(:k))"), {"k": LOCK_NAME})).scalar())
 
 
@@ -116,9 +119,9 @@ async def _link_tasks(db) -> dict:
     try:
         if not await try_lock(db):
             await db.rollback()
-            logger.warning("plm task links skipped — 잠금을 다른 받기 · 합친 과제 옮기기 · 일괄 적용이 쥐었다(다음 받기가 잇는다)")
-            return {"scope": "all", "skipped": "busy",
-                    "detail": "다른 받기 · 합친 과제 옮기기 · 일괄 적용이 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"}
+            why = f"{LOCK_HOLDERS} 가운데 하나가 잠금을 쥐어 건너뛰었다 — 다음 받기가 잇는다"
+            logger.warning("plm task links skipped — %s", why)
+            return {"scope": "all", "skipped": "busy", "detail": why}
         got = await onto.auto_link_tasks(db)
         await db.commit()
         return got
@@ -143,7 +146,7 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
                     trigger: str = "worker", requested_by: str = "") -> dict:
     """한 번 받는다(층 1 → 층 2 반영 → 커밋). 실패를 예외로 올리지 않는다 — 워커가 이것 때문에 멈추면 안 된다.
 
-    결과는 셋이다(규칙 16) — ok · needs_check · failed. 이미 받는 중이면 시작하지 않고 `busy` 를 돌려준다(규칙 14).
+    결과는 셋이다(규칙 16) — ok · needs_check · failed. 잠금이 잡혀 있으면(`LOCK_HOLDERS`) 시작하지 않고 `busy` 를 돌려준다(규칙 14).
     `client` 는 시험이 넣는다(MockTransport 를 실은 것) — 망 없이 계약을 고정하려면 필요하다.
     """
     if not enabled():
@@ -158,7 +161,7 @@ async def sync_once(*, full: bool = False, allow_shrink: bool = False, client: S
             if not await try_lock(db):
                 await db.rollback()
                 return {"ok": False, "result": "busy", "error": "busy",
-                        "detail": "이미 받는 중이다 — 끝난 뒤 다시 한다"}
+                        "detail": f"{LOCK_HOLDERS} 가운데 하나가 잠금을 쥐고 있다 — 끝난 뒤 다시 한다"}
             run_id = await _open_run(mode=mode, allow_shrink=allow_shrink, trigger=trigger,
                                      requested_by=requested_by)
             try:

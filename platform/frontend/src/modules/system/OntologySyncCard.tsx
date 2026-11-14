@@ -88,7 +88,7 @@ export function OntologySyncCard() {
                   if (window.confirm('절반 넘게 안 온 것을 정말 「사용 안 함」 으로 바꿉니다. 토큰의 부서 · 공개 범위가 줄어든 것이 아님을 허브에 확인했나요?')) run.mutate({ full: true, allowShrink: true })
                 }}>강제 정리</Button>
               )}
-              {/* 실행 기록에 남은 실패는 아래 「마지막 실행」 이 말한다 — 기록이 없는 거절(받는 중 · 꺼짐)만 여기 */}
+              {/* 실행 기록에 남은 실패는 아래 「마지막 실행」 이 말한다 — 기록이 없는 거절(잠금이 잡힘 · 꺼짐)만 여기 */}
               {err && err !== last?.error && <span className="text-danger text-xs">{err}</span>}
             </div>
 

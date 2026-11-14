@@ -369,6 +369,9 @@ async def test_a_busy_lock_skips_the_link_and_says_so(db):
         assert got["skipped"] == "busy", got
         # 「받기 뒤 자동 잇기가 이 리포트까지 본다」 고 약속하지 않는다 — 허브 받기가 꺼진 박스에서는 거짓이다(재검토 11-12)
         assert "켜져 있으면" in got["detail"] and "관리자 일괄 적용" in got["detail"], got
+        # 쥐는 길을 모두 댄다 — 반입이 겹치면 쥔 쪽은 대개 다른 리포트의 이 잇기인데 예전 글은 받기 · 옮기기 · 일괄 적용만 댔다
+        # (재검토 11-14 F-14)
+        assert "리포트 하나의 과제 잇기" in plm_sync.LOCK_HOLDERS and plm_sync.LOCK_HOLDERS in got["detail"], got
         assert r.kind == "sphere"
     finally:
         await _drop(db, u, s)
@@ -521,7 +524,7 @@ async def test_a_busy_lock_after_a_receive_skips_the_link_and_logs_it(db, caplog
         with caplog.at_level(logging.WARNING, logger="koorm.worker"):
             got = await plm_sync._link_tasks(db)
         await holder.rollback()
-    assert got["skipped"] == "busy", got
+    assert got["skipped"] == "busy" and plm_sync.LOCK_HOLDERS in got["detail"], got
     assert any("plm task links skipped" in r.getMessage() for r in caplog.records), caplog.text
 
 
@@ -996,7 +999,8 @@ async def test_the_admin_apply_is_refused_while_a_receive_holds_the_lock(db):
                 r = await c.post(f"{P}/ontology/task-links/apply", json={"only": ["없는-문자열"]},
                                  headers={"authorization": f"Bearer {security.create_access_token(a.id)}"})
             await holder.rollback()
-        assert r.status_code == 409 and "busy" in r.json()["message"], (r.status_code, r.text[:200])
+        msg = r.json()["message"]
+        assert r.status_code == 409 and msg.startswith("busy: ") and plm_sync.LOCK_HOLDERS in msg, (r.status_code, r.text[:300])
     finally:
         await _drop(db, a, sa)
 

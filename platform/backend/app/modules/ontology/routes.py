@@ -303,10 +303,11 @@ async def apply_links(body: ApplyLinks, actor: User = Depends(require_system_adm
                       db: AsyncSession = Depends(get_db)):
     """붙는 것만 잇는다 — 받기 뒤 자동 잇기와 같은 길 · 같은 기계 출처(`rule`): 사람이 끊은 리포트 · 손으로 확정한 리포트는
     건너뛰고 세며(`skipped_unlinked` · `kept_manual`) 판에 관리자 이름을 찍지 않는다(검토 반영 11-11). 받기와 같은 잠금을 건다 —
-    받는 중이거나 다른 적용 · 합친 과제 옮기기가 돌면 409 `busy`."""
+    그 잠금을 쥐는 길(`plm_sync.LOCK_HOLDERS`) 가운데 하나가 돌고 있으면 409 `busy`."""
     from app.worker import plm_sync
     if not await plm_sync.try_lock(db):
-        raise HTTPException(status.HTTP_409_CONFLICT, "busy: 지금 받는 중이거나 다른 적용이 돈다 — 끝난 뒤 다시 누르세요")
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"busy: 지금 {plm_sync.LOCK_HOLDERS} 가운데 하나가 돈다 — 끝난 뒤 다시 누르세요")
     done = await svc.apply_task_links(db, only=body.only)
     await db.commit()
     logger.info("task links applied by %s — 이음 %s · 사람 판 %s · 끊음 %s", actor.email,
@@ -503,7 +504,7 @@ async def run_sync(
 
     결과는 셋이다(SP 키트 규칙 16) — `ok` · `needs_check`(받은 것은 반영했고 사유가 `problems` 에) · `failed`.
     ★멈춘 실행도 **끝까지 받은 흐름은 이미 커밋됐다**(전부-아니면-무가 아니다). 그때는 409 로 통째 실패라 말하지 않고
-    타입별 결과(`types`)와 함께 돌려준다(KR-13). 아예 못 돈 것(꺼짐 · 받는 중 · 예외 · 카탈로그 불가 — `types` 가 비었다)만 409 다.
+    타입별 결과(`types`)와 함께 돌려준다(KR-13). 아예 못 돈 것(꺼짐 · 잠금이 잡힘 · 예외 · 카탈로그 불가 — `types` 가 비었다)만 409 다.
     `allow_shrink` 는 `full` 일 때만 뜻이 있다 — 증분은 부재 대조를 안 한다."""
     from app.worker import plm_sync
     got = await plm_sync.sync_once(full=full, allow_shrink=allow_shrink and full, trigger="admin",
@@ -533,12 +534,14 @@ async def move_merged(task_key: str, body: MoveIn, actor: User = Depends(require
                       db: AsyncSession = Depends(get_db)):
     """합쳐진 과제(A)의 우리 것을 허브가 정한 곳(B)으로 옮긴다(사용자 결정 10-30 「알리고 사람이 옮긴다」).
 
-    받는 중이면 거절한다 — 받기의 층 2 반영과 같은 표를 고친다(규칙 14 의 잠금을 함께 건다).
+    받는 중이면 거절한다 — 받기의 층 2 반영과 같은 표를 고친다(규칙 14 의 잠금을 함께 건다 — 그 잠금을 쥐는 다른
+    길(`plm_sync.LOCK_HOLDERS`)이 돌아도 거절한다).
     그 과제의 리포트 · 판을 누가 고치는 중이거나 옮길 판이 그새 달라졌어도 409 `busy` 다 — 기다리지 않고 아무것도 옮기지 않는다(다시
     누른다. 까닭은 문구에 일어난 그대로 적힌다)."""
     from app.worker import plm_sync
     if not await plm_sync.try_lock(db):
-        raise HTTPException(status.HTTP_409_CONFLICT, "busy: 지금 받는 중입니다 — 끝난 뒤 다시 누르세요")
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"busy: 지금 {plm_sync.LOCK_HOLDERS} 가운데 하나가 돌고 있습니다 — 끝난 뒤 다시 누르세요")
     got = await svc.move_merged_task(db, task_key, by=actor.email, note=body.note)
     if not got.get("ok"):
         raise HTTPException(status.HTTP_409_CONFLICT, f"{got.get('error')}: {got.get('detail') or ''}")

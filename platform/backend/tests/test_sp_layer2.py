@@ -755,6 +755,34 @@ async def test_a_move_pressed_while_a_report_is_held_answers_busy_at_once(db):
 
 
 @pytest.mark.usefixtures("own_sync_lock")
+async def test_a_move_pressed_while_the_sync_lock_is_held_is_refused_and_names_who_may_hold_it(db):
+    """합친 과제 옮기기는 받기 잠금이 잡혀 있으면 409 `busy` 로 아무것도 옮기지 않는다(규칙 14). 문구는 그 잠금을 쥐는 길을 모두 댄다 —
+    예전엔 「받는 중」 뿐이라 일괄 적용 · 리포트 하나의 과제 잇기가 쥔 것도 받기 탓으로 읽혔다(재검토 11-14 F-14)."""
+    import httpx
+
+    from app.database import SessionLocal
+    from app.shared.auth import get_current_user
+    from app.worker import plm_sync
+    t, users, sid = _tag(), [], ulid.new().str
+    try:
+        a, _, _, admin = await _merged_case(db, t, users, sid)
+        app, transport = await _client()
+        app.dependency_overrides[get_current_user] = lambda: admin
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c, SessionLocal() as other:
+            assert await plm_sync.try_lock(other)
+            try:
+                r = await c.post(f"{P}/ontology/merged-tasks/{a}/move", json={})
+            finally:
+                await other.rollback()
+            msg = r.json()["message"]
+            assert r.status_code == 409 and msg.startswith("busy: ") and plm_sync.LOCK_HOLDERS in msg, (r.status_code, r.text[:300])
+            listed = (await c.get(f"{P}/ontology/merged-tasks")).json()["data"]
+            assert [m["revisions"] for m in listed if m["key"] == a] == [[f"{a}@dv1"]], "busy 로 답하고도 옮겼다"
+    finally:
+        await _wipe(db, t, *users, session_id=sid)
+
+
+@pytest.mark.usefixtures("own_sync_lock")
 async def test_a_move_pressed_while_a_revision_is_held_answers_busy_at_once_then_carries_the_late_line(db):
     """옮길 판의 **이름**을 다른 트랜잭션이 쥐고 있어도(새 리포트를 그 판에 손으로 확정하는 중 — 커밋 전) 누름은 기다리지 않고 409
     `busy` 다. 그 트랜잭션이 끝난 뒤 다시 누르면 그새 이어진 선까지 옮긴다."""

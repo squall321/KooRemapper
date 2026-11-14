@@ -905,7 +905,7 @@ async def apply_task_links(db, *, only: list[str] | None = None) -> dict:
     `manual` 이라 그새 끊은 기록을 지우고(R1) 주인이 확정한 판에서 옮기고(R4) 판에 관리자 이름을 찍었다). 버튼은 사람의 손이지만
     리포트마다 본 판단이 아니다 — 그래서 사람이 끊은 리포트는 건너뛰고(`skipped_unlinked`), 사람이 손으로 확정한 리포트는
     옮기지 않고(`kept_manual`), 판에 누가 정했다(`decided_by`)를 찍지 않는다. 결과는 자동 잇기와 같은 꼴에 고른 문자열 수(`strings`).
-    받기 잠금 · 커밋은 부르는 쪽(라우트 — 받는 중이면 409).
+    받기 잠금 · 커밋은 부르는 쪽(라우트 — 그 잠금이 잡혀 있으면 409).
     """
     planned = await plan_task_links(db)
     picked = [e for e in planned["plan"] if e["verdict"] == "links" and (only is None or e["free"] in only)]
@@ -1056,7 +1056,7 @@ async def link_report(db, report: ImpactReport) -> dict:
     `ingest_report` 를 지나므로 거기서 한 번)와 사람이 끊은 기록을 지운 뒤(11-11)에 부른다. 그 리포트만 본다.
 
     ★실패가 반입을 되돌리지 않는다 — 저장점 안에서 돌고, 깨지면 그 저장점만 되감고 `{"error": …}` 를 돌려준다(부르는 쪽이
-    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(층 2 쓰기 — 받기 · 합친 과제 옮기기 · 관리자 일괄 적용)을 걸고, 쥐고 있으면 건너뛰고
+    응답 · 잡 경고에 싣는다). 받기와 같은 잠금(`plm_sync.LOCK_HOLDERS` — 다른 리포트의 이 잇기도 쥔다)을 걸고, 쥐고 있으면 건너뛰고
     그렇게 말한다(허브 받기가 켜져 있으면 다음 받기 뒤 자동 잇기가 전부를 본다 — 꺼져 있으면 관리자 일괄 적용이 잇는다). 과제·개정 기능이 꺼져 있으면(`KOORM_ONTOLOGY=0` · 허브 설정 없음 — 라우트와
     같은 판정) 하지 않고 `skipped: off` 로 말한다.
     """
@@ -1073,8 +1073,8 @@ async def link_report(db, report: ImpactReport) -> dict:
         if not await plm_sync.try_lock(db):
             await db.commit()          # 잠금 질의로 연 트랜잭션만 닫는다 — rollback 은 리포트 행을 만료시킨다
             return {"scope": "reports", "skipped": "busy",
-                    "detail": "받기 · 합친 과제 옮기기 · 관리자 일괄 적용이 잠금을 쥐고 있어 이번엔 잇지 않았다 — 허브 받기가 켜져 있으면 "
-                              "다음 받기 뒤 자동 잇기가, 아니면 관리자 일괄 적용이 잇는다"}
+                    "detail": f"{plm_sync.LOCK_HOLDERS} 가운데 하나가 잠금을 쥐고 있어 이번엔 잇지 않았다 — 허브 받기가 "
+                              "켜져 있으면 다음 받기 뒤 자동 잇기가, 아니면 관리자 일괄 적용이 잇는다"}
         async with db.begin_nested():
             got = await auto_link_tasks(db, report_ids=[rid])
         await db.commit()

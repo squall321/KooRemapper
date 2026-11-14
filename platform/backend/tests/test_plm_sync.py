@@ -163,7 +163,7 @@ async def test_every_run_leaves_a_record_with_one_of_three_results(db, on):
 
 
 async def test_a_run_does_not_start_while_another_holds_the_lock(db, on):
-    """규칙 14 — 워커 주기와 관리자 버튼은 다른 프로세스다. 겹치면 기준 시각이 엇갈린다 — 시작하지 않고 「받는 중」."""
+    """규칙 14 — 워커 주기와 관리자 버튼은 다른 프로세스다. 겹치면 기준 시각이 엇갈린다 — 시작하지 않고 `busy`."""
     slug = f"t_{ulid.new().str.lower()}"
     from app.database import SessionLocal
     async with SessionLocal() as holder:
@@ -171,6 +171,7 @@ async def test_a_run_does_not_start_while_another_holds_the_lock(db, on):
         got = await plm_sync.sync_once(client=_one_task_hub(slug))
         await holder.rollback()          # 트랜잭션 잠금 — 끝나면 저절로 풀린다
     assert got["result"] == "busy" and "run_id" not in got, got
+    assert plm_sync.LOCK_HOLDERS in got["detail"], "쥔 쪽이 받기라고 단정하지 않는다 — 쥐는 길을 모두 댄다(재검토 11-14 F-14)"
     rows = (await db.execute(select(OntoObject).where(OntoObject.type_slug == slug))).scalars().all()
     assert rows == [], "잠겨 있는데 받았다"
 
