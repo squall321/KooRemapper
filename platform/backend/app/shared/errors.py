@@ -78,7 +78,11 @@ _NOISE = ("[SQL", "[parameters", "DETAIL:", "(Background on this error", "(raise
 def short_error(exc: BaseException, limit: int = 300) -> str:
     """응답 · 원장에 싣는 오류의 짧은 꼴 — 「클래스: 한 줄」(`limit` 자 안). SQL 문 · 매개변수 · DETAIL · 배경 링크는 싣지 않는다 —
     전문은 서버 로그(`logger.exception`)에 남긴다. 예전에는 SQLAlchemy 오류 전문(약 1.6 KB — 문장과 값까지)이 API 응답 · 7-1 원장 ·
-    받기 기록에 실렸다(검토 2차 11-11 항목 7 · 재검토 11-12)."""
+    받기 기록에 실렸다(검토 2차 11-11 항목 7 · 재검토 11-12).
+
+    ★「값이 안 실린다」 는 아니다 — 남기는 그 한 줄에 값이 적혀 오는 오류가 있다(`invalid input syntax for type integer: "…"`, asyncpg 의
+    `invalid input for query argument $1: …`, 트리거가 `RAISE` 한 글, `OSError` 의 파일 경로 — 재검토 11-14 F-13 · 6a). 걷어 낼지는
+    정하지 않았다."""
     inner = exc.orig if isinstance(exc, StatementError) and exc.orig is not None else None   # 드라이버 오류 — 문장 없이 까닭만
     text = str(inner if inner is not None else exc)
     line = next((ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith(_NOISE)), "")

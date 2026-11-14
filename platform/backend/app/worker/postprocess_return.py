@@ -487,8 +487,12 @@ async def _fetch_and_ingest(db, job: Job, ref: dict, client: KooSlurmClient, ver
 
     # 리포트 곁의 해석 온톨로지 꾸러미 — 반입 · 잡 성공을 **먼저 굳힌 뒤** 싣는다. 싣기가 깨지면 attach_ontology 가 세션을
     # 되감는데, 그때 굳히지 않은 반입까지 함께 되감기면 안 된다(리포트가 정본이고 꾸러미는 덧붙이는 산출물이다).
-    # ★무엇이 깨져도 원장(`external_ref.ontology`)에 남기고 경고로 올린다 — 잡은 이미 성공으로 굳었으니 여기서 예외가 새면 스캔이
-    # 되감아 원장도 경고도 없이 빠졌다(검토 2차 11-11 항목 6). 다리만 깨진 것(`bridges.error`)도 경고로 — 꾸러미는 실렸다.
+    # ★이 단계의 여느 예외는 원장(`external_ref.ontology`)에 남기고 경고로 올린다 — 잡은 이미 성공으로 굳었으니 여기서 예외가 새면
+    # 스캔이 되감아 원장도 경고도 없이 빠졌다(검토 2차 11-11 항목 6). 다리만 깨진 것(`bridges.error`)도 경고로 — 꾸러미는 실렸다.
+    # 「늘 남는다」 는 아니다(검토 3차 11-14 결함 2 — main 에도 있는 틈). 이 단계에서 스캔이 취소되거나(재기동 — `CancelledError` 는
+    # 잡지 않는다) 원장을 적어 굳히기 전에 연결이 끊기면(아래 `db.get` · `_poll_jobs` 의 커밋) 잡은 성공인데 `ontology` 칸도 경고도
+    # 없다. 같은 잡 키의 리포트가 이미 있어 닫는 길(`already_ingested`)은 이 단계를 타지 않는다 — 반입과 잡 성공 사이에 끊겨 다음
+    # 스캔이 닫은 잡도 그렇다.
     jid, rid = job.id, report.id
     await db.commit()
     try:
