@@ -310,6 +310,26 @@ async def test_a_broken_link_report_keeps_the_report_and_says_why(db, monkeypatc
         await _drop(db, u, s)
 
 
+async def test_a_database_error_in_the_import_link_is_reported_in_the_short_form(db, monkeypatch):
+    """반입 뒤 잇기가 DB 쪽에서 깨지면 `task_links.error` 는 짧은 꼴(「클래스: 한 줄」)이다 — SQL 문 · 매개변수 · 배경 링크는 응답 ·
+    7-1 원장에 싣지 않는다(재검토 11-12 — 예전엔 SQLAlchemy 오류 전문 500 자가 실렸다). 전문은 서버 로그에."""
+    from sqlalchemy import text as sql
+
+    async def broken(sdb, **_kw):
+        await sdb.execute(sql("select 1/0 as rr_short_error_probe"))
+
+    monkeypatch.setattr(onto, "auto_link_tasks", broken)
+    u, s = await _owner(db, commit=True)
+    try:
+        r = await _rep(db, s, project=f"AL-{_tag()}", code="dv1", commit=True)
+        got = await onto.link_report(db, r)
+        err = got["error"]
+        assert "division by zero" in err and len(err) <= 300, err
+        assert "[SQL" not in err and "rr_short_error_probe" not in err and "sqlalche.me" not in err, err
+    finally:
+        await _drop(db, u, s)
+
+
 async def test_with_the_feature_off_the_import_does_not_link(db, monkeypatch):
     """과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 반입 뒤 잇기를 하지 않고 그렇게 말한다 — 라우트가 거절하는 것과 같은 판정."""
     from app.config import settings
@@ -336,7 +356,9 @@ async def test_a_busy_lock_skips_the_link_and_says_so(db):
             assert await plm_sync.try_lock(holder)            # 받기가 도는 중이다
             got = await onto.link_report(db, r)
             await holder.rollback()
-        assert got["skipped"] == "busy" and "받기 뒤" in got["detail"], got
+        assert got["skipped"] == "busy", got
+        # 「받기 뒤 자동 잇기가 이 리포트까지 본다」 고 약속하지 않는다 — 허브 받기가 꺼진 박스에서는 거짓이다(재검토 11-12)
+        assert "켜져 있으면" in got["detail"] and "관리자 일괄 적용" in got["detail"], got
         assert r.kind == "sphere"
     finally:
         await _drop(db, u, s)
@@ -488,6 +510,28 @@ async def test_a_busy_lock_after_a_receive_skips_the_link_and_logs_it(db, caplog
     assert any("plm task links skipped" in r.getMessage() for r in caplog.records), caplog.text
 
 
+async def test_with_the_feature_off_a_receive_does_not_link(db, monkeypatch):
+    """받기는 허브 설정만 보고 돈다(`plm_sync.enabled`). 과제·개정 기능을 끄면(KOORM_ONTOLOGY=0) 받기 뒤 자동 잇기도 하지 않고 그렇게
+    말한다 — 반입 뒤 잇기 · 라우트와 같은 판정(재검토 11-12 — 예전엔 꺼도 리포트 전부를 이었고, 라우트는 409 라 끊지도 못했다)."""
+    from app.config import settings
+    monkeypatch.setattr(settings, "ontology", "0")
+    called = []
+
+    async def spy(_db, **kw):
+        called.append(kw)
+        return {"scope": "all", "linked": 0}
+
+    async def yes(_db):
+        return True
+
+    monkeypatch.setattr(onto, "auto_link_tasks", spy)
+    monkeypatch.setattr(plm_sync, "try_lock", yes)
+    got = await plm_sync._link_tasks(db)
+    await db.rollback()
+    assert called == [], "기능이 꺼져 있는데 받기 뒤 자동 잇기를 불렀다"
+    assert got["skipped"] == "off" and "KOORM_ONTOLOGY=0" in got["detail"], got
+
+
 async def test_a_broken_link_after_a_receive_keeps_what_was_received(db, hub_on, monkeypatch):
     async def boom(_db, **_kw):
         raise RuntimeError("잇기 결함")
@@ -524,7 +568,8 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
     run = OntoSyncRun(mode="normal", trigger="test", result="needs_check", counts={
         "types": {}, "task_links": {"scope": "all", "linked": 2, "candidates": 3, "unmatched": 4,
                                     "reports_without_a_name": 5},
-        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": []}},
+        "reflected": {"renamed": 1, "revisions": 1, "reports": 7, "dropped": ["A@dv1 → B@dv1"],
+                      "error": "IntegrityError: … Key (src_key)=(01SOMEONEELSES) …"}},
         problems=["과제 잇기 실패 — RuntimeError: 원문에 남의 리포트 01ABC"], error="exception: 원문")
     db.add(run)
     await db.commit()
@@ -544,11 +589,53 @@ async def test_the_fleet_wide_counts_reach_only_a_system_admin(db):
         assert b["counts"]["task_links"]["linked"] == 2
         # 예외 원문(사유 줄 · 오류 글)과 층 2 가 옮긴 리포트 수도 관리자에게만 — 일반 사용자는 「문제가 있었다」(수)까지만
         assert (p["problems"], p["error"], p["problem_count"]) == ([], None, 1), p
-        assert "reports" not in p["counts"]["reflected"] and p["counts"]["reflected"]["renamed"] == 1, p["counts"]
+        # 층 2 반영의 글(예외 원문 `error` · 끊은 줄 `dropped`)도 관리자에게만 — 일반 사용자는 반영 **수**만(재검토 11-12)
+        assert p["counts"]["reflected"] == {"renamed": 1, "revisions": 1}, p["counts"]
         assert (b["problems"][0].startswith("과제 잇기 실패"), b["error"], b["problem_count"]) == (True, "exception: 원문", 1)
-        assert b["counts"]["reflected"]["reports"] == 7
+        assert b["counts"]["reflected"]["reports"] == 7 and "01SOMEONEELSES" in b["counts"]["reflected"]["error"]
     finally:
         await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == run.id))
+        await db.commit()
+        await _drop(db, a, sa)
+        await _drop(db, u, s)
+
+
+async def test_the_hub_error_text_on_type_rows_reaches_only_a_system_admin(db):
+    """허브가 준 오류 원문(`{kind}: {detail}` — 주소 · 응답 글이 든다)은 실행의 `error` 만 가리고 타입 줄 `last_error`(받기 상태) ·
+    과제 목록 `last_error` 로는 그대로 갔다(재검토 11-12). 이제 셋 다 관리자에게만 — 일반 사용자는 `last_status`(표시)까지."""
+    from app.main import create_app
+    from app.models import OntoSyncState
+    from app.modules.ontology.routes import require_ontology
+    raw = "transport: ConnectError: [Errno 111] connect to https://hub.internal:8443/api/core/objects?token=…"
+    slug = f"t_{_tag()}"
+    u, s = await _owner(db, commit=True)
+    a, sa = await _owner(db, admin=True, commit=True)
+    mine = [slug]
+    db.add(OntoSyncState(type_slug=slug, last_status="error", last_error=raw))
+    if (await db.get(OntoSyncState, onto.TYPE_TASK)) is None:      # 과제 목록이 읽는 과제 타입 줄 — 없을 때만 만들고 치운다
+        db.add(OntoSyncState(type_slug=onto.TYPE_TASK, last_status="error", last_error=raw))
+        mine.append(onto.TYPE_TASK)
+    await db.commit()
+    try:
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+        got = {}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                     base_url="http://test") as c:
+            for who, uid in (("plain", u.id), ("boss", a.id)):
+                h = {"authorization": f"Bearer {security.create_access_token(uid)}"}
+                st, tasks = await c.get(f"{P}/ontology/sync", headers=h), await c.get(f"{P}/ontology/tasks", headers=h)
+                assert st.status_code == 200 and tasks.status_code == 200, (st.text[:200], tasks.text[:200])
+                row = next(r for r in st.json()["data"]["types"] if r["type_slug"] == slug)
+                got[who] = (row["last_status"], row["last_error"], tasks.json()["data"]["last_error"])
+        assert got["plain"][:2] == ("error", None), got["plain"]
+        assert got["boss"][:2] == ("error", raw), got["boss"]
+        if onto.TYPE_TASK in mine:
+            assert (got["plain"][2], got["boss"][2]) == (None, raw), got
+        else:
+            assert got["plain"][2] is None, got
+    finally:
+        await db.execute(delete(OntoSyncState).where(OntoSyncState.type_slug.in_(mine)))
         await db.commit()
         await _drop(db, a, sa)
         await _drop(db, u, s)
@@ -715,6 +802,36 @@ async def test_a_metadata_edit_moves_only_a_machine_link_and_only_on_project_or_
         assert await _linked(db, machine.id) == [f"{other}@dv1"], "기계가 이은 선이 바뀐 과제를 따라가지 않았다"
     finally:
         await _drop(db, u, s, keys=[task, other])
+
+
+async def test_a_link_that_breaks_in_the_database_never_drops_the_metadata_save(db, monkeypatch):
+    """인제스트 때 잇기(`_link_revision`)가 DB 쪽에서 깨져도(세션이 되감김 대기가 되는 오류) 메타 저장은 굳는다 — 잇기만 저장점에서
+    되감긴다(재검토 11-12 rr1 — 예전엔 예외를 삼키고도 부르는 쪽의 커밋이 PendingRollbackError 로 깨져 인제스트는 리포트째 잃었다)."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import text as sql
+
+    from app.modules.reports import services as rsvc
+    t = _tag()
+    task, other = f"AL-{t}", f"AL2-{t}"
+    u, s = await _owner(db, commit=True)
+    # 고친 것이 무르면 세션이 되감김 대기라 객체 칸을 못 읽는다 — id 를 먼저 적어 두고 그것으로 치운다(남기지 않는다)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
+    try:
+        r = await _rep(db, s, project=task, code="dv1", commit=True)
+        rid = r.id
+
+        async def broken(sdb, rep):
+            await sdb.execute(sql("select 1/0"))           # 바깥 트랜잭션에서 나면 세션째 되감김 대기가 되는 DB 오류
+            return {"ok": True}
+
+        monkeypatch.setattr(onto, "link_from_eng_meta", broken)
+        await rsvc.update_report_meta(db, r, project=other)
+        async with SessionLocal() as f:
+            saved = await f.get(ImpactReport, rid)
+            assert (saved.eng_meta or {}).get("project") == other, f"잇기가 깨져 메타 저장까지 잃었다: {saved.eng_meta}"
+    finally:
+        await _drop(db, *mine, keys=[task, other])
 
 
 async def test_a_receive_leaves_an_unlinked_report_unlinked_and_counts_it(db, hub_on, monkeypatch):

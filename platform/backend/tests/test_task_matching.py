@@ -4,7 +4,8 @@
 그때는 그 위에 결론이 얹혀 있다. 그래서 —
 
   · 짐작이 없는 두 길(**글자 그대로 같다** · **사람이 이미 붙였다**)만 자동으로 붙는다 — 그 원천들이 **과제 하나로 모일
-    때만**이다. 엇갈리면(별칭과 같은 글자의 허브 과제 · 두 과제의 과제코드) 후보다(검토 R8 · R6, 11-11)
+    때만**이다. 엇갈리면(별칭과 같은 글자의 허브 과제 · 두 과제의 과제코드) 후보다(검토 R8 · R6, 11-11). 그만 쓴 과제는 살아 있는
+    과제가 하나도 안 맞을 때만 센다(사용자 결정 11-12 — 하나면 잇고 여럿이면 못 붙임)
   · 정규화해서 같아 보이는 것은 **후보**다 — 근거와 함께 보이고 사람이 고른다
   · 아무 후보도 없으면 **「못 붙였다」 고 목록으로 말한다**(조용히 건너뛰면 "다 붙었다" 로 읽힌다)
 
@@ -60,9 +61,9 @@ async def _report(db, s, *, project="", code="", embed=""):
     return r
 
 
-async def _task(db, key, label="", task_code=""):
+async def _task(db, key, label="", task_code="", status="active"):
     # key 는 **과제명**(rootdesign plm_task.key), 과제코드는 properties.task_code 다(KR-01).
-    t = OntoObject(type_slug="plm_task", key=key, label=label or key,
+    t = OntoObject(type_slug="plm_task", key=key, label=label or key, status=status,
                    source=SOURCE_HUB, properties=({"task_code": task_code} if task_code else {}))
     db.add(t)
     await db.flush()
@@ -204,6 +205,80 @@ async def test_a_task_code_shared_by_two_tasks_is_a_stable_candidate(db, tag):
         assert got["linked"] == 0 and await onto.history(db, a) == [] and await onto.history(db, b) == []
     finally:
         await _wipe(db, u, s, keys=[a, b, code])
+
+
+# ── 살아 있는 과제가 정한다(사용자 결정 11-12 — 다리와 같은 규칙을 과제 잇기에도) ──────────────────────
+
+async def test_a_deprecated_task_never_vetoes_a_live_match(db, tag):
+    """그만 쓴(deprecated) 과제는 살아 있는 과제의 일치를 막지 못한다 — 이름이 살아 있는 과제의 과제코드 · 과제명과 같은 글자여도,
+    과제코드를 같이 써도 살아 있는 과제로 잇는다(재검토 rr2b — 예전엔 엇갈림이라 과제코드로 잇던 리포트가 안 이어졌다)."""
+    live, code = f"A-{tag}", f"C-{tag}"
+    quiet = [f"B-{tag}", f"D-{tag}", f"E-{tag}"]
+    try:
+        await _task(db, live, task_code=code)
+        await _task(db, quiet[0], label=code, status="deprecated")          # 이름 = 살아 있는 과제의 과제코드
+        await _task(db, quiet[1], label=live, status="deprecated")          # 이름 = 살아 있는 과제의 과제명
+        await _task(db, quiet[2], task_code=code, status="deprecated")      # 과제코드를 같이 쓴다
+        assert await onto.resolve_task(db, code) == (live, "task_code")
+        assert await onto.resolve_task(db, live) == (live, "exact")
+    finally:
+        await _wipe(db, keys=[live, code, *quiet])
+
+
+async def test_deprecated_tasks_count_only_when_no_live_task_matches(db, tag):
+    """살아 있는 과제가 하나도 안 맞을 때만 그만 쓴 과제를 센다 — 하나면 예전처럼 잇고, 여럿이면 못 붙임(그만 쓴 과제는 후보로도 내지
+    않는다 — 새로 고르는 목록, 10-30 결정)."""
+    from app.models import ImpactReport as IR
+    one, a, b, code = f"O-{tag}", f"A-{tag}", f"B-{tag}", f"C-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, one, status="deprecated")
+        await _task(db, a, task_code=code, status="deprecated")
+        await _task(db, b, task_code=code, status="deprecated")
+        assert await onto.resolve_task(db, one) == (one, "exact")
+        assert await onto.resolve_task(db, code) == ("", "")
+        r = await _report(db, s, project=code, code="dv1")
+        e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+        assert (e["verdict"], e["candidates"]) == ("unmatched", []), e
+    finally:
+        await _wipe(db, u, s, keys=[one, a, b, code])
+
+
+async def test_among_live_tasks_a_same_label_still_only_disagrees(db, tag):
+    """살아 있는 과제끼리는 그대로(D7) — 이름(label)만으로는 잇지 않고, 다른 과제의 이름이 같은 글자면 엇갈림(후보)이다."""
+    a, b = f"A-{tag}", f"B-{tag}"
+    try:
+        await _task(db, a)
+        await _task(db, b, label=a)
+        assert await onto.resolve_task(db, a) == ("", "")
+        cands, ambiguous = await onto.candidates_for(db, a)
+        assert ambiguous and [c["key"] for c in cands][:2] == [a, b], cands
+    finally:
+        await _wipe(db, keys=[a, b])
+
+
+async def test_an_alias_whose_task_is_missing_disagrees_and_never_links(db, tag):
+    """사람이 붙인 별칭의 끝(과제)이 거울에 없으면(허브에서 지워짐 · 합쳐짐 · 받은 적 없음) 엇갈림이다 — 다른 원천이 한 과제로 맞아도
+    잇지 않고 후보로 낸다. 그 끝은 거울에 없어 고를 수 없으니 후보로 내지 않고 `alias_missing` 으로 보인다(SRC-08 다리와 같은 규칙 —
+    예전엔 거울에 없는 그 key 로 풀려 확인 못 한 과제의 판을 만들었다)."""
+    from app.models import ImpactReport as IR
+    live, gone, word = f"L-{tag}", f"G-{tag}", f"W-{tag}"
+    u, s = await _session(db)
+    try:
+        await _task(db, live)
+        assert (await onto.confirm_alias(db, alias=word, key=gone, by="kim"))["ok"]      # 끝이 거울에 없는 별칭
+        assert (await onto.confirm_alias(db, alias=live, key=gone, by="kim"))["ok"]      # 살아 있는 과제명과 같은 글자 · 끝이 없다
+        assert await onto.resolve_task(db, word) == ("", ""), "끝이 거울에 없는 별칭으로 풀었다"
+        assert await onto.resolve_task(db, live) == ("", ""), "끝이 없는 별칭이 엇갈리는데 과제명으로 이었다"
+        cands, ambiguous = await onto.candidates_for(db, live)
+        assert ambiguous and [c["key"] for c in cands] == [live] and gone in cands[0]["why"], cands
+        r = await _report(db, s, project=word, code="dv1")
+        e = (await onto.plan_task_links(db, scope=IR.id.in_([r.id])))["plan"][0]
+        assert e["verdict"] != "links" and e.get("alias_missing") == gone, e
+        got = await onto.auto_link_tasks(db, report_ids=[r.id])
+        assert got["linked"] == 0 and await onto.history(db, gone) == [], got
+    finally:
+        await _wipe(db, u, s, keys=[live, gone, word])
 
 
 async def test_a_string_cannot_point_at_two_tasks(db, tag):

@@ -222,6 +222,8 @@ export interface ReportRevisionOut {
   task_candidates: TaskCandidate[]
   /** 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 둔다 */
   ambiguous?: boolean
+  /** 사람이 붙인 별칭의 끝(과제)이 거울에 없다 — 엇갈림이라 잇지 않았다(재검토 11-12) */
+  alias_missing?: string | null
 }
 export async function reportRevision(reportId: string, taskKey?: string): Promise<ReportRevisionOut> {
   const { data } = await api.get(`/reports/${reportId}/revision`, { params: { task_key: taskKey || undefined } })

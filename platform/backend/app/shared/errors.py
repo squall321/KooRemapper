@@ -1,3 +1,4 @@
+# 오류를 밖으로 내보내는 꼴 — 표준 봉투 예외 처리기 · 응답과 원장에 싣는 짧은 오류 글(short_error)
 """Centralized exception handlers — every error returns the standard envelope.
 
 ⚠ 상관자를 **contextvar 가 아니라 `request.state` 에서** 읽는다. 이유를 적어 둔다 —
@@ -11,9 +12,11 @@ contextvar 가 이미 `-` 로 돌아간 뒤에 이 핸들러가 로그를 찍었
 from __future__ import annotations
 
 import logging
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from sqlalchemy.exc import StatementError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.shared.logctx import NONE
@@ -62,3 +65,25 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=500,
             headers=_with_corr(None, corr),
         )
+
+
+# ── 응답 · 원장에 싣는 짧은 오류 글 ───────────────────────────────────────────────
+# 코어 다리(reports/bridges.py)에서 처음 썼고, 과제 잇기(ontology) · 7-1 스캔이 두 번째 · 세 번째 소비자라 여기로 옮겼다(재검토 11-12).
+# `bridges.short_error` 는 이것을 다시 내보낸다(부르는 쪽이 그대로 쓴다).
+
+# 응답 · 원장에 싣지 않는 줄 — SQL 문 · 매개변수 · DETAIL(값이 든다) · 배경 링크 · autoflush 안내
+_NOISE = ("[SQL", "[parameters", "DETAIL:", "(Background on this error", "(raised as a result of Query-invoked autoflush")
+
+
+def short_error(exc: BaseException, limit: int = 300) -> str:
+    """응답 · 원장에 싣는 오류의 짧은 꼴 — 「클래스: 한 줄」(`limit` 자 안). SQL 문 · 매개변수 · DETAIL · 배경 링크는 싣지 않는다 —
+    전문은 서버 로그(`logger.exception`)에 남긴다. 예전에는 SQLAlchemy 오류 전문(약 1.6 KB — 문장과 값까지)이 API 응답 · 7-1 원장 ·
+    받기 기록에 실렸다(검토 2차 11-11 항목 7 · 재검토 11-12)."""
+    inner = exc.orig if isinstance(exc, StatementError) and exc.orig is not None else None   # 드라이버 오류 — 문장 없이 까닭만
+    text = str(inner if inner is not None else exc)
+    line = next((ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith(_NOISE)), "")
+    line = re.sub(r"\s*\(Background on this error at: [^)]*\)\s*$", "", line)
+    m = re.match(r"<class '(?:[\w.]+\.)?(\w+)'>:\s*(.*)", line)     # asyncpg 어댑터 꼴 「<class 'asyncpg…Error'>: 까닭」
+    if m:
+        line = m.group(2) if m.group(1) == type(exc).__name__ else f"{m.group(1)}: {m.group(2)}"
+    return (f"{type(exc).__name__}: {line}" if line else type(exc).__name__)[:limit]

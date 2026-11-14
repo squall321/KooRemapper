@@ -790,6 +790,23 @@ async def test_one_job_rolling_back_does_not_stop_the_scan(db, owner, slurm, mon
 
 
 @_aio
+async def test_a_crashed_poll_closes_the_job_with_the_short_error(db, owner, slurm, own_key, monkeypatch):
+    """스캔이 잡 하나를 보다 DB 쪽에서 깨지면 그 잡을 실패로 닫되 `error_summary` 는 짧은 꼴(「클래스: 한 줄」)이다 — SQL 문 · 값 ·
+    배경 링크는 잡에 싣지 않는다(재검토 11-12 — 예전엔 SQLAlchemy 오류 전문). 전문은 서버 로그에."""
+    from sqlalchemy import text as sql
+    u, s = owner
+    job = await _reserved(db, u, s)
+
+    async def crash(dbx, j, now):
+        await dbx.execute(sql("select 1/0 as rr_scan_probe"))
+    monkeypatch.setattr(pr, "poll_one", crash)
+    j = await _scan_one(db, job)
+    assert j.status == "failed", j.status
+    assert j.error_summary.startswith("worker exception: ") and "division by zero" in j.error_summary, j.error_summary
+    assert "[SQL" not in j.error_summary and "rr_scan_probe" not in j.error_summary, j.error_summary
+
+
+@_aio
 @needs_sphere
 async def test_a_bridge_failure_while_attaching_does_not_stop_the_scan(db, owner, slurm, own_key, monkeypatch):
     """7-1 반입이 꾸러미를 붙이다 코어 다리가 깨져도 반입 · 잡 성공은 그대로이고 같은 스캔의 다음 잡이 돈다. 스캔 고리(`_poll_jobs`)를

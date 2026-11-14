@@ -261,7 +261,7 @@ async def _poll_jobs(db, ids: list[str], now: datetime) -> None:
                 j = await db.get(Job, jid)
                 if j is not None and j.status == "running":
                     _close(j, status="failed", now=now,
-                           why=f"worker exception: {type(exc).__name__}: {exc}")
+                           why=f"worker exception: {short_error(exc)}")     # 짧은 꼴 — 전문은 위 로그(재검토 11-12)
                     await db.commit()
             except Exception:  # noqa: BLE001 — 실패를 적다 깨져도 다음 잡은 본다
                 logger.exception("postprocess job %s: 실패를 잡에 적지 못했다", jid)

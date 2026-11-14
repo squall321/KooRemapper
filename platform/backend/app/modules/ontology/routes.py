@@ -70,11 +70,12 @@ async def list_tasks(
     project: str | None = Query(default=None, description="이 프로젝트의 과제만(properties.project) — KR-16"),
     include_deleted: bool = Query(default=False, description="허브에서 사라진 것도"),
     limit: int = Query(default=100, ge=1, le=1000),
-    _user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """허브에서 받은 과제 목록. **비어 있는 것과 수신이 꺼진 것을 갈라 말한다** —
     빈 목록만 주면 「과제가 없다」 로 읽히는데, 실제로는 물어보지도 못한 것이다.
+    ★`last_error`(허브가 준 오류 원문 — 주소 · 응답 글이 든다)는 시스템 관리자에게만이다(재검토 11-12). 일반 사용자는 `last_status` 까지.
 
     검색은 key(과제명)·properties.task_code(과제코드)·별칭(허브 `properties.aliases` · 우리 별칭 표)·label 을 본다.
     **순위를 매긴 뒤 자른다**(KR-16 다시) — 앞부분 · 낱말 경계 · 부분 순이고, 항목마다 `matched_by` · `match_kind` 를 단다.
@@ -88,7 +89,7 @@ async def list_tasks(
         **got,
         "sync_enabled": plm_sync.enabled(),
         "last_status": state.last_status if state else None,
-        "last_error": state.last_error if state else None,
+        "last_error": state.last_error if (state and user.is_system_admin) else None,
         "last_run_at": state.last_run_at if state else None,
         "reason": (None if rows else
                    ("허브 수신이 꺼져 있다 — 아직 한 번도 받지 않았다"
@@ -185,6 +186,8 @@ async def get_report_revision(
         "task_candidates": task_cands,
         # 글자 그대로 맞는 과제가 둘 이상(원천이 엇갈린다) — 잇지 않고 후보로 낸다(검토 R8 · R6). 사람이 고른다
         "ambiguous": ambiguous,
+        # 끝이 거울에 없는 사람의 별칭(있으면 그것 때문에 잇지 않았다 — 재검토 11-12, SRC-08 다리와 같은 규칙)
+        "alias_missing": svc.missing_alias(found),
     })
 
 
@@ -203,8 +206,9 @@ async def set_report_revision(
                                  model_key=body.model_key, supersedes=body.supersedes,
                                  decided_by=user.email, note=body.note, source="manual")
     if not got.get("ok"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"{got.get('error')}: {got.get('detail') or ''}")
+        # 읽은 뒤 그사이 지워진 리포트(잠근 뒤 행이 없다 — 재검토 11-12)는 404, 나머지 거절은 400
+        code = status.HTTP_404_NOT_FOUND if got.get("error") == "report_gone" else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(code, f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
     return ok(got, message="개정을 확정했습니다.")
 
@@ -352,6 +356,9 @@ async def drop_alias(
     return ok(got, message="별칭을 뗐습니다.")
 
 
+_REFLECTED_COUNTS = ("renamed", "revisions", "collapsed", "aliases", "models", "merged_waiting", "deferred")
+
+
 def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
     counts = dict(r.counts or {})
     problems = list(r.problems or [])
@@ -361,7 +368,8 @@ def _run_out(r: OntoSyncRun, *, who: bool) -> dict:
         # plan_task_links 로 자기 것을 본다.
         counts.pop("task_links", None)
         if isinstance(counts.get("reflected"), dict):
-            counts["reflected"] = {k: v for k, v in counts["reflected"].items() if k != "reports"}
+            # 층 2 반영은 **수**만 — 옮긴 리포트 수 · 반영 실패의 예외 원문(`error`) · 끊은 줄(`dropped`)은 관리자에게만(재검토 11-12)
+            counts["reflected"] = {k: v for k, v in counts["reflected"].items() if k in _REFLECTED_COUNTS}
     out = {"id": r.id, "started_at": r.started_at, "finished_at": r.finished_at, "mode": r.mode,
            "allow_shrink": r.allow_shrink, "trigger": r.trigger, "result": r.result, "revision": r.revision,
            "counts": counts, "problem_count": len(problems), "notes": r.notes or [],
@@ -405,6 +413,8 @@ async def sync_state(
     읽기는 로그인한 일반 사용자에게 연다(KR-17, 2026-10-27) — 챗이 '받기가 됐나' 에 답할 수 있게.
     수신 자체(받기 · 처음부터 · 강제 정리 · 과거 붙이기 적용 · 별칭 · 합친 과제 옮기기)는 여전히 관리자만이다(admin 라우터).
     마지막 실행의 과제 잇기 수(`counts.task_links` — SRC-09)는 리포트 전부를 센 것이라 시스템 관리자에게만 싣는다.
+    ★오류 원문은 모두 시스템 관리자에게만이다(재검토 11-12) — 마지막 실행의 사유 줄 · `error` · 층 2 반영의 `error` · 끊은 줄(일반
+    사용자는 반영 수만 · `problem_count`), 타입 줄의 `last_error`(허브가 준 원문 — 일반 사용자는 `last_status` 까지).
 
     ★멈춘 타입(SRC-11) — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖인데 거울에 남은 타입은 타입 줄에 `stopped`
     (+ `stopped_why`)를 달고 `problems` 에 한 줄 싣는다. 타입 줄의 `last_status` 는 마지막으로 받았을 때의 기록이라 그대로 둔다 —
@@ -426,7 +436,7 @@ async def sync_state(
         "types": [{"type_slug": r.type_slug, "objects_as_of": r.objects_as_of,
                    "relations_as_of": r.relations_as_of,
                    "catalog_revision": r.catalog_revision, "last_run_at": r.last_run_at,
-                   "last_status": r.last_status, "last_error": r.last_error,
+                   "last_status": r.last_status, "last_error": r.last_error if user.is_system_admin else None,
                    "objects": counts.get(r.type_slug, 0),
                    "stopped": r.type_slug in stopped, "stopped_why": stopped.get(r.type_slug)} for r in rows],
         "stopped_types": sorted(stopped),

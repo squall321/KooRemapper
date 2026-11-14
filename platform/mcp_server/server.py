@@ -146,10 +146,22 @@ def _forward_headers(ctx: Context) -> dict:
 def _seg(value) -> str:
     """사용자 값을 경로 칸 **하나**로 — `quote(…, safe='')` 에 칸 전체가 `.`·`..` 인 것까지 감싼다(httpx 가 점 칸을 접는다).
 
-    감싸지 않으면 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 은 뒤를 잘라, `x/../../sessions/S` 는 남의 길로 간다
-    (검토 반영 11-11). 경로에 들어가는 사용자 값(리포트 · 세션 · 잡 · 과제 · 개정 · 레시피 · 케이스 …)은 모두 이것을 지난다 —
-    `tests/test_mcp_tools_contract.py` 가 f-문자열 경로를 훑어 못박는다.
+    감싸지 않으면 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 은 뒤를 잘라 다른 길로 간다(검토 반영 11-11). 경로에
+    들어가는 사용자 값(리포트 · 세션 · 잡 · 레시피 · 케이스 …)은 모두 이것을 지난다 — `tests/test_mcp_tools_contract.py` 가 f-문자열
+    경로를 훑어 못박는다. ★`/` · `\\` 가 든 값은 **거절한다**(ValueError — 보내지 않는다). 감싸도 백엔드(uvicorn)가 `%2F` 를 `/` 로
+    풀어 그 길로 라우팅한다(재검토 11-12 rr4 — `delete_report(id+'/revision')` 가 끊기 라우트로 갔다). 리포트 · 세션 · 잡 · 파일 id 에는
+    이 글자가 없다. `/` 가 들 수 있는 과제명 · 객체 key 만 `_seg_key` 를 쓴다(받는 라우트가 `{…:path}`).
     """
+    s = str(value)
+    if "/" in s or "\\" in s:
+        raise ValueError(f"경로 값에 '/' · '\\' 를 쓸 수 없다(id 에는 없는 글자다): {s!r}")
+    return _seg_key(s)
+
+
+def _seg_key(value) -> str:
+    """과제명 · 객체 key — `/` 가 들 수 있다(허브의 과제명). 받는 라우트가 `{…:path}` 라 백엔드가 `%2F` 를 풀어도 같은 라우트가
+    통째로 받는다. 감싸기는 `_seg` 와 같다(점 칸 포함). `task_revisions` · `compare_task_revisions` · `ontology_object` 의 key 밖에
+    쓰지 않는다(다른 칸에 쓰면 `/` 가 다른 라우트로 샌다 — 시험이 못박는다)."""
     s = quote(str(value), safe="")
     return s.replace(".", "%2E") if s in (".", "..") else s
 
@@ -1792,7 +1804,8 @@ async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str =
     별칭으로 걸렸으면 `matched_alias` · `alias_source`(hub · dynaforge)도. **순위를 매긴 뒤 자른다** — 앞부분 · 낱말 경계
     일치가 위로 오고, 더 있으면 `truncated:true` · `total`. `project` 로 좁힐 수 있다.
     ★`status:"deprecated"` 는 허브가 **그만 쓰라고 한** 과제다 — 새로 붙일 때는 고르지 마라(이미 이은 것은 그대로다).
-    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다.
+    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다. `last_error`(허브가 준 오류 원문)는 시스템
+    관리자에게만 온다 — 일반 사용자는 null 이고 `last_status` 를 본다.
     / Mirrored PLM tasks. `q` matches name · task_code · aliases · label, ranked before truncation;
     each item carries `matched_by` and `match_kind`."""
     params: dict = {"limit": limit}
@@ -1811,13 +1824,15 @@ async def task_revisions(task_key: str, ctx: Context) -> dict:
     그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
     ★판은 다 보이지만 판마다 리포트는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 온다 — 시스템 관리자는 전부(`scope`).
     / Revision chain; task_found:false means the task is unknown (not just empty). Report ids cover only reports you can read."""
-    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/revisions")
+    return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/revisions")
 
 
 @mcp.tool()
 async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> dict:
     """이 리포트가 어느 과제·개정인가(`linked`) + **어긋남** + **후보와 근거** + 그 과제의 허브 처지(`task_state`).
     `ambiguous: true` 면 글자 그대로 맞는 과제가 둘 이상이다(원천이 엇갈린다) — 풀지 않고 `task_candidates` 에 근거와 함께 둔다.
+    그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다(살아 있는 과제의 일치를 막지 못한다).
+    `alias_missing` 은 사람이 붙인 별칭의 끝(과제)이 거울에 없다는 뜻이다 — 엇갈림이라 잇지 않았다(그 별칭을 떼고 다시 붙인다).
 
     ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
     **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라. `kind` 가
@@ -1854,8 +1869,11 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
 async def ontology_sync_state(ctx: Context) -> dict:
     """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
     '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패.
-    사유 수는 `last_run.problem_count` 다. ★사유 줄(`last_run.problems` — 공개 안 된 타입 · 「절반 넘게 안 와서 정리를 멈춤」 ·
-    예외 원문 등) · 오류 글(`error`) · 층 2 반영이 옮긴 리포트 수는 **시스템 관리자에게만** 온다 — 일반 사용자에게는 빈 목록 · null 이다.
+    사유 수는 `last_run.problem_count` 다. ★오류 원문은 **시스템 관리자에게만** 온다 — 사유 줄(`last_run.problems` — 공개 안 된 타입 ·
+    「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄
+    (`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반 사용자에게는 빈 목록 · null 이고
+    `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` · `merged_waiting` · `deferred` — 리포트를
+    누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다.
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
@@ -1864,6 +1882,7 @@ async def ontology_sync_state(ctx: Context) -> dict:
     `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
     `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
     못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`) · 사람이 끊어 건너뜀(`skipped_unlinked`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
+    과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 받기는 돌아도 잇지 않는다 — `skipped: off`.
     받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
     return await _get(ctx, "/ontology/sync")
 
@@ -1895,7 +1914,7 @@ async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
     ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
     끝이 리포트인 선(개정에 달린 리포트)은 읽을 수 있는 리포트만 보인다(`scope`).
     / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
-    return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg(key)}")
+    return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg_key(key)}")
 
 
 @mcp.tool()
@@ -1904,9 +1923,11 @@ async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
     ★**아무것도 쓰지 않는다**(미리 보기다). `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
     갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라. `links` 는 글자 그대로 맞는 원천(과제명 ·
     과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 **과제 하나로 모일 때만**이다 — 엇갈리면(`ambiguous: true`) 후보다.
+    그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다 — 하나면 잇고, 여럿이면 못 붙임(후보로 내지 않는다).
+    항목의 `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어(지워짐 · 합쳐짐 · 받은 적 없음) 엇갈림이라 잇지 않았다.
     ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
     전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
-    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
+    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(과제·개정 기능이 켜져 있을 때 · 사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
     `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
     항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
     / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
@@ -1928,7 +1949,7 @@ async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
     ★리포트 줄 · 수치(최악값 · 심각도 · 케이스 · `measured_from`)는 **읽을 수 있는 리포트(소유 · 같은 소속)만**으로 센다 —
     판은 다 보이고 시스템 관리자는 전부다(`scope`: all · readable). 전사 수가 아닐 수 있다.
     / Revisions of one task side by side; report rows and numbers cover only reports you can read (scope)."""
-    return await _get(ctx, f"/ontology/tasks/{_seg(task_key)}/compare")
+    return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/compare")
 
 
 @mcp.tool()
@@ -1958,7 +1979,8 @@ async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REP
 async def confirm_task_alias(alias: str, task_key: str, ctx: Context,
                              note: str = "") -> dict:
     """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다 — 단 다른 정확 일치(과제명 ·
-    과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous`).
+    과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous` — 그만 쓴
+    과제는 살아 있는 과제를 막지 못한다). 붙인 과제가 거울에 없으면(받기 전 · 허브에서 지워짐) 그 별칭으로는 잇지 않는다(`alias_missing`).
 
     ★짐작으로 부르지 마라 — `plan_task_links` 의 후보와 **근거**를 사람에게 보여 주고 고른
     값을 넣어라. 한 문자열은 **한 과제만** 가리킨다(다른 곳에 붙어 있으면 거절된다).
