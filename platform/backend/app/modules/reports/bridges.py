@@ -398,13 +398,16 @@ async def rebuild_quietly(db, report: ImpactReport) -> dict:
         return {"error": short_error(exc)}
 
 
-async def reread(db, report: ImpactReport, rid: str) -> None:
+async def reread(db, report: ImpactReport, rid: str) -> bool:
     """되감은 뒤 리포트 객체를 다시 읽어 둔다 — 되감기는 세션의 모든 객체를 만료시키고, 부르는 쪽(라우트 · 번들 반입 · 7-1)은 그
-    객체를 계속 읽는다(async 에서 만료된 칸을 읽으면 깨진다 — key 도 만료돼 `rid` 를 따로 받는다). 그사이 지워졌으면 만료된 채로 둔다."""
+    객체를 계속 읽는다(async 에서 만료된 칸을 읽으면 깨진다 — key 도 만료돼 `rid` 를 따로 받는다). 그사이 지워졌으면 만료된 채로 둔다.
+    다시 읽었으면 참 — 굳히다 깨진 붙이기는 이 값과 다시 읽은 요약으로 굳었는지를 정한다(`services.attach_ontology`)."""
     try:
         await db.refresh(report)
     except Exception:                       # noqa: BLE001 — 되감은 뒤의 정리가 원래 실패를 가리면 안 된다
         logger.warning("리포트 %s 를 다시 읽지 못했다 — 되감은 뒤 지워졌을 수 있다", rid, exc_info=True)
+        return False
+    return True
 
 
 async def rebuild_after_attach(db, report: ImpactReport) -> dict:

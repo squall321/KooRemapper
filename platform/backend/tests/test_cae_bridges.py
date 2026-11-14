@@ -1264,6 +1264,125 @@ async def test_a_lost_commit_after_the_rebuild_rolls_back_and_rereads(db, monkey
         await _drop(db, u)
 
 
+# ── 굳히다 깨진 붙이기 — 굳었는지는 다시 읽어 정한다(검토 3차 11-14 결함 7) ─────────────────────────────────────
+
+def _lose_the_commit_answer(monkeypatch, dbx) -> None:
+    """다음 커밋 한 번을 굳힌 뒤에 깨뜨린다 — 서버는 굳혔는데 그 응답이 돌아오지 않은 것(그 사이 연결이 끊김)을 만든다."""
+    real_commit = dbx.commit
+
+    async def lost_answer():
+        monkeypatch.setattr(dbx, "commit", real_commit)
+        await real_commit()
+        raise ConnectionError("굳힌 응답 유실(시험)")
+    monkeypatch.setattr(dbx, "commit", lost_answer)
+
+
+@ON_SESSION_LOOP
+async def test_an_attach_whose_commit_landed_but_lost_its_answer_is_an_attach(db, monkeypatch):
+    """굳히는 문장(COMMIT)이 굳고 응답만 잃으면 붙은 것이다 — 다시 읽은 요약이 이번 파일 행을 가리키므로 여느 붙이기처럼 답하고 옛 디스크
+    파일을 걷는다. 예전에는 굳은 새 행이 가리키는 새 파일을 지우고 「아무것도 바꾸지 않았다」 로 답했다 — 같은 꾸러미를 다시 붙여도
+    「이미 실었다」 라 파일이 돌아오지 않았다(검토 3차 11-14 결함 7)."""
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        first = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        raw = _variant("응답을 잃은 판")
+        _lose_the_commit_answer(monkeypatch, db)
+        got = await svc.attach_ontology(db, rep, raw)
+        assert got["already"] is False and got["sha256"] == hashlib.sha256(raw).hexdigest() != first["sha256"]
+        assert "error" not in got["bridges"], got["bridges"]
+        assert not _columns_expired(rep) and rep.ontology["file_id"] == got["file_id"]
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (got["sha256"], got["file_id"]), "굳은 요약이 돌려준 것과 다르다"
+        assert await _package_files(db, sid, rid) == [got["file"]], "파일 행은 새 것 하나다"
+        path = await _stored_file(db, got)
+        assert path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == got["sha256"], "굳은 꾸러미의 파일이 없다"
+        assert _disk_files(uid, sid, rid) == [got["file"].removeprefix(f"ontology/{rid}/")], "옛 파일이 디스크에 남았다"
+        again = await svc.attach_ontology(db, rep, raw)
+        assert again["already"] is True and again["file_id"] == got["file_id"]
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_an_attach_whose_commit_died_before_landing_changes_nothing(db, monkeypatch):
+    """굳히다 깨졌고 굳지 않았으면(연결이 COMMIT 앞에서 끊김) 다시 읽은 요약이 옛 것이다 — 이번 디스크 파일을 걷고 OntoAttachError
+    (`unknown` 거짓). 옛 꾸러미 · 행 · 파일이 그대로다. 굳히다 깨진 것을 모두 굳었다고 읽으면 옛 요약을 새 붙이기의 답으로 돌려준다."""
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        first = await svc.attach_ontology(db, rep, FIX.read_bytes())
+        files, disk = await _package_files(db, sid, rid), _disk_files(uid, sid, rid)
+        rows = await _count(db, OntoObject, OntoObject.report_id == rid)
+        real_commit = db.commit
+
+        async def dead_commit():
+            monkeypatch.setattr(db, "commit", real_commit)
+            await _kill_connection(db)
+            await real_commit()
+        monkeypatch.setattr(db, "commit", dead_commit)
+        with pytest.raises(svc.OntoAttachError) as err:
+            await svc.attach_ontology(db, rep, _variant("굳지 않은 판"))
+        assert err.value.unknown is False and "실렸는지 모른다" not in str(err.value), str(err.value)
+        assert not _columns_expired(rep) and rep.ontology["sha256"] == first["sha256"]
+        assert await _package_files(db, sid, rid) == files, "이번 파일 행이 남았다"
+        assert _disk_files(uid, sid, rid) == disk, "이번 디스크 파일이 남았다"
+        assert await _count(db, OntoObject, OntoObject.report_id == rid) == rows
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_an_attach_that_cannot_tell_whether_it_landed_says_so_and_keeps_the_file(db, monkeypatch):
+    """굳히다 깨졌고 리포트를 다시 읽지도 못하면 실렸는지 모른다 — OntoAttachError(`unknown` 참)이고 이번 디스크 파일을 지우지 않는다
+    (굳었으면 새 파일 행이 그 파일을 가리킨다). 옛 파일도 건드리지 않는다. REST 500 은 「아무것도 바꾸지 않았다」 대신 그 사실과 확인하는
+    길을 말한다. 같은 꾸러미를 다시 붙이면 「이미 실었다」 이고 파일이 있다."""
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import create_app
+    from app.shared.auth import get_current_user
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        disk = _disk_files(uid, sid, rid)
+        raw = _variant("실렸는지 모르는 판")
+        _lose_the_commit_answer(monkeypatch, db)
+
+        async def unreadable(*a, **k):
+            return False
+        with monkeypatch.context() as m:
+            m.setattr(br, "reread", unreadable)
+            with pytest.raises(svc.OntoAttachError) as err:
+                await svc.attach_ontology(db, rep, raw)
+        why = str(err.value)
+        assert err.value.unknown is True and why.startswith("실렸는지 모른다") and "ConnectionError" in why, why
+        assert br.short_error(err.value).startswith("OntoAttachError: 실렸는지 모른다"), "원장 · 경고에 싣는 짧은 꼴의 앞에 온다"
+        await db.rollback()
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert stored["sha256"] == hashlib.sha256(raw).hexdigest(), "이 시험의 손은 굳힌 뒤에 깨뜨린다"
+        assert (await _stored_file(db, stored)).is_file(), "굳은 꾸러미의 파일을 지웠다"
+        assert set(disk) < set(_disk_files(uid, sid, rid)), "옛 파일은 건드리지 않는다 — 굳었는지 모른다"
+        again = await svc.attach_ontology(db, rep, raw)
+        assert again["already"] is True and (await _stored_file(db, again)).is_file()
+
+        async def unknown(*a, **k):
+            raise svc.OntoAttachError("ConnectionError: 굳힌 응답 유실(시험)", unknown=True)
+        monkeypatch.setattr(svc, "attach_ontology", unknown)
+        await db.refresh(u)
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: u
+        async with httpx.AsyncClient(transport=ASGITransport(app=app, raise_app_exceptions=False), base_url="http://t") as c:
+            r = await c.post(f"/api/v1/reports/{rid}/cae", files={"file": ("report.ontology.json", raw, "application/json")})
+        msg = r.json()["message"]
+        assert r.status_code == 500 and "실렸는지 모른다" in msg and "아무것도 바꾸지 않았다" not in msg, r.text[:400]
+        assert f"GET /reports/{rid}/cae" in msg and "ConnectionError" in msg
+    finally:
+        await _drop(db, u)
+
+
 # ── 이름 바뀐 사람 선은 부르는 이름으로 · 다시 확정하면 풀린다(검토 2차 11-11 항목 8) ───────────────────────────────
 
 @ON_SESSION_LOOP

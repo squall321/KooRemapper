@@ -910,7 +910,9 @@ async def attach_ontology(
     (사용자 결정 10-31 (가)). 소유자만. 받아들인 어휘 판 · 짝 HTML 지문 · 종류 · 런 키에 안 맞으면 422 — 아무것도 바꾸지 않는다.
     같은 바이트는 행을 그대로 둔다(멱등), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 어느 쪽이든 끝에 코어 다리(core-link SRC-08)를
     지금 거울로 다시 짓는다 — 응답 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선 수와 후보 · 못 붙인 객체 수(사람 선은 다시 붙여도 남는다).
-    리포트가 그사이 지워졌으면 404, 싣는 쓰기가 깨지면 500 과 짧은 까닭 — 어느 쪽이든 아무것도 바뀌지 않는다(옛 꾸러미 · 행 그대로)."""
+    리포트가 그사이 지워졌으면 404, 싣는 쓰기가 깨지면 500 과 짧은 까닭 — 어느 쪽이든 아무것도 바뀌지 않는다(옛 꾸러미 · 행 그대로).
+    ★굳히다(COMMIT) 깨지면 다시 읽어 정한다 — 굳었으면 여느 붙이기처럼 답하고, 다시 읽지도 못하면 500 이 「실렸는지 모른다」 와 확인하는
+    길(GET · 같은 꾸러미 다시 붙이기)을 말한다."""
     r = await _require_owned_report(db, user, report_id)
     raw, name = await _read_upload(file, what="온톨로지 꾸러미")
     try:
@@ -920,6 +922,9 @@ async def attach_ontology(
     except bridges.ReportGone:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다 — 그사이 지워졌다")
     except svc.OntoAttachError as exc:
+        if exc.unknown:                     # 굳히다 깨졌고 다시 읽지도 못했다 — 「아무것도 안 바꿨다」 고 말할 수 없다
+            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                                f"온톨로지 꾸러미가 {exc} · GET /reports/{report_id}/cae 로 확인하거나 같은 꾸러미를 다시 붙인다")
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
                             f"온톨로지 꾸러미를 싣지 못했다 — {exc} · 아무것도 바꾸지 않았다(옛 꾸러미 · 행 그대로)")
     loaded = summary["counts"]["loaded"]

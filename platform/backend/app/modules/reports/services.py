@@ -1399,8 +1399,17 @@ async def attach_render(db: AsyncSession, report: ImpactReport, raw: bytes) -> d
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 캠페인 수준 행으로 싣는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ──────
 class OntoAttachError(RuntimeError):
-    """꾸러미는 검사를 통과했는데 싣는 쓰기가 깨졌다(DB · 디스크) — 되감고 이번 디스크 파일을 지웠다. 옛 행 · 옛 파일 · 요약은 그대로다.
-    까닭은 짧은 꼴(`bridges.short_error` — 전문은 서버 로그). 꾸러미 탓이 아니므로 OntoPackageError(422)와 가른다."""
+    """꾸러미는 검사를 통과했는데 싣는 쓰기가 깨졌다(DB · 디스크). 까닭은 짧은 꼴(`bridges.short_error` — 전문은 서버 로그). 꾸러미 탓이
+    아니므로 OntoPackageError(422)와 가른다.
+
+    - `unknown` 거짓 — 되감았고 이번 디스크 파일을 지웠다. 옛 행 · 옛 파일 · 요약은 그대로다.
+    - `unknown` 참 — 굳히다(COMMIT) 깨졌고 리포트를 다시 읽지도 못해 **실렸는지 모른다**. 이번 디스크 파일을 지우지 않았다(굳었으면 새 파일
+      행이 그 파일을 가리킨다). 글 맨 앞에 그 사실을 적는다 — 짧은 꼴(`short_error`)로 잘려도 남는다. 부르는 쪽은 이때 「아무것도 안
+      바꿨다」 고 말하면 안 된다."""
+
+    def __init__(self, why: str, *, unknown: bool = False):
+        super().__init__(f"실렸는지 모른다(굳히다 깨졌고 다시 읽지 못했다) — {why}" if unknown else why)
+        self.unknown = unknown
 
 
 def _package_dest(session: Session, filename: str) -> tuple[str, Path]:
@@ -1436,8 +1445,12 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     - ★한 리포트의 붙이기는 **리포트 행 잠금 아래 한 트랜잭션**이다 — 꾸러미 파일 행 · 해석 행 · 요약 · 다리(저장점)를 한 번에 굳힌다.
       잠근 뒤 요약을 다시 읽어 「이미 실었다」 를 정한다 — 잠그기 전에 읽은 요약으로 정하면 그사이 다른 꾸러미가 붙은 것을 놓치고 옛
       요약을 `already` 로 돌려줬다(검토 2차 11-11 항목 4). 리포트가 그사이 지워졌으면 `bridges.ReportGone`(→ 404, 아무것도 안 썼다).
-      쓰기가 깨지면 되감고 이번 디스크 파일을 지운 뒤 리포트 객체를 다시 읽어 두고 `OntoAttachError` — 예전에는 깨진 커밋 뒤 만료된
+      쓰기가 깨지면 되감고 리포트 객체를 다시 읽어 둔 뒤 이번 디스크 파일을 지우고 `OntoAttachError` — 예전에는 깨진 커밋 뒤 만료된
       객체를 읽다 PendingRollbackError 가 나 정리가 돌지 않았고 파일 행 · 디스크 파일이 남았다(검토 2차 항목 2).
+    - ★굳히는 문장(COMMIT)에서 깨지면 굳었는지 모른다(서버는 굳혔는데 응답만 잃을 수 있다) — 다시 읽은 요약이 이번 파일 행을 가리키면
+      **굳은 것**이라 여느 붙이기처럼 답하고, 아니면 굳지 않은 것이라 위와 같다. 다시 읽지도 못하면 이번 디스크 파일을 지우지 않고
+      `OntoAttachError(unknown=True)`. 예전에는 굳은 새 행이 가리키는 새 파일을 지우고 「아무것도 바꾸지 않았다」 로 답했다 — 같은
+      꾸러미를 다시 붙여도 「이미 실었다」 라 파일이 돌아오지 않았다(검토 3차 11-14 결함 7).
     """
     import hashlib
     from datetime import datetime, timezone
@@ -1474,6 +1487,7 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     # 쓴다) 늦게 지워도 새 파일을 건드리지 않는다. 행만 있고 파일이 없는 자리는 이번이나 뒤의 붙이기가 다시 쓸 수 있어 지우지 않는다.
     old_paths = [p for f in old_files if (p := storage.abs_path(f.rel_path)).is_file()]
     safe, dest = _package_dest(session, f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}")
+    file_id = None                          # 굳히는 문장(COMMIT)을 보내기 직전에 채운다 — 그 뒤에 깨지면 굳었는지는 다시 읽어야 안다
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(dest.write_bytes, raw)
@@ -1502,13 +1516,21 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
         }
         await db.flush()                    # 다리 짓기는 잠근 뒤 요약을 DB 에서 다시 읽는다 — 새 요약이 먼저 내려가 있어야 한다
         counts = await bridges.rebuild_quietly(db, report)      # 저장점 — 다리가 깨져도 꾸러미는 실린다(`bridges.error`)
+        file_id = stored.id
         await db.commit()
     except Exception as exc:
         logger.exception("꾸러미 싣기 실패 — report %s", rid)
-        await db.rollback()                 # 파일 행 · 해석 행 · 요약이 함께 되감긴다 — 옛 것이 그대로다
-        dest.unlink(missing_ok=True)        # 이번 디스크 파일만(자리는 비어 있던 곳이다)
-        await bridges.reread(db, report, rid)
-        raise OntoAttachError(bridges.short_error(exc)) from exc
+        await db.rollback()                 # 굳지 않았으면 파일 행 · 해석 행 · 요약이 함께 되감긴다 — 옛 것이 그대로다
+        fresh = await bridges.reread(db, report, rid)
+        if file_id is not None and not fresh:
+            # 굳히다 깨졌고 다시 읽지도 못했다 — 굳었으면 새 파일 행이 이 파일을 가리키므로 지우지 않는다(굳지 않았으면 행 없는 파일이 남는다)
+            raise OntoAttachError(bridges.short_error(exc), unknown=True) from exc
+        if file_id is None or not (isinstance(report.ontology, dict) and report.ontology.get("file_id") == file_id):
+            # 굳지 않았다 — 굳었다가 그 틈에 다른 붙이기가 바꿨어도 지금 실린 것은 이 꾸러미가 아니고 이 파일을 가리키는 행도 없다
+            dest.unlink(missing_ok=True)    # 이번 디스크 파일만(자리는 비어 있던 곳이다)
+            raise OntoAttachError(bridges.short_error(exc)) from exc
+        # 서버는 굳혔고 그 응답만 잃었다 — 요약이 이번 파일 행을 가리킨다. 붙은 것이다(검토 3차 11-14 결함 7)
+        logger.warning("꾸러미 %s 는 굳었다 — 굳힌 응답만 잃었다(report %s)", sha[:12], rid)
     summary = dict(report.ontology)
     for p in old_paths:                     # DB 는 더 건드리지 않는다 — 굳힌 뒤에 깨질 것이 없다
         try:
