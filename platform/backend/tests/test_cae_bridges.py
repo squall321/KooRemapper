@@ -955,6 +955,38 @@ def test_an_error_goes_out_as_class_and_one_line_without_sql_or_values():
     assert br.short_error(RuntimeError()) == "RuntimeError"
 
 
+@ON_SESSION_LOOP
+@pytest.mark.parametrize("where", ["build", "view"])
+async def test_a_bridge_failure_shaped_like_a_db_error_goes_out_short(db, monkeypatch, where):
+    """다리 짓기(붙이기 응답)와 다리 보기(보기 응답)가 깨질 때 `bridges.error` 로 나가는 글도 짧은 꼴이다 — 실제 DB 오류 꼴(문장 · 매개변수 ·
+    DETAIL 의 값이 든 여러 줄)을 넣어 잰다. 한 줄짜리 오류는 전문과 짧은 꼴이 같아서, 두 자리에 전문을 되돌려도 시험이 모두
+    초록이었다(검토 3차 11-14 c2 · c3)."""
+    from sqlalchemy.exc import IntegrityError
+
+    orig = Exception("<class 'asyncpg.exceptions.UniqueViolationError'>: duplicate key value violates unique constraint "
+                     "\"uq_onto_relations_edge\"\nDETAIL:  Key (src_key)=(비밀-값) already exists.")
+    exc = IntegrityError("INSERT INTO onto_relations (relation, src_key) VALUES ($1, $2)", ("maps_to", "비밀-값"), orig)
+
+    async def broken(*a, **kw):
+        raise exc
+    u, rep = await _make(db)
+    try:
+        if where == "build":
+            monkeypatch.setattr(br, "plan", broken)
+            got = await svc.attach_ontology(db, rep, FIX.read_bytes())
+            assert got["counts"]["loaded"]["cae_part"] == 23
+        else:
+            await svc.attach_ontology(db, rep, FIX.read_bytes())
+            monkeypatch.setattr(br, "view", broken)
+            got = await svc.ontology_view(db, rep)
+            assert got["loaded"] and len(got["parts"]) == 23
+        err = got["bridges"]["error"]
+        assert err == br.short_error(exc), "전문이 그대로 나갔다"
+        assert not [s for s in ("INSERT", "[SQL", "[parameters", "DETAIL", "비밀-값", "\n") if s in err], err
+    finally:
+        await _drop(db, u)
+
+
 # ── 꾸러미 붙이기는 리포트 행 잠금 아래 한 트랜잭션(검토 2차 11-11 항목 2 · 3 · 4) ─────────────────────────────
 
 def _dup_edge(monkeypatch) -> None:
@@ -1246,6 +1278,54 @@ async def test_overlapping_attaches_keep_the_file_of_the_package_that_ends_up_st
         assert on_disk.is_file() and hashlib.sha256(on_disk.read_bytes()).hexdigest() == stored["sha256"], \
             "끝에 실린 꾸러미의 파일이 디스크에 없다"
         assert _disk_files(uid, sid, rid) == [got_a["file"].removeprefix(f"ontology/{rid}/")], "옛 파일이 디스크에 남았다"
+    finally:
+        await _drop(db, u)
+
+
+async def _waits_for_a_lock(pid: int) -> None:
+    """DB 연결 `pid` 가 남이 쥔 잠금 앞에 설 때까지 기다린다(pg_locks 의 아직 못 받은 줄) — 잠을 재서 「이쯤이면 막혔다」 고 짐작하지 않는다."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+    async with SessionLocal() as probe:
+        for _ in range(300):
+            if (await probe.execute(text("select count(*) from pg_locks where pid = :pid and not granted"),
+                                    {"pid": pid})).scalar_one():
+                return
+            await asyncio.sleep(0.05)
+    raise AssertionError(f"DB 연결 {pid} 가 15초 안에 잠금 앞에 서지 않았다")
+
+
+@ON_SESSION_LOOP
+async def test_an_attach_queued_behind_a_session_delete_does_not_deadlock_with_it(db):
+    """붙이기는 세션 행(KEY SHARE)을 리포트 행보다 먼저 쥔다 — 세션 지우기(세션 행 → 연쇄로 리포트 행)와 같은 차례다. 세션 지우기가 세션 행을
+    쥔 동안 온 붙이기는 그 행 앞에서 아무것도 쥐지 않고 기다리고, 지우기가 굳으면 잠글 리포트 행이 없어 404 다. 세션 행을 먼저 쥐지 않으면
+    붙이기가 리포트 행을 쥔 채 꾸러미 파일 행의 FK 검사에서 세션 행을 기다리고 지우기의 연쇄는 그 리포트 행을 기다려 교착한다 — 그 잠금 줄을
+    빼도 시험이 모두 초록이었다(검토 3차 11-14 d6)."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid, sid = rep.id, rep.session_id
+    try:
+        async with SessionLocal() as sh, SessionLocal() as sa:
+            ra = await sa.get(ImpactReport, rid)
+            pid = (await sa.execute(text("select pg_backend_pid()"))).scalar_one()
+            await sh.execute(select(Session.id).where(Session.id == sid).with_for_update())      # 세션 지우기가 먼저 쥐는 세션 행
+            ta = asyncio.create_task(svc.attach_ontology(sa, ra, FIX.read_bytes()))
+            try:
+                await _waits_for_a_lock(pid)
+                await sh.execute(delete(Session).where(Session.id == sid))                       # 연쇄로 리포트 행까지 지운다
+                await sh.commit()
+            finally:
+                await sh.rollback()
+                got = (await asyncio.gather(asyncio.wait_for(ta, 60), return_exceptions=True))[0]
+        assert isinstance(got, br.ReportGone), got
     finally:
         await _drop(db, u)
 
@@ -1600,6 +1680,46 @@ async def test_a_delete_whose_commit_fails_keeps_the_package_file(db, monkeypatc
         assert _disk_files(uid, sid, rid) == disk
         await svc.delete_report(db, rep)
         assert await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == []
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+@pytest.mark.parametrize("source", ["kept", "gone"])
+async def test_a_delete_queued_behind_an_attach_removes_the_file_the_attach_lands(db, monkeypatch, source):
+    """지우기는 리포트 행을 **먼저** 잠그고 그 뒤에 지울 꾸러미 파일을 읽는다 — 붙이기가 행을 쥔 채 새 꾸러미 파일(행 · 디스크)을 놓고 굳히는 사이에
+    온 지우기는 그 잠금 앞에서 기다렸다가 그 새 파일까지 지운다. 그 잠금을 빼도 시험이 모두 초록이었다(검토 3차 11-14 h1). 빼면 원본 파일이
+    있는 리포트(kept)는 교착한다 — 지우기는 원본 파일 행을 지우다 리포트 행을 기다리고(FK 의 SET NULL), 붙이기는 요약을 다시 쓰다 그 파일
+    행을 기다린다(리포트 행의 FK 검사). 원본 파일이 없는 리포트(gone)는 아직 안 굳은 새 파일 행을 못 본 채 리포트만 지워, 주인 없는 꾸러미
+    파일(행 · 디스크)이 세션에 남는다."""
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        if source == "gone":
+            rep.source_file_id = None
+            await db.commit()
+        async with SessionLocal() as sx:
+            rx = await sx.get(ImpactReport, rid)
+            paused, go = _pause_in_plan(monkeypatch, sx)
+            ta = asyncio.create_task(svc.attach_ontology(sx, rx, FIX.read_bytes()))
+            await asyncio.wait_for(paused.wait(), 15)         # 붙이기가 행을 쥐었고 새 파일(행 · 디스크)을 놓았다 — 아직 안 굳혔다
+            pid = (await db.execute(text("select pg_backend_pid()"))).scalar_one()
+            td = asyncio.create_task(svc.delete_report(db, rep))
+            try:
+                await _waits_for_a_lock(pid)
+            finally:
+                go.set()
+                res = await asyncio.gather(asyncio.wait_for(ta, 60), asyncio.wait_for(td, 60), return_exceptions=True)
+        assert not any(isinstance(x, BaseException) for x in res), res
+        assert res[0]["already"] is False and await _count(db, ImpactReport, ImpactReport.id == rid) == 0
+        assert await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == [], \
+            "지운 리포트의 꾸러미 파일(행 · 디스크)이 남았다"
     finally:
         await _drop(db, u)
 

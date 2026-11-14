@@ -213,6 +213,23 @@ def test_a_relation_listed_twice_is_refused_by_name():
     assert name(one) in msg and name(two) in msg, msg
 
 
+def test_a_relation_with_an_unloaded_end_listed_twice_is_refused_too():
+    """끝이 행으로 실리지 않는 타입(런 · 파트 응답 · 하중 전달)인 관계도 두 번이면 거절한다 — 그런 관계는 선으로 싣지 않지만 겹침은 꾸러미의
+    모든 관계에서 본다(만든 쪽 열쇠는 타입을 가리지 않는다). 픽스처의 관계는 모두 실리는 타입 사이라(contact_side · path_between ·
+    finding_about) 이 갈래는 따로 잰다(검토 3차 11-14 — 겹침 검사를 실리는 타입 사이로 좁혀도 시험이 모두 초록이었다)."""
+    for slug, src, dst in (("run_of", "cae_run", "cae_campaign"), ("response_in", "cae_part_response", "cae_run"),
+                           ("response_of", "cae_part_response", "cae_part"), ("transfer_via", "cae_load_transfer", "cae_contact")):
+        assert not {src, dst} <= set(op.LOADED_TYPES), f"{slug} — 한 끝은 행으로 실리지 않는 타입이어야 이 갈래를 잰다"
+        pkg = copy.deepcopy(_pkg())
+        one = {"relation": slug, "src": [src, _obj(pkg, src)["key"]], "dst": [dst, _obj(pkg, dst)["key"]]}
+        pkg["relations"] += [one, copy.deepcopy(one)]
+        with pytest.raises(op.OntoPackageError) as exc:
+            _check(pkg)
+        msg = str(exc.value)
+        assert msg.startswith("duplicate_relation") and "(1곳)" in msg, msg
+        assert f"{slug} {src} {one['src'][1]} → {dst} {one['dst'][1]}" in msg, msg
+
+
 def _refusal(mutate, **kw) -> str:
     pkg = copy.deepcopy(_pkg())
     mutate(pkg)
