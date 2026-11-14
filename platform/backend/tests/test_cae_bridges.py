@@ -1424,6 +1424,34 @@ async def test_deleting_a_report_removes_its_package_files(db):
         await _drop(db, u)
 
 
+@ON_SESSION_LOOP
+async def test_a_delete_whose_commit_fails_keeps_the_package_file(db, monkeypatch):
+    """지우기의 커밋이 깨지면 리포트 · 꾸러미 파일 행이 그대로이므로 디스크의 꾸러미 파일도 그대로여야 한다 — 예전에는 커밋 전에 디스크에서
+    먼저 지워 행만 남았고, 같은 바이트를 다시 붙여도 「이미 실은 꾸러미」 라 파일이 돌아오지 않았다(검토 3차 11-14 결함 10). 커밋이 굳으면
+    예전처럼 행 · 디스크가 함께 사라진다."""
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        rows, disk = await _package_files(db, sid, rid), _disk_files(uid, sid, rid)
+        assert len(rows) == 1 and len(disk) == 1
+
+        async def lost():
+            raise RuntimeError("커밋 유실")
+        with monkeypatch.context() as m:
+            m.setattr(db, "commit", lost)
+            with pytest.raises(RuntimeError, match="커밋 유실"):
+                await svc.delete_report(db, rep)
+        await db.rollback()
+        rep = await db.get(ImpactReport, rid)
+        assert rep is not None and await _package_files(db, sid, rid) == rows
+        assert _disk_files(uid, sid, rid) == disk
+        await svc.delete_report(db, rep)
+        assert await _package_files(db, sid, rid) == [] and _disk_files(uid, sid, rid) == []
+    finally:
+        await _drop(db, u)
+
+
 # ── 꾸러미에 같은 관계가 두 번이면 검사가 거절한다(결정 11-12) ───────────────────────────────────────────
 
 @ON_SESSION_LOOP

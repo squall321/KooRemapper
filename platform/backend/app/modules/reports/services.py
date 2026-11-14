@@ -1241,16 +1241,22 @@ async def delete_report(db: AsyncSession, report: ImpactReport) -> None:
             except OSError:
                 pass
             await db.delete(f)
+    packages = []
     for f in (await db.execute(select(SessionFile).where(
             SessionFile.session_id == report.session_id,
             SessionFile.filename.like(f"ontology/{report.id}/%")))).scalars().all():
-        try:
-            storage.abs_path(f.rel_path).unlink(missing_ok=True)
-        except OSError:
-            pass
+        packages.append(storage.abs_path(f.rel_path))
         await db.delete(f)
     await db.delete(report)
     await db.commit()
+    # 꾸러미 파일은 커밋이 굳은 뒤에 디스크에서 지운다 — 커밋이 깨지면 리포트 · 파일 행이 그대로라 파일도 그대로여야 한다(예전에는 먼저 지워
+    # 행만 남았고, 같은 바이트를 다시 붙여도 「이미 실은 꾸러미」 라 파일이 돌아오지 않았다 — 검토 3차 11-14 결함 10). 리포트가 지워졌으니 그
+    # 자리에 새 꾸러미가 올 일은 없다.
+    for p in packages:
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _bump(slot: dict, value, case_key: str) -> None:
