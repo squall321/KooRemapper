@@ -6,8 +6,9 @@
   R2   기록을 본 직후 커밋된 끊기를 자동 잇기가 지우고 다시 이었다
 이제 리포트 선을 고치는 모든 길이 리포트 행을 먼저 잠그고(id 차례) 잠근 뒤에 다시 읽는다. 겹친 쪽은 기다렸다가 그때의 상태로 한다.
 
-두 세션을 실제로 겹친다(공유 dev DB) — 이 시험의 행만 만들고 치운다. 기다림은 「1초 뒤에도 안 끝났다」 로 잰다 — 잠금이 있으면
-상대가 커밋하기 전에는 끝날 수 없다.
+두 세션을 실제로 겹친다(공유 dev DB) — 이 시험의 행만 만들고 치운다. 주인(`_owner`)을 만든 뒤의 준비는 모두 `try:` 안에서 한다 — 준비가
+깨져도 `finally` 가 적어 둔 id 로 치워 아무것도 남기지 않는다(재검토 11-14 F-18). 기다림은 「1초 뒤에도 안 끝났다」 로 잰다 — 잠금이
+있으면 상대가 커밋하기 전에는 끝날 수 없다.
 """
 from __future__ import annotations
 
@@ -121,8 +122,8 @@ async def test_a_hand_confirm_during_an_open_auto_link_waits_and_leaves_one_link
     t = _tag()
     task, code = f"RC-{t}", f"RCC-{t}"
     uid, sid = await _owner(db)
-    rid = await _rep(db, uid, sid, project=code, code="dv1")
     try:
+        rid = await _rep(db, uid, sid, project=code, code="dv1")
         await _open_auto_link(db, task, code, rid)
 
         async def confirm(other):
@@ -147,8 +148,8 @@ async def test_an_unlink_during_an_open_auto_link_waits_and_records_no_500(db):
     t = _tag()
     task, code = f"RU-{t}", f"RUC-{t}"
     uid, sid = await _owner(db)
-    rid = await _rep(db, uid, sid, project=code, code="dv1")
     try:
+        rid = await _rep(db, uid, sid, project=code, code="dv1")
         await _open_auto_link(db, task, code, rid)
 
         async def unlink(other):
@@ -177,8 +178,8 @@ async def test_an_unlink_landing_after_the_auto_links_first_look_is_respected(db
     t = _tag()
     task, code = f"RL-{t}", f"RLC-{t}"
     uid, sid = await _owner(db)
-    rid = await _rep(db, uid, sid, project=code, code="dv1")
     try:
+        rid = await _rep(db, uid, sid, project=code, code="dv1")
         async with SessionLocal() as s:
             rep = await s.get(ImpactReport, rid)
             assert (await onto.link_from_eng_meta(s, rep))["ok"]
@@ -213,16 +214,16 @@ async def test_an_unlink_landing_after_the_auto_links_first_look_is_respected(db
 # (`uq_onto_objects_type_key`)에 걸려 인제스트는 리포트째 잃고(500 · HTML 고아), 손 확정은 500, 자동 잇기는 회차 전체가 되감겼다.
 # 이제 판을 만들거나 고치는 길은 리포트 행 다음에 **판 이름 잠금**을 건다 — 둘째는 첫째가 끝날 때까지 기다렸다가 그 판을 쓴다.
 
-async def _hold_new_revision(task: str, code: str, uid: int, sid: str):
-    """다른 세션이 리포트 A 를 새 판 task@code 에 잇고 **커밋하지 않은 채** 쥔다(인제스트 때 잇기 · 자동 잇기의 긴 트랜잭션)."""
-    s = SessionLocal()
+async def _hold_new_revision(s, task: str, code: str, uid: int, sid: str) -> str:
+    """다른 세션 `s` 가 리포트 A 를 새 판 task@code 에 잇고 **커밋하지 않은 채** 쥔다(인제스트 때 잇기 · 자동 잇기의 긴 트랜잭션). 세션은
+    부르는 쪽이 열어 넘긴다 — 여기서 깨져도 부르는 쪽 `finally` 가 그 세션을 닫아, 쥔 것이 풀린 뒤에 치운다."""
     rid = uuid.uuid4().hex[:26].upper()
     s.add(ImpactReport(id=rid, session_id=sid, user_id=uid, kind="sphere", n_cases=0,
                        eng_meta={"project": task, "dev_revision": {"code": code}}))
     await s.commit()
     rep = await s.get(ImpactReport, rid)
     assert (await onto.link_from_eng_meta(s, rep))["ok"]
-    return s, rid
+    return rid
 
 
 async def test_an_ingest_linking_a_revision_another_transaction_is_creating_keeps_the_report(db):
@@ -231,9 +232,11 @@ async def test_an_ingest_linking_a_revision_another_transaction_is_creating_keep
     t = _tag()
     task = f"RF-{t}"
     uid, sid = await _owner(db)
-    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
-    bid = uuid.uuid4().hex[:26].upper()
+    holder = SessionLocal()
     try:
+        a_id = await _hold_new_revision(holder, task, "dv1", uid, sid)
+        bid = uuid.uuid4().hex[:26].upper()
+
         async def ingest(other):
             other.add(ImpactReport(id=bid, session_id=sid, user_id=uid, kind="sphere", n_cases=0,
                                    eng_meta={"project": task, "dev_revision": {"code": "dv1"}}))
@@ -264,11 +267,13 @@ async def test_a_hand_confirm_of_a_revision_another_transaction_is_creating_succ
     t = _tag()
     task = f"RH-{t}"
     uid, sid = await _owner(db)
-    bid = await _rep(db, uid, sid, project="", code="")
-    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
-    app = create_app()
-    app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+    holder = SessionLocal()
     try:
+        bid = await _rep(db, uid, sid, project="", code="")
+        await _hold_new_revision(holder, task, "dv1", uid, sid)
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+
         async def put():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
                                          base_url="http://test") as c:
@@ -296,19 +301,21 @@ async def test_an_auto_link_round_with_a_colliding_new_revision_keeps_every_link
     t = _tag()
     task, other = f"RA-{t}", f"RB-{t}"
     uid, sid = await _owner(db)
-    await _task(db, task, task_code=f"RAC-{t}")
-    await _task(db, other, task_code=f"RBC-{t}")
-    early = await _rep(db, uid, sid, project=f"RBC-{t}", code="dv1")        # 따로 이을 수 있는 리포트
-    late = await _rep(db, uid, sid, project=f"RAC-{t}", code="dv1")         # 겹치는 판(task@dv1)
-    holder, a_id = await _hold_new_revision(task, "dv1", uid, sid)
-    real = onto.auto_link_tasks
-
-    async def yes(_db):
-        return True
-
-    monkeypatch.setattr(plm_sync, "try_lock", yes)
-    monkeypatch.setattr(onto, "auto_link_tasks", lambda sdb, report_ids=None: real(sdb, report_ids=sorted([early, late])))
+    holder = SessionLocal()
     try:
+        await _task(db, task, task_code=f"RAC-{t}")
+        await _task(db, other, task_code=f"RBC-{t}")
+        early = await _rep(db, uid, sid, project=f"RBC-{t}", code="dv1")    # 따로 이을 수 있는 리포트
+        late = await _rep(db, uid, sid, project=f"RAC-{t}", code="dv1")     # 겹치는 판(task@dv1)
+        await _hold_new_revision(holder, task, "dv1", uid, sid)
+        real = onto.auto_link_tasks
+
+        async def yes(_db):
+            return True
+
+        monkeypatch.setattr(plm_sync, "try_lock", yes)
+        monkeypatch.setattr(onto, "auto_link_tasks", lambda sdb, report_ids=None: real(sdb, report_ids=sorted([early, late])))
+
         async def round_():
             async with SessionLocal() as s3:
                 return await plm_sync._link_tasks(s3)
@@ -334,12 +341,12 @@ async def test_a_move_waiting_on_a_hand_confirm_keeps_the_confirmed_revision_fie
     t = _tag()
     old, new = f"RM-{t}", f"RMN-{t}"
     uid, sid = await _owner(db)
-    x = await _rep(db, uid, sid, project=old, code="dv1")
-    async with SessionLocal() as s:                              # X 는 인제스트 때 잇기로 old@dv1(eng_meta)에 있다
-        assert (await onto.link_from_eng_meta(s, await s.get(ImpactReport, x)))["ok"]
-        await s.commit()
     hand = SessionLocal()
     try:
+        x = await _rep(db, uid, sid, project=old, code="dv1")
+        async with SessionLocal() as s:                          # X 는 인제스트 때 잇기로 old@dv1(eng_meta)에 있다
+            assert (await onto.link_from_eng_meta(s, await s.get(ImpactReport, x)))["ok"]
+            await s.commit()
         assert (await onto.set_revision(hand, await hand.get(ImpactReport, x), task_key=old, code="dv1",
                                         decided_by="owner@x", note="사람이 본 판", source="manual"))["ok"]
 
@@ -372,39 +379,39 @@ async def test_the_rename_loop_never_waits_on_a_report_while_holding_revisions_a
     t = _tag()
     old1, new1, old2, new2 = f"RD1-{t}", f"RN1-{t}", f"RD2-{t}", f"RN2-{t}"
     uid, sid = await _owner(db)
-    a = await _rep(db, uid, sid, project="", code="")
-    y = await _rep(db, uid, sid, project="", code="")
-    z = await _rep(db, uid, sid, project="", code="")
-    for rid, task in ((a, old1), (y, old2)):
-        async with SessionLocal() as s:
-            assert (await onto.set_revision(s, await s.get(ImpactReport, rid), task_key=task, code="dv1",
-                                            decided_by="kim@x", source="manual"))["ok"]
-            await s.commit()
-
-    async def mine(_db, type_slug):                              # 받은 사본 전체 대신 이 시험의 이름 바뀜 둘만(공유 DB)
-        return {old1: new1, old2: new2} if type_slug == onto.TYPE_TASK else {}
-
-    real = onto._reports_on
-    side: dict = {}
-
-    async def hooked(sdb, keys):
-        # 뒤 과제 옮기기의 첫 보기(옛 key 와 옮겨 갈 key 를 함께 본다) — 앞 과제의 판 이름은 이미 쥐었다
-        if list(keys) == [f"{old2}@dv1", f"{new2}@dv1"] and "t2" not in side:
-            async with SessionLocal() as s:                      # Z 가 뒤 과제의 판에 이어진다(커밋)
-                assert (await onto.set_revision(s, await s.get(ImpactReport, z), task_key=old2, code="dv1",
+    try:
+        a = await _rep(db, uid, sid, project="", code="")
+        y = await _rep(db, uid, sid, project="", code="")
+        z = await _rep(db, uid, sid, project="", code="")
+        for rid, task in ((a, old1), (y, old2)):
+            async with SessionLocal() as s:
+                assert (await onto.set_revision(s, await s.get(ImpactReport, rid), task_key=task, code="dv1",
                                                 decided_by="kim@x", source="manual"))["ok"]
                 await s.commit()
 
-            async def hand(other):                               # 다른 사람 손: Z 를 쥐고 앞 과제의 판(옮기는 중)으로 확정
-                return await onto.set_revision(other, await other.get(ImpactReport, z), task_key=old1, code="dv1",
-                                               decided_by="lee@x", source="manual")
-            side["t2"] = asyncio.create_task(_in_other_session(hand))
-            await asyncio.sleep(0.7)
-        return await real(sdb, keys)
+        async def mine(_db, type_slug):                          # 받은 사본 전체 대신 이 시험의 이름 바뀜 둘만(공유 DB)
+            return {old1: new1, old2: new2} if type_slug == onto.TYPE_TASK else {}
 
-    monkeypatch.setattr(onto, "renamed_keys", mine)
-    monkeypatch.setattr(onto, "_reports_on", hooked)
-    try:
+        real = onto._reports_on
+        side: dict = {}
+
+        async def hooked(sdb, keys):
+            # 뒤 과제 옮기기의 첫 보기(옛 key 와 옮겨 갈 key 를 함께 본다) — 앞 과제의 판 이름은 이미 쥐었다
+            if list(keys) == [f"{old2}@dv1", f"{new2}@dv1"] and "t2" not in side:
+                async with SessionLocal() as s:                  # Z 가 뒤 과제의 판에 이어진다(커밋)
+                    assert (await onto.set_revision(s, await s.get(ImpactReport, z), task_key=old2, code="dv1",
+                                                    decided_by="kim@x", source="manual"))["ok"]
+                    await s.commit()
+
+                async def hand(other):                           # 다른 사람 손: Z 를 쥐고 앞 과제의 판(옮기는 중)으로 확정
+                    return await onto.set_revision(other, await other.get(ImpactReport, z), task_key=old1, code="dv1",
+                                                   decided_by="lee@x", source="manual")
+                side["t2"] = asyncio.create_task(_in_other_session(hand))
+                await asyncio.sleep(0.7)
+            return await real(sdb, keys)
+
+        monkeypatch.setattr(onto, "renamed_keys", mine)
+        monkeypatch.setattr(onto, "_reports_on", hooked)
         try:
             first = ("ok", await onto.reflect_after_sync(db))
             await db.commit()
@@ -436,22 +443,22 @@ async def test_a_hand_confirm_racing_a_report_delete_is_a_404_and_leaves_no_line
     t = _tag()
     task = f"RG-{t}"
     uid, sid = await _owner(db)
-    rid = await _rep(db, uid, sid, project="", code="")
-    real = onto.lock_reports
-    fired = []
-
-    async def delete_first(sdb, ids):
-        if rid in {str(i) for i in ids} and not fired:          # PUT 이 리포트를 읽은 뒤 · 잠그기 전에 주인이 지운다(커밋)
-            fired.append(1)
-            async with SessionLocal() as other:
-                await other.execute(delete(ImpactReport).where(ImpactReport.id == rid))
-                await other.commit()
-        return await real(sdb, ids)
-
-    monkeypatch.setattr(onto, "lock_reports", delete_first)
-    app = create_app()
-    app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
     try:
+        rid = await _rep(db, uid, sid, project="", code="")
+        real = onto.lock_reports
+        fired = []
+
+        async def delete_first(sdb, ids):
+            if rid in {str(i) for i in ids} and not fired:      # PUT 이 리포트를 읽은 뒤 · 잠그기 전에 주인이 지운다(커밋)
+                fired.append(1)
+                async with SessionLocal() as other:
+                    await other.execute(delete(ImpactReport).where(ImpactReport.id == rid))
+                    await other.commit()
+            return await real(sdb, ids)
+
+        monkeypatch.setattr(onto, "lock_reports", delete_first)
+        app = create_app()
+        app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
                                      base_url="http://test") as c:
             r = await c.put(f"/api/v1/reports/{rid}/revision", json={"task_key": task, "code": "dv1"},
