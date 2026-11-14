@@ -1423,7 +1423,9 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
       같은 바이트면 행은 그대로 둔다(멱등).
     - 끝에 코어 다리(`bridges` — cae_part → part · cae_finding → failure_mode · cae_campaign → analysis_method, core-link SRC-08)를
       지금 거울로 다시 짓는다(같은 바이트여도). 셈은 요약의 `bridges` 에 — 다리가 깨져도 꾸러미는 실린다(`bridges.error`).
-    - 꾸러미 파일은 리포트 세션에 둔다 — 하중 전달(런 × 접촉)은 거기에만 있다. 옛 파일은 새 행이 커밋된 뒤에 지운다.
+    - 꾸러미 파일은 리포트 세션에 둔다 — 하중 전달(런 × 접촉)은 거기에만 있다. 옛 파일 **행**은 새 행과 한 트랜잭션에서 지우고, 옛 디스크
+      파일은 굳힌 뒤에 지운다 — 잠근 때 디스크에 있던 것만. 예전에는 행도 굳힌 뒤(잠금이 풀린 뒤)에 지웠다 — 겹친 붙이기가 아직 보이는 옛
+      행을 지난 꾸러미로 읽고, 그 행의 경로에 다시 쓴 새 파일을 정리가 지웠다(둘 다 ok 를 받고 디스크에 파일이 없었다 — 검토 3차 11-14).
     - ★한 리포트의 붙이기는 **리포트 행 잠금 아래 한 트랜잭션**이다 — 꾸러미 파일 행 · 해석 행 · 요약 · 다리(저장점)를 한 번에 굳힌다.
       잠근 뒤 요약을 다시 읽어 「이미 실었다」 를 정한다 — 잠그기 전에 읽은 요약으로 정하면 그사이 다른 꾸러미가 붙은 것을 놓치고 옛
       요약을 `already` 로 돌려줬다(검토 2차 11-11 항목 4). 리포트가 그사이 지워졌으면 `bridges.ReportGone`(→ 404, 아무것도 안 썼다).
@@ -1457,9 +1459,13 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     if session is None:
         raise onto_package.OntoPackageError("리포트의 세션을 찾지 못했다")
     base = f"ontology/{rid}/"
-    # 잠근 뒤에 읽는다 — 꾸러미 파일 행은 이 잠금 아래에서만 생기므로 여기 보이는 것은 모두 지난 꾸러미의 것이다(겹친 붙이기의 것이 아니다)
+    # 잠근 뒤에 읽는다 — 이 리포트의 꾸러미 파일 행은 이 잠금 아래에서만 생기고 사라진다(아래에서 새 행과 함께 지운다). 여기 보이는 것은 모두
+    # 지난 꾸러미의 것이다
     old_files = list((await db.execute(select(SessionFile).where(
         SessionFile.session_id == sid, SessionFile.filename.like(base + "%")))).scalars().all())
+    # 굳힌 뒤 디스크에서 지울 옛 파일 — 지금 디스크에 있는 것만. 있는 자리는 뒤에 오는 붙이기가 다시 쓰지 않으므로(`_package_dest` 가 옆 이름을
+    # 쓴다) 늦게 지워도 새 파일을 건드리지 않는다. 행만 있고 파일이 없는 자리는 이번이나 뒤의 붙이기가 다시 쓸 수 있어 지우지 않는다.
+    old_paths = [p for f in old_files if (p := storage.abs_path(f.rel_path)).is_file()]
     safe, dest = _package_dest(session, f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}")
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1467,6 +1473,8 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
         stored = SessionFile(session_id=sid, filename=safe, rel_path=f"{session.storage_path}/{safe}", kind="generated",
                              size_bytes=len(raw), sha256=sha, meta={"filename": dest.name})
         db.add(stored)
+        for f in old_files:                 # 옛 파일 행 — 잠금이 풀릴 때 보이는 꾸러미 파일 행은 새 것 하나다
+            await db.delete(f)
         await db.flush()
         # 사람이 이은 다리 선만 남긴다 — 가리키던 해석 객체가 새 꾸러미에 없으면 「끊긴 사람 선」 으로 보인다(지우지 않는다)
         await db.execute(delete(OntoRelation).where(OntoRelation.report_id == rid, ~bridges.keep_on_reattach()))
@@ -1495,8 +1503,11 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
         await bridges.reread(db, report, rid)
         raise OntoAttachError(bridges.short_error(exc)) from exc
     summary = dict(report.ontology)
-    for f in old_files:
-        await sess_svc.delete_file(db, f)
+    for p in old_paths:                     # DB 는 더 건드리지 않는다 — 굳힌 뒤에 깨질 것이 없다
+        try:
+            p.unlink(missing_ok=True)
+        except OSError:
+            pass
     return {**summary, "bridges": counts, "already": False}
 
 

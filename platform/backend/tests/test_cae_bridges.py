@@ -1134,6 +1134,89 @@ async def test_already_is_decided_on_the_summary_read_after_the_lock(db):
         await _drop(db, u)
 
 
+async def _stored_file(db, summary: dict) -> Path:
+    """요약이 가리키는 꾸러미 파일의 디스크 자리 — 파일 행(`file_id`)의 rel_path 로 찾는다(내려받기가 읽는 길)."""
+    row = await db.get(SessionFile, summary["file_id"], populate_existing=True)
+    assert row is not None and row.filename == summary["file"], "요약의 file_id 가 가리키는 파일 행이 없다"
+    return storage.abs_path(row.rel_path)
+
+
+@ON_SESSION_LOOP
+async def test_a_reattach_over_a_stale_file_row_keeps_the_new_file(db):
+    """지난 꾸러미의 파일 행이 디스크 파일 없이 보여도(겹친 붙이기의 정리가 파일만 지우고 행은 아직인 틈 · 정리가 중간에 깨진 뒤) 그 빈 자리에
+    다시 쓴 새 파일을 지우지 않는다. 예전에는 굳힌 뒤 정리가 옛 행의 경로를 지웠는데 그 경로가 방금 쓴 파일이었다 — 부르는 쪽은 ok 를 받고
+    요약 · 파일 행은 있는데 디스크에 파일이 없었다(검토 3차 11-14). 옛 행은 새 행과 함께 사라진다."""
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        raw = FIX.read_bytes()
+        a = await svc.attach_ontology(db, rep, raw)
+        b = await svc.attach_ontology(db, rep, _variant("B"))
+        assert _disk_files(uid, sid, rid) == [b["file"].removeprefix(f"ontology/{rid}/")], "A 의 옛 파일은 지워졌다"
+        s = await db.get(Session, sid)                # 겹친 붙이기가 남기는 꼴 — A 의 옛 파일 행은 보이는데 디스크 파일은 이미 없다
+        db.add(SessionFile(session_id=sid, filename=a["file"], rel_path=f"{s.storage_path}/{a['file']}", kind="generated",
+                           size_bytes=len(raw), sha256=a["sha256"]))
+        await db.commit()
+        again = await svc.attach_ontology(db, rep, raw)
+        assert again["already"] is False and again["sha256"] == a["sha256"]
+        assert await _package_files(db, sid, rid) == [again["file"]], "옛 파일 행이 남았다"
+        on_disk = await _stored_file(db, again)
+        assert on_disk.is_file() and hashlib.sha256(on_disk.read_bytes()).hexdigest() == a["sha256"], \
+            "방금 실은 꾸러미 파일이 디스크에 없다"
+        assert _disk_files(uid, sid, rid) == [again["file"].removeprefix(f"ontology/{rid}/")], "B 의 옛 파일이 디스크에 남았다"
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_overlapping_attaches_keep_the_file_of_the_package_that_ends_up_stored(db, monkeypatch):
+    """A 가 실려 있고 B 를 붙이는 동안 A 를 다시 보내도(B 의 잠금 뒤에 줄을 선다) 끝에 실린 꾸러미의 파일이 디스크에 있고 파일 행은 그것
+    하나다. 예전에는 B 가 굳힌 뒤(잠금이 풀린 뒤) 옛 파일 A 를 디스크에서 먼저 지우고 행을 나중에 지웠다 — 그 틈에 잠금을 받은 A 가 아직 보이는
+    옛 행을 「지난 꾸러미」 로 읽고 빈 자리에 다시 쓴 뒤 그 옛 행의 경로(방금 쓴 파일)를 지웠다. 둘 다 ok 를 받았다(검토 3차 11-14).
+    그 틈을 넓혀 잰다 — 앞 붙이기가 잠금을 푼 뒤에 또 커밋하면(옛 판의 정리) 뒤 붙이기가 끝날 때까지 미룬다. 고친 판에는 그런 커밋이 없다."""
+    import asyncio
+
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    uid, rid, sid = u.id, rep.id, rep.session_id
+    try:
+        a_raw, b_raw = FIX.read_bytes(), _variant("B")
+        await svc.attach_ontology(db, rep, a_raw)
+        async with SessionLocal() as s1, SessionLocal() as s2:
+            r1, r2 = await s1.get(ImpactReport, rid), await s2.get(ImpactReport, rid)
+            gate, later, real_commit, commits = asyncio.Event(), asyncio.Event(), s1.commit, []
+
+            async def held_commit():
+                commits.append(1)
+                if len(commits) == 1:                 # B 의 문장은 다 나갔고(리포트 행을 쥐었다) 커밋 앞에서 기다린다
+                    await s1.flush()
+                    await gate.wait()
+                else:                                 # 잠금을 푼 뒤의 커밋 — 뒤 붙이기가 끝난 뒤에 보낸다
+                    await later.wait()
+                await real_commit()
+            monkeypatch.setattr(s1, "commit", held_commit)
+            tb = asyncio.create_task(svc.attach_ontology(s1, r1, b_raw))
+            await asyncio.sleep(0.5)
+            ta = asyncio.create_task(svc.attach_ontology(s2, r2, a_raw))
+            await asyncio.sleep(0.5)
+            assert not ta.done(), "뒤 붙이기가 앞 붙이기의 리포트 행 잠금을 기다리지 않았다"
+            gate.set()
+            got_a = await asyncio.wait_for(ta, 60)
+            later.set()
+            got_b = await asyncio.wait_for(tb, 60)
+        assert got_b["already"] is False and got_a["already"] is False, (got_b["already"], got_a["already"])
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert stored["sha256"] == got_a["sha256"] == hashlib.sha256(a_raw).hexdigest() and stored["file_id"] == got_a["file_id"]
+        assert await _package_files(db, sid, rid) == [got_a["file"]], "끝에 실린 꾸러미의 파일 행 하나만 남는다"
+        on_disk = await _stored_file(db, got_a)
+        assert on_disk.is_file() and hashlib.sha256(on_disk.read_bytes()).hexdigest() == stored["sha256"], \
+            "끝에 실린 꾸러미의 파일이 디스크에 없다"
+        assert _disk_files(uid, sid, rid) == [got_a["file"].removeprefix(f"ontology/{rid}/")], "옛 파일이 디스크에 남았다"
+    finally:
+        await _drop(db, u)
+
+
 # ── 다리 커밋이 깨지면 되감고 다시 읽는다(검토 2차 11-11 항목 6) ─────────────────────────────────────────
 
 async def _kill_connection(dbx) -> None:
