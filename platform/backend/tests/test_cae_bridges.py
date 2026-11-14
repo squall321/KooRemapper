@@ -1225,6 +1225,49 @@ async def test_renamed_follows_the_name_the_rule_matches_on_and_a_reconfirm_clea
         await _drop(db, u)
 
 
+@ON_SESSION_LOOP
+async def test_a_human_line_confirmed_on_an_unnamed_object_is_flagged_once_the_object_gets_a_name(db, mirror):
+    """부르는 칸이 빈 해석 객체(단건 심층 리포트의 이름 없는 파트 — 만드는 쪽이 빈 칸을 뺀다)에 확정한 사람 선은 남긴 이름이 빈 글이다.
+    다시 반입에서 그 객체에 이름이 생기면 「이름 바뀐 사람 선」 이다 — 빈 글도 확정 때 부르던 이름이다(검토 3차 11-14 F1. 남긴 이름이
+    비면 견주지 않아 조용히 지나갔다 — 견주는 칸을 label 에서 부르는 칸으로 바꾼 6cb7ba2 의 퇴행이다. label 은 빈 적이 없었다).
+    이름이 빈 채로는 바뀐 것이 아니고, 같은 짝을 다시 확정하면 지금 이름으로 맞춰 풀린다."""
+    u, rep = await _make(db)
+    try:
+        bare = _pkg()
+        for o in bare["objects"]:
+            if o["type"] == "cae_part" and o["key"] == "part/5":
+                o["label"] = "Part 5"
+                del o["properties"]["name"]
+        first = (await svc.attach_ontology(db, rep, _raw(bare)))["bridges"]
+        assert first["by_type"]["cae_part"]["unnamed"] == 1, first
+        got = await br.confirm(db, rep, src_key="part/5", dst_key="cbt:subpkg", by="o")
+        await db.commit()
+        assert got["ok"] and (await _lines(db, rep.id))[("part/5", "cbt:subpkg")].properties["src_label"] == ""
+        again = await br.confirm(db, rep, src_key="part/5", dst_key="cbt:subpkg", by="o")      # 이름이 빈 채로 다시 확정 — 그대로다
+        await db.commit()
+        assert again["already"] and "relabeled" not in again, again
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert "drift" not in view and view["counts"]["renamed"] == 0, "이름이 그대로 비어 있는데 바뀌었다고 했다"
+        assert "renamed_from" not in next(x for x in view["lines"] if x["src_key"] == "part/5")
+
+        b = (await svc.attach_ontology(db, rep, FIX.read_bytes()))["bridges"]                   # 같은 key 의 파트에 이름이 생긴다
+        assert (b["human"], b["renamed"], b["by_type"]["cae_part"]["renamed"]) == (1, 1, 1), b
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert view["drift"]["renamed"] == [{"relation": "maps_to", "src_key": "part/5", "dst_key": "cbt:subpkg",
+                                             "src_label_then": "", "src_label_now": "PKG\\PKG 3"}], view.get("drift")
+        ln = next(x for x in view["lines"] if x["src_key"] == "part/5")
+        assert (ln["basis"], ln["src_label"], ln["renamed_from"]) == ("human", "PKG\\PKG 3", ""), ln
+
+        same = await br.confirm(db, rep, src_key="part/5", dst_key="cbt:subpkg", by="other@x")   # 사람이 「같은 것」 이라 한다
+        await db.commit()
+        assert same["ok"] and same["already"] and same["relabeled"] == {"was": "", "now": "PKG\\PKG 3"}, same
+        assert same["bridges"]["renamed"] == 0 and "renamed_from" not in same["line"]
+        view = (await svc.ontology_view(db, rep))["bridges"]
+        assert "drift" not in view and view["counts"]["renamed"] == 0
+    finally:
+        await _drop(db, u)
+
+
 # ── 끝이 거울에 없는 우리 별칭도 엇갈림이다(검토 2차 11-11 항목 9) ─────────────────────────────────────────
 
 def test_an_alias_whose_target_is_not_in_the_mirror_is_a_disagreement():

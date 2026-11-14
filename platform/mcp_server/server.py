@@ -1092,7 +1092,7 @@ async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     후보(까닭에 그 말). 사람 선은
     꾸러미를 다시 붙여도 남고 다대일(파트 · 캠페인)에서는 규칙을 이긴다. bridges 는
     `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나(dst_active) · 그만 씀(dst_deprecated), 부르는 칸의 글이 확정
-    때와 달라진 사람 선은 `renamed_from`) ·
+    때와 달라진 사람 선은 `renamed_from` — 확정 때 그 칸이 비어 있었으면 빈 글이다) ·
     `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 — 지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key ·
     까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) · `counts` · `rule`(맞추는 규칙 글) · `drift`(있을 때만 — 붙인 뒤 거울이
     바뀌어 저장된 규칙 선이 지금 셈과 다르면 add · drop, 사람 선의 해석 객체를 부르는 칸의 글이 바뀌었으면 renamed — 캠페인 이름만

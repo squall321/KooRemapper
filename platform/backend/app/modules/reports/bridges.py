@@ -330,10 +330,11 @@ async def plan(db, report: ImpactReport, *, rows: list | None = None, edges: lis
             by_type[e.src_type]["stale"] += 1
     # 같은 key 인데 부르는 이름이 바뀐 해석 객체의 사람 선 — 남기고 이기지만 조용히 따라가지 않는다(검토 11-11 P7). 새 칸을 두지 않고
     # 확정 때 남긴 이름(src_label)과 지금 부르는 이름을 견준다 — 규칙이 견주는 칸이다(객체 이름 label 이 아니다 — 캠페인 이름만
-    # 바뀌고 종류가 그대로면 같은 다리다, 검토 2차 항목 8). 남긴 이름이 없는 선은 견줄 수 없어 세지 않는다.
+    # 바뀌고 종류가 그대로면 같은 다리다, 검토 2차 항목 8). 남긴 이름이 빈 글인 선(부르는 칸이 빈 객체에 확정했다)도 견준다 — 빈 글도
+    # 확정 때 부르던 이름이라 그 객체에 이름이 생기면 바뀐 것이다(검토 3차 F1 — 참인지로 가르면 조용히 지나간다). 칸째 없는 선만 못 견준다.
     called = {o.key: _name(o, bmap[o.type_slug]) for o in objs}
     renamed = [e for e in lines if _basis(e) == HUMAN and e.src_key in present
-               and (e.properties or {}).get("src_label") and (e.properties or {})["src_label"] != called[e.src_key]]
+               and "src_label" in (e.properties or {}) and (e.properties or {})["src_label"] != called[e.src_key]]
     for e in renamed:
         by_type[e.src_type]["renamed"] += 1
     mirror = {b.dst_type: len(pools[b.dst_type].labels) for b in bmap.values()}
@@ -470,8 +471,8 @@ def _line(rid: str, e: OntoRelation, names: dict[str, str], ends: dict, called: 
     for k in ("matched_by", "matched_text", "decided_by", "decided_at", "note"):
         if p.get(k):
             out[k] = p[k]
-    if out["basis"] == HUMAN and p.get("src_label") and called and e.src_key in called and called[e.src_key] != p["src_label"]:
-        out["renamed_from"] = p["src_label"]        # 확정 때 부르던 이름 — 지금 부르는 이름과 다르다(drift.renamed)
+    if out["basis"] == HUMAN and "src_label" in p and called and e.src_key in called and called[e.src_key] != p["src_label"]:
+        out["renamed_from"] = p["src_label"]        # 확정 때 부르던 이름 — 지금 부르는 이름과 다르다(drift.renamed). 빈 글일 수 있다
     return out
 
 
