@@ -1040,6 +1040,8 @@ async def test_bundle_intake_answers_with_an_ontology_error_when_the_package_wri
         assert await _count(db, ImpactReport, ImpactReport.user_id == uid) == 1
         assert await _count(db, Session, Session.user_id == uid) == 1
         rid = data["report_id"]
+        # 까닭이 무엇이든 맞는 글 — 「싣지 못했다」 고 단정하지 않고(굳히다 깨지면 실렸을 수 있다) 실렸는지 볼 자리를 말한다
+        assert "싣지 못했다" not in onto["why"] and f"GET /reports/{rid}/cae" in onto["why"], onto["why"]
         assert (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one() is None
         assert await _package_files(db, data["session_id"], rid) == [] and _disk_files(uid, data["session_id"], rid) == []
     finally:

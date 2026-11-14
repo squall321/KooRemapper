@@ -285,9 +285,13 @@ async def report_intake(
             except Exception as exc:  # noqa: BLE001 — 굳은 반입을 500 으로 바꾸면 클라이언트가 다시 보내 리포트 · 세션이 둘이 된다
                 logger.exception("번들 반입 %s: 꾸러미 싣기 실패 — 반입은 그대로다", payload["report_id"])
                 await db.rollback()
+                # 까닭(error)이 무엇이든 맞는 글 하나 — 굳히다 깨져 실렸는지 모를 때도(OntoAttachError.unknown), 꾸러미 탓이라 다시 붙여도
+                # 깨질 때도 있다. 예전 글은 「싣지 못했다 · 꾸러미만 다시 붙인다」 고만 했다(검토 3차 11-14 결함 7 · 11).
                 onto_summary = {"ok": False, "error": bridges.short_error(exc),
-                                "why": "꾸러미를 싣지 못했다 — 리포트는 반입됐다. 번들을 다시 보내지 말고 꾸러미만 "
-                                       f"POST /reports/{payload['report_id']}/cae 로 붙인다"}
+                                "why": "꾸러미 싣기가 깨졌다(까닭은 error) — 리포트는 반입됐다. 번들을 다시 보내지 말고 "
+                                       f"GET /reports/{payload['report_id']}/cae 로 실렸는지 보고, 안 실렸으면 꾸러미만 "
+                                       f"POST /reports/{payload['report_id']}/cae 로 붙인다 — 까닭이 꾸러미에 있으면 다시 붙여도 "
+                                       "실패한다"}
     except ValueError as exc:
         if created_here:
             await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
