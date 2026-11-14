@@ -974,9 +974,13 @@ async def ingest_report(
       · 허브 과제와 맞는데 하나로 정해지지 않으면(여러 과제에 걸린다 · 이름(label)만 같다) **잇지 않는다** — 후보(없으면 못 붙임)로
         남는다(`plan_task_links` · `report_revision` 의 `task_candidates`).
       · 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 잇는다(`eng_meta`).
-    응답의 `task_links` — 반입 뒤 과제 잇기가 센 수다. 반입 때 이미 이어졌으면 `already` 1 이다(`linked` 는 그 뒤에 새로 잇거나 옮긴
-    수 — 대개 0). 하나로 정해지지 않은 이름 · 허브가 모르는 이름은 `candidates` · `unmatched` 로 세기만 한다. 깨졌으면 `error` 가
-    오고 반입은 그대로다. 과제·개정 기능이 꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다(반입 때 잇기는 이 스위치와 따로 돈다)."""
+    응답의 `task_links` — 반입 뒤 과제 잇기가 센 수다. 이름이 허브 과제 하나로 풀려 반입 때 이어졌으면 `already` 1 이다(`linked` 는
+    그 뒤에 새로 잇거나 옮긴 수 — 대개 0). 하나로 정해지지 않은 이름 · 허브가 모르는 이름은 `candidates`(고를 후보가 있다) ·
+    `unmatched`(없다)로 세기만 한다 — ★이 둘은 선이 있는지와 따로다(허브가 모르는 이름은 글자 그대로 이어진 채, 하나로 정해지지 않은
+    이름은 잇지 않은 채 센다 — 선은 `report_revision` 의 `linked` 로 본다). 깨졌으면 `error` 가 오고 반입은 그대로다. 과제·개정 기능이
+    꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다. ★반입 때 잇기는 이 스위치와 따로 돈다 — 거울에 허브 과제가 남아
+    있으면 꺼져 있어도 위 판정을 따른다(하나로 풀리면 그 과제의 판에, 하나로 정해지지 않으면 잇지 않는다 — 재검토 11-14 실측). 그때
+    응답은 `skipped: off` 뿐이고 `report_revision` · `plan_task_links` 는 거절된다(「과제·개정 기능이 꺼져 있습니다」)."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
@@ -1017,7 +1021,7 @@ async def update_report_meta(
       · 과제 이름(project 를 지우면 리포트에 박힌 과제 이름)이나 dev_rev 가 없으면 이을 것이 없다 — 있던 연결은 그대로다.
     ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고, 사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는
     메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은 건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는
-    `clear_report_unlink`."""
+    `clear_report_unlink`. ★응답은 연결이 어떻게 됐는지 싣지 않는다 — `report_revision` 으로 확인한다."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
@@ -1861,6 +1865,9 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
     받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로 — 반입 · 메타 고침). 누가
     이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 사람이 이은 선은 기계가 옮기지 않는다.
+    ★선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛 표시(`eng_meta` · `manual` · null)가
+    그대로다. 그래서 지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있고(과제가 허브에 오기 전에 글자 그대로 이은 선), 한 판의
+    리포트들이 서로 다른 표시를 가질 수 있다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)
@@ -1890,8 +1897,8 @@ async def ontology_sync_state(ctx: Context) -> dict:
     「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄과
     같은 판으로 접을 때 남는 판에 못 옮긴 앞 판 줄(`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반
     사용자에게는 빈 목록 · null 이고 `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` ·
-    `merged_waiting` · `deferred` — 리포트를 누가 고치는 중이라 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제 수)만 온다. 미뤘으면
-    `last_run.notes` 에도 한 줄 적힌다(수만 — 누구나 본다).
+    `merged_waiting` · `deferred` — 그 과제의 리포트 · 판을 그때 누가 고치고 있어 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제
+    수)만 온다. 미뤘으면 `last_run.notes` 에도 한 줄 적힌다(수만 — 누구나 본다).
     타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
     ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
     `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
@@ -1993,7 +2000,9 @@ async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REP
     """사람이 끊은 기록을 **지운다**(리포트 소유자만) — 그 리포트를 자동 잇기가 다시 본다.
 
     지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다 — 과제명 · 과제코드 · 별칭이 글자 그대로 맞고 개정 코드가 있으면
-    지금 이어진다(`task_links`). 기록이 없으면 거절된다(조용히 성공하지 않는다). 기록은 `report_revision` 의 `unlinked` 로 본다.
+    지금 이어진다(`task_links`). 허브가 모르는 이름은 지금 이어지지 않는다(세기만 한다) — 글자 그대로의 선은 project 나 dev_rev 를 주는
+    다음 메타 저장(`update_report_meta`) 때 다시 생긴다(또는 `set_report_revision` 으로 손으로 잇는다). 기록이 없으면 거절된다(조용히
+    성공하지 않는다). 기록은 `report_revision` 의 `unlinked` 로 본다.
     / Clear the unlink record of a report (owner only) and run the automatic link for it once."""
     return await _delete(ctx, f"/reports/{_seg(report_id)}/revision/unlinked")
 

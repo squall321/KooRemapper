@@ -485,9 +485,10 @@ async def update_report_meta(
     if project is not None or dev_rev is not None:
         # 과제·개정이 손으로 바뀌었다 — 기계가 이은 선만 따라간다. 어디로 가는지는 자동 잇기와 **같은 판정**이다(11-12 —
         # `ontology.services.link_from_eng_meta`). 허브가 아는 이름이 과제 하나로 풀리면 그 과제의 판으로(이미 거기면 아무것도 쓰지
-        # 않는다), 하나로 정해지지 않으면 **어디로도 가지 않는다**(있던 선은 그대로 — 어긋남은 `mismatch` 가 말한다), 허브가 모르는
-        # 이름이면 예전처럼 글자 그대로의 판으로. 사람이 이 리포트를 개정 화면에서 확정한 선 · 사람이 끊은 리포트는 set_revision 이
-        # 거절해 그대로 둔다(kept_manual · unlinked). 설계안 · DOE 만 고치면 선을 보지 않는다(검토 R3).
+        # 않는다), 하나로 정해지지 않으면 **어디로도 가지 않는다**(있던 선은 그대로다 — 그 선이 메타 글자와 다른 판이면 `mismatch` 가
+        # 말하고, 메타 글자 그대로의 판이면 `mismatch` 는 비어 있다 — 재검토 11-14), 허브가 모르는 이름이면 예전처럼 글자 그대로의
+        # 판으로. 사람이 이 리포트를 개정 화면에서 확정한 선 · 사람이 끊은 리포트는 set_revision 이 거절해 그대로 둔다(kept_manual ·
+        # unlinked). 설계안 · DOE 만 고치면 선을 보지 않는다(검토 R3).
         await _link_revision(db, report)
     await db.commit()
     await db.refresh(report)

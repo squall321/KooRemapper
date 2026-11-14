@@ -163,6 +163,8 @@ async def get_report_revision(
     어긋남이 아니다. `linked.source` 는 그 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 ·
     메타 고침 · 받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로). 누가 이었는지
     적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual` 이고(서버가 그 선을 사람 선으로 지킨다 — 같은 판정이다) 아니면 null 이다.
+    선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛 표시(`eng_meta` · `manual` · null)가
+    그대로다(지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있다 — 지금 어떻게 풀리는지는 `resolved_task` · `resolved_how`).
     """
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
