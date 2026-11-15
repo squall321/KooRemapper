@@ -160,6 +160,8 @@ async def owner(db):
     db.add(u)
     await db.commit()
     await db.refresh(u)
+    home = storage.abs_path(str(u.id))
+    made_home = not home.exists()       # 이미 있던 자리는 이 시험이 만든 것이 아니다 — 지우지 않는다
     sid = ulid.new().str
     s = Session(id=sid, user_id=u.id, name="pp", storage_path=storage.session_rel_dir(u.id, sid))
     db.add(s)
@@ -174,6 +176,9 @@ async def owner(db):
     await db.execute(delete(User).where(User.id == u.id))
     await db.commit()
     shutil.rmtree(storage.session_abs_dir(u.id, sid), ignore_errors=True)
+    # 사용자의 저장 자리(`storage/<사용자 id>`)도 — 세션 폴더만 지우면 빈 자리가 돌릴 때마다 쉰 개씩 쌓였다(재검토 11-15)
+    if made_home:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def _args(**over):
