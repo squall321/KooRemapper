@@ -797,8 +797,9 @@ async def test_one_job_rolling_back_does_not_stop_the_scan(db, owner, slurm, mon
 
 @_aio
 async def test_a_crashed_poll_closes_the_job_with_the_short_error(db, owner, slurm, own_key, monkeypatch):
-    """스캔이 잡 하나를 보다 DB 쪽에서 깨지면 그 잡을 실패로 닫되 `error_summary` 는 짧은 꼴(「클래스: 한 줄」)이다 — SQL 문 · 값 ·
-    배경 링크는 잡에 싣지 않는다(재검토 11-12 — 예전엔 SQLAlchemy 오류 전문). 전문은 서버 로그에."""
+    """스캔이 잡 하나를 보다 DB 쪽에서 깨지면 그 잡을 실패로 닫되 `error_summary` 는 짧은 꼴(「클래스: 한 줄」)이다 — SQL 문 ·
+    `[parameters` 줄 · 배경 링크는 잡에 싣지 않는다(드라이버가 그 한 줄에 적어 온 값은 남을 수 있다 — `short_error` 의 ★. 재검토
+    11-12 — 예전엔 SQLAlchemy 오류 전문). 전문은 서버 로그에."""
     from sqlalchemy import text as sql
     u, s = owner
     job = await _reserved(db, u, s)

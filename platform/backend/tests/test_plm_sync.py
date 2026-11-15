@@ -198,8 +198,8 @@ async def test_a_broken_reflect_keeps_what_was_received_and_says_so(db, on, monk
 
 async def test_a_database_error_in_the_reflect_is_recorded_in_the_short_form(db, on, monkeypatch):
     """층 2 반영이 DB 쪽에서 깨지면 실행 기록의 `counts.reflected.error` 와 사유 줄(「층 2 반영 실패 — …」)은 짧은 꼴
-    (「클래스: 한 줄」)이다 — SQL 문 · 매개변수 값 · 배경 링크는 싣지 않는다(전문은 서버 로그에 — 재검토 11-12.
-    SRC-09~11 재검토 M8d — 전문으로 되돌려도 초록이었다)."""
+    (「클래스: 한 줄」)이다 — SQL 문 · `[parameters` 줄 · 배경 링크는 싣지 않는다(드라이버가 그 한 줄에 적어 온 값은 남을 수 있다 —
+    `short_error` 의 ★. 전문은 서버 로그에 — 재검토 11-12. SRC-09~11 재검토 M8d — 전문으로 되돌려도 초록이었다)."""
     from sqlalchemy import text as sql
 
     from app.modules.ontology import services as onto
