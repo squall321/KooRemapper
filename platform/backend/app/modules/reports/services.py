@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -1409,7 +1410,8 @@ class OntoAttachError(RuntimeError):
     """꾸러미는 검사를 통과했는데 싣는 쓰기가 깨졌다(DB · 디스크). 까닭은 짧은 꼴(`bridges.short_error` — 전문은 서버 로그). 꾸러미 탓이
     아니므로 OntoPackageError(422)와 가른다.
 
-    - `unknown` 거짓 — 되감았고 이번 디스크 파일을 지웠다. 옛 행 · 옛 파일 · 요약은 그대로다.
+    - `unknown` 거짓 — 되감았고 이번 디스크 파일을 지웠다. 옛 행 · 옛 파일 · 요약은 그대로다. ★굳히다 깨진 그 틈에 다른 붙이기가 굳었으면
+      이번 디스크 파일을 지우지 않는다(뒤의 붙이기가 같은 자리를 다시 썼을 수 있다) — 그때 실려 있는 것은 그 붙이기의 꾸러미다.
     - `unknown` 참 — 굳히다(COMMIT) 깨졌고 리포트를 다시 읽지도 못해 **실렸는지 모른다**. 이번 디스크 파일을 지우지 않았다(굳었으면 새 파일
       행이 그 파일을 가리킨다). 글 맨 앞에 그 사실을 적는다 — 짧은 꼴(`short_error`)로 잘려도 남는다. 부르는 쪽은 이때 「아무것도 안
       바꿨다」 고 말하면 안 된다."""
@@ -1454,10 +1456,16 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
       요약을 `already` 로 돌려줬다(검토 2차 11-11 항목 4). 리포트가 그사이 지워졌으면 `bridges.ReportGone`(→ 404, 아무것도 안 썼다).
       쓰기가 깨지면 되감고 리포트 객체를 다시 읽어 둔 뒤 이번 디스크 파일을 지우고 `OntoAttachError` — 예전에는 깨진 커밋 뒤 만료된
       객체를 읽다 PendingRollbackError 가 나 정리가 돌지 않았고 파일 행 · 디스크 파일이 남았다(검토 2차 항목 2).
-    - ★굳히는 문장(COMMIT)에서 깨지면 굳었는지 모른다(서버는 굳혔는데 응답만 잃을 수 있다) — 다시 읽은 요약이 이번 파일 행을 가리키면
-      **굳은 것**이라 여느 붙이기처럼 답하고, 아니면 굳지 않은 것이라 위와 같다. 다시 읽지도 못하면 이번 디스크 파일을 지우지 않고
-      `OntoAttachError(unknown=True)`. 예전에는 굳은 새 행이 가리키는 새 파일을 지우고 「아무것도 바꾸지 않았다」 로 답했다 — 같은
-      꾸러미를 다시 붙여도 「이미 실었다」 라 파일이 돌아오지 않았다(검토 3차 11-14 결함 7).
+    - ★굳히는 문장(COMMIT)에서 깨지면 굳었는지 모른다(서버는 굳혔는데 응답만 잃을 수 있다) — 다시 읽은 요약이 가리키는 파일 행으로
+      가른다. 이번 파일 행이면 **굳은 것**이라 여느 붙이기처럼 답하고, 붙이기 전 그대로면 굳지 않은 것이라 위와 같다. 다시 읽지도 못하면
+      이번 디스크 파일을 지우지 않고 `OntoAttachError(unknown=True)`. 예전에는 굳은 새 행이 가리키는 새 파일을 지우고 「아무것도 바꾸지
+      않았다」 로 답했다 — 같은 꾸러미를 다시 붙여도 「이미 실었다」 라 파일이 돌아오지 않았다(검토 3차 11-14 결함 7).
+    - ★실패한 붙이기가 지우는 것은 **이번에 쓴 것이 분명한 파일뿐**이다(재검토 11-15 RF-A-1). 되감기 전에 그 자리에 파일이 없었으면(쓰기가
+      파일을 만들지 못하고 깨졌다) 지우지 않는다 — 되감은 뒤 그 빈 자리에 선 파일은 뒤의 붙이기 것이다. 굳히다 깨졌는데 다시 읽은 요약이
+      이번 것도 붙이기 전 것도 아니면 그 틈에 다른 붙이기가 굳은 것이다 — 답은 같은 `OntoAttachError` 이되 지우지 않는다. 이번 것이 굳었다가
+      바뀐 것이면 그 붙이기가 이 파일을 옛 파일로 걷었고 뒤의 붙이기가 같은 자리를 다시 썼을 수 있다(예전에는 지워서 뒤의 붙이기가 굳힌
+      꾸러미의 파일이 사라졌고, 같은 꾸러미를 다시 붙여도 「이미 실었다」 라 돌아오지 않았다). 이번 것이 굳지 않았던 것이면 행 없는 파일
+      하나가 남는다 — 세션 폴더가 지워질 때 함께 간다.
     """
     import hashlib
     from datetime import datetime, timezone
@@ -1495,6 +1503,7 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
     old_paths = [p for f in old_files if (p := storage.abs_path(f.rel_path)).is_file()]
     safe, dest = _package_dest(session, f"{base}{sha[:12]}/{Path(filename).name or 'report.ontology.json'}")
     file_id = None                          # 굳히는 문장(COMMIT)을 보내기 직전에 채운다 — 그 뒤에 깨지면 굳었는지는 다시 읽어야 안다
+    before = prior.get("file_id") if prior else None        # 잠근 채 읽은, 붙이기 전 요약이 가리키는 파일 행 — 굳히다 깨지면 견준다
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         await asyncio.to_thread(dest.write_bytes, raw)
@@ -1527,14 +1536,26 @@ async def attach_ontology(db: AsyncSession, report: ImpactReport, raw: bytes, *,
         await db.commit()
     except Exception as exc:
         logger.exception("꾸러미 싣기 실패 — report %s", rid)
+        # 되감기 전에 본다 — 이 자리는 잠근 때 비어 있었고, 굳히는 문장을 보내기 전에는 이번 붙이기만 쓴다. 없으면(쓰기가 파일을 만들지 못하고
+        # 깨졌다) 지울 것이 없다 — 되감은 뒤 이 자리에 서는 파일은 뒤의 붙이기 것이다
+        on_disk = os.path.exists(dest)
         await db.rollback()                 # 굳지 않았으면 파일 행 · 해석 행 · 요약이 함께 되감긴다 — 옛 것이 그대로다
         fresh = await bridges.reread(db, report, rid)
         if file_id is not None and not fresh:
             # 굳히다 깨졌고 다시 읽지도 못했다 — 굳었으면 새 파일 행이 이 파일을 가리키므로 지우지 않는다(굳지 않았으면 행 없는 파일이 남는다)
             raise OntoAttachError(bridges.short_error(exc), unknown=True) from exc
-        if file_id is None or not (isinstance(report.ontology, dict) and report.ontology.get("file_id") == file_id):
-            # 굳지 않았다 — 굳었다가 그 틈에 다른 붙이기가 바꿨어도 지금 실린 것은 이 꾸러미가 아니고 이 파일을 가리키는 행도 없다
-            dest.unlink(missing_ok=True)    # 이번 디스크 파일만(자리는 비어 있던 곳이다)
+        # 굳히는 문장을 보냈으면 다시 읽은 요약이 가리키는 파일 행으로 가른다 — 이번 것이면 굳었고, 붙이기 전 것(`before`)이면 굳지 않았다
+        now = report.ontology.get("file_id") if file_id is not None and isinstance(report.ontology, dict) else None
+        if file_id is None or now != file_id:
+            if on_disk and (file_id is None or now == before):
+                # 이번에 쓴 것이 분명한 파일만 — 굳히는 문장을 보내지 않았거나, 요약이 붙이기 전 그대로다(그 틈에 굳은 붙이기가 없다)
+                dest.unlink(missing_ok=True)
+            elif on_disk:
+                # 요약이 붙이기 전 것도 이번 것도 아니다 — 그 틈에 다른 붙이기가 굳었다. 이번 것이 굳었다가 바뀐 것이면 그 붙이기가 이 파일을
+                # 옛 파일로 걷었고 뒤의 붙이기가 같은 자리를 다시 썼을 수 있다. 지우지 않는다 — 굳지 않았던 것이면 행 없는 파일이 남는다
+                # (재검토 11-15 RF-A-1 — 예전에는 지워서 뒤의 붙이기가 굳힌 꾸러미의 파일이 사라졌다)
+                logger.warning("꾸러미 %s 의 디스크 파일(%s)을 그대로 둔다 — 굳히다 깨진 틈에 다른 붙이기가 굳었다(report %s)",
+                               sha[:12], safe, rid)
             raise OntoAttachError(bridges.short_error(exc)) from exc
         # 서버는 굳혔고 그 응답만 잃었다 — 요약이 이번 파일 행을 가리킨다. 붙은 것이다(검토 3차 11-14 결함 7)
         logger.warning("꾸러미 %s 는 굳었다 — 굳힌 응답만 잃었다(report %s)", sha[:12], rid)

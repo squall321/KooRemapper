@@ -1507,6 +1507,94 @@ async def test_an_attach_that_cannot_tell_whether_it_landed_says_so_and_keeps_th
         await _drop(db, u)
 
 
+@ON_SESSION_LOOP
+async def test_a_lost_commit_answer_keeps_the_file_a_later_attach_put_on_the_same_place(db, monkeypatch):
+    """굳힌 응답을 잃은 붙이기(X)가 다시 읽기 전에 다른 붙이기 둘이 굳으면 — 다른 꾸러미(Y)가 X 의 파일을 옛 파일로 걷고, 그 뒤 같은
+    X 가 비어 있는 그 자리를 다시 쓴다 — 다시 읽은 요약은 이번 파일 행을 가리키지 않는다. 답은 OntoAttachError(`unknown` 거짓)이되
+    이번 디스크 파일을 지우면 안 된다(그 자리의 파일은 뒤의 붙이기가 굳힌 꾸러미의 것이다). 예전에는 지웠다 — 요약과 파일 행은 X 를
+    가리키는데 파일이 없었고, 같은 꾸러미를 다시 붙여도 「이미 실었다」 라 돌아오지 않았다(재검토 11-15 RF-A-1)."""
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid, sid = rep.id, rep.session_id
+    try:
+        await svc.attach_ontology(db, rep, FIX.read_bytes())
+        x_raw, y_raw = _variant("응답을 잃은 X"), _variant("그 틈에 굳은 Y")
+        x_sha = hashlib.sha256(x_raw).hexdigest()
+        later: dict = {}
+        real_reread = br.reread
+
+        async def others_first(dbx, report, rid_):
+            monkeypatch.setattr(br, "reread", real_reread)
+            for raw in (y_raw, x_raw):          # 되감은 뒤 · 다시 읽기 전 — 리포트 잠금은 풀려 있다
+                async with SessionLocal() as s:
+                    later.update(await svc.attach_ontology(s, await s.get(ImpactReport, rid), raw))
+            return await real_reread(dbx, report, rid_)
+        monkeypatch.setattr(br, "reread", others_first)
+        _lose_the_commit_answer(monkeypatch, db)
+        with pytest.raises(svc.OntoAttachError) as err:
+            await svc.attach_ontology(db, rep, x_raw)
+        assert err.value.unknown is False and "실렸는지 모른다" not in str(err.value), str(err.value)
+        assert later["already"] is False and later["file"] == f"ontology/{rid}/{x_sha[:12]}/report.ontology.json", \
+            "이 시험의 손은 뒤의 X 가 같은 자리를 다시 쓰게 한다"
+        await db.rollback()
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (x_sha, later["file_id"]), "실린 것은 뒤의 붙이기가 굳힌 X 다"
+        assert await _package_files(db, sid, rid) == [later["file"]], "파일 행은 뒤의 붙이기 것 하나다"
+        path = await _stored_file(db, stored)
+        assert path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == x_sha, "뒤의 붙이기가 굳힌 꾸러미의 파일을 지웠다"
+        await db.refresh(rep)                   # 위에서 되감으며 만료됐다 — 다시 읽고 같은 꾸러미를 다시 붙인다
+        again = await svc.attach_ontology(db, rep, x_raw)
+        assert again["already"] is True and (await _stored_file(db, again)).is_file()
+    finally:
+        await _drop(db, u)
+
+
+@ON_SESSION_LOOP
+async def test_an_attach_whose_write_made_no_file_leaves_the_place_to_a_later_attach(db, monkeypatch):
+    """디스크 쓰기가 파일을 만들지 못하고 깨진 붙이기(X) — 되감은 뒤 · 다시 읽기 전에 다른 붙이기가 같은 X 를 그 빈 자리에 굳히면
+    그 자리의 파일은 뒤의 붙이기 것이다. 깨진 붙이기는 지울 것이 없다. 예전에는 「이번 디스크 파일」 이라며 그 자리를 지웠다 — 요약과
+    파일 행은 X 를 가리키는데 파일이 없었다(재검토 11-15 RF-A-1 을 고치며 찾은 같은 갈래)."""
+    from app.database import SessionLocal
+
+    u, rep = await _make(db)
+    rid, sid = rep.id, rep.session_id
+    try:
+        x_raw = _variant("쓰기가 깨진 X")
+        x_sha = hashlib.sha256(x_raw).hexdigest()
+        later: dict = {}
+        failed: list = []
+        real_reread, real_write = br.reread, Path.write_bytes
+
+        def no_room(self, data):                # 첫 쓰기만 — 파일을 만들기 전에 깨진다
+            if failed:
+                return real_write(self, data)
+            failed.append(self)
+            raise OSError(28, "No space left on device(시험)")
+
+        async def another_first(dbx, report, rid_):
+            monkeypatch.setattr(br, "reread", real_reread)
+            async with SessionLocal() as s:     # 되감은 뒤 · 다시 읽기 전 — 리포트 잠금은 풀려 있다
+                later.update(await svc.attach_ontology(s, await s.get(ImpactReport, rid), x_raw))
+            return await real_reread(dbx, report, rid_)
+        monkeypatch.setattr(Path, "write_bytes", no_room)
+        monkeypatch.setattr(br, "reread", another_first)
+        with pytest.raises(svc.OntoAttachError) as err:
+            await svc.attach_ontology(db, rep, x_raw)
+        assert err.value.unknown is False and "OSError" in str(err.value), str(err.value)
+        assert later["already"] is False and later["file"] == f"ontology/{rid}/{x_sha[:12]}/report.ontology.json", \
+            "이 시험의 손은 뒤의 붙이기가 깨진 붙이기의 빈 자리를 쓰게 한다"
+        assert [p.name for p in failed] == ["report.ontology.json"]
+        await db.rollback()
+        stored = (await db.execute(select(ImpactReport.ontology).where(ImpactReport.id == rid))).scalar_one()
+        assert (stored["sha256"], stored["file_id"]) == (x_sha, later["file_id"]), "실린 것은 뒤의 붙이기가 굳힌 X 다"
+        assert await _package_files(db, sid, rid) == [later["file"]], "파일 행은 뒤의 붙이기 것 하나다"
+        path = await _stored_file(db, stored)
+        assert path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == x_sha, "뒤의 붙이기가 굳힌 꾸러미의 파일을 지웠다"
+    finally:
+        await _drop(db, u)
+
+
 # ── 이름 바뀐 사람 선은 부르는 이름으로 · 다시 확정하면 풀린다(검토 2차 11-11 항목 8) ───────────────────────────────
 
 @ON_SESSION_LOOP
