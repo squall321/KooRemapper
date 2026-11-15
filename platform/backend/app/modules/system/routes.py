@@ -52,22 +52,54 @@ POSTPROCESS_VERSION_DAYS = 90
 POSTPROCESS_VERSION_MAX = 10
 
 
+#: 남이 지은 글(꾸러미의 producer)을 목록에 낼 때의 상한 — 찍히는 글자 한 줄.
+POSTPROCESS_TEXT_MAX = 80
+
+
+def _one_line(v, cap: int = POSTPROCESS_TEXT_MAX) -> str | None:
+    """찍히는 글자 한 줄 · 상한 — 줄바꿈 · 제어 문자는 빈칸으로 접는다. 비면 None."""
+    if v is None:
+        return None
+    s = " ".join("".join(ch if ch.isprintable() else " " for ch in str(v)).split())
+    return s[:cap] or None
+
+
 async def _postprocess_versions(db: AsyncSession) -> list[dict]:
-    """최근 리포트에 실려 온 후처리 판 — `ontology.producer` 의 서로 다른 {name, version} · 수 · 마지막 시각.
+    """최근 7-1 반입 리포트에 실려 온 후처리 판 — `ontology.producer` 의 서로 다른 {name, adapter, version} · 수 · 마지막 시각.
 
     왜(2026-11-12, 포털 낙하 파이프라인 (c)) — stcx 에 접속하지 않고도 운영에서 실제로 어느 후처리 판(예 v51)이
-    도는지 본다. 꾸러미(ontology)가 없는 리포트는 세지 않는다 — 판을 모르는 것을 판이 없다고 하지 않는다.
+    도는지 본다. 꾸러미가 없거나 판이 빈 리포트는 세지 않는다 — 판을 모르는 것을 판이 없다고 하지 않는다.
+
+    합친 판 검토(kooremapper-4a, 11-15)가 셋을 고쳤다 —
+    · 후처리(koo_deep_report)가 쓰는 칸은 `tool` · `adapter` · `version` · `created_utc` 다(`name` 이 아니다 — 픽스처
+      `cae_package_v14_min.json`). 이름은 `tool`(없으면 옛 `name`), 어댑터가 다르면 다른 줄이다. 빈 `version`(dev 호스트)은 건너뛴다.
+    · **7-1 로 들어온 리포트(`external_job_key` 가 있는 것)만** 센다 — 손으로 붙이는 꾸러미의 producer 는 아무나 지을 수
+      있어 「운영에서 실제로 도는 판」 이 아니고, 지어낸 판이 진짜 판을 목록에서 밀어낼 수 있다.
+    · 그래도 남이 지은 글이다 — 로그인한 모두에게 나가므로 찍히는 글자 한 줄 · 80자로 접는다.
     """
     from datetime import datetime, timedelta, timezone
     prod = ImpactReport.ontology["producer"]
-    name, ver = prod["name"].astext, prod["version"].astext
+    tool = func.coalesce(prod["tool"].astext, prod["name"].astext)
+    adapter, ver = prod["adapter"].astext, prod["version"].astext
     last = func.max(ImpactReport.created_at)
     since = datetime.now(timezone.utc) - timedelta(days=POSTPROCESS_VERSION_DAYS)
     rows = (await db.execute(
-        select(name, ver, func.count(), last)
-        .where(ver.is_not(None), ImpactReport.created_at >= since)
-        .group_by(name, ver).order_by(last.desc()).limit(POSTPROCESS_VERSION_MAX))).all()
-    return [{"name": n, "version": v, "n": c, "last_at": t.isoformat() if t else None} for n, v, c, t in rows]
+        select(tool, adapter, ver, func.count(), last)
+        .where(ImpactReport.external_job_key.is_not(None), ver.is_not(None), ver != "",
+               ImpactReport.created_at >= since)
+        .group_by(tool, adapter, ver).order_by(last.desc()).limit(POSTPROCESS_VERSION_MAX * 5))).all()
+    # 접은 뒤 같아진 줄은 합친다 — 접기 전에는 달랐어도 사람에게는 같은 판이다.
+    merged: dict[tuple, dict] = {}
+    for n, a, v, c, t in rows:
+        key = (_one_line(n), _one_line(a), _one_line(v))
+        if key[2] is None:
+            continue
+        m = merged.setdefault(key, {"name": key[0], "adapter": key[1], "version": key[2], "n": 0, "last": None})
+        m["n"] += c
+        m["last"] = t if m["last"] is None or (t and t > m["last"]) else m["last"]
+    out = sorted(merged.values(), key=lambda m: m["last"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return [{"name": m["name"], "adapter": m["adapter"], "version": m["version"], "n": m["n"],
+             "last_at": m["last"].isoformat() if m["last"] else None} for m in out[:POSTPROCESS_VERSION_MAX]]
 
 
 @router.get("/system/status")
