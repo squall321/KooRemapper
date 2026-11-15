@@ -223,10 +223,13 @@ async def test_an_unlink_landing_after_the_auto_links_first_look_is_respected(db
         await _drop(uid, sid, [task, code])
 
 
-async def test_a_same_value_meta_save_during_an_open_auto_link_waits_and_writes_nothing(db):
+async def test_a_same_value_meta_save_during_an_open_auto_link_waits_and_writes_nothing(db, monkeypatch):
     """값이 같은 메타 저장(바뀌는 열이 없어 제 UPDATE 로 리포트 행을 쥐지 않는다)의 잇기도 리포트 행을 **먼저** 잠그고 그 뒤에 선을
     읽는다 — 커밋 전인 자동 잇기를 기다렸다가 `already` 로 아무것도 쓰지 않는다. 읽은 뒤에 잠그면 자동 잇기 전의 선을 보고 `set_revision`
     으로 가서, 회차가 방금 이은 선의 `linked_at` 을 다시 찍는다(재검토 11-14 — 이 차례를 뒤집어도 빨개지는 시험이 없었다)."""
+    from app.config import settings
+    # 메타 저장의 잇기는 과제·개정 기능이 켜져 있을 때만 판정을 따른다 — 꺼져 있으면(이 박스는 허브 설정이 없다) 글자 그대로 잇는다
+    monkeypatch.setattr(settings, "ontology", "1")
     t = _tag()
     task, code = f"RS-{t}", f"RSC-{t}"
     uid, sid = await _owner(db)

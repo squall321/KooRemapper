@@ -147,7 +147,8 @@ async def ingest_report(
     글자 그대로의 판에 잇는다. 응답의 `task_links` 는 그 뒤에 도는 반입 뒤 잇기가 센 수다 — 이름이 허브 과제 하나로 풀려 반입 때
     이어졌으면 `already` 다. ★`candidates`(고를 후보가 있다) · `unmatched`(없다)는 하나로 풀리지 않은 이름의 수고 선이 있는지와
     따로다 — 허브가 모르는 이름은 글자 그대로 이어진 채, 하나로 정해지지 않은 이름은 잇지 않은 채 센다. 선은
-    `GET /reports/{id}/revision` 의 `linked` 로 본다(재검토 11-14).
+    `GET /reports/{id}/revision` 의 `linked` 로 본다(재검토 11-14). 과제·개정 기능이 꺼져 있으면 `task_links` 는 `skipped: off` 이고,
+    반입 때 잇기는 판정 없이 어느 이름이든 글자 그대로의 판에 잇는다(거울에 허브 과제가 남아 있어도 — 개정 보기는 그때 409 다).
     """
     s = await _require_session(db, user, session_id)
     if kind is not None and kind not in _KINDS:
@@ -351,7 +352,8 @@ async def patch_report_meta(
     비어 있다 — 그때는 그 응답의 `ambiguous` · `task_candidates` 로만 보이고, 그만 쓴 과제만 맞는 이름은 그것도 비어 있을 수 있다),
     허브가 모르는 이름이면 글자 그대로의 판으로 간다. 사람이 확정한 연결 · 사람이 끊은 리포트는 그대로다(메타만 저장된다). 설계안 ·
     DOE 만 고치면 연결을 보지 않는다. ★이 응답은 연결이 어떻게 됐는지 싣지 않는다(잇지 않은 까닭은 서버 로그에만 남는다) — 개정
-    보기(`GET /reports/{id}/revision`)로 확인한다(재검토 11-14).
+    보기(`GET /reports/{id}/revision`)로 확인한다(재검토 11-14). 과제·개정 기능이 꺼져 있으면 판정 없이 어느 이름이든 글자 그대로의
+    판으로 간다(개정 보기는 그때 409 다).
     """
     r = await _require_owned_report(db, user, report_id)
     try:

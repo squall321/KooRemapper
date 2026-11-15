@@ -281,13 +281,16 @@ async def test_an_alias_whose_task_is_missing_disagrees_and_never_links(db, tag)
         await _wipe(db, u, s, keys=[live, gone, word])
 
 
-async def test_a_missing_alias_beside_a_match_on_a_deprecated_task_only_still_disagrees(db, tag):
+async def test_a_missing_alias_beside_a_match_on_a_deprecated_task_only_still_disagrees(db, tag, monkeypatch):
     """끝이 거울에 없는 별칭과 **그만 쓴 과제만** 맞는 원천(과제코드)이 함께 맞으면 엇갈림을 그대로 둔다 — 그만 쓴 과제를 덜어 낸 뒤
     남는 것이 `alias_missing` 뿐이면 덜어 내지 않는다(`exact_matches` 의 끝줄 — SRC-09~11 재검토 M7h: `alive or out` 으로 바꿔도
     초록이었다). 덜어 내면 「허브가 모르는 이름」 으로 읽혀 인제스트 때 잇기가 글자 그대로의 헛 판에 잇는다. 오늘 답 그대로 잰다 —
     후보는 없고(그만 쓴 과제는 후보로 내지 않는다) 엇갈림으로 보이고 잇지 않는다. 미리 보기가 못 붙임으로 세는 것은 오늘 동작이다
     (결정 대기 — 검토 「항목 2」 결과 4)."""
+    from app.config import settings
     from app.models import ImpactReport as IR
+    # 인제스트 때 잇기는 과제·개정 기능이 켜져 있을 때만 판정을 따른다 — 꺼져 있으면(이 박스는 허브 설정이 없다) 글자 그대로 잇는다
+    monkeypatch.setattr(settings, "ontology", "1")
     old, gone, code = f"D-{tag}", f"G-{tag}", f"C-{tag}"
     u, s = await _session(db)
     try:

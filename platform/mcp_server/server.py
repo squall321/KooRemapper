@@ -978,9 +978,10 @@ async def ingest_report(
     그 뒤에 새로 잇거나 옮긴 수 — 대개 0). 하나로 정해지지 않은 이름 · 허브가 모르는 이름은 `candidates`(고를 후보가 있다) ·
     `unmatched`(없다)로 세기만 한다 — ★이 둘은 선이 있는지와 따로다(허브가 모르는 이름은 글자 그대로 이어진 채, 하나로 정해지지 않은
     이름은 잇지 않은 채 센다 — 선은 `report_revision` 의 `linked` 로 본다). 깨졌으면 `error` 가 오고 반입은 그대로다. 과제·개정 기능이
-    꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다. ★반입 때 잇기는 이 스위치와 따로 돈다 — 거울에 허브 과제가 남아
-    있으면 꺼져 있어도 위 판정을 따른다(하나로 풀리면 그 과제의 판에, 하나로 정해지지 않으면 잇지 않는다 — 재검토 11-14 실측). 그때
-    응답은 `skipped: off` 뿐이고 `report_revision` · `plan_task_links` 는 거절된다(「과제·개정 기능이 꺼져 있습니다」)."""
+    꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다. ★꺼져 있어도 반입 때 잇기는 돈다 — 다만 위 판정을 따르지 않고(거울에
+    허브 과제가 남아 있어도) 어느 이름이든 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 `eng_meta` 로 잇는다(허브가 바꾼 옛
+    과제명만 지금 과제명으로 푼다). 그때 응답은 `skipped: off` 뿐이고 `report_revision` · `plan_task_links` 는 거절된다(「과제·개정
+    기능이 꺼져 있습니다」). 나중에 켜면 받기 뒤 자동 잇기 · 일괄 적용이 하나로 풀리는 이름의 그 선을 판정대로 옮긴다."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
@@ -1021,7 +1022,9 @@ async def update_report_meta(
       · 과제 이름(project 를 지우면 리포트에 박힌 과제 이름)이나 dev_rev 가 없으면 이을 것이 없다 — 있던 연결은 그대로다.
     ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고, 사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는
     메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은 건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는
-    `clear_report_unlink`. ★응답은 연결이 어떻게 됐는지 싣지 않는다 — `report_revision` 으로 확인한다."""
+    `clear_report_unlink`. ★응답은 연결이 어떻게 됐는지 싣지 않는다 — `report_revision` 으로 확인한다. ★과제·개정 기능이 꺼져 있으면
+    위 판정을 따르지 않는다 — 어느 이름이든 예전처럼 글자 그대로의 판으로 간다(거울에 허브 과제가 남아 있어도 · 허브가 바꾼 옛
+    과제명만 지금 과제명으로 푼다 · 사람이 확정한 연결과 사람이 끊은 리포트는 그때도 그대로다). 그때 `report_revision` 은 거절된다."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
@@ -1873,11 +1876,11 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     **버리지 않고** 보여 주는 것이다.
     ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
     `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
-    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로 — 반입 · 메타 고침). 누가
-    이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 사람이 이은 선은 기계가 옮기지 않는다.
-    ★선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛 표시(`eng_meta` · `manual` · null)가
-    그대로다. 그래서 지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있고(과제가 허브에 오기 전에 글자 그대로 이은 선), 한 판의
-    리포트들이 서로 다른 표시를 가질 수 있다.
+    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(반입 · 메타 고침 — 허브가 모르는 이름을, 기능이 꺼져 있던 때에는 어느
+    이름이든, 수동 메타 글자 그대로). 누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 사람이 이은
+    선은 기계가 옮기지 않는다. ★선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛
+    표시(`eng_meta` · `manual` · null)가 그대로다. 그래서 지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있고(과제가 허브에 오기
+    전이나 기능이 꺼져 있던 때에 글자 그대로 이은 선), 한 판의 리포트들이 서로 다른 표시를 가질 수 있다.
     / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)

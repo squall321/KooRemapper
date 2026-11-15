@@ -340,10 +340,10 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
     for old in live:
         if old.dst_key != key:
             await db.delete(old)
-    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다. 선에 **누가 이었나**를 적는다(`link_source` —
-    # manual 사람 · rule 이름이 정확 일치 규칙으로 허브 과제 하나에 풀렸다 · eng_meta 허브가 모르는 이름을 글자 그대로, 사람이면
-    # `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라 여러 리포트가 나눠 쓴다). 사람이
-    # 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
+    # 리포트는 우리 1급 표다 — 행을 만들지 않고 **선의 끝점**으로만 쓴다. 선에 **누가 이었나**를 적는다(`link_source` — manual 사람 ·
+    # rule 이름이 정확 일치 규칙으로 허브 과제 하나에 풀렸다 · eng_meta 허브가 모르는 이름(기능이 꺼져 있던 때에는 어느 이름이든)을
+    # 글자 그대로, 사람이면 `linked_by`) — 사람 판인지는 리포트마다 이것으로 가른다(판의 `rev_source` 는 판 하나에 하나라 여러
+    # 리포트가 나눠 쓴다). 사람이 이은 선을 기계가 같은 판으로 다시 지나가면 사람 표시를 덮지 않는다.
     # ★여기서 **쓸 때** 찍는 표시다 — 이미 그 판에 있어 부르는 쪽이 쓰지 않고 지나간 선(`already`)은 옛 표시 그대로다. 판의
     # `rev_source` 는 그 판에 마지막으로 쓴 쪽의 값이다(사람 판은 기계가 덮지 않는다 — 재검토 11-14).
     stamp: dict[str, Any] = {"link_source": source, "linked_at": _now()}
@@ -388,24 +388,36 @@ async def link_from_eng_meta(db, report: ImpactReport) -> dict:
         거울이 빈 박스에도 별칭은 생길 수 있어서(`confirm_alias` 는 끝이 거울에 있는지 보지 않는다) 그것을 엇갈림으로 세면 그 박스의
         반입 동작이 바뀐다. 자동 잇기 · 미리 보기는 그대로다 — 그 이름을 `alias_missing` 으로 보이고, 글자 그대로 이은 선을 옮기지
         않는다(별칭의 끝이 거울에 오면 그때 옮긴다).
+    ★과제·개정 기능이 **꺼진** 박스(옵션으로 껐다 · 옵션이 비었거나 못 읽는 값이고 허브 설정이 없다 — `ontology_enabled`)는 거울로
+    판정하지 않는다 — 어느 이름이든 셋째 길로 간다. 거울에 과제가 남아 있어도(운영 덤프로 되살린 dev · 받다가 끈 박스) 예전 그대로
+    글자 그대로 `eng_meta` 로 잇는다(허브가 바꾼 옛 과제명만 지금 과제명으로 푼다 — 예전에도 그랬다). 판정을 따르면 그 결과(다른
+    과제의 판에 `rule` 로 · 엇갈려 선 없음)를 보일 데가 없다 — 개정 보기 · 미리 보기는 409 이고 반입 뒤 잇기는 `skipped: off`
+    다(재검토 11-14 「항목 2」 1 — 사용자 결정의 「허브 없는 박스(dev)는 동작이 그대로다」 를 기능 스위치로 읽었다, 조정 세션이 고른
+    읽기). 나중에 켜면 받기 뒤 자동 잇기 · 일괄 적용이 하나로 풀리는 이름의 그 기계 선을 판정대로 옮긴다(하나로 정해지지 않는 이름은
+    후보로 보이고 선은 그대로다).
     그래서 선의 `link_source` 는 — `rule` 은 이름이 정확 일치 규칙으로 허브 과제 하나에 풀려 이은 것(반입 · 메타 고침 · 받기 뒤 ·
-    일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 는 허브가 모르는 이름을 글자 그대로 이은 것이다. ★선을 **쓸 때** 찍는 표시다 —
-    `already` 로 지나간 선은 옛 표시(`eng_meta` · `manual` · 없음)가 그대로라, 지금은 허브 과제 하나로 풀리는 이름의 선이 `eng_meta`
-    일 수 있다(과제가 허브에 오기 전에 글자 그대로 이은 선). 한 판의 리포트들이 서로 다른 표시를 가질 수 있고, 기계가 만든 판의
-    `rev_source` 는 그 판에 **마지막으로 쓴** 쪽의 것이다(재검토 11-14 — 예전 글은 「판의 `rev_source` 도 같다」 였다).
+    일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 는 허브가 모르는 이름(기능이 꺼져 있던 때에는 어느 이름이든)을 글자 그대로 이은
+    것이다. ★선을 **쓸 때** 찍는 표시다 — `already` 로 지나간 선은 옛 표시(`eng_meta` · `manual` · 없음)가 그대로라, 지금은 허브 과제
+    하나로 풀리는 이름의 선이 `eng_meta` 일 수 있다(과제가 허브에 오기 전이나 기능이 꺼져 있던 때에 글자 그대로 이은 선). 한 판의
+    리포트들이 서로 다른 표시를 가질 수 있고, 기계가 만든 판의 `rev_source` 는 그 판에 **마지막으로 쓴** 쪽의 것이다(재검토 11-14 —
+    예전 글은 「판의 `rev_source` 도 같다」 였다).
     사람이 이미 정한 개정은 **건드리지 않는다**(`set_revision` 의 `kept_manual`). 사람이 끊은 리포트는 수동 메타를 고쳐도
     **다시 잇지 않는다** — `set_revision` 이 `unlinked` 로 거절하고, 메타 고침 자체는 그대로 저장된다(11-11).
     """
+    from app.shared.features import ontology_enabled
+
     task = report_free_task(report)
     code = str(((report.eng_meta or {}).get("dev_revision") or {}).get("code") or "").strip()
     if not task or not code:
         return {"ok": False, "error": "nothing_to_link",
                 "detail": "eng_meta 에 과제와 dev_revision.code 가 둘 다 있어야 한다"}
-    found = await exact_matches(db, task)
+    # 과제·개정 기능이 꺼진 박스는 거울로 판정하지 않는다 — 거울에 과제가 남아 있어도 아래 「허브가 모르는 이름」 길로 예전 그대로
+    # 잇는다(재검토 11-14 「항목 2」 1 — 판정한 결과를 보일 화면이 그 박스에는 없다).
+    found = await exact_matches(db, task) if ontology_enabled() else []
     if all(how == "alias_missing" for _, how in found):
-        # 허브가 모르는 이름(맞는 데가 아예 없거나, 끝이 거울에 없는 우리 별칭만 맞는다) — 예전 그대로 글자 그대로 잇는다. 허브가 바꾼
-        # 옛 과제명인데 바뀐 과제가 거울에 살아 있지 않을 때만 key 가 달라진다(지금 것으로 — 안 풀면 옛 key 로 개정이 새로 생겨 같은
-        # 판이 둘이 된다, 층 2).
+        # 허브가 모르는 이름(맞는 데가 아예 없거나, 끝이 거울에 없는 우리 별칭만 맞는다)이거나 기능이 꺼져 있다 — 예전 그대로 글자
+        # 그대로 잇는다. key 가 달라지는 것은 허브가 바꾼 옛 과제명뿐이다(지금 것으로 — 안 풀면 옛 key 로 개정이 새로 생겨 같은 판이
+        # 둘이 된다, 층 2). 켜져 있으면 바뀐 과제가 거울에 살아 있을 때 위 판정이 먼저 그 과제로 풀어, 여기는 살아 있지 않을 때만 온다.
         task = await current_key(db, TYPE_TASK, task)
         return await set_revision(db, report, task_key=task, code=code, source="eng_meta")
     key, _how = _pick(found)
@@ -486,10 +498,11 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
     rev = (await db.execute(select(OntoObject).where(
         OntoObject.type_slug == TYPE_REVISION, OntoObject.key == edge.dst_key))).scalar_one_or_none()
     props = (rev.properties or {}) if rev is not None else {}
-    # 이 리포트의 선을 누가 이었나(manual 사람 · rule 이름이 허브 과제 하나로 풀렸다 · eng_meta 허브가 모르는 이름을 글자 그대로). 판의
-    # rev_source 와 다르다(판은 나눠 쓴다). ★누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 manual 로 답한다 — 서버가 그
-    # 선을 사람 선으로 지키는 판정(`_human_link`)을 그대로 쓴다(재검토 11-14 F-15 — 화면의 ✓ 가 이 값을 본다. 예전엔 null 이라 손으로
-    # 확정한 옛 리포트에서 ✓ 가 사라졌는데 기계는 그 선을 옮기지 못했다). 기계 판의 옛 선은 적힌 것이 없어 null 이다.
+    # 이 리포트의 선을 누가 이었나(manual 사람 · rule 이름이 허브 과제 하나로 풀렸다 · eng_meta 허브가 모르는 이름(기능이 꺼져 있던
+    # 때에는 어느 이름이든)을 글자 그대로). 판의 rev_source 와 다르다(판은 나눠 쓴다). ★누가 이었는지 적지 않던 때의 옛 선은 그 판이
+    # 사람 판이면 manual 로 답한다 — 서버가 그 선을 사람 선으로 지키는 판정(`_human_link`)을 그대로 쓴다(재검토 11-14 F-15 — 화면의 ✓
+    # 가 이 값을 본다. 예전엔 null 이라 손으로 확정한 옛 리포트에서 ✓ 가 사라졌는데 기계는 그 선을 옮기지 못했다). 기계 판의 옛 선은
+    # 적힌 것이 없어 null 이다.
     # 선을 **쓸 때** 찍힌 값이다 — `already` 로 지나간 선은 옛 값 그대로다(`set_revision` 의 주석 — 재검토 11-14)
     src = (edge.properties or {}).get("link_source")
     if not src and _human_link(edge.properties, edge.dst_key,
@@ -1067,7 +1080,7 @@ async def link_report(db, report: ImpactReport) -> dict:
     st = ontology_state()
     if not st["enabled"]:
         # 기능이 꺼져 있으면 라우트처럼 하지 않는다(KOORM_ONTOLOGY=0 · 허브 설정 없음 — 검토 반영 11-11). 인제스트 때 잇기
-        # (`_link_revision`)는 이 스위치와 따로 예전대로 돈다 — 거울이 아는 이름은 판정대로, 모르는 이름(허브 없는 박스)은 글자 그대로.
+        # (`_link_revision`)는 꺼져 있어도 돈다 — 다만 거울로 판정하지 않고 예전 그대로 글자 그대로 잇는다(`link_from_eng_meta`).
         return {"scope": "reports", "skipped": "off", "detail": f"과제·개정 기능이 꺼져 있다 — {st['reason']}"}
     try:
         if not await plm_sync.try_lock(db):

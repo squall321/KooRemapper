@@ -6,7 +6,8 @@
   ③ 반입 · 받기를 **먼저 굳히고** 돈다 — 잇기가 깨져도 리포트 · 받은 행은 남고, 경고(반입 응답 · 잡) · 「확인 필요」(받기)로 알린다.
   ④ 받기 뒤 수는 리포트 전부를 센 것이라 관리자에게만 보인다(SRC-10 · 10-31 과 같은 까닭).
 (11-12) 인제스트 때 잇기 · 수동 메타 고침(`link_from_eng_meta`)도 같은 판정을 따른다(사용자 결정 「허브에 있으면 판정을 따른다」) —
-허브에서 풀리는 이름은 그 과제의 판에 `rule` 로, 엇갈리면 잇지 않고, 허브가 모르는 이름만 글자 그대로 `eng_meta` 로. 맨 아래 ⑦.
+허브에서 풀리는 이름은 그 과제의 판에 `rule` 로, 엇갈리면 잇지 않고, 허브가 모르는 이름만 글자 그대로 `eng_meta` 로. 과제·개정 기능이
+꺼진 박스는 판정 없이 어느 이름이든 글자 그대로다(재검토 11-14). 맨 아래 ⑦.
 
 시험 DB 는 떠 있는 dev 워커의 DB 다 — 서비스 시험은 한 트랜잭션 안에서 돌리고 되돌린다. 커밋하는 시험(반입 · 받기)은 고유한
 과제명 · 과제코드를 쓰고 치운다. 받기 시험은 전부를 보는 호출(report_ids=None)이 나가는지만 잡고 실제로는 이 시험의 리포트만 잇는다
@@ -27,8 +28,8 @@ import ulid
 from sqlalchemy import delete, select
 
 from app.database import SessionLocal
-from app.models import (ImpactReport, OntoAlias, OntoObject, OntoRelation, OntoSyncRun, Session, SessionFile,
-                        User)
+from app.models import (ImpactReport, OntoAlias, OntoObject, OntoPreviousKey, OntoRelation, OntoSyncRun, Session,
+                        SessionFile, User)
 from app.modules.ontology import services as onto
 from app.runner import sp_core
 from app.shared import security, storage
@@ -121,6 +122,7 @@ async def _drop(db, u, s, keys=(), runs=()) -> None:
         await db.execute(delete(OntoObject).where(OntoObject.key.like(f"{k}@%")))
         await db.execute(delete(OntoObject).where(OntoObject.key == k))
         await db.execute(delete(OntoAlias).where(OntoAlias.key == k))
+        await db.execute(delete(OntoPreviousKey).where((OntoPreviousKey.old_key == k) | (OntoPreviousKey.key == k)))
     for rid in runs:
         await db.execute(delete(OntoSyncRun).where(OntoSyncRun.id == rid))
     await db.execute(delete(ImpactReport).where(ImpactReport.session_id == sid))
@@ -1027,7 +1029,9 @@ async def test_the_admin_apply_is_refused_while_a_receive_holds_the_lock(db):
 # 「허브가 아는 이름」 은 거울에 있는 과제를 가리키는 원천이 하나라도 있는 이름이다 — 끝이 거울에 없는 우리 별칭만 맞는 이름은 허브가
 # 모르는 이름이다(거울이 빈 박스에도 별칭은 생길 수 있다 — 그 박스의 반입 동작이 바뀌면 안 된다).
 # 예전엔 두 길이 따로 봤다 — 반입마다 「과제코드@판」 헛 판이 남고, 값이 같은 메타 저장이 rule 선을 그리로 되돌리고, 엇갈린 이름을
-# 글자 그대로 조용히 이었다(재검토 11-12 rr2 · rr2c).
+# 글자 그대로 조용히 이었다(재검토 11-12 rr2 · rr2c). 과제·개정 기능이 꺼진 박스(옵션으로 껐다 · 옵션이 비었고 허브 설정이 없다)는
+# 거울에 과제가 남아 있어도 판정 없이 어느 이름이든 글자 그대로 잇는다 — 판정한 결과를 보일 화면이 그 박스에는 없다(재검토 11-14
+# 「항목 2」 1 · 이 파일의 시험은 `ontology_on` 으로 켜고 잰다).
 
 async def _edge_of(db, rid: str) -> OntoRelation:
     """이 리포트의 살아 있는 선 하나(표시 — `link_source` · `linked_at` — 를 견줄 때 쓴다)."""
@@ -1057,6 +1061,85 @@ async def test_a_name_the_hub_does_not_know_is_linked_literally_as_before(db):
         assert await _linked(db, r.id) == [f"{free}@dv1"]
     finally:
         await db.rollback()
+
+
+@pytest.mark.parametrize("off", ["option", "no_hub"])
+async def test_with_the_feature_off_the_two_linkers_stay_literal_whatever_the_mirror_holds(db, monkeypatch, off):
+    """과제·개정 기능이 꺼진 박스는 거울로 판정하지 않는다 — 반입 때 잇기 · 수동 메타 고침이 예전 그대로(main 과 같은 길) 글자 그대로
+    `eng_meta` 로 잇는다. 꺼지는 길은 둘이고 동작은 같다 — 옵션으로 껐다(`KOORM_ONTOLOGY=0` · 허브 설정은 있다), 허브 설정이 없다(옵션은
+    비었다). 그런 박스에도 거울에는 과제가 남아 있을 수 있다(운영 덤프로 되살린 dev · 받다가 끈 박스). 그때 판정을 따르면 과제코드로
+    적힌 리포트가 그 과제의 판에 `rule` 로 이어지고 엇갈린 이름은 선이 없는데, 그것을 보일 화면이 없다(개정 보기 · 미리 보기는 409 ·
+    반입 뒤 잇기는 `skipped: off`) — 사용자 결정 11-12 의 「허브 없는 박스(dev)는 동작이 그대로다」 가 깨졌던 자리(재검토 11-14
+    「항목 2」 1). 예전 그대로라 허브가 바꾼 옛 과제명만은 지금 과제명으로 풀어 잇는다(`current_key` — 안 풀면 같은 판이 둘이 된다)."""
+    from types import SimpleNamespace
+
+    from app.config import settings
+    from app.modules.reports import services as rsvc
+    from app.shared.features import ontology_enabled
+    monkeypatch.setattr(settings, "ontology", "0" if off == "option" else "")
+    monkeypatch.setattr(settings, "sp_core_url", "http://hub.test/api" if off == "option" else "")
+    monkeypatch.setattr(settings, "sp_core_token", "tok" if off == "option" else "")
+    assert not ontology_enabled(), "이 시험은 기능이 꺼진 박스를 잰다"
+    t = _tag()
+    a, code, b1, b2, both, old, new = (f"{p}-{t}" for p in ("AL", "ALC", "ALB", "ALD", "ALE", "ALO", "ALN"))
+    u, s = await _owner(db, commit=True)
+    mine = SimpleNamespace(id=u.id), SimpleNamespace(id=s.id)
+
+    async def literal(r, key: str, why: str) -> None:
+        assert await _linked(db, r.id) == [key], why
+        assert (await _edge_of(db, r.id)).properties["link_source"] == "eng_meta", why
+        assert (await _rev(db, key)).properties["rev_source"] == "eng_meta", why
+
+    try:
+        await _task(db, a, task_code=code)                         # 켜져 있으면 code 는 a 의 판에 rule 로 붙는 이름이다
+        await _task(db, b1, task_code=both)                        # 켜져 있으면 both 는 엇갈려 잇지 않는 이름이다
+        await _task(db, b2, task_code=both)
+        await _task(db, old)
+        await sp_core.save_rows(db, onto.TYPE_TASK, [{"key": new, "label": f"과제 {new}", "status": "active", "updated_at": "T2",
+                                                      "renamed_from": old, "previous_keys": [old]}])
+        await db.commit()
+
+        r = await _rep(db, s, project=code, code="dv1", commit=True)
+        await rsvc._link_revision(db, r)                           # ingest_report 의 차례 — 넣고 커밋 전에 잇기
+        await db.commit()
+        await literal(r, f"{code}@dv1", "꺼진 박스의 반입이 거울로 판정했다(과제코드로 풀었다)")
+        assert await _rev(db, f"{a}@dv1") is None, "꺼진 박스가 과제코드의 과제에 판을 만들었다"
+        assert (await onto.link_report(db, r))["skipped"] == "off"   # 반입 뒤 잇기는 꺼져 있다고만 말한다 — 선은 그대로다
+        await literal(r, f"{code}@dv1", "꺼져 있다고 말한 반입 뒤 잇기가 선을 건드렸다")
+
+        r2 = await _rep(db, s, project=both, code="dv1", commit=True)
+        await rsvc._link_revision(db, r2)
+        await db.commit()
+        await literal(r2, f"{both}@dv1", "꺼진 박스의 반입이 엇갈린 이름을 잇지 않았다 — 그 사실을 보일 화면이 없다")
+
+        r3 = await _rep(db, s, project=old, code="dv1", commit=True)
+        await rsvc._link_revision(db, r3)
+        await db.commit()
+        await literal(r3, f"{new}@dv1", "허브가 바꾼 옛 과제명은 꺼져 있어도 지금 과제명으로 푼다(예전 그대로)")
+
+        r = await rsvc.update_report_meta(db, r, dev_rev="dv2")     # 메타 고침 — 판만
+        await literal(r, f"{code}@dv2", "꺼진 박스의 메타 고침이 거울로 판정했다")
+        r = await rsvc.update_report_meta(db, r, project=both)      # 메타 고침 — 켜져 있으면 엇갈려 옛 선에 머무는 이름으로
+        await literal(r, f"{both}@dv2", "꺼진 박스의 메타 고침이 선을 옛 과제에 남겼다")
+        for k in (a, b1, b2):
+            assert await _rev(db, f"{k}@dv1") is None and await _rev(db, f"{k}@dv2") is None, f"거울의 과제 {k} 에 판이 생겼다"
+
+        # 나중에 켜면 — 꺼져 있던 때의 글자 그대로의 선은 굳지 않는다. 자동 잇기가 하나로 풀리는 이름의 기계 선을 판정대로 옮기고,
+        # 하나로 정해지지 않는 이름은 후보로 세기만 한다(선은 그대로다).
+        r4 = await _rep(db, s, project=code, code="dv3", commit=True)
+        await rsvc._link_revision(db, r4)
+        await db.commit()
+        await literal(r4, f"{code}@dv3", "꺼진 박스의 반입이 거울로 판정했다")
+        monkeypatch.setattr(settings, "ontology", "1")
+        got = await onto.auto_link_tasks(db, report_ids=[r.id, r2.id, r3.id, r4.id])
+        await db.commit()
+        assert (got["linked"], got["already"], got["candidates"], got["unmatched"]) == (1, 1, 1, 0), got
+        assert await _linked(db, r4.id) == [f"{a}@dv3"], "켠 뒤 자동 잇기가 과제코드로 적힌 리포트를 그 과제의 판으로 옮기지 않았다"
+        assert (await _edge_of(db, r4.id)).properties["link_source"] == onto.SOURCE_RULE
+        assert await _linked(db, r3.id) == [f"{new}@dv1"], "옛 과제명의 리포트는 이미 지금 과제의 판에 있다(already)"
+        assert (await _linked(db, r.id), await _linked(db, r2.id)) == ([f"{both}@dv2"], [f"{both}@dv1"]), "엇갈린 이름의 선을 건드렸다"
+    finally:
+        await _drop(db, *mine, keys=[a, code, b1, b2, both, old, new])
 
 
 async def test_a_task_code_name_links_straight_to_its_task_and_a_same_value_edit_changes_nothing(db):
