@@ -425,6 +425,33 @@ async def test_the_previous_revision_is_the_line_made_last_however_the_rows_are_
         await db.rollback()
 
 
+async def test_a_fold_of_two_names_holding_the_same_line_drops_nothing(db):
+    """옛 이름과 새 이름이 **같은 줄**(`pre` ← `dv1`)을 따로 쥐고 있다. 접으면 두 줄은 한 줄이다 — 접히는 `dv1` 의 앞 판(`A@pre`)과
+    남는 `dv1` 의 앞 판(`B@pre`)은 이번에 함께 접히는 같은 판이라, 못 옮긴 선으로 알릴 것이 없다. 판은 key 차례로 접혀(`dv1` 이
+    `pre` 보다 먼저다) 그때 앞 판은 아직 옛 이름이다 — 이름 글자만 견주면 다른 판으로 읽힌다(재검토 11-15 RF-B-3)."""
+    t = _tag()
+    a, b = f"L2A-{t}", f"L2B-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        ra0, ra1, rb0, rb1 = _report(), _report(), _report(), _report()
+        a_pre = await _rev(db, ra0, a, "pre")
+        await _rev(db, ra1, a, "dv1", supersedes=a_pre)
+        b_pre = await _rev(db, rb0, b, "pre")
+        await _rev(db, rb1, b, "dv1", supersedes=b_pre)
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["collapsed"] >= 2 and not got["deferred"], got
+        assert not [d for d in got["dropped"] if t in d], f"같은 줄인데 못 옮긴 선으로 알렸다: {got['dropped']}"
+
+        assert [e.dst_key for e in await _our_edges(db, onto.REL_SUPERSEDES, src_key=f"{b}@dv1")] == [b_pre]
+        line = {x["code"]: x for x in await onto.history(db, b)}
+        assert line["dv1"]["supersedes"] == b_pre and sorted(line["dv1"]["reports"]) == sorted([ra1.id, rb1.id]), line
+    finally:
+        await db.rollback()
+
+
 async def test_a_reused_old_key_is_not_resolved_away(db):
     """A→B 로 바뀐 뒤 허브가 A 라는 **새** 과제를 만들면 A 는 지금 key 다 — 옛 → 새 로 풀면 남의 개정을 옮긴다."""
     t = _tag()
