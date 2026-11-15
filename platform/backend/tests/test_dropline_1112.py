@@ -154,9 +154,18 @@ def test_an_external_jobs_warnings_are_redacted_like_its_summary():
 
 
 def test_one_line_does_not_scan_a_huge_string():
-    """자르기 전에 다 훑지 않는다(11-15 검토) — 10 MB 글도 앞부분만 본다."""
+    """자르기 전에 다 훑지 않는다(11-15 검토) — 10 MB 글도 앞부분만 본다.
+
+    고정 시간 기준은 바쁜 박스에서 흔들린다(4a 지적 — 처음 판은 50 ms). 그래서 같은 자리에서 **글 전체를 훑는 값**을 함께 재고
+    그 1/20 보다 빨라야 한다고 본다(실측 전체 0.27 s · 앞부분 36 µs — 차이가 수천 배라 여유가 크다)."""
     import time
     from app.modules.system.routes import POSTPROCESS_TEXT_MAX, _one_line
+    big = "x" * 10_000_000
     t0 = time.perf_counter()
-    got = _one_line("x" * 10_000_000)
-    assert len(got) == POSTPROCESS_TEXT_MAX and time.perf_counter() - t0 < 0.05
+    " ".join("".join(ch if ch.isprintable() else " " for ch in big).split())    # 자르지 않고 다 훑는 값
+    full = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    got = _one_line(big)
+    mine = time.perf_counter() - t0
+    assert len(got) == POSTPROCESS_TEXT_MAX
+    assert mine < full / 20, (mine, full)
