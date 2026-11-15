@@ -188,17 +188,12 @@ async def candidates(db, report: ImpactReport, *, task_key: str = "") -> list[di
 # ── 확정 ───────────────────────────────────────────────────────────────────
 
 async def _chain_keys(db, start_key: str) -> list[str]:
-    """`supersedes` 를 따라 앞으로 거슬러 간 키들(자기 포함)."""
+    """`supersedes` 를 따라 앞으로 거슬러 간 키들(자기 포함). 한 판에 앞 판 선이 둘이면 개정 줄이 보이는 선을 따라간다(`_prev_of`)."""
     seen: list[str] = []
     cur = start_key
     while cur and cur not in seen:
         seen.append(cur)
-        row = (await db.execute(
-            select(OntoRelation).where(OntoRelation.relation == REL_SUPERSEDES,
-                                       OntoRelation.src_type == TYPE_REVISION,
-                                       OntoRelation.src_key == cur,
-                                       OntoRelation.deleted.is_(False)))).scalars().first()
-        cur = row.dst_key if row else ""
+        cur = await _prev_of(db, cur)
     return seen
 
 
@@ -561,10 +556,12 @@ async def history(db, task_key: str, *, scope=None) -> list[dict]:
     by_rev: dict[str, list[str]] = {}
     for e in edges:
         by_rev.setdefault(e.dst_key, []).append(e.src_key)
+    # 한 판에 앞 판 선이 둘이면 나중에 만든 선(id 가 큰 것)을 보인다 — 순환 검사 · 접기가 읽는 선과 같다(`_prev_of`)
     sups = (await db.execute(
         select(OntoRelation).where(OntoRelation.relation == REL_SUPERSEDES,
                                    OntoRelation.src_key.in_(keys),
-                                   OntoRelation.deleted.is_(False)))).scalars().all()
+                                   OntoRelation.deleted.is_(False))
+        .order_by(OntoRelation.id))).scalars().all()
     prev = {e.src_key: e.dst_key for e in sups}
 
     out = []
@@ -1466,10 +1463,16 @@ async def _reports_on(db, keys: list[str]) -> list[str]:
 
 
 async def _prev_of(db, key: str) -> str:
-    """이 판의 앞 판 key(살아 있는 `supersedes` 선 — 없으면 빈 문자열). `_chain_keys` 와 같은 자리를 읽는다."""
+    """이 판의 앞 판 key(살아 있는 `supersedes` 선 — 없으면 빈 문자열). 순환 검사(`_chain_keys`)와 접기가 이것으로 읽는다.
+
+    ★선이 **둘**일 수 있다 — 사람이 앞 판을 바꿔 다시 확정하면 앞 선이 남는다(main 부터 그랬다. 정의는 many_to_one 이다). 그때는
+    나중에 만든 선(id 가 큰 것 — 되살린 선은 처음 만든 차례 그대로다)이다. 개정 줄(`history`)도 같은 선을 보인다 — 예전엔 차례를 적지
+    않아 접기가 개정 줄과 다른 앞 판을 남는 판에 이었다(재검토 11-15 RF-B-2).
+    """
     row = (await db.execute(select(OntoRelation).where(
         OntoRelation.relation == REL_SUPERSEDES, OntoRelation.src_type == TYPE_REVISION,
-        OntoRelation.src_key == key, OntoRelation.deleted.is_(False)))).scalars().first()
+        OntoRelation.src_key == key, OntoRelation.deleted.is_(False))
+        .order_by(OntoRelation.id.desc()))).scalars().first()
     return row.dst_key if row else ""
 
 

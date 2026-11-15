@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pytest
 import ulid
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from app.models import (SOURCE_HUB, ImpactReport, OntoAlias, OntoObject, OntoPreviousKey, OntoRelation,
                         Session, User)
@@ -366,6 +366,61 @@ async def test_a_fold_carries_the_line_to_a_previous_revision_that_already_moved
         line = {x["code"]: x for x in await onto.history(db, b)}
         assert line["dv2"]["supersedes"] == f"{b}@dv1", line
         assert await onto._chain_keys(db, f"{b}@dv2") == [f"{b}@dv2", f"{b}@dv1"]
+    finally:
+        await db.rollback()
+
+
+async def test_a_fold_carries_the_previous_revision_the_history_shows(db):
+    """한 판에 앞 판 선이 **둘**일 수 있다 — 사람이 `dv3` 을 앞 판 `dv1` 로 확정했다가 `dv2` 로 다시 확정하면 앞 선이 남는다(main 부터
+    그랬다). 개정 줄(`history`)은 나중에 만든 선을 보인다. 접을 때 남는 판이 받는 앞 판도 그 선이어야 한다 — 예전엔 접기가 먼저 만든
+    선을 집어, 「dv3 의 앞은 dv2」 라던 줄이 과제 이름이 바뀐 뒤 「dv3 의 앞은 dv1」 이 됐다(재검토 11-15 RF-B-2)."""
+    t = _tag()
+    a, b = f"L2A-{t}", f"L2B-{t}"
+    try:
+        await _task(db, a)
+        await _task(db, b)
+        r1, r2, r3, r_m = _report(), _report(), _report(), _report()
+        first = await _rev(db, r1, a, "dv1")
+        second = await _rev(db, r2, a, "dv2")
+        await _rev(db, r3, a, "dv3", supersedes=first)
+        await _rev(db, r3, a, "dv3", supersedes=second)          # 다시 확정 — 앞 선(dv3 → dv1)은 남는다
+        assert (await _machine(db, r_m, b, "dv3"))["ok"]
+        ahead = sorted(e.dst_key for e in await _our_edges(db, onto.REL_SUPERSEDES, src_key=f"{a}@dv3"))
+        assert ahead == [first, second], ahead
+        assert {x["code"]: x for x in await onto.history(db, a)}["dv3"]["supersedes"] == second
+        assert await onto._chain_keys(db, f"{a}@dv3") == [f"{a}@dv3", second], "순환 검사가 개정 줄과 다른 앞 판을 따라간다"
+
+        await _hub(db, onto.TYPE_TASK, {"key": b, "renamed_from": a, "previous_keys": [a], "updated_at": "T2"})
+        got = await onto.reflect_after_sync(db)
+        assert got["collapsed"] >= 1 and not got["deferred"], got
+        assert not [d for d in got["dropped"] if t in d], got["dropped"]
+
+        line = {x["code"]: x for x in await onto.history(db, b)}
+        assert line["dv3"]["supersedes"] == f"{b}@dv2", f"접은 뒤 개정 줄의 앞 판이 달라졌다: {line['dv3']}"
+        assert [e.dst_key for e in await _our_edges(db, onto.REL_SUPERSEDES, src_key=f"{b}@dv3")] == [f"{b}@dv2"]
+    finally:
+        await db.rollback()
+
+
+async def test_the_previous_revision_is_the_line_made_last_however_the_rows_are_stored(db):
+    """앞 판 선이 둘일 때 개정 줄 · 순환 검사 · 접기가 **같은 선**(나중에 만든 것)을 읽는다 — 차례를 적지 않은 읽기는 행이 고쳐 쓰이면
+    (이름 바뀜이 선의 끝을 옮길 때 그렇다) 달라져, 셋이 서로 다른 앞 판을 말할 수 있었다(재검토 11-15 RF-B-2)."""
+    t = _tag()
+    a = f"L2A-{t}"
+    try:
+        await _task(db, a)
+        r1, r2, r3 = _report(), _report(), _report()
+        first = await _rev(db, r1, a, "dv1")
+        second = await _rev(db, r2, a, "dv2")
+        await _rev(db, r3, a, "dv3", supersedes=second)
+        await _rev(db, r3, a, "dv3", supersedes=first)           # 나중에 만든 선 — dv3 → dv1
+        older = (await _our_edges(db, onto.REL_SUPERSEDES, src_key=f"{a}@dv3", dst_key=second))[0]
+        # 먼저 만든 선의 행을 고쳐 쓴다(값은 그대로) — 저장 자리가 나중 선 뒤로 간다
+        await db.execute(update(OntoRelation).where(OntoRelation.id == older.id).values(deleted=False))
+
+        assert {x["code"]: x for x in await onto.history(db, a)}["dv3"]["supersedes"] == first
+        assert await onto._chain_keys(db, f"{a}@dv3") == [f"{a}@dv3", first]
+        assert await onto._prev_of(db, f"{a}@dv3") == first
     finally:
         await db.rollback()
 
