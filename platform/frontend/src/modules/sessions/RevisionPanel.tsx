@@ -37,6 +37,13 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
     enabled: on,        // 꺼져 있으면 **부르지도 않는다** — 409 를 받아 숨기는 것과 다르다
   })
 
+  // 폼을 닫은 채 누르는 두 단추(연결 끊기 · 자동 잇기 다시 허용)의 거절 — 까닭을 보이고 보기를 다시 읽는다(보기가 낡아 거절된 것일 수
+  // 있다 — 다른 창에서 이미 끊었거나 기록을 지웠다). 예전에는 까닭을 폼 안에만 그려 폼이 닫혀 있으면 아무것도 안 보였다(재검토 11-15)
+  const refused = (e: unknown) => {
+    setErr(errorMessage(e))
+    qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
+  }
+
   const drop = useMutation({
     mutationFn: () => unlinkReportRevision(reportId),
     onSuccess: () => {
@@ -44,7 +51,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
       qc.invalidateQueries({ queryKey: ['task-revisions'] })
     },
-    onError: (e) => setErr(errorMessage(e)),
+    onError: refused,
   })
 
   // 사람이 끊은 기록 지우기(11-11) — 지우면 자동 잇기가 이 리포트를 다시 본다(서버가 바로 한 번 돈다)
@@ -55,7 +62,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       qc.invalidateQueries({ queryKey: ['report-revision', reportId] })
       qc.invalidateQueries({ queryKey: ['task-revisions'] })
     },
-    onError: (e) => setErr(errorMessage(e)),
+    onError: refused,
   })
 
   const save = useMutation({
@@ -137,6 +144,9 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
         </div>
       )}
 
+      {/* 폼을 닫은 채 누른 단추가 거절된 까닭 — 폼이 열려 있으면 폼 안에 보인다 */}
+      {!open && err && <div className="text-danger">{err}</div>}
+
       {/* 과제의 허브 처지 — 합쳐짐은 알리고 관리자가 옮긴다(저절로 옮기지 않는다 — 사용자 결정 10-30) */}
       {d.task_state && <TaskStateNotice st={d.task_state} reportId={reportId} />}
 
@@ -203,7 +213,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
                   onClick={() => save.mutate()}>
             {save.isPending ? <Spinner /> : <><Check size={13} /> 확정</>}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>취소</Button>
+          <Button size="sm" variant="ghost" onClick={() => { setOpen(false); setErr(null) }}>취소</Button>
           <span className="text-muted">확정하면 재인제스트에도 지워지지 않는다</span>
           {err && <span className="text-danger">{err}</span>}
         </div>
