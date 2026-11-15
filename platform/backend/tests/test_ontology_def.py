@@ -565,6 +565,60 @@ def test_our_definition_uses_nothing_whose_sp_rules_are_not_mirrored_here():
     assert _uses_what_is_not_mirrored({"interfaces": {}}) == ["(최상위) interfaces"]
 
 
+# ── ⑥ SP 는 모양부터 본다 — 목록 자리에 온 목록 아닌 값(재검토 11-15 RF-C-1) ─────────────────
+# ⑤ 까지의 눈은 모두 `doc.get("groups") or []` 꼴로 읽는다 — `{}` · `""` · `0` · `false` 는 「없다」 로 지나간다. SP 는 계획을 세우기
+# 전에 모양부터 보고(importer._require_shape) 그런 값을 파일째 거절한다. `types` · `relation_types` · `interfaces` 는 다른 못박기에
+# 걸려 빨갰지만, `groups` 는 타입의 nav_group_slug 까지 빠지면 39 개가 모두 초록이었다(⑤ 의 「거절인데 초록 0」 은 이 꼴을 안 셌다).
+
+_SP_TOP = ("groups", "interfaces", "types", "relation_types")
+
+
+def _wrong_shape_for_sp(doc) -> list[str]:
+    """SP 가져오기가 모양 때문에 파일째 거절할 자리 — `importer._require_shape` 가 보는 것 그대로. 한 자리에 한 줄.
+
+    안 적은 키와 null 은 지나친다. 그 밖의 값은 비어 있어도 목록이 아니면 거절이고, 목록의 항목은 표(객체)여야 하며 항목의
+    `properties` 는 null 이거나 표의 목록이어야 한다."""
+    if not isinstance(doc, dict):
+        return ["(최상위) 표(객체)가 아니다"]
+    bad: list[str] = []
+    for name in _SP_TOP:
+        items = doc.get(name)
+        if items is None:
+            continue
+        if not isinstance(items, list):
+            bad.append(f"(최상위) {name}={items!r} 는 목록이 아니다")
+            continue
+        for i, one in enumerate(items):
+            if not isinstance(one, dict):
+                bad.append(f"{name}[{i}]={one!r} 는 표(객체)가 아니다")
+                continue
+            props = one.get("properties")
+            if props is not None and not (isinstance(props, list) and all(isinstance(p, dict) for p in props)):
+                bad.append(f"{name}/{one.get('slug')}.properties 는 표의 목록이 아니다")
+    return bad
+
+
+def test_our_definition_has_the_shape_sp_plans_with():
+    """SP 가 모양으로 거절할 자리가 없고, 묶음과 타입이 선 자리가 그대로다 — 뒤 둘은 내용 못박기다(SP 가 받는 바뀜에도 빨개진다 —
+    일부러다. 묶음을 아무도 보지 않아 `groups` 가 통째로 비는 것을 놓쳤다)."""
+    doc = json.loads(OURS.read_text(encoding="utf-8"))
+    assert _wrong_shape_for_sp(doc) == []
+    assert [g["slug"] for g in doc["groups"]] == ["dynaforge"]
+    assert [t.get("nav_group_slug") for t in doc["types"]] == ["dynaforge"], "타입이 묶음 밖에 섰다 — 허브 사이드바에 안 선다"
+    if SP_IMPORTER.exists():        # 최상위 키는 SP 것과 같아야 한다 — 그쪽이 키를 늘리면 여기도 그 모양을 본다
+        assert set(_SP_TOP) == _sp_key_sets()["TOP_KEYS"]
+    # 판별력 — 목록이 아닌 값은 비어 있어도 잡는다(네 키 모두) · 표가 아닌 항목 · 표의 목록이 아닌 properties
+    for name in _SP_TOP:
+        for value in ({}, "", 0, False, "x", {"slug": "g"}, [7], [None], [{"slug": "a", "properties": {}}],
+                      [{"slug": "a", "properties": ""}], [{"slug": "a", "properties": ["basis"]}]):
+            assert len(_wrong_shape_for_sp({name: value})) == 1, (name, value)
+        # SP 가 받는 이웃은 안 잡는다 — 안 적은 키 · null · 빈 목록 · properties 가 없거나 null 이거나 표의 목록
+        for value in (None, [], [{"slug": "a"}], [{"slug": "a", "properties": None}], [{"slug": "a", "properties": []}],
+                      [{"slug": "a", "properties": [{"key": "k"}]}]):
+            assert _wrong_shape_for_sp({name: value}) == [], (name, value)
+    assert _wrong_shape_for_sp({}) == [] and _wrong_shape_for_sp([]) == ["(최상위) 표(객체)가 아니다"]
+
+
 # ── 판별력 — 흠을 정말 잡는가 ──────────────────────────────────────────────
 
 def _doc(**kw):
