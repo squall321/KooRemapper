@@ -524,10 +524,21 @@ async def test_types_and_conflicts_are_refused(db, mirror):
         lines = await _lines(db, rep.id)
         assert lines[("finding/3", "cbt:fm-shock")].properties["basis"] == "rule", "다대다는 규칙 선이 사람 선 곁에 남는다"
         # 규칙 선과 같은 짝을 확정하면 그 선이 사람 선으로 오른다
+        assert lines[("part/2", "cbt:wall")].properties["matched_by"] == "previous_key", "오르기 전에는 규칙이 적은 맞은 칸이 있다"
         up = await br.confirm(db, rep, src_key=f"{rep.id}/part/2", dst_key="cbt:wall", by="o")
         await db.commit()
         assert up["ok"] and up["promoted_rule"] is True
-        assert (await _lines(db, rep.id))[("part/2", "cbt:wall")].properties["basis"] == "human"
+        raised = (await _lines(db, rep.id))[("part/2", "cbt:wall")].properties
+        assert raised["basis"] == "human"
+        # 오른 선에는 규칙이 적은 맞은 칸 · 글을 남기지 않는다(재검토 11-15 RF-C-2) — 정의의 설명이 「다른 근거 층에서는 비운다」 다.
+        # 남기면 사람이 이은 선이 「옛 key 와 글자 그대로 맞았다」 고 말한다 — 그 뒤 이름이 바뀌어도 그 글이 그대로 따라다닌다
+        assert sorted(raised) == ["basis", "decided_at", "decided_by", "src_label"], raised
+        assert not {"matched_by", "matched_text"} & set(up["line"]) and up["line"]["decided_by"] == "o", up["line"]
+        # 걷어도 잃는 것이 없다 — 그 사람 선을 지우면 규칙 선이 맞은 칸 · 글과 함께 다시 선다
+        back = await br.remove(db, rep, src_key="part/2", dst_key="cbt:wall")
+        await db.commit()
+        again = (await _lines(db, rep.id))[("part/2", "cbt:wall")].properties
+        assert back["ok"] and again == {"basis": "rule", "matched_by": "previous_key", "matched_text": "Front\\Wall"}, again
 
         no = await br.remove(db, rep, src_key="part/3", dst_key="cbt:pcb")
         assert (no["status"], no["error"]) == (409, "rule_line"), "규칙 선은 지우지 않는다"

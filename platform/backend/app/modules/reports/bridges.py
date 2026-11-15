@@ -556,7 +556,8 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     다르다(422 wrong_relation) · 끝 타입이 다르다(422 wrong_type — cae_part 는 part 에만) · 거울에 없는 코어 객체(422 not_in_mirror) ·
     허브에서 사용 안 함(422 inactive) · 다대일인데 다른 사람 선이 이미 있다(409 already_bound — 먼저 지운다) · 리포트가 그사이
     지워졌다(404 report_gone).
-    같은 짝의 규칙 선이 있으면 그 선을 사람 선으로 올린다. 다대일이면 그 객체의 다른 규칙 선은 다시 짓기에서 빠진다(사람이 이긴다).
+    같은 짝의 규칙 선이 있으면 그 선을 사람 선으로 올린다 — 규칙이 적은 맞은 칸 · 글(`matched_by` · `matched_text`)은 걷는다(사람 선에는
+    없다 — 지우면 다시 짓기가 규칙 선을 새로 긋는다). 다대일이면 그 객체의 다른 규칙 선은 다시 짓기에서 빠진다(사람이 이긴다).
     같은 짝의 사람 선이 이미 있으면 `already` — 그 객체를 부르는 이름이 확정 때와 달라졌으면(renamed) 남긴 이름을 지금 것으로 맞추고
     확정한 사람 · 때를 새로 적는다(`relabeled` — 사람이 「같은 것」 이라 했다, 검토 2차 항목 8).
     """
@@ -619,7 +620,9 @@ async def confirm(db, report: ImpactReport, *, src_key: str, dst_key: str, dst_t
     replaced = [e.dst_key for e in lines if b.single and _basis(e) != HUMAN and e.dst_key != dst_key]
     props = {"basis": HUMAN, "decided_by": by or "", "decided_at": now, "src_label": name, **({"note": note} if note else {})}
     if same is not None:
-        same.properties = {**props, **{k: v for k, v in (same.properties or {}).items() if k in ("matched_by", "matched_text")}}
+        # 규칙이 적은 맞은 칸 · 글은 걷는다 — 정의의 설명이 「다른 근거 층에서는 비운다」 다(`maps_to` 공통 블록 · 재검토 11-15 RF-C-2).
+        # 예전에는 그 둘을 남겨 사람이 이은 선이 「옛 key 와 글자 그대로 맞았다」 고 말했다(읽는 코드는 없었다)
+        same.properties = props
         line = same
     else:
         line = OntoRelation(relation=b.relation, src_type=obj.type_slug, src_key=key, dst_type=b.dst_type, dst_key=dst_key,
