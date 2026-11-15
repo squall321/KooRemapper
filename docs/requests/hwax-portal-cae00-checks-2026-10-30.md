@@ -4,7 +4,7 @@
 **정본** DynaForge 쪽 결정 · 계약은 KooRemapper `platform/docs/REQUEST-postprocess-operation.md` §10, `docs/01-plan/features/{postprocess-reservation-1028,sphere-risk-map-1029}.plan.md`, 총괄 `drop-twin-1028.checklist.md`. KooSlurm 쪽은 KooSlurm `docs/sso_enable_20261029/{icn401_apply_check,sso_enable_procedure}.md`(origin `46c647e4`).
 
 ## 0. 순서 — 한 줄씩
-1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261108-234149Z` 를 받는다) → §1 · §1-1 · §1-2 · §1-3 · §1-4 확인.
+1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261115-093042Z` 를 받는다) → §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 확인.
 2. **icn401** — `git pull && sudo ./dashboard/start_production.sh` → §3 확인(KooSlurm 문서 §2).
 3. **비밀 하나를 두 곳에** — icn401 `HEAX_GATEWAY_SECRET`(backend_5010/.env) = cae00 `KOORM_KOOSLURM_SSO_SECRET`(KooRemapper platform/.env) → §2 · §3-3.
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
@@ -16,14 +16,14 @@ SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
 10-30 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7`) · `dev_rev` 를 예약 때 반입 규칙으로(`3574342`) · **변형 뷰어 1단계** — 리포트에 StepForge fe_cad 묶음 붙이기(REST `POST /reports/{id}/cad` · MCP `attach_cad`, `aa63e2a`) · 맵에서 각도를 고르면 「형상 보기」(`d37fcbb`). 그 판의 **마이그레이션 셋**(0015 · 0016 · 0017 — 모두 null 허용 칸 · 유일 제약, 옛 코드에 영향 없음) — 그 뒤 0018 · 0019 · 0020 이 더해져
-지금은 0015 ~ 0020 여섯이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4).
+지금은 0015 ~ 0020 여섯이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로다(§1-5).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`e6407dc`) · `revision_matches_binary` true |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `e6407dc` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`8b49d2a`) · `revision_matches_binary` true |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `8b49d2a` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0020 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
-| MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 89개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` 가 새로 있다) · `MCP SMOKE: PASS` |
+| MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 90개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` · `clear_report_unlink` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
 | 형상 보기 | 같은 맵의 상위 표에서 각도 한 줄을 누른다 | 「고른 각도 …」 줄이 생긴다. CAD 묶음을 붙인 리포트면 「형상 보기」 로 glb 가 열리고 파트가 칠해진다(「속 보기」 로 속 파트). 안 붙였으면 붙이는 길(MCP `attach_cad` · REST)이 적힌다 — 운영에서 누가 붙일지는 §9 |
 
@@ -114,7 +114,7 @@ SP 키트 2026-10-21 판(규칙 16 · 시험장 8단계 자동 시험) 받기 ·
 
 | 확인 | 어디서 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `e6407dc` · `revision_matches_binary` true |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `e6407dc`(11-08 판 — 지금 판은 §1-5 의 `8b49d2a`) · `revision_matches_binary` true |
 | 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `c5f74c18…` |
 | 연산 수 | 시스템 상태의 `operations` | 65(그대로) |
 | 스모크(dev 실측 11-08) | `mcp_server/deckops_smoke.py` · `mcp_server/allops_smoke.py` | 29/29 · 64/64(외부 잡 하나 건너뜀) |
@@ -127,6 +127,66 @@ KooRemapper 가 `c5f74c18` 이다(실측). 같은 굽기의 Drive tar 는 `Smart
 (node001 · 002 · viz)는 down 이라 노드 사본은 아직이다 — 살아나면 `deploy_compute_images.sh`. 다음 판으로 미룬 기존 결함 목록은 KooRemapper
 `docs/01-plan/features/seatbelt-aux-walkers-1107.plan.md` 「다음 판으로 미룬 것」.
 
+## 1-5. cae00 — 11-15 반영분(핵심 잇기 SRC-08 ~ 11 · 낙하 파이프라인 API 셋)
+바이너리 · 마이그레이션 · SIF 가 그대로인 판이다(바이너리 `c5f74c18` · 0020). Drive 판 `dist-20261115-093042Z`(소스 `8b49d2a`)에서 11-08 판과 다른
+파일은 `BUILD_INFO.txt` 와 콘솔 묶음 `koorm-frontend-dist.tar.gz` 둘뿐이다 — SIF 다섯과 `koorm-bin.tar.gz` 는 sha256 이 같다(실측). 그 밖에 바뀐 것은
+git 으로 들어오는 파이썬(백엔드 · MCP 서버) · 정의 파일 `platform/core/ontology/dynaforge-core.json` · 새 점검 스크립트 하나다. MCP 도구는 89 →
+**90**(`clear_report_unlink`), 연산 수는 65 그대로다. SP 서브모듈 고정은 `13e6b02`(v0.4.85 — 키트 판 2026-11-06 그대로). 파이썬은 `update-all` 의 git
+갱신으로 들어가므로 §1 「소스」 줄(`git log -1`)과 아래 표의 도구 수로 본다.
+- **핵심 잇기 — 코어 다리(SRC-08)** — 해석 온톨로지 꾸러미를 붙일 때 그 객체를 허브에서 받은 코어 객체에 잇는 선(다리)을 함께 짓는다. 관계는
+  셋이다(`maps_to` `cae_part` → `part` · `indicates` `cae_finding` → `failure_mode` · `follows_method` `cae_campaign` → `analysis_method`). 정확히
+  하나로 맞는 것만 규칙 선으로 긋고 나머지는 후보나 못 붙인 것으로만 보인다. 사람이 확정 · 지우는 길은 REST 둘(`POST` ·
+  `DELETE /reports/{id}/cae/bridges` — 리포트 주인과 시스템 관리자만)이고, 보기는 `report_cae` 의 `bridges` 다. 사람 선은 꾸러미를 다시 붙여도 남는다.
+- **과제 잇기 · 개정(SRC-09 ~ 11)** — 리포트를 과제의 판에 잇는 판정이 한 곳으로 모였다(미리 보기 · 일괄 적용 · 받기 뒤 자동 잇기 · 반입 · 메타 고침).
+  기계는 사람이 정한 선과 끊은 리포트를 바꾸지 않는다. 연결을 끊으면 끊은 기록(누가 · 언제)이 남아 자동 잇기가 그 리포트를 건너뛰고, 기록 지우기는
+  리포트 주인만 한다(REST `DELETE /reports/{id}/revision/unlinked` · MCP `clear_report_unlink` · 콘솔 개정 줄의 「자동 잇기 다시 허용」).
+- **낙하 파이프라인 API 셋(포털 요청 11-12)** — 잡 응답의 `external` 칸 · 리포트 찾기의 `external_job_key` 거르기 · 시스템 상태의
+  `postprocess_versions` 다. 덧붙이기만 했고 기존 칸 · 인자는 그대로다. 점검 스크립트 `platform/infra/scripts/check-postprocess.py`(표준
+  라이브러리만)는 §2 의 설정 칸이 비었는지와 KooSlurm 위임 창구에 닿는지만 보고 값은 출력하지 않는다.
+- **정의 파일** — `dynaforge-core.json`(sha256 `9253578b…51f3`)에 관계 셋이 더해지고 `rev_source` 고름 목록에 `rule` 이 더해졌다(다섯 값). 허브에 다시
+  넣는 것은 허브 관리자의 손 가져오기다(아래 6).
+
+알고 받을 동작 변화
+1. 과제·개정 스위치가 **꺼진 박스**(허브 주소 · 토큰이 없는 박스 — §1-1) — 온톨로지 길(`/ontology/*` · 개정 보기)은 예전처럼 409 이고, 반입 · 메타
+   고침 · 7-1 반입은 예전처럼 과제명 글자 그대로의 판에 잇는다. 해석 온톨로지 꾸러미 붙이기는 스위치와 무관하게 되고, 거울이 비어 있으면 다리 셈이 0
+   이고 `bridges.notes` 가 까닭을 말한다.
+2. 스위치가 **켜진 박스**(허브 설정이 선 뒤) — 반입 · 메타 고침도 자동 잇기와 같은 판정을 따른다. 허브에서 하나로 풀리는 이름은 그 과제의 판에
+   잇고(출처 `rule`), 하나로 안 정해지는 이름은 잇지 않고 후보로만 보이며, 허브가 모르는 이름만 글자 그대로 잇는다(`eng_meta`). 반입 응답의
+   `task_links` 수만으로는 이어졌는지 가를 수 없다 — 선은 개정 보기(`GET /reports/{id}/revision` 의 `linked`)로 본다.
+3. 미리 보기(`GET /ontology/task-links`)는 관리자만에서 로그인한 누구나(읽을 수 있는 리포트만 · `scope`)로 바뀌었다. 일괄
+   적용(`POST /ontology/task-links/apply`)의 응답은 네 칸에서 열두 칸이 되었고, 선은 관리자 이름의 `manual` 이 아니라 출처 `rule` 로 적힌다. 과제의 판
+   목록 · 비교 · 객체 보기는 읽을 수 있는 리포트로 좁혀졌다(새 칸 `scope`).
+4. 잠금 — 일괄 적용 · 합친 과제 옮기기 · 개정 확정(`PUT /reports/{id}/revision`)은 다른 길이 잠금을 쥐고 있으면 기다리지 않고 409 `busy: …` 로 답하고
+   아무것도 바꾸지 않는다(잠시 뒤 다시 한다). 반입은 그대로 되고 응답의 `task_links` 가 `{skipped: "busy", detail}` 로 온다.
+5. 오류 글 — 반입 응답 · 7-1 원장 · 7-1 잡 `error_summary` · 받기 기록의 짧은 오류 글은 「클래스: 한 줄」(300자 안 — SQL 문 · 배경 링크는 빠진다)로
+   온다. MCP 는 경로 id(리포트 · 세션 · 잡 · 파일 …)에 `/` · `\` 가 들면 보내지 않고 도구 오류를 낸다. 리포트를 지우면 붙였던 꾸러미 파일도 함께
+   지운다.
+6. 정의 파일을 허브에 다시 넣을 때 — 처음에 넣은 길 · 같은 출처로 넣는다. `dynaforge` 출처로 넣었던 허브에 손으로 넣으면 파일째 거절된다(오류 넷).
+   `revision_of` · `supersedes` 는 StepForge 와 이름만 같고 정의가 달라, 한 허브에 두 앱 정의를 손으로 함께 넣으면 나중 것이 앞 것을 덮는다. 다리의 끝
+   타입(`part` · `failure_mode` · `analysis_method`)은 받을 타입에 있어야 한다 — `KOORM_SP_CORE_TYPES=` 빈 값(전부)이면 된다. 넣는 차례와 재어 본 것은
+   KooRemapper `docs/01-plan/features/corelink-src08-11.plan.md` 「허브에 올릴 때 알릴 것」.
+7. 낙하 파이프라인 — 잡 응답(`GET /jobs/{id}` · MCP `get_job`)의 `external` 은 외부 잡(stcx 제출 · 후처리 예약)이면
+   `{kind, cluster_state, ontology:{state, why?}}`, 로컬 잡이면 null 이다(원본 `external_ref` 는 내보내지 않는다). `postprocess_versions` 는 최근 90일
+   7-1 반입 리포트의 후처리 판(`[{name, adapter, version, n, last_at}]` · 최대 10판)이고, 그 기간에 7-1 반입이 없으면 `[]`, 못 세면 null 이다.
+
+| 확인 | 어디서 | 기대값 |
+|---|---|---|
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `8b49d2a` · `revision_matches_binary` true · `published_utc` `2026-11-15T09:30:46Z` |
+| 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `c5f74c18…`(11-08 판과 같다) |
+| 마이그레이션 | `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없음(0020 그대로) |
+| MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | `[tools] 90 (expect 90)` · `MCP SMOKE: PASS` — `clear_report_unlink` 가 새로 있다 |
+| 정의 파일 | `sha256sum platform/core/ontology/dynaforge-core.json` | `9253578b…51f3` |
+| 시스템 상태 | MCP `system_status`(REST `/api/v1/system/status`) | `postprocess_versions`(7-1 반입이 없었으면 `[]`) · `postprocess_versions_window_days` 90 |
+| 설정 점검 | `python3 platform/infra/scripts/check-postprocess.py` | §2 를 넣은 뒤면 끝 줄이 「후처리 예약 · 반입: 설정 칸과 위임 창구가 갖춰졌다…」 — 칸 이름 · 있음/비었음 · HTTP 상태만 나오고 값은 나오지 않는다 |
+| (켜진 박스만 · 리포트 주인으로) 개정 줄 | 세션 → 리포트 펼치기 → 「개정」 줄 | 「연결 끊기」 를 누르면 「… 이 끊었다 — 자동 잇기가 다시 잇지 않는다」 와 「자동 잇기 다시 허용」 단추가 보인다 |
+| 스모크(dev 실측 11-15) | `mcp_server/smoke.py` · `deckops_smoke.py` · `allops_smoke.py` · `reports_smoke.py` | PASS(도구 90) · 29/29 · 64/64(외부 잡 하나 건너뜀) · 59/59(스위치 꺼짐 — 스위치를 켠 임시 스택에서는 69/69) |
+
+⚠ 도구 수가 89 로 남아 있으면 MCP 가 옛 코드로 떠 있는 것이다 — MCP 를 다시 띄운다(`apptainer instance stop koorm_mcp` 뒤 곧바로
+`bash platform/infra/scripts/start.sh`). 분이 바뀌는 때는 피한다 — 감독자(cron 의 `supervisor.sh`)가 먼저 되살리면 MCP 가 데이터
+바인드(`/data/svc/kooremapper`) 없이 뜬다(11-15 dev 실측 — 이번 판 앞부터 있던 것이고 아직 고치지 않았다). 바인드가 없으면 MCP 도구가 `/data` 아래
+로컬 경로(`upload_local_path` · `save_result_to_path`)를 보지 못한다. 확인은 `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` —
+폴더가 보이면 바인드가 있다.
+
 ## 2. cae00 — 후처리 예약(7-1) 설정
 `platform/.env`(KooRemapper)에 둘. **값은 화면 · 로그 · 채팅에 붙이지 않는다.**
 ```
@@ -135,13 +195,15 @@ KOORM_KOOSLURM_SSO_SECRET=<icn401 backend_5010/.env 의 HEAX_GATEWAY_SECRET 과 
 ```
 선택 — `KOORM_POSTPROCESS_WAIT_DAYS`(기본 7) · `KOORM_KOOSLURM_TIMEOUT_SEC`(기본 30). 넣은 뒤 재기동(도는 잡 0 확인 → `restart-api-only.sh`, 또는 다음 `update-all` 이 .env 지문으로 재기동).
 
+(11-15 덧붙임) 칸과 위임 창구만 먼저 보려면 `python3 platform/infra/scripts/check-postprocess.py`(§1-5) — 칸 이름 · 있음/비었음 · HTTP 상태만 나오고 값은 나오지 않는다. `--email <주소>` 를 주면 그 사람 명의로 토큰을 실제로 받아 본다(토큰은 출력하지 않는다).
+
 **확인 — 없는 잡으로 예약해 본다**(운영 잡을 건드리지 않는다). 콘솔에서 세션 하나 → 오퍼레이션 `postprocess` → `job_key=stcx:0`, `sim_type=fullangle_drop` → 실행. 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/allops_smoke.py` 의 postprocess 줄.
 | 잡의 오류 문구 | 뜻 |
 |---|---|
 | 「구성 안 됨 — KOORM_… 이(가) 비었다」 | 설정이 아직 안 들어갔다(또는 재기동 전) |
 | 「위임 창구가 잡 소유자의 토큰을 내주지 않았다(sso_401)」 | 비밀이 icn401 과 다르다 |
 | 「…(sso_404)」 | icn401 에 비밀이 아직 없다(§3-3) — 창구가 닫혀 있다 |
-| 「…(sso_400)」 | 이메일이 사용자 이름 규칙에 안 맞는다(`@` 앞이 `[a-z0-9._-]` 1~32 · admin · root · anonymous 거절) |
+| 「…(sso_400)」 | 이메일이 사용자 이름 규칙에 안 맞는다(`@` 앞이 `[a-z0-9._-]` 1~32 · admin · root · anonymous 거절), 또는 KooSlurm 의 클라이언트 허용 목록에 `dynaforge` 가 없다(`X-Heax-Client` — 11-15 덧붙임 · 두 까닭은 `check-postprocess.py --email` 이 보이는 까닭 글로 가른다) |
 | 1~2분 뒤 「클러스터가 이 잡을 모른다(`/info` 404 …)」 | **정상** — 설정 · 위임 · 대시보드 REST 가 다 닿았다(잡 0 은 없다) |
 
 ## 3. icn401 — KooSlurm 반영(사람)
@@ -229,7 +291,7 @@ KooSlurm `docs/sso_enable_20261029/sso_enable_procedure.md`. 켜기 전에 설 �
 - 걸린 예약이 없을 때 켠다 — 켜는 순간 신원이 admin → 실제 사용자로 바뀌어 켜기 전 예약은 403 으로 닫힌다.
 
 ## 8. 되돌리기
-- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261107-083706Z`) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다).
+- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261108-234149Z`) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다.
 - **KooSlurm** — 그쪽 문서의 되돌리기 절.
 
 ## 9. 남은 사람 결정(참고)
