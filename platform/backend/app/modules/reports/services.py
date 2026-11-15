@@ -339,8 +339,8 @@ async def ingest_report(
     await db.commit()
     await db.refresh(report)
     # SRC-09 — 반입을 굳힌 **뒤에** 과제 잇기(붙는 것만 · 이 리포트만). 깨져도 반입은 그대로고, 결과는 부르는 쪽이 응답 · 잡 경고에 싣는다.
-    # 위에서 같은 판정으로 이미 이었으면 `already` 로 센다(붙는 이름은 대개 그렇다 — 11-12). 후보 · 못 붙임 수를 내는 자리고, 위 잇기가
-    # 깨졌을 때(그 저장점만 되감긴다)의 그물이다.
+    # 위에서 이름이 허브 과제 하나로 풀려 이었으면 `already` 로 센다(11-12 — 허브가 모르는 이름은 글자 그대로 이어졌어도 후보 ·
+    # 못 붙임으로 센다). 후보 · 못 붙임 수를 내는 자리고, 위 잇기가 깨졌을 때(그 저장점만 되감긴다)의 그물이다.
     from app.modules.ontology import services as onto
     report.auto_task_links = await onto.link_report(db, report)
     if report.kind == "sphere":
