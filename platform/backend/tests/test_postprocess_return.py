@@ -369,6 +369,7 @@ async def _forget_task_links(db, *keys):
 
 @needs_sphere
 @_aio
+@pytest.mark.usefixtures("own_sync_lock")
 async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slurm, monkeypatch):
     """반입 뒤 과제 잇기(SRC-09) — 예약 인자의 과제(여기선 과제코드)가 정본 과제로 풀리면 이어지고 원장(`task_links`)에 남는다.
     11-12 부터 인제스트 때 잇기가 같은 판정으로 그 과제의 판에 먼저 잇는다 — 원장은 「이미 이어져 있다」(`already`)로 센다."""
@@ -402,6 +403,7 @@ async def test_the_return_links_the_task_and_keeps_it_on_the_job(db, owner, slur
 
 @needs_sphere
 @_aio
+@pytest.mark.usefixtures("own_sync_lock")
 async def test_a_broken_task_link_warns_and_the_job_still_succeeds(db, owner, slurm, monkeypatch):
     from app.config import settings
     from app.modules.ontology import services as onto
