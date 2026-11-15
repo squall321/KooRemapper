@@ -1096,8 +1096,8 @@ async def attach_cae_package(
     수(코어 거울에 그 타입이 없으면 notes 가 까닭을 말한다). 다리 짓기만 깨지면 꾸러미는 실리고 `bridges` 는
     `{"error": "<클래스: 한 줄>"}` 이다 — 같은 꾸러미를 다시 붙이면 다시 짓는다.
     리포트를 번들(.zip)로 올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다. 후처리 예약(postprocess)
-    반입도 귀환 매니페스트에 꾸러미가 있으면 저절로 싣는다(잡의 external_ref.ontology.state — 그 칸이 없는 성공 잡도 있다, 그때
-    실렸는지는 report_cae 로 본다).
+    반입도 귀환 매니페스트에 꾸러미가 있으면 저절로 싣는다(get_job 의 `external.ontology.state` — `ontology` 가 null 인 성공
+    잡도 있다, 그때 실렸는지는 report_cae 로 본다).
     리포트가 그사이 지워졌으면 「찾을 수 없습니다」 오류, 싣는 쓰기가 깨지면 짧은 까닭과 함께 오류이고 아무것도 바뀌지 않는다 — 다만
     오류 글이 「실렸는지 모른다」 고 하면 실렸을 수 있다(report_cae 로 확인하거나 같은 꾸러미를 다시 붙인다).
     Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent rows; rebuilds core bridges."""

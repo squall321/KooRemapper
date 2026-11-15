@@ -57,7 +57,8 @@ SP 키트 2026-10-21 판(규칙 16 · 시험장 8단계 자동 시험) 받기 ·
 운영에서 꾸러미가 생기는 것은 꾸러미를 내는 후처리 이미지가 stcx 에 깔린 뒤다 — 그전에는 「없음」 이 정상이다. 후처리 예약(7-1) 반입은
 귀환 매니페스트의 꾸러미(`reports[].ontology`)를 저절로 싣는다. 세 자리가 다 서야 실제로 실린다 — KooSlurm 작성기(`b6a3d75c`, icn401 반영 뒤
 제출한 잡부터) · 리포트 도구가 `-o` HTML 곁에 꾸러미를 쓰는 후처리 이미지(KooD3plotReader (A) — **Post v43** `eccde7f` 부터, 지금 깔 판은 **v51** `226eca7`, §5-1) · 이 판의 DynaForge. 하나라도 없으면
-리포트만 반입되고 잡 `external_ref.ontology.state` 가 `no_field`(옛 작성기) · `absent`(꾸러미 없음)다 — 둘 다 정상이고 경고가 아니다.
+리포트만 반입되고 잡 응답(`GET /jobs/{id}` · MCP `get_job`)의 `external.ontology.state` 가 `no_field`(옛 작성기) · `absent`(꾸러미 없음)다 —
+둘 다 정상이고 경고가 아니다(원장 `external_ref` 는 응답에 나가지 않는다 — 11-12 판부터 그 요약 `external` 이 나간다).
 이 싣기(`77c10a0`)와 어휘 0.4 판(0.3 꾸러미도 그대로 받는다)은 **파이썬 · 데이터만 바뀐 커밋**이라 Drive 판은 그대로다 —
 `update-all` 의 git 갱신으로 들어간다(§1 「소스」 줄의 `git log -1` 로 본다).
 
@@ -194,12 +195,12 @@ v43 · v47 · v50 을 이미 깔았으면 v51 로 바꾸고, 아직이면 v43 ~ 
   (헤드와 노드의 판이 다르면 리포트 셸이 경고한다).
 - 설치 뒤 — `apptainer exec <설치한 SmartTwinPostprocessor.sif> head -3 /opt/kood3plot/VERSION` → `Version: 226eca7`.
 - 순서 — 이 판의 꾸러미는 어휘 0.5 다. cae00 DynaForge 가 `32cc364` 이상이어야 받는다(§0 의 1번 update-all 을 먼저 하거나 같은 때에 — `752fa2b` 판이
-  이미 그 뒤다). 늦으면 그 사이 반입된 리포트는 꾸러미 없이 들어오고 잡 `external_ref.ontology.state` 가 `failed`(「받아들이지 않은 어휘 판이다」 — 잡
+  이미 그 뒤다). 늦으면 그 사이 반입된 리포트는 꾸러미 없이 들어오고 잡 응답의 `external.ontology.state` 가 `failed`(「받아들이지 않은 어휘 판이다」 — 잡
   경고 한 줄)다. 리포트는 정상이고, 꾸러미는 나중에 리포트 화면 「꾸러미 붙이기」로 붙인다. 노드 쪽 사본이 아직 옛 판(v46 이하)이면 그 잡의 꾸러미는
   어휘 0.4 로 오고 그대로 받는다(v47 ~ v49 이면 0.5 — 같다).
 - 운영에서 볼 것 — 전각도 잡 하나 뒤 (1) 단면 영상 마지막 프레임 범례가 `max = 0, at node# 0` 이 아니다 (2) 결과 폴더에
   `<출력>/sphere_report.ontology.json` 이 있다 (3) icn401 반영 뒤 제출한 잡이면 귀환 매니페스트의 `reports[].ontology.present` 가 true 이고,
-  그 잡을 받은 DynaForge 후처리 예약의 `external_ref.ontology.state` 가 `loaded` (4) 그 리포트 화면의 해석 온톨로지 칸에 노란 경고 줄이 없다 — 있으면
+  그 잡을 받은 DynaForge 후처리 예약 잡 응답의 `external.ontology.state` 가 `loaded` (4) 그 리포트 화면의 해석 온톨로지 칸에 노란 경고 줄이 없다 — 있으면
   꾸러미가 캠페인 폴더 · 덱을 못 읽고 지어진 것이다(접촉 양쪽 선 등이 빠진다) (5) 핫스팟을 켠 결과의 `hotspot.criteria` 가 9개 · `yield_eps_threshold`
   가 1e-6 이상 (6) deep 리포트에 그림이 있다(부하가 높아도 VTK abort 로 빠지지 않는다) (7) 파트별 단면 영상은 이름에 BGA 가 든 파트만 — 없으면
   갤러리에 「[설정] 파트별 단면: 이름에 BGA 가 든 파트가 없어 만들지 않았다(파트 이름: …)」 가 뜬다(개관 영상은 그대로) · 파트별 영상 폴더 이름이
