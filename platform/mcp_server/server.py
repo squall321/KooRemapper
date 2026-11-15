@@ -209,9 +209,10 @@ async def whoami(ctx: Context) -> dict:
 
 @mcp.tool()
 async def system_status(ctx: Context) -> dict:
-    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수) + `postprocess_versions` — 최근 90일 리포트가 실어 온
-    후처리 판(`ontology.producer` 의 name·version · 수 · 마지막 시각). stcx 에 닿지 않고도 운영에서 어느 후처리 판이
-    도는지 본다(None = 못 셌다, [] = 그 기간에 꾸러미 실린 리포트가 없다). / Platform health + worker queue."""
+    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수) + `postprocess_versions` — 최근 90일 **7-1 반입** 리포트가 실어 온
+    후처리 판([{name(producer.tool), adapter, version, n, last_at}] — 어댑터가 다르면 다른 줄, 빈 판은 안 센다, 글은 한 줄 80자).
+    stcx 에 닿지 않고도 운영에서 어느 후처리 판이 도는지 본다(None = 못 셌다, [] = 그 기간에 7-1 반입 리포트가 없다).
+    / Platform health + worker queue."""
     return await _get(ctx, "/system/status")
 
 

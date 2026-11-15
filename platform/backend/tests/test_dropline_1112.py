@@ -111,17 +111,43 @@ async def test_find_reports_filters_by_the_exact_external_job_key(db):
 
 
 @async_db
-async def test_system_status_counts_postprocess_versions_from_recent_reports(db):
+async def test_system_status_counts_postprocess_versions_from_recent_7_1_reports(db):
+    """생산 쪽 꼴(koo_deep_report — tool · adapter · version · created_utc)로 짓는다. 처음 판은 `{"name", "version"}` 을 손으로
+    지어 초록이었는데 실물은 `name` 칸이 없었다(합친 판 검토 ①, 11-15)."""
     u, s = await _owner(db)
     try:
-        name = f"test-postprocessor-{ulid.new().str[-8:]}"     # 공용 dev DB — 이 이름의 행만 본다
-        for v in ("v50", "v51", "v51"):
-            await _report(db, u, s, ontology={"producer": {"name": name, "version": v}})
-        await _report(db, u, s, ontology={"producer": {"name": name}})        # 판이 없는 꾸러미 — 세지 않는다
-        await _report(db, u, s)                                                # 꾸러미가 없는 리포트 — 세지 않는다
-        mine = [r for r in await _postprocess_versions(db) if r["name"] == name]
-        assert {r["version"]: r["n"] for r in mine} == {"v50": 1, "v51": 2}
-        assert mine[0]["version"] == "v51", "마지막 시각이 늦은 판이 앞에 온다"
+        tag = f"t{ulid.new().str[-8:]}"                      # 공용 dev DB — 이 꼬리표의 행만 본다
+        tool = f"koo_deep_report.ontology.{tag}"
+        k = iter(range(100))
+
+        def pkg(**p):
+            return {"producer": {"tool": tool, "adapter": "sphere", "version": "v51",
+                                 "created_utc": "2026-11-15T00:00:00+00:00", **p}}
+        for over in ({}, {}, {"adapter": "deep"}, {"version": "v50"}, {"version": ""}):
+            await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}", ontology=pkg(**over))
+        await _report(db, u, s, ontology=pkg(version="v99"))          # 손으로 붙인 꾸러미(7-1 아님) — 세지 않는다
+        await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}",   # 남이 지은 글 — 한 줄 · 80자로 접힌다
+                      ontology=pkg(tool=tool + "\n\x1b[31m" + "x" * 500, version="v52\r\nINJECTED"))
+        await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}")  # 꾸러미 없음 — 세지 않는다
+        mine = [r for r in await _postprocess_versions(db) if (r["name"] or "").startswith(tool)]
+        got = {(r["adapter"], r["version"]): r["n"] for r in mine if r["name"] == tool}
+        assert got == {("sphere", "v51"): 2, ("deep", "v51"): 1, ("sphere", "v50"): 1}, got
+        assert not any(r["version"] == "v99" for r in mine), "7-1 이 아닌 꾸러미는 세지 않는다"
+        hostile = [r for r in mine if r["name"] != tool]
+        assert len(hostile) == 1
+        h = hostile[0]
+        assert len(h["name"]) <= 80 and "\n" not in h["name"] and "\x1b" not in h["name"]
+        assert h["version"] == "v52 INJECTED", "줄바꿈은 빈칸으로 접힌다"
         assert all(r["last_at"] for r in mine)
     finally:
         await _cleanup(db, u, s)
+
+
+def test_an_external_jobs_warnings_are_redacted_like_its_summary():
+    """같은 까닭이 `external.ontology.why` 에서는 접히고 `warnings[]` 에서는 날것이던 것(합친 판 검토 ③, 11-15)."""
+    raw = f"해석 온톨로지 꾸러미를 싣지 못했다 — 꾸러미가 결과 폴더 밖에 있다(path={Path.home()}/x.json) (리포트는 반입됐다)"
+    d = JobRead.model_validate(_job(external_kind="kooslurm_return", external_ref={"ontology": {"state": "failed"}},
+                                    warnings=[raw])).model_dump()
+    assert str(Path.home()) not in d["warnings"][0] and "<home>" in d["warnings"][0]
+    local = JobRead.model_validate(_job(warnings=[raw])).model_dump()
+    assert local["warnings"] == [raw], "로컬 잡의 경고는 그대로 둔다"

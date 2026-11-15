@@ -46,3 +46,17 @@ dev 에 값을 넣고 `--email e2etest@…` 로 점검하니 400 이었다. 본�
 
 `platform/.env` 끝 블록(URL · SSO 비밀 · 확인 간격 10초, 지우면 되돌아감) · `.env` 0644 → 0600 · API 재기동 ·
 DynaForge 사용자 `e2etest@kooremapper.test` 와 세션 `01M77VGGBVFR1H7GF25GTESVH9`(비밀번호는 `~/.config/smarttwin/dev_dynaforge_e2etest` 0600).
+
+### 합친 판 적대적 검토가 찾은 결함 셋 (kooremapper-4a, 11-15) — 고침
+
+① **`postprocess_versions` 가 틀린 칸을 읽었다.** 후처리(koo_deep_report)의 producer 는 `tool` · `adapter` · `version` · `created_utc` 다
+(`tests/fixtures/cae_package_v14_min.json`). `name` 을 읽어 실물은 늘 null 이었고, 어댑터가 달라도 한 줄로 합쳐졌고, dev 의 빈
+version 이 한 줄을 차지했다. 내 시험이 초록이었던 것은 `{"name", "version"}` 을 **손으로 지어서**다 — 생산 쪽 꼴을 보지 않고
+내가 상상한 꼴로 시험했다. → `coalesce(tool, name)` · adapter 를 열쇠에 · 빈 version 건너뜀 · 시험은 생산 쪽 꼴로.
+② **남이 지은 글을 모두에게 냈다.** producer 는 검사 없이 저장되고 `/system/status` 는 로그인한 모두가 본다. 검토 실측 — 탐침
+열 개로 응답 538 → 201,687 자, 지어낸 판 열 개면 진짜 판이 밀린다. → **7-1 반입 리포트(`external_job_key` 있음)만** 센다(목적이
+「운영에서 실제로 도는 판」 이라 손으로 붙인 꾸러미는 맞지 않는다) · 낼 때 한 줄 80자로 접는다(접은 뒤 같아진 줄은 합친다).
+③ **같은 까닭이 한쪽에서만 접혔다.** `external.ontology.why` 는 redact 를 거치는데 7-1 이 경고 글에 넣는 같은 까닭(꾸러미 실패 ·
+결과 폴더 밖 경로)은 날것이었다. → `JobRead.warnings` serializer 가 외부 잡이면 같은 redact. 로컬 잡 경고는 그대로.
+
+교훈 — 응답 칸을 남의 데이터로 채울 때는 **그 데이터를 만드는 쪽의 꼴**(픽스처 · 실물)로 시험하고, 그 글이 누구에게 나가는지 본다.

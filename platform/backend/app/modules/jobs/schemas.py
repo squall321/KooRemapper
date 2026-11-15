@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, field_serializer
 
 from app.shared.diagnostics import redact
 
@@ -74,3 +74,12 @@ class JobRead(BaseModel):
     @property
     def external(self) -> dict | None:
         return external_summary(self.external_kind, self.external_ref)
+
+    @field_serializer("warnings")
+    def _warnings_out(self, v):
+        """외부 잡의 경고도 `external` 과 같은 `redact` 를 거친다(합친 판 검토 ③, 11-15) — 7-1 은 꾸러미를 못 실은 까닭 ·
+        결과 폴더 밖 경로를 경고 글에 넣는다. 한쪽에서만 접히면 같은 까닭이 두 번, 한 번은 날것으로 나간다.
+        저장된 행에도 듣도록 쓸 때가 아니라 낼 때 접는다. 로컬 잡의 경고는 그대로 둔다."""
+        if not self.external_kind or not isinstance(v, list):
+            return v
+        return [redact(x) if isinstance(x, str) else x for x in v]

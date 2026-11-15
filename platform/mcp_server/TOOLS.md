@@ -150,7 +150,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |
-| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 리포트가 실어 온 후처리 판 · 수 · 마지막 시각) |
+| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 7-1 반입 리포트가 실어 온 후처리 판 — name(tool) · adapter · version · 수 · 마지막 시각) |
 | `system_capabilities` | — | GET /system/capabilities | 기능 카탈로그 + 웹/MCP 패리티 + 연결 힌트 |
 
 > 표준 워크플로: `create_session` → `upload_*` → `describe_operation` → `run_operation`
