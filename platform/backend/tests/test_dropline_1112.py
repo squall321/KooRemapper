@@ -127,7 +127,7 @@ async def test_system_status_counts_postprocess_versions_from_recent_7_1_reports
             await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}", ontology=pkg(**over))
         await _report(db, u, s, ontology=pkg(version="v99"))          # 손으로 붙인 꾸러미(7-1 아님) — 세지 않는다
         await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}",   # 남이 지은 글 — 한 줄 · 80자로 접힌다
-                      ontology=pkg(tool=tool + "\n\x1b[31m" + "x" * 500, version="v52\r\nINJECTED"))
+                      ontology=pkg(tool=tool + "\n\x1b[31m" + "x" * 200_000, version="v52\r\nINJECTED"))
         await _report(db, u, s, external_job_key=f"stcx:{tag}{next(k)}")  # 꾸러미 없음 — 세지 않는다
         mine = [r for r in await _postprocess_versions(db) if (r["name"] or "").startswith(tool)]
         got = {(r["adapter"], r["version"]): r["n"] for r in mine if r["name"] == tool}
@@ -151,3 +151,12 @@ def test_an_external_jobs_warnings_are_redacted_like_its_summary():
     assert str(Path.home()) not in d["warnings"][0] and "<home>" in d["warnings"][0]
     local = JobRead.model_validate(_job(warnings=[raw])).model_dump()
     assert local["warnings"] == [raw], "로컬 잡의 경고는 그대로 둔다"
+
+
+def test_one_line_does_not_scan_a_huge_string():
+    """자르기 전에 다 훑지 않는다(11-15 검토) — 10 MB 글도 앞부분만 본다."""
+    import time
+    from app.modules.system.routes import POSTPROCESS_TEXT_MAX, _one_line
+    t0 = time.perf_counter()
+    got = _one_line("x" * 10_000_000)
+    assert len(got) == POSTPROCESS_TEXT_MAX and time.perf_counter() - t0 < 0.05

@@ -60,7 +60,9 @@ def _one_line(v, cap: int = POSTPROCESS_TEXT_MAX) -> str | None:
     """찍히는 글자 한 줄 · 상한 — 줄바꿈 · 제어 문자는 빈칸으로 접는다. 비면 None."""
     if v is None:
         return None
-    s = " ".join("".join(ch if ch.isprintable() else " " for ch in str(v)).split())
+    # 훑기 전에 먼저 자른다 — 긴 글 전체를 글자마다 훑지 않게(11-15 검토). 빈칸 접기로 줄어들 몫을 넉넉히 둔다.
+    raw = str(v)[: cap * 4]
+    s = " ".join("".join(ch if ch.isprintable() else " " for ch in raw).split())
     return s[:cap] or None
 
 
@@ -79,8 +81,11 @@ async def _postprocess_versions(db: AsyncSession) -> list[dict]:
     """
     from datetime import datetime, timedelta, timezone
     prod = ImpactReport.ontology["producer"]
-    tool = func.coalesce(prod["tool"].astext, prod["name"].astext)
-    adapter, ver = prod["adapter"].astext, prod["version"].astext
+    # 앞부분만 가져온다 — 남이 지은 긴 글이 DB 에서 통째로 넘어오지 않게(어차피 80자로 접는다).
+    head = POSTPROCESS_TEXT_MAX * 4
+    tool = func.substr(func.coalesce(prod["tool"].astext, prod["name"].astext), 1, head)
+    adapter = func.substr(prod["adapter"].astext, 1, head)
+    ver = func.substr(prod["version"].astext, 1, head)
     last = func.max(ImpactReport.created_at)
     since = datetime.now(timezone.utc) - timedelta(days=POSTPROCESS_VERSION_DAYS)
     rows = (await db.execute(
