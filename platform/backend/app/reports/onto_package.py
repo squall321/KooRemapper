@@ -39,7 +39,13 @@ WHY_LIMIT = 1000      # 까닭 한 줄의 상한(글자) — 꾸러미가 준 ke
 def _one_line(text: str, limit: int = WHY_LIMIT) -> str:
     """까닭을 찍히는 글자 한 줄 · `limit` 자 안으로 — 찍히지 않는 글자(NUL · 줄바꿈 · 짝 없는 대리 문자)는 `\\x00` 꼴로 풀어 쓰고, 길면
     가운데를 덜어 앞(어느 것)과 뒤(왜)를 남긴다. 까닭은 422 본문 · 번들 `why` · 7-1 원장(JSONB) · 잡 경고에 그대로 실린다 — 날것의 NUL 은
-    JSONB 에 못 실려 7-1 원장 쓰기가 깨졌고, 2만 자 key 는 2만 자 까닭이 됐다(검토 3차 11-14 결함 2e · 6b)."""
+    JSONB 에 못 실려 7-1 원장 쓰기가 깨졌고, 2만 자 key 는 2만 자 까닭이 됐다(검토 3차 11-14 결함 2e · 6b).
+
+    먼저 덜고 푼다 — 전체를 글자마다 풀어 쓴 뒤 줄이면 드는 값이 받은 글자 수를 따른다(천만 자 값 하나의 거절이 수백 MB — 고침 라운드
+    검토 11-15 RF-A-2). 풀어 쓴 글자는 줄지 않으니 남길 앞뒤는 받은 글의 앞 · 뒤 `limit` 자 안에서 나오고, 나오는 글은 한 글자도 다르지
+    않다."""
+    if len(text) > 2 * limit:
+        text = text[:limit] + text[-limit:]
     text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii") for ch in text)
     if len(text) <= limit:
         return text

@@ -277,6 +277,43 @@ def test_an_ordinary_refusal_reads_as_before():
                    + " 외 2 — 만든 쪽은 같은 관계(이름 · 양 끝)를 한 번만 싣는다"), msg
 
 
+def _escape_then_cut(text: str, limit: int = op.WHY_LIMIT) -> str:
+    """견줄 기준 — 전체를 풀어 쓴 뒤 줄인다(`c4a04f5` 가 처음 낸 꼴)."""
+    text = "".join(ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii") for ch in text)
+    if len(text) <= limit:
+        return text
+    head = (limit - 3) * 2 // 3
+    return text[:head] + " … " + text[len(text) - (limit - 3 - head):]
+
+
+def test_a_huge_refusal_costs_what_it_keeps_not_what_it_was_given():
+    """까닭을 한 줄로 만드는 값은 남기는 글자 수에 달렸지 받은 글자 수에 달리지 않는다 — 전체를 글자마다 풀어 쓴 뒤 줄이면 값 하나가
+    천만 자인 꾸러미의 거절 한 번이 수백 MB 를 쓴다(고침 라운드 검토 11-15 RF-A-2 — 19 KB 올리기 하나가 API 에서 780 MB). 먼저 덜고
+    풀어도 나오는 글은 한 글자도 다르지 않다 — 풀어 쓴 글자는 줄지 않으니 남길 앞뒤는 받은 글의 앞뒤 `limit` 자 안에서 나온다."""
+    import tracemalloc
+    # 되풀이 없는 찍히는 글 — 남는 앞 664 자 · 뒤 333 자가 받은 글의 꼭 그만큼에서 나온다(덜 남기는 고침은 여기서 갈린다)
+    plain = "".join(f"{i:x}." for i in range(3000))
+    for n in (0, 1, 664, 665, 998, 1000, 1001, 1999, 2000, 2001, 2003, 5000, len(plain)):
+        text = plain[:n]
+        assert op._one_line(text) == _escape_then_cut(text), n
+        for at in (0, 332, 333, 334, 663, 664, 665, 999, 1000, 1001):      # 덜어 내는 자리 둘레에 못 찍는 글자를 둔다(앞 · 뒤에서 세어)
+            for ch in ("\x00", "\n", "\udcff"):
+                for seen in (text[:at] + ch + text[at:], text[:max(n - at, 0)] + ch + text[max(n - at, 0):]):
+                    assert op._one_line(seen) == _escape_then_cut(seen), (n, at, ch)
+    dense = "".join("\x00\n\udcff\u2028\x7f"[i % 5] + plain[i] for i in range(5000))       # 못 찍는 글자가 절반인 글
+    assert op._one_line(dense) == _escape_then_cut(dense)
+    # 풀어 쓰면 다섯 글자(`\x00가`)가 되풀이된다 — 남는 앞 664 자 · 뒤 333 자는 그 무늬의 앞뒤다
+    big, unit = "\x00가" * 1_000_000, "\\x00가" * 200
+    tracemalloc.start()
+    try:
+        got = op._one_line(big)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert got == unit[:664] + " … " + unit[-333:], got[:80]
+    assert peak < 1_000_000, f"이백만 자 까닭을 한 줄로 만드는 데 {peak:,} 바이트를 썼다"
+
+
 # ── 실물(다른 리포의 표본이 있을 때) ─────────────────────────────────────────
 
 @pytest.mark.skipif(not REAL.exists(), reason="KooD3plotReader 표본 없음")
