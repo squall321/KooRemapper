@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import MCP_PUBLIC_URL_ENV, settings
 from app.database import get_db
-from app.models import Job, User
+from app.models import ImpactReport, Job, User
 from app.runner import catalog
 from app.shared.auth import get_current_user
 from app.shared.features import ontology_state
@@ -47,6 +47,29 @@ def _gmsh_available() -> bool:
     return shutil.which("gmsh") is not None
 
 
+#: 후처리 판을 볼 기간 · 판 수 — 운영에서 「지금 어느 판이 도는가」 를 보는 칸이라 오래된 판은 뺀다.
+POSTPROCESS_VERSION_DAYS = 90
+POSTPROCESS_VERSION_MAX = 10
+
+
+async def _postprocess_versions(db: AsyncSession) -> list[dict]:
+    """최근 리포트에 실려 온 후처리 판 — `ontology.producer` 의 서로 다른 {name, version} · 수 · 마지막 시각.
+
+    왜(2026-11-12, 포털 낙하 파이프라인 (c)) — stcx 에 접속하지 않고도 운영에서 실제로 어느 후처리 판(예 v51)이
+    도는지 본다. 꾸러미(ontology)가 없는 리포트는 세지 않는다 — 판을 모르는 것을 판이 없다고 하지 않는다.
+    """
+    from datetime import datetime, timedelta, timezone
+    prod = ImpactReport.ontology["producer"]
+    name, ver = prod["name"].astext, prod["version"].astext
+    last = func.max(ImpactReport.created_at)
+    since = datetime.now(timezone.utc) - timedelta(days=POSTPROCESS_VERSION_DAYS)
+    rows = (await db.execute(
+        select(name, ver, func.count(), last)
+        .where(ver.is_not(None), ImpactReport.created_at >= since)
+        .group_by(name, ver).order_by(last.desc()).limit(POSTPROCESS_VERSION_MAX))).all()
+    return [{"name": n, "version": v, "n": c, "last_at": t.isoformat() if t else None} for n, v, c, t in rows]
+
+
 @router.get("/system/status")
 async def system_status(request: Request, _user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _mcp_url = mcp_public_url(request)
@@ -58,6 +81,10 @@ async def system_status(request: Request, _user: User = Depends(get_current_user
         running = (await db.execute(select(func.count(Job.id)).where(Job.status == "running"))).scalar_one()
     except Exception:
         db_ok = False
+    try:
+        pp_versions = await _postprocess_versions(db) if db_ok else None
+    except Exception:          # 덧붙인 칸이 상태 응답 전체를 깨지 않게 — 못 셌다는 것은 None 으로 말한다
+        pp_versions = None
     return ok({
         "version": APP_VERSION,
         "env": settings.app_env,
@@ -77,6 +104,9 @@ async def system_status(request: Request, _user: User = Depends(get_current_user
         "rate_limit": {"enabled": settings.ratelimit_enabled},
         "signup": {"enabled": settings.allow_signup},
         "operations": len(catalog.operation_names()),
+        # 최근 리포트가 실어 온 후처리 판 — None 이면 못 셌다, [] 이면 그 기간에 꾸러미 실린 리포트가 없다
+        "postprocess_versions": pp_versions,
+        "postprocess_versions_window_days": POSTPROCESS_VERSION_DAYS,
     })
 
 
