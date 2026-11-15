@@ -1885,7 +1885,8 @@ async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> d
     ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
     `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
     받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(반입 · 메타 고침 — 허브가 모르는 이름을, 기능이 꺼져 있던 때에는 어느
-    이름이든, 수동 메타 글자 그대로). 누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 사람이 이은
+    이름이든, 수동 메타 글자 그대로). 누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 기계가 지은
+    판에 사람이 확정하면 그 판의 다른 옛 선은 그때 `eng_meta` 가 된다(남이 확정했다고 내 리포트가 사람 선이 되지 않는다). 사람이 이은
     선은 기계가 옮기지 않는다. ★선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛
     표시(`eng_meta` · `manual` · null)가 그대로다. 그래서 지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있고(과제가 허브에 오기
     전이나 기능이 꺼져 있던 때에 글자 그대로 이은 선), 한 판의 리포트들이 서로 다른 표시를 가질 수 있다.
@@ -1904,6 +1905,8 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
     `supersedes` 는 앞 판의 개정 키(`<과제 key(과제명)>@<code>`)다 — 순환은 거절된다.
     ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
     `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라. 사람이 끊은 기록이 있으면 지운다.
+    기계가 지은 판에 확정하면 그 판에 얹힌 다른 리포트의 옛 선(누가 이었는지 안 적힌 선)에 기계가 이었다고 먼저 적는다 — 그 리포트를
+    누가 고치는 중이면 `busy` 로 거절한다(HTTP 409 — 아무것도 바꾸지 않았다. 잠시 뒤 다시 부른다).
     / Confirm the revision of a report. Survives re-ingest; do not guess."""
     return await _put(ctx, f"/reports/{_seg(report_id)}/revision", {
         "task_key": task_key, "code": code, "model_key": model_key,

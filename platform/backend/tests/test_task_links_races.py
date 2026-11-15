@@ -556,6 +556,137 @@ async def test_the_rename_round_waits_for_a_hand_holding_a_later_tasks_report_an
         await _drop(uid, sid, [old1, new1, old2, new2])
 
 
+# ── 기계 판에 손 확정 — 그 판에 옛 선으로 얹힌 남의 리포트도 잠근다(재검토 11-15 RF-B-1) ────────────
+
+async def _unstamp(*rids: str) -> None:
+    """이 리포트들의 살아 있는 선을 운영 main 이 이은 꼴(누가 이었는지 안 적힌 선)로 만든다."""
+    async with SessionLocal() as s:
+        for e in (await s.execute(select(OntoRelation).where(
+                OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+                OntoRelation.src_key.in_(rids), OntoRelation.deleted.is_(False)))).scalars():
+            e.properties = None
+        await s.commit()
+
+
+async def _stamps(*rids: str) -> list:
+    """리포트마다 살아 있는 선의 `link_source` — 표시 없는 선은 None, 선이 없으면 "no line"."""
+    async with SessionLocal() as f:
+        rows = (await f.execute(select(OntoRelation.src_key, OntoRelation.properties).where(
+            OntoRelation.relation == onto.REL_MEASURED, OntoRelation.src_type == onto.TYPE_REPORT,
+            OntoRelation.src_key.in_(rids), OntoRelation.deleted.is_(False)))).all()
+    got = {src: (props or {}).get("link_source") for src, props in rows}
+    return [got.get(r, "no line") for r in rids]
+
+
+async def _rev_source(key: str):
+    async with SessionLocal() as f:
+        props = (await f.execute(select(OntoObject.properties).where(
+            OntoObject.type_slug == onto.TYPE_REVISION, OntoObject.key == key))).scalar_one()
+    return (props or {}).get("rev_source")
+
+
+async def test_a_hand_confirm_on_a_machine_revision_waits_for_a_hand_holding_another_old_line_report(db):
+    """기계 판에 손으로 확정하면 그 판에 옛 선(누가 이었는지 안 적힌 선)으로 얹힌 남의 리포트 행도 **제 리포트와 한 문장으로** 잠근다 —
+    아직 판 이름을 쥐지 않아 기다려도 된다. 그 리포트를 다른 손이 쥐고 있으면 기다렸다가 그 선에 기계가 이었다고 적고 확정한다. 한
+    문장으로 잠그지 않으면 판 이름을 쥔 뒤에야 그 리포트를 만나, 기다리지 못하고 거절한다(재검토 11-15 RF-B-1)."""
+    t = _tag()
+    task = f"RH-{t}"
+    uid, sid = await _owner(db)
+    holder = SessionLocal()
+    try:
+        me = await _rep(db, uid, sid, project=task, code="dv1")
+        old = await _rep(db, uid, sid, project=task, code="dv1")
+        for rid in (me, old):                                    # 둘 다 기계가 task@dv1 에 이었다
+            async with SessionLocal() as s:
+                assert (await onto.link_from_eng_meta(s, await s.get(ImpactReport, rid)))["ok"]
+                await s.commit()
+        await _unstamp(me, old)                                  # 운영 main 이 이은 선 — 표시가 없다
+
+        async def confirm(other):
+            return await onto.set_revision(other, await other.get(ImpactReport, me), task_key=task, code="dv1",
+                                           decided_by="kim@x", source="manual")
+
+        await onto.lock_reports(holder, [old])                   # 다른 손이 남의 리포트를 쥔다(메타 고침이 맨 먼저 하는 일 — 커밋 전)
+        job = asyncio.create_task(_in_other_session(confirm))
+        blocked = await _waits_on(holder, job)
+        await holder.rollback()                                  # 그 손이 놓는다
+        outcome = await asyncio.wait_for(job, 30)
+        assert blocked, f"손 확정이 그 판의 다른 옛 선 리포트를 쥔 손을 기다리지 않았다 — {outcome}"
+        assert outcome[0] == "ok" and outcome[1]["ok"], outcome
+        assert await _stamps(me, old) == ["manual", "eng_meta"], "남의 옛 선이 사람 선으로 굳었다"
+        assert await _rev_source(f"{task}@dv1") == "manual"
+        assert (await _live(me), await _live(old)) == ([f"{task}@dv1"], [f"{task}@dv1"])
+    finally:
+        await holder.close()
+        await _drop(uid, sid, [task])
+
+
+@pytest.mark.parametrize("via", ["service", "route"])
+async def test_a_hand_confirm_on_a_machine_revision_is_busy_when_a_late_old_line_report_is_held(db, monkeypatch, via):
+    """손 확정이 제 리포트를 잠근 뒤 · 판 이름을 쥐기 전에 그 판에 옛 선이 하나 더 얹히면(이름 바뀜 옮기기가 그렇게 얹는다) 판 이름을 쥔
+    뒤 그 리포트를 기다리지 않고 잠근다. 다른 손이 쥐고 있으면 **아무것도 쓰지 않고** `busy` 로 거절한다(라우트는 409) — 끊은 기록도
+    그대로다. 그 손이 놓은 뒤 다시 확정하면 그 선에 기계가 이었다고 적고 확정한다(재검토 11-15 RF-B-1)."""
+    import httpx
+
+    from app.main import create_app
+    from app.modules.ontology.routes import require_ontology
+    t = _tag()
+    task = f"RI-{t}"
+    uid, sid = await _owner(db)
+    holder = SessionLocal()
+    try:
+        me = await _rep(db, uid, sid, project=task, code="dv1")
+        z = await _rep(db, uid, sid, project=task, code="dv1")
+        async with SessionLocal() as s:                          # 내 리포트는 기계가 task@dv1 에 이었다가 사람이 끊었다(기록이 남는다)
+            rep = await s.get(ImpactReport, me)
+            assert (await onto.link_from_eng_meta(s, rep))["ok"]
+            assert (await onto.unlink_revision(s, rep, by="kim@x"))["ok"]
+            await s.commit()
+        real, fired = onto.lock_revision_names, []
+
+        async def late_line_then_held(sdb, keys, **kw):
+            if not fired:                                        # 손 확정이 제 리포트를 잠그고 판 이름을 잠그려는 바로 그때(한 번만)
+                fired.append(1)
+                async with SessionLocal() as s:                  # Z 가 그 판에 얹힌다(커밋) — 표시 없는 옛 선으로
+                    assert (await onto.link_from_eng_meta(s, await s.get(ImpactReport, z)))["ok"]
+                    await s.commit()
+                await _unstamp(z)
+                await onto.lock_reports(holder, [z])             # 다른 손이 Z 를 쥔다(커밋 전)
+            return await real(sdb, keys, **kw)
+
+        monkeypatch.setattr(onto, "lock_revision_names", late_line_then_held)
+        if via == "route":
+            app = create_app()
+            app.dependency_overrides[require_ontology] = lambda: {"enabled": True, "reason": None}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+                                         base_url="http://test") as c:
+                r = await c.put(f"/api/v1/reports/{me}/revision", json={"task_key": task, "code": "dv1"},
+                                headers={"authorization": f"Bearer {security.create_access_token(uid)}"})
+            assert r.status_code == 409 and "busy" in r.text and "고치는 중인 리포트" in r.text, (r.status_code, r.text[:300])
+        else:
+            got = await onto.set_revision(db, await db.get(ImpactReport, me), task_key=task, code="dv1",
+                                          decided_by="kim@x", source="manual")
+            await db.commit()                                    # 거절은 쓰기 앞이다 — 굳혀도 남는 것이 없어야 한다
+            assert (got.get("ok"), got.get("error")) == (False, "busy") and "고치는 중인 리포트" in got["detail"], got
+        assert fired, "늦게 온 선이 끼어들지 않았다 — 시험이 틀렸다"
+        assert await _marks(me) == [f"{task}@dv1"], "거절하면서 끊은 기록을 지웠다"
+        assert (await _live(me), await _stamps(z), await _rev_source(f"{task}@dv1")) == ([], [None], "eng_meta"), \
+            "거절하면서 뭔가 썼다"
+        await holder.rollback()                                  # 그 손이 놓는다
+        async with SessionLocal() as s:
+            again = await onto.set_revision(s, await s.get(ImpactReport, me), task_key=task, code="dv1",
+                                            decided_by="kim@x", source="manual")
+            await s.commit()
+        assert again["ok"], again
+        assert (await _marks(me), await _live(me)) == ([], [f"{task}@dv1"])
+        assert await _stamps(me, z) == ["manual", "eng_meta"], "남의 옛 선이 사람 선으로 굳었다"
+        assert await _rev_source(f"{task}@dv1") == "manual"
+    finally:
+        await db.rollback()
+        await holder.close()
+        await _drop(uid, sid, [task])
+
+
 # ── 지우기와 겹친 손 확정(재검토 11-12) ─────────────────────────────────────────────────────────────
 
 async def test_a_hand_confirm_racing_a_report_delete_is_a_404_and_leaves_no_line(db, monkeypatch):

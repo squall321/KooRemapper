@@ -231,6 +231,8 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
     ★사람이 끊은 리포트(끊은 기록이 있다)는 기계 경로(`source` 가 manual 이 아닌 것)를 `unlinked` 로 거절하고, 사람이 잇는
     것(manual)은 끊은 기록을 지우고 잇는다(11-11). 사람이 **이 리포트를** 다른 판에 확정해 두었으면 기계 경로는 `kept_manual` 로
     거절한다 — 리포트마다(선의 `link_source`) 가른다. 리포트 행을 먼저 잠그고 그 뒤에 읽는다(`lock_reports`).
+    ★사람이 **기계 판**에 확정하면(11-15) 그 판에 얹힌 표시 없는 옛 선에 먼저 기계가 이었다고 적는다 — 그 판이 사람 판이 되면서 남의
+    리포트가 사람 선으로 굳지 않게. 그 리포트를 누가 고치는 중이라 못 잠그면 `busy` 로 거절한다. 거절은 모두 쓰기 앞이다.
     """
     task_key = (task_key or "").strip()
     code = (code or "").strip()
@@ -242,7 +244,16 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         return {"ok": False, "error": "bad_code", "detail": str(exc)}
     # 리포트 행을 먼저 잠그고 그 뒤에 읽는다 — 같은 리포트를 고치는 다른 길과 겹쳐도 선이 둘이 되거나(R11) 끊은 기록이 지워지지
     # 않는다(R2). 받기 뒤 자동 잇기가 이 리포트를 쥐고 있으면 그것이 커밋할 때까지 기다린다.
-    locked = await lock_reports(db, [report.id])
+    # ★사람이 **기계 판**에 확정하면 그 판에 표시 없는 옛 선으로 얹힌 남의 리포트도 **같은 문장으로** 잠근다(id 차례 — 아래에서 그
+    #   선들에 적는다, 재검토 11-15 RF-B-1). 잠그기 전에 보는 자리라 칸만 읽는다(정체 맵에 판 객체를 남기지 않는다).
+    key = revision_key(task_key, code)
+    also: list[str] = []
+    if source == "manual":
+        seen = (await db.execute(select(OntoObject.properties).where(
+            OntoObject.type_slug == TYPE_REVISION, OntoObject.key == key))).first()
+        if seen is not None and (seen[0] or {}).get("rev_source") != "manual":
+            also = await _old_line_reports(db, key)
+    locked = await lock_reports(db, [report.id, *also])
     if str(report.id) not in locked and inspect(report).has_identity:
         # 읽은 뒤 그사이 지워졌다(지우기가 굳은 뒤 차례가 왔다) — 선을 넣으면 지운 리포트의 선이 남는다(0019 트리거는 지울 때 한 번
         # 돈다 — 재검토 11-12). DB 에 넣은 적 없는 손 객체(시험)는 잠글 것이 없어 지나간다.
@@ -254,7 +265,6 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         return {"ok": False, "error": "unlinked",
                 "detail": "사람이 이 리포트의 개정 연결을 끊었다 — 기계는 다시 잇지 않는다"
                           "(손으로 다시 잇거나 끊은 기록을 지우면 다시 잇는다)"}
-    key = revision_key(task_key, code)
     live = (await db.execute(select(OntoRelation).where(
         OntoRelation.relation == REL_MEASURED, OntoRelation.src_type == TYPE_REPORT,
         OntoRelation.src_key == str(report.id), OntoRelation.deleted.is_(False))
@@ -282,12 +292,6 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         if key in await _chain_keys(db, supersedes):
             return {"ok": False, "error": "cycle",
                     "detail": f"{supersedes!r} 의 앞줄에 이미 {key!r} 가 있다"}
-    if marks:
-        # 사람이 다시 잇는다 — 끊은 기록을 지운다(검사를 다 지난 뒤에 — 거절되면 기록이 남아야 한다). 같은 판의 기록을
-        # 남겨 두면 아래 `_edge` 가 그 행을 되살리며 끊은 사람 · 때를 그대로 단 채 둔다.
-        for m in marks:
-            await db.delete(m)
-        await db.flush()
 
     # ★판 이름 잠금(리포트 행 다음) — 같은 새 판을 다른 리포트가 지금 만들고 있으면 그것이 끝날 때까지 기다렸다가 그때의 판을
     #   읽는다(재검토 11-12 rr1 — 예전엔 둘째가 유일 제약에 걸렸다). 잠근 뒤 새로 읽는다(정체 맵의 옛 판 객체를 믿지 않는다).
@@ -296,6 +300,24 @@ async def set_revision(db, report: ImpactReport, *, task_key: str, code: str,
         select(OntoObject).where(OntoObject.type_slug == TYPE_REVISION,
                                  OntoObject.key == key)
         .execution_options(populate_existing=True))).scalar_one_or_none()
+    if source == "manual" and obj is not None and (obj.properties or {}).get("rev_source") != "manual":
+        # ★기계 판에 사람이 확정한다 — 이 판은 이제 사람 판이다. 그 판에 얹혀 있던 **남의 옛 선**(누가 이었는지 안 적힌 선 — 운영
+        #   main 의 기계 길이 이었다)이 그때부터 사람 선으로 읽히면(`_human_link` 의 옛 선 규칙) 아무도 확정한 적 없는 리포트에 ✓ 가
+        #   뜨고 그 주인이 메타를 고쳐도 선이 안 옮는다(재검토 11-15 RF-B-1). 먼저 그 선들에 기계가 이었다고 적는다 — 접을 때와 같은
+        #   규칙이다. 그 리포트 행은 위에서 함께 잠갔다. 그 뒤에 얹힌 것은 기다리지 않고 잠가 보고(판 이름을 쥐었다 —
+        #   `lock_reports`), 누가 쥐고 있으면 아무것도 쓰지 않고 거절한다.
+        late = [r for r in await _old_line_reports(db, key) if r not in locked and r != str(report.id)]
+        try:
+            await lock_reports(db, late)
+        except ReportsBusy as exc:
+            return {"ok": False, "error": "busy", "detail": f"{exc} — 확정하지 않았다. 잠시 뒤 다시 한다"}
+        await _stamp_old_machine_lines(db, key)
+    if marks:
+        # 사람이 다시 잇는다 — 끊은 기록을 지운다(검사를 다 지난 뒤에 — 거절되면 기록이 남아야 한다). 같은 판의 기록을
+        # 남겨 두면 아래 `_edge` 가 그 행을 되살리며 끊은 사람 · 때를 그대로 단 채 둔다.
+        for m in marks:
+            await db.delete(m)
+        await db.flush()
     props: dict[str, Any] = {
         "task": task_key,
         "code": code,
@@ -502,7 +524,8 @@ async def linked_revision(db, report: ImpactReport) -> dict | None:
     # 때에는 어느 이름이든)을 글자 그대로). 판의 rev_source 와 다르다(판은 나눠 쓴다). ★누가 이었는지 적지 않던 때의 옛 선은 그 판이
     # 사람 판이면 manual 로 답한다 — 서버가 그 선을 사람 선으로 지키는 판정(`_human_link`)을 그대로 쓴다(재검토 11-14 F-15 — 화면의 ✓
     # 가 이 값을 본다. 예전엔 null 이라 손으로 확정한 옛 리포트에서 ✓ 가 사라졌는데 기계는 그 선을 옮기지 못했다). 기계 판의 옛 선은
-    # 적힌 것이 없어 null 이다.
+    # 적힌 것이 없어 null 이다. 기계 판이 사람 판이 될 때(손 확정 · 접기) 그 판의 옛 선에는 `eng_meta` 를 적어 둔다 — 남이 확정했다고
+    # 이 값이 manual 로 바뀌지 않는다(재검토 11-15 RF-B-1).
     # 선을 **쓸 때** 찍힌 값이다 — `already` 로 지나간 선은 옛 값 그대로다(`set_revision` 의 주석 — 재검토 11-14)
     src = (edge.properties or {}).get("link_source")
     if not src and _human_link(edge.properties, edge.dst_key,
@@ -1049,7 +1072,8 @@ async def _link_state(db, ids: list[str]) -> dict[str, dict]:
 
 def _human_link(props: dict | None, key: str, legacy_manual: set[str]) -> bool:
     """이 리포트 선을 사람이 이었나 — 선에 적힌 `link_source` 로 가른다. 적지 않던 때의 옛 선은 그 판이 사람 판이면 사람 선으로
-    본다(조심 쪽 — 사람이 정한 것일 수 있다)."""
+    본다(조심 쪽 — 사람이 정한 것일 수 있다). 기계 판이 사람 판이 될 때(손 확정 · 접기)에는 그 판의 옛 선에 먼저 기계가 이었다고
+    적는다(`_stamp_old_machine_lines`, 11-15) — 이 옛 선 규칙에 닿는 것은 **그 전부터 사람 판이던** 판의 옛 선뿐이다."""
     src = (props or {}).get("link_source")
     return src == "manual" if src else key in legacy_manual
 
@@ -1449,14 +1473,25 @@ async def _prev_of(db, key: str) -> str:
     return row.dst_key if row else ""
 
 
+async def _old_line_reports(db, key: str) -> list[str]:
+    """이 판에 **옛 선**(누가 이었는지 `link_source` 가 없는 살아 있는 리포트 선)으로 이어진 리포트 id. 칸만 읽는다 — 잠그기 전에도
+    부른다(`set_revision`)."""
+    rows = (await db.execute(select(OntoRelation.src_key, OntoRelation.properties).where(
+        OntoRelation.relation == REL_MEASURED, OntoRelation.source == SOURCE_SELF,
+        OntoRelation.src_type == TYPE_REPORT, OntoRelation.dst_type == TYPE_REVISION,
+        OntoRelation.dst_key == key, OntoRelation.deleted.is_(False)))).all()
+    return sorted({src for src, props in rows if not (props or {}).get("link_source")})
+
+
 async def _stamp_old_machine_lines(db, key: str) -> None:
-    """이 (기계) 판에 이어진 **옛 선**(누가 이었는지 `link_source` 가 없는 살아 있는 리포트 선)에 `eng_meta` 를 적는다 — 사람 판과
-    접히면 남는 판이 사람 판이라, 표시 없는 선이 그때부터 사람 선으로 읽힌다(`_human_link` 의 옛 선 규칙 — 재검토 11-14 F-01 · F-02).
+    """이 (기계) 판에 이어진 **옛 선**(누가 이었는지 `link_source` 가 없는 살아 있는 리포트 선)에 `eng_meta` 를 적는다 — 기계 판이
+    사람 판이 되면 표시 없는 선이 그때부터 사람 선으로 읽힌다(`_human_link` 의 옛 선 규칙). 그렇게 되는 두 자리에서 부른다 — 사람
+    판과 접힐 때(남는 판이 사람 판이다 — 재검토 11-14 F-01 · F-02)와 사람이 그 판에 확정할 때(`set_revision` — 재검토 11-15 RF-B-1).
 
     표시를 안 적던 때(운영 main)의 기계 길은 인제스트 · 메타 고침의 글자 그대로 잇기 하나였고, 사람이 확정하면 그 판이 사람 판이
     됐다(기계가 다시 지나가도 사람 판 그대로다) — 기계 판에 남은 표시 없는 선은 그 기계 길이 이은 것이다. 언제 이었는지는 모른다
     (`linked_at` 은 적지 않는다). ★가리지 못하는 것 하나 — main 의 접기가 이미 기계 판으로 옮겨 놓은 사람 선은 여기서도 기계 선이다.
-    부르는 쪽이 그 리포트 행을 잠가 둔다(`move_task_revisions` 의 잠금 차례 ①).
+    부르는 쪽이 그 리포트 행을 잠가 둔다(`move_task_revisions` 의 잠금 차례 ① · `set_revision` 은 제 리포트와 한 문장으로).
     """
     await db.flush()
     for e in (await db.execute(select(OntoRelation).where(

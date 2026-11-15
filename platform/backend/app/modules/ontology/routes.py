@@ -163,9 +163,10 @@ async def get_report_revision(
     어긋남이 아니다. `linked.source` 는 그 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 ·
     메타 고침 · 받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(허브가 모르는 이름을, 기능이 꺼져 있던 때에는 어느
     이름이든, 수동 메타 글자 그대로). 누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual` 이고(서버가 그 선을 사람
-    선으로 지킨다 — 같은 판정이다) 아니면 null 이다. 선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시
-    찍지 않아 옛 표시(`eng_meta` · `manual` · null)가 그대로다(지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있다 — 지금 어떻게
-    풀리는지는 `resolved_task` · `resolved_how`).
+    선으로 지킨다 — 같은 판정이다) 아니면 null 이다. 기계 판에 사람이 확정하면 그 판의 다른 옛 선은 그때 `eng_meta` 가 된다(남이
+    확정했다고 내 리포트가 사람 선이 되지 않는다 — 11-15). 선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은
+    다시 찍지 않아 옛 표시(`eng_meta` · `manual` · null)가 그대로다(지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있다 — 지금
+    어떻게 풀리는지는 `resolved_task` · `resolved_how`).
     """
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
@@ -206,7 +207,10 @@ async def set_report_revision(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`). 끊은 기록이 있으면 지운다(11-11)."""
+    """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`). 끊은 기록이 있으면 지운다(11-11).
+
+    기계 판에 확정하면 그 판에 얹힌 다른 리포트의 옛 선(누가 이었는지 안 적힌 선)에 기계가 이었다고 먼저 적는다 — 그 리포트를 누가
+    고치는 중이면 409 `busy` 다(기다리지 않고 아무것도 바꾸지 않는다 — 잠시 뒤 다시 한다, 11-15)."""
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
@@ -214,8 +218,10 @@ async def set_report_revision(
                                  model_key=body.model_key, supersedes=body.supersedes,
                                  decided_by=user.email, note=body.note, source="manual")
     if not got.get("ok"):
-        # 읽은 뒤 그사이 지워진 리포트(잠근 뒤 행이 없다 — 재검토 11-12)는 404, 나머지 거절은 400
-        code = status.HTTP_404_NOT_FOUND if got.get("error") == "report_gone" else status.HTTP_400_BAD_REQUEST
+        # 읽은 뒤 그사이 지워진 리포트(잠근 뒤 행이 없다 — 재검토 11-12)는 404, 같은 판의 다른 리포트를 누가 고치는 중이면(`busy`)
+        # 409, 나머지 거절은 400
+        code = {"report_gone": status.HTTP_404_NOT_FOUND,
+                "busy": status.HTTP_409_CONFLICT}.get(got.get("error"), status.HTTP_400_BAD_REQUEST)
         raise HTTPException(code, f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
     return ok(got, message="개정을 확정했습니다.")

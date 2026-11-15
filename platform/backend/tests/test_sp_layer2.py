@@ -168,6 +168,49 @@ async def test_an_old_line_on_a_persons_revision_reads_as_a_persons_line(db):
         await db.rollback()
 
 
+async def test_a_hand_confirmation_on_a_machine_revision_leaves_the_other_old_lines_machine(db):
+    """기계 판에 누가 **자기 리포트를** 손으로 확정하면 그 판은 사람 판이 된다. 그 판에 얹혀 있던 남의 옛 선(표시 없는 선 — 운영 main 의
+    기계 길이 이었다)이 그때부터 사람 선으로 읽히면, 아무도 확정한 적 없는 리포트에 ✓ 가 뜨고 그 주인이 메타를 고쳐도 선이 안 옮는다
+    (재검토 11-15 RF-B-1). 확정하는 그때 그 옛 선에 기계가 이었다고 적는다 — 접을 때와 같은 규칙이다."""
+    t = _tag()
+    a = f"L2A-{t}"
+    try:
+        await _task(db, a)
+        r_me, r_old, r_new = _report(), _report(), _report()
+        for r in (r_me, r_old, r_new):
+            assert (await _machine(db, r, a, "dv1"))["ok"]
+        await _legacy(db, r_me)                               # 운영 main 이 이은 선 — 표시가 없다
+        await _legacy(db, r_old)
+        await _rev(db, r_me, a, "dv1")                        # 한 사람이 제 리포트를 그 판에 확정한다 → 사람 판
+        assert (await _rev_obj(db, f"{a}@dv1")).properties["rev_source"] == "manual"
+        got = {r.id: (await onto.linked_revision(db, r))["source"] for r in (r_me, r_old, r_new)}
+        assert got == {r_me.id: "manual", r_old.id: "eng_meta", r_new.id: "eng_meta"}, got
+        # 서버의 판정도 같다 — 확정한 리포트만 기계가 못 옮기고, 남의 리포트는 예전처럼(운영 main 과 같이) 옮긴다
+        assert (await _machine(db, r_me, a, "dv2")).get("error") == "kept_manual"
+        assert (await _machine(db, r_old, a, "dv2"))["ok"], "남의 옛 선이 사람 선으로 굳었다"
+        assert (await _machine(db, r_new, a, "dv2"))["ok"]
+    finally:
+        await db.rollback()
+
+
+async def test_a_hand_confirmation_on_a_persons_revision_writes_nothing_on_the_other_old_lines(db):
+    """이미 사람 판인 판에 다른 사람이 제 리포트를 확정할 때는 남의 옛 선에 아무것도 적지 않는다 — 그 옛 선은 먼저 확정한 사람의 것일 수
+    있다(조심 쪽 그대로). 적으면 배포 뒤 두 번째 확정이 첫 사람의 ✓ 를 지운다."""
+    t = _tag()
+    a = f"L2A-{t}"
+    try:
+        await _task(db, a)
+        r_first, r_second = _report(), _report()
+        await _rev(db, r_first, a, "dv1")
+        await _legacy(db, r_first)                            # 운영 main 에서 확정한 선 — 표시가 없다
+        await _rev(db, r_second, a, "dv1")
+        assert (await _our_edges(db, onto.REL_MEASURED, src_key=r_first.id))[0].properties is None, "옛 선에 뭔가 적었다"
+        assert (await onto.linked_revision(db, r_first))["source"] == "manual"
+        assert (await _machine(db, r_first, a, "dv2")).get("error") == "kept_manual"
+    finally:
+        await db.rollback()
+
+
 async def test_a_fold_keeps_what_a_person_decided(db):
     """A 가 B 로 바뀌었는데 B 에 같은 코드의 **기계 판**이 이미 있다(받기 전에 새 이름으로 반입이 왔다 · 미뤄진 옮기기 사이에 잇기가
     돌았다). 접을 때 남는 판이 사람이 정한 것(누가 · 언제 · 메모 · 앞 판)을 받고, 사람이 이은 옛 선은 사람 선으로 남는다 — 예전엔 남는
