@@ -143,7 +143,7 @@ cae00 운영의 11-09 제안서 「플랫폼 데이터 온톨로지화 · 코어
   결정이라 올린다. 끝(`cdef15e`) — 백엔드 전체 976 통과 · 11 건너뜀 · 4 실패(감독자 로그 시험 넷 · 환경) · `test_postprocess_return.py` 혼자
   56 · MCP 계약 11 · 정의 40 · tsc 0 · dev DB 기준선 그대로. 콘솔 고침(`13a31cd`)은 임시 API 를 띄워 화면으로 확인했다(07:28 ~ 07:37 UTC).
   자세한 것은 아래 결정 기록(11-15).
-- [ ] (보류 풀린 뒤) main · push · 배포 · 포털에 알림 — ★11-12 포털 부탁으로 **main(bc022d9) · Drive(dist-20261108-234149Z) 동결.**
+- [x] (보류 풀린 뒤) main · push · 배포 · 포털에 알림 — ★11-12 포털 부탁으로 **main(bc022d9) · Drive(dist-20261108-234149Z) 동결.**
   cae00 이 이번 update-all(KooRemapper 는 안 바뀐다는 글)을 끝냈다고 포털이 알려 올 때까지 main 에는 문서 커밋도 안 올린다. 가지 작업은 된다.
   (11-14 01:41 UTC 포털 답 — cae00 끝 소식은 아직 없다. 동결 그대로이고 포털도 push · 빌드를 멈춰 두고 있다. 끝났는지는 사용자가 cae00 보고를
   들고 와야 안다.)
@@ -159,6 +159,11 @@ cae00 운영의 11-09 제안서 「플랫폼 데이터 온톨로지화 · 코어
   합쳤다(`6d4dd78`). 남은 차례 — 고침 라운드의 적대적 검토와 고침 → main → dist 한 번 → API · MCP 재기동 → 스모크 → 포털 끝 알림(저쪽 알림 글에
   합친 판을 넣어 함께). 그 뒤 main 이 한 번 더 움직였고(`cd2eba5` — 합친 판 검토가 찾은 낙하 파이프라인 결함 셋을 그 세션이 고친 것) 다시
   합쳤다(`c6fb1eb` — 965 통과 · 7-1 모듈 혼자 56 · MCP 계약 11). 검토와 고침은 끝났다(끝 `cdef15e`) — 남은 것은 main 부터다.
+  (조정 세션 덧붙임 11-15) 올렸다. 09:11:58 UTC 에 main 으로 밀고(`cd2eba5` → `a599aaa`) 그 세션의 마지막 고침 `8b49d2a` 를 읽고 받은 뒤, 도는
+  잡 0 을 확인하고 API(09:14:44) · MCP(09:16:08)를 다시 띄웠다. 스모크(MCP 도구 90 · 연산 65 · deckops 29/29 · allops 64/64 · reports 59/59,
+  스위치를 켠 임시 스택 69/69)와 백엔드 전체(977 통과 · 11 건너뜀 · 4 실패 — 감독자 로그 시험 넷 · 환경) 뒤 Drive 에
+  `dist-20261115-093042Z`(commit `8b49d2a`)를 올렸다(09:30:42 ~ 09:32:43). cae00 점검 문서는 `c5a6bb9` 이고, 끝 알림은 10:09 에 포털 세션 둘 ·
+  낙하 파이프라인 세션 · StepForge 세션에 보냈다. 자세한 것은 아래 결정 기록 「배포 · 끝 알림(11-15)」.
 
 ## 포털 · 계약에 알릴 것 (SRC-08)
 - 관계 셋 — `maps_to`(cae_part → part · 다대일 · ★StepForge 와 **같은 정의**(11-11 — 두 앱이 바이트 같은 블록을 싣는다 · 출발
@@ -415,22 +420,29 @@ cae00 운영의 11-09 제안서 「플랫폼 데이터 온톨로지화 · 코어
     때는 그쪽 가지에만 있었다). `revision_of` · `supersedes` 는 여전히 다르다(그쪽 끝은 `cad_revision`).
 
 ## 끝 알림에 함께 싣는 것 (dropline-1112)
-- 다른 세션(`kooremapper-fd`, 가지 `dropline-1112` → `0d7ce64` 기준)이 11-14 써 준 글이다. 그대로 옮겨 둔다 — 합친 SHA 는 main 에 오를 때
-  넣는다. 이 가지의 적대적 검토 범위에는 들어 있지 않다.
-  - [DynaForge — 스마트트윈 낙하 파이프라인 API 셋(포털 요청, 사용자 지시 11-12)] 덧붙이기만 했고, 기존 칸·인자는 그대로입니다.
+- 다른 세션(`kooremapper-fd`, 가지 `dropline-1112`)이 써 준 글의 마지막 판이다(11-15 09:13 UTC 에 받았다). 그대로 옮겨 둔다. 두 갈래를 합친
+  커밋은 `6d4dd78` · `c6fb1eb` 이고, 그 세션의 마지막 고침은 main 의 `8b49d2a`(`a599aaa` 바로 다음)다. 이 가지의 적대적 검토 범위에는 들어 있지
+  않다(합친 판 검토가 찾은 셋은 그 세션이 `cd2eba5` 에서 고쳤다).
+  - [DynaForge — 스마트트윈 낙하 파이프라인 API 셋(포털 요청, 사용자 지시 11-12 · 합친 판 검토 고침 11-15)] 덧붙이기만 했고, 기존 칸·인자는
+    그대로입니다.
   - get_job(REST /jobs/{id}) 에 `external` 칸이 생깁니다. 외부 잡(stcx 제출·후처리 예약)이면 {kind, cluster_state, ontology:{state, why?}}, 로컬
-    잡이면 null 입니다. 원본 external_ref 는 내보내지 않고, 문자열은 진단 번들과 같은 가리기(경로 접기·이메일·토큰)를 거칩니다.
+    잡이면 null 입니다. 원본 external_ref 는 내보내지 않고, 문자열은 진단 번들과 같은 가리기(경로 접기·이메일·토큰)를 거칩니다. 외부 잡이면
+    warnings[] 문자열도 같은 가리기를 거칩니다(로컬 잡 경고는 그대로).
   - find_reports(REST /reports) 에 `external_job_key` 거르기가 생깁니다(정확히 같음, 꼴 `stcx:<Slurm 잡 id>`).
-  - system_status 에 `postprocess_versions`([{name, version, n, last_at}] — 최근 90일 리포트의 ontology.producer, 최대 10판, 못 세면 null)와
-    `postprocess_versions_window_days` 가 생깁니다.
+  - system_status 에 `postprocess_versions` 와 `postprocess_versions_window_days` 가 생깁니다. postprocess_versions 는 [{name, adapter, version,
+    n, last_at}] 입니다. 최근 90일 7-1 반입 리포트(external_job_key 있음)의 ontology.producer(name=tool, adapter, version)를 셉니다. 어댑터가
+    다르면 다른 줄이고, 빈 판은 세지 않으며, 글은 찍히는 글자 한 줄·80자로 접고, 최대 10판입니다. 못 세면 null, 그 기간에 7-1 반입이 없으면 []
+    입니다.
   - 새 점검 스크립트 platform/infra/scripts/check-postprocess.py(표준 라이브러리만)가 들어옵니다. 후처리 예약·반입 설정 칸이 비었는지와 KooSlurm
     위임 창구에 닿는지만 보고, 값은 출력하지 않습니다. `--email` 을 줄 때만 그 사람 명의 토큰을 받아 봅니다.
   - 알고 받을 것: 마이그레이션·SIF·바이너리 변경은 없습니다. 후처리 예약·반입에 드는 설정은 KOORM_STCX_BACKEND_URL·KOORM_KOOSLURM_SSO_SECRET
-    둘이고(GATEWAY_PAT 는 stcx 제출용), KooSlurm 위임 창구는 X-Heax-Client 를 허용 목록으로 거릅니다(다르면 맞는 비밀이어도 400).
-- (조정 세션 덧붙임 11-15) 위 알림 글은 `cd2eba5` 앞의 것이다 — 합친 판 검토가 찾은 셋을 그 세션이 main 에서 고쳤다(`cd2eba5`).
-  `postprocess_versions` 는 이제 `[{name, adapter, version, n, last_at}]` 이고(리포트의 `producer.tool` · `adapter` · `version` 에서 · 7-1 로
-  반입한 리포트만 · 열 줄까지), 남이 쓴 글은 한 줄 80 자로 접으며, 외부 잡의 `warnings` 도 접는다. 끝 알림에는 그 세션이 고쳐 준 글을 받아
-  싣는다.
+    둘입니다(GATEWAY_PAT 는 stcx 제출용). KooSlurm 위임 창구는 X-Heax-Client 를 허용 목록으로 거르므로, 이름이 다르면 맞는 비밀이어도 400
+    입니다(401 이 비밀 불일치). dev 끝-끝(④ 예약·⑤ 반입)은 메모리 조건으로 보류 중입니다.
+- (조정 세션 덧붙임 11-15) 11-14 의 처음 판을 이 글로 바꿔 넣었다(처음 판은 `a599aaa` 의 이 자리에 있다). 달라진 곳은 머리의 날짜 · 외부 잡
+  `warnings` 가리기 · `postprocess_versions` 의 꼴과 세는 범위(`adapter` 칸이 생기고 어댑터가 다르면 다른 줄 · 7-1 로 반입한 리포트만 · 빈 판은
+  세지 않는다 · 한 줄 80자 · 그 기간에 반입이 없으면 `[]`) · 「알고 받을 것」 의 400 과 401 가르기 · dev 끝-끝 보류다. `8b49d2a` 는 응답 칸 ·
+  인자를 바꾸지 않아 글은 그대로 선다(그 세션의 말이고, 커밋을 읽어 확인했다 — 긴 글을 훑기 전에 자르는 것뿐이다). 포털 끝 알림(10:09 UTC)에 이
+  글을 그대로 실었다.
 
 ## 결정 기록
 - (11-10) 위 사용자 결정. 원문의 Q-5 는 포털 결정 기록 CK-2 로 확인했다(전해 들은 말만으로 짓지 않는다).
@@ -1093,3 +1105,60 @@ cae00 운영의 11-09 제안서 「플랫폼 데이터 온톨로지화 · 코어
   `CHANGES.md` 맨 위 판 그대로라 올릴 것이 없다(main 의 고정 커밋은 아직 `e2676ad` — 이 가지가 오를 때 옮겨진다. main 에 올리기 직전에 한 번 더
   본다). StepForge main(`27b2132b`)의 서브모듈 가리킴도 `13e6b02` 이고, 그쪽 정의 파일은 공통 `maps_to` 블록을 같은 지문으로 싣는다(읽기
   전용으로 확인 — 그쪽 로컬의 origin/main 기준).
+
+### 배포 · 끝 알림(11-15)
+- (09:07 ~ 09:13 UTC) main — 계획 기록 `a599aaa` 를 가지에 올리고 SP 를 다시 본 뒤(09:10 — SP main 끝 `13e6b02` = 서브모듈 = 경계 시험의 고정
+  커밋 · `HEAD..origin/main` 빔 · `KIT_VERSION` 양쪽 2026-11-06 · `CHANGES.md` 맨 위 판 그대로) 09:11:58 에 main 으로 밀었다(`cd2eba5` →
+  `a599aaa`, 빨리 감기). 이것으로 main 의 SP 고정이 `e2676ad` → `13e6b02` 가 되었다(StepForge main 과 같은 커밋). 주 체크아웃을 감고 서브모듈을
+  맞춘 뒤 콘솔을 지었다(09:12:37 ~ 47 · `pnpm build` 는 `tsc -b` 와 vite 빌드다 · rc 0). 09:13:09 에 낙하 파이프라인 세션이 마지막 고침
+  `8b49d2a` 를 main 에 올렸다(`postprocess_versions` 가 남의 긴 글을 훑기 전에 자른다 — `system/routes.py` 와 시험 파일 하나). 읽고 받아 가지를
+  감았다. 코드 판은 이 `8b49d2a` 다(`v1.7.0-1202-g8b49d2a` · 앞 Drive 판 `e6407dc` 뒤 147 커밋 · 파일 61 · 모두 `platform/` · `docs/` · SP
+  가리킴 안이고 마이그레이션 · `requirements` · SIF 정의 · `package.json` 은 바뀌지 않았다).
+- (09:14 ~ 09:16) 다시 띄우기 — 도는 잡 0 을 확인하고(09:14:43) API 를 다시 띄웠다(09:14:44 ~ 48 · `restart-api-only.sh` · 헬스 ok). MCP 는
+  09:15:00 에 멈춘 것을 감독자 크론이 같은 분에 먼저 되살려 데이터 바인드 없이 떴다(아래 다음 판 목록). 분 경계를 피해 멈추고 `start.sh` 로 다시
+  띄웠다(09:16:08 ~ 10 — 인스턴스 안에서 `/data/svc/kooremapper` 가 보이고 8701 이 406 을 낸다).
+- (09:20 ~ 09:29) 확인(`8b49d2a`) — MCP 스모크 통과(`[tools] 90 (expect 90)` · 연산 65) · deckops 29/29 · allops 64/64(건너뜀 1 —
+  `stcx_fullangle_drop`) · reports 59/59. dev 는 과제 · 개정 스위치가 꺼져 있어 켜진 뒤의 항은 돌지 않는다. 켜진 쪽은 임시 스택(작업 트리 코드 ·
+  API 8790 `KOORM_ONTOLOGY=1` `--lifespan off` · MCP 8791)에서 69/69 이고, dev 인스턴스에서 잰 것이 아니다. 두 실행의 차이는 켜진 쪽에만 도는 항
+  열넷 · dev 에만 도는 항 넷이며, 다리 항 셋은 dev 에서도 돈다. 백엔드 전체 977 통과 · 11 건너뜀 · 4 실패(작업 트리에 `platform/.env` 가 없어서
+  나는 `tests/test_supervisor_log.py` 넷 · 주 체크아웃에서는 일부러 돌리지 않았다) · `tests/test_postprocess_return.py` 혼자 56 ·
+  `tests/test_dropline_1112.py` 7. MCP 계약 시험은 MCP venv 가 있는 주 체크아웃에서 11 통과(10:14 — 작업 트리에는 그 venv 가 없어 건너뛴다).
+  콘솔은 위 빌드가 `tsc -b` 를 품고, 그 뒤 프런트 파일이 바뀌지 않았다.
+- (09:30 ~ 09:36) Drive — 마른 실행 rc 0 뒤(09:30:20 ~ 26) 올렸다(09:30:42 ~ 09:32:43 · rc 0). 판 이름은 `dist-20261115-093042Z`
+  다(`published_utc` 2026-11-15T09:30:46Z · commit `8b49d2a` · branch main). 바이너리는 다시 짓지 않아 sha256 `c5f74c18…10bcd` 그대로다(11-08
+  판과 같다). 두 판의 `SHA256SUMS` 를 견주면 다른 파일은 `BUILD_INFO.txt` 와 `koorm-frontend-dist.tar.gz` 둘뿐이고, SIF 다섯과
+  `koorm-bin.tar.gz` 는 바이트가 같다. 가장 오래된 `dist-20261030-142622Z` 가 정리되어 Drive 에는 넷(`dist-20261031-214338Z` ·
+  `dist-20261107-083706Z` · `dist-20261108-234149Z` · 이 판)과 `latest` 가 있다. 되돌리기는
+  `rclone copy ApptainerImages:KooRemapper/dist/dist-20261108-234149Z/ ApptainerImages:KooRemapper/dist/latest/`(그 판 코드는 `e6407dc`)인데, 새
+  코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 게시 뒤 dev 헬스는 다시 띄우지 않아도 `revision 8b49d2a` ·
+  `revision_matches_binary true` 가 되었고(09:36 — 헬스의 판은 Drive 판의 커밋이다), dev DB 기준선은 그대로다(리포트 14 · 과제 0 · 다리 선 0 ·
+  끊은 기록 0 · `queued` 잡 0 · 시험 사용자 0).
+- (09:47 ~ 09:54) cae00 점검 문서 — `docs/requests/hwax-portal-cae00-checks-2026-10-30.md` 를 이 판에 맞췄다(`c5a6bb9` · 09:54:08 에 가지와 main
+  으로). 새 절 §1-5(핵심 잇기 · 낙하 파이프라인 API 셋 · 확인 표 아홉 줄 · 알고 받을 동작 변화 일곱)를 넣고 §0 · §1 · §1-4 · §2 · §8 을 고쳤다.
+  §2 에는 점검 스크립트와 sso_400 줄의 클라이언트 허용 목록을 더했다(KooSlurm 로컬 HEAD `ea9ebe59` 의 `sso_delegate_api.py` 를 읽기만 했고,
+  icn401 에 깔린 판은 모른다).
+- (10:00 ~ 10:09) 끝 알림 — 끝 알림을 청하고(11-11) 동결을 푼(11-14 16:22 UTC) 포털 세션 `hwaxportal-a5` 가 목록에 없었다. 포털 세션은
+  `hwaxportal-71` · `hwaxportal-87` 둘이 있어 같은 글을 둘에 보내고 글 첫머리에 그렇게 적었다(조정 세션의 읽기 — 어느 세션이 다음 cae00 라운드를
+  맡을지 알 수 없다). 글에는 판 · dist 이름 · 바이너리 지문 · 바뀐 응답 칸(추림) · 알고 받을 것 · 문서 자리와 위 낙하 파이프라인 글을 실었고,
+  답장은 필요 없고 지금 할 일도 없으며 cae00 안내서로 옮기는 일은 사용자 지시가 있을 때 한 세션만 하면 된다고 적었다(포털은 11-14 에 새 일은
+  사용자 지시가 있을 때만 한다고 했다). 같은 때 낙하 파이프라인 세션(배포 결과 · 막지 않는 메모 둘 · 감독자 MCP 바인드)과 StepForge 세션(main 의
+  SP 고정이 `13e6b02` 가 된 것 · 공통 블록 지문 같음 · `revision_of` · `supersedes` 는 여전히 다름)에도 보냈다. 넷 다 받은 편지함에 들어갔고,
+  읽었다는 확인은 받지 않았다. 알린 응답 칸 · 도구 · 길 이름은 보내기 전에 소스에서 하나씩 확인했다(일괄 적용과 합친 과제 옮기기는 MCP 도구가
+  없고 REST 뿐이다).
+- (10:07 ~ 10:14) 알림 뒤 — 낙하 파이프라인 세션이 메모 하나(시험의 고정 50 ms 단정)를 받아 시험 파일만 고쳐 main 에 올렸다(`2b7a335` —
+  `c5a6bb9` 위 · 같은 자리에서 잰 전체 훑기 값의 1/20 보다 빠른지로 본다). 읽고 가지를 감아 그 파일을 돌렸다(7 통과). 그래서 `8b49d2a` 뒤 main
+  에 붙은 것은 문서 커밋 둘(`c5a6bb9` · 이 기록)과 시험 파일만 든 커밋 하나다. 끝 알림에는 「문서만 든 커밋이 붙는다」 고 적었으므로, 이 기록을
+  올린 뒤 끝 판과 함께 포털 두 세션에 한 줄로 바로잡는다. 그 세션이 dev 에서 봤다고 알려 온 것(헬스 `revision 8b49d2a` · `postprocess_versions`
+  `[]` · `find_reports` 의 `external_job_key` 거르기)은 조정 세션이 다시 재지 않았다.
+- (11-15) 다음 판 목록에 더한 것 — 감독자(`supervisor.sh`)가 되살린 MCP 는 `start.sh` 가 띄운 것과 인자가 다르다. 데이터
+  바인드(`KOORM_DATA_BINDS` — `/data/svc/kooremapper`)가 없어, MCP 가 죽었다 되살아난 뒤에는 `/data` 아래 경로를 읽고 쓰는
+  도구(`upload_local_path` · `save_result_to_path`)가 닿지 못한다. `.env` 에 적은 저장 자리(`KOORM_STORAGE_DIR`)와 호출
+  기한(`KOORM_MCP_API_TIMEOUT_S`)도 넘어가지 않는다. main 에도 있던 것이고 cae00 도 같은 코드다. API 는 감독자가 `restart-api-only.sh` 로 되살려
+  해당하지 않는다. 바인드 배열을 짓는 줄이 이미 `start.sh` 와 `restart-api-only.sh` 두 곳에 있어, 고칠 때는 `_common.sh` 하나로 모으는 편이
+  맞다(감독자가 셋째 소비자다). 확인은 `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` 이고, 그때까지 MCP 를 손으로 멈출 때는
+  분 경계를 피한다.
+- (11-15) 끝 보고에 함께 싣는 것(배포에서 나온 것) — Drive 올리기를 이 세션이 한 것은 사용자 지시(「다 반영하자 … 업로드까지」)에 따른 것이고,
+  포털 글의 「Drive 올리기는 지금처럼 사용자를 거친다」 는 cae00 이 받는 길(사용자의 update-all)로 읽었다 · cae00 의 상태는 포털이 전한
+  것뿐이다(포털 글 — cae00 의 `deploy-all-from-drive` 가 멈춰 둔 KooRemapper 를 띄웠다가 `stop.sh` 로 다시 멈춘다 · HP-66 · HP-67 은 포털 쪽에
+  열려 있다) · 끝 알림을 받은 포털 세션 둘은 그것을 청한 세션이 아니다 · cae00 안내서(`docs/cae00-deploy-guide.md`)로 옮기는 일은 사용자 지시를
+  기다린다 · 감독자 MCP 바인드를 지금 고칠지(작지만 감독 스크립트라, dev 에서 MCP 를 죽여 되살아나는 것까지 봐야 한다).
