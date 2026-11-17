@@ -53,6 +53,7 @@
 - DF-14 칸 이름 확인 — 「낱칸 — 우리 꼴」(`element_id_collisions` · `parts_missing`).
 
 ## 2차 — 나머지 13건 설계서
+- 설계안 · 이름표는 `df-request-1117.design.md`(11-17 — 사용자 확인 전, 짓지 않는다).
 - 캠페인 개체 · 런 칸(출처 · 유효성 · 추출) · 캠페인 집계 도구의 이름표를 요청서 제안 바탕으로 쓰고 확인받는다.
 - 다른 플랫폼에 기대는 것 — KooChainRun KC-01 · KC-02 · KC-05(이 박스에 리포 없음 — 꼴을 못 봤다) · MatNexus MN-01 · ReportArchive
   RA-02.
