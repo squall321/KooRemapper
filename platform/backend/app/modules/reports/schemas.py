@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, computed_field
+
+from app.config import settings
 
 
 class ReportRead(BaseModel):
@@ -42,6 +44,13 @@ class ReportRead(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    # 이 응답을 낸 서버의 환경 — dev · prod · unknown(2026-11-17 · 결정 문서 D5). 리포트를 인용하는 쪽(리스크 앱 등)이
+    # 어느 환경의 report_id 인지 응답마다 안다
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def environment(self) -> str:
+        return settings.environment
+
 
 class ReportListItem(BaseModel):
     id: str
@@ -60,6 +69,13 @@ class ReportListItem(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    # 이 응답을 낸 서버의 환경 — dev · prod · unknown(2026-11-17 · 결정 문서 D5). 리포트를 인용하는 쪽(리스크 앱 등)이
+    # 어느 환경의 report_id 인지 응답마다 안다
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def environment(self) -> str:
+        return settings.environment
 
 
 class CaseRead(BaseModel):

@@ -273,7 +273,8 @@ async def report_intake(
         payload = {"session_id": s.id, "report_id": report.id, "kfile_id": kfile_id,
                    "kind": report.kind, "n_cases": report.n_cases, "label": report.label,
                    "source_kfile_id": report.source_kfile_id,
-                   "task_links": getattr(report, "auto_task_links", None)}   # 반입 뒤 과제 잇기(SRC-09)
+                   "task_links": getattr(report, "auto_task_links", None),   # 반입 뒤 과제 잇기(SRC-09)
+                   "environment": settings.environment}                      # dev · prod · unknown(D5)
         onto_summary: dict | None = None
         if bundle_onto:
             # 후처리 꾸러미(같은 이름 줄기) — 실패해도 리포트 반입은 막지 않고 까닭을 돌려준다(사용자 결정 10-31 (가))

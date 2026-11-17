@@ -211,7 +211,8 @@ async def inspect_file(
     f = await svc.get_viewable_file(db, user, session_id, file_id)
     if f is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
-    return ok({"filename": f.filename, "meta": f.meta or {}})
+    # sha256 은 파일 행의 것(덱 판을 가리는 지문 — 리스크 앱 RK-06 이 여기서 찾는다, 2026-11-17)
+    return ok({"filename": f.filename, "sha256": f.sha256, "meta": f.meta or {}})
 
 
 @router.post(

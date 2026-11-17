@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # 만든 값은 실측 세 경로 중 둘이 틀렸다(포트 유실·내부 주소). 포털 경유면
     # https://<포털오리진:포트>/apps/kooremapper_mcp/mcp 가 정본이다.
     mcp_public_url: str = ""
+    # 포털 오리진(끝 `/` 없이) — `/system/capabilities` 의 `intake.public_url` 을 짓는다(2026-11-17 · 결정 문서 D4). MCP 의
+    # `upload_instructions` 도 같은 변수(KOORM_PUBLIC_BASE)를 읽는다. 비우면 null — 주소를 지어내지 않는다
+    public_base: str = ""
 
     # --- database ---
     # asyncpg DSN, e.g. postgresql+asyncpg://koorm:pw@127.0.0.1:5436/koorm
@@ -179,6 +182,12 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.app_env.lower() == "development"
+
+    @property
+    def environment(self) -> str:
+        """게이트웨이 낱말(GW-05) — development → dev · production → prod · 그 밖 unknown(2026-11-17 · 결정 문서 D5 ·
+        DF-15 의 environment 칸을 앞당겼다). 리스크 앱도 같은 낱말로 싣는다."""
+        return {"development": "dev", "production": "prod"}.get(self.app_env.strip().lower(), "unknown")
 
     @property
     def cors_origin_list(self) -> list[str]:

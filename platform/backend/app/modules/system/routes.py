@@ -190,4 +190,20 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
         "mcp_url": mcp_public_url(request) or None,
         "mcp_add_hint": mcp_add_command(request, "kr_..."),
         "mcp_desktop_hint": "Claude Desktop은 mcp-remote 브리지 사용 (mcp_server/CLAUDE_DESKTOP.md)",
+        # ★외부 적재의 공식 답(2026-11-17 · 결정 문서 D4) — 게이트웨이 카탈로그(GW-01)가 이것을 그대로 싣는다. 토큰은 이 서버가
+        #   발급한 kr_ PAT(Authorization: Bearer)이고 API 가 스스로 검증하므로 포털 관문(portal_auth)이 필요 없다. 운영 게이트웨이가
+        #   그 헤더를 실제로 넘기는지는 이 칸이 보증하지 않는다 — 401 이면 detail 글로 가른다(MCP `upload_instructions`).
+        #   공개 주소는 운영자가 KOORM_PUBLIC_BASE 를 넣어야 채워진다(비면 null). 한 호출에 리포트 하나 — 묶음 적재는 아직 없다
+        "intake": {
+            "method": "POST",
+            "path": "/api/v1/reports/intake",
+            "public_url": (settings.public_base.rstrip("/") + "/apps/kooremapper_api/api/v1/reports/intake")
+                          if settings.public_base.strip() else None,
+            "mcp_url": mcp_public_url(request) or None,
+            "token": "kr_pat",
+            "portal_auth_required": False,
+            "max_upload_mb": settings.max_upload_mb,
+            "max_report_mb": settings.max_report_mb,
+            "batch": False,
+        },
     })

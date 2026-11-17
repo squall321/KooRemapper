@@ -856,7 +856,8 @@ async def list_session_jobs(session_id: str, ctx: Context) -> list:
 @mcp.tool()
 async def system_capabilities(ctx: Context) -> dict:
     """플랫폼 기능 카탈로그 — 오퍼레이션 수, MCP 도구 수, 웹/MCP 패리티 매트릭스,
-    Claude 연결 방법 힌트. / Capability + web-MCP parity matrix + connect hints."""
+    Claude 연결 방법 힌트, 외부 적재의 공식 답 `intake`(경로 · 메서드 · 토큰 종류 · 크기 상한 · 포털 관문 필요 여부 · 묶음 적재
+    여부 · 공개 주소 — 운영자가 KOORM_PUBLIC_BASE 를 넣지 않았으면 null). / Capability + web-MCP parity matrix + connect hints + intake."""
     return await _get(ctx, "/system/capabilities")
 
 
@@ -939,6 +940,11 @@ async def report_upload_instructions(project: str = "", filename: str = "") -> d
         "토큰 발급": f"웹 UI 로그인→MCP 토큰 화면에서 kr_ PAT, 또는 REST POST {api}/auth/login→JWT→"
                     f"POST {api}/me/tokens. 환경변수 KR_PAT 에 둔다.",
         "note": ("MCP 로 파일 본문을 나르지 않는다(GB 급 불가) — REST intake 를 쓴다."
+                 " 401 이면 응답 detail 글로 까닭을 가른다 — 「인증 토큰이 필요합니다.」 는 Authorization 헤더가 API 에 닿지 않았다"
+                 "(경로 · 게이트웨이가 헤더를 넘기는지 본다) · 「토큰이 유효하지 않거나 취소·만료되었습니다.」 는 kr_ 토큰인데 이 서버가"
+                 " 발급하지 않았거나(다른 인스턴스 — dev · 운영 — 에서 받은 토큰) 취소 · 만료됐다 · 「토큰이 유효하지 않거나"
+                 " 만료되었습니다.」(「취소」 없음)는 kr_ 로 시작하지 않는 토큰이다(포털 자체 토큰은 받지 않는다 — 이 서버의 kr_ PAT"
+                 " 를 쓴다) · detail 이 없는 401(이 서버의 JSON 꼴이 아니다)은 게이트웨이가 앞에서 막았다."
                  + ("" if base else " ⚠ 이 서버는 공개 주소를 모른다(KOORM_PUBLIC_BASE 미설정) — "
                     "<포탈오리진> 자리엔 포탈을 연 브라우저 주소창 오리진을 넣는다")),
     }
