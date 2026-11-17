@@ -125,6 +125,11 @@ public:
     // 원본 없이 덱을 지어내는 쓰기(`KFileWriter::writeFile` — tetremesh)가 이것을 보고 `*ELEMENT_TSHELL` 로 쓴다(예전엔 `*ELEMENT_SOLID`
     // 로 써서 두께 셸이 솔리드가 됐다). 셸(`*ELEMENT_SHELL`)은 요소 꼴(QUAD4)이 이미 가른다
     std::set<int> thickShellIds;
+    // ★리더가 같은 번호의 뒤 카드에 덮여 잃은 요소 정의(2026-11-17 · DF-14) — 잃은 정의의 PID → 수. 요소를 한 표(`elements`)에 번호로
+    // 담아 솔리드 1 과 셸 1 처럼 족을 건넌 번호(LS-DYNA 는 족마다 따로 받는다)도 뒤 정의만 남는다. 리더(`KFileReader`)만 채운다 —
+    // op 이 요소를 바꿔 끼우는 `addElement` 는 잃은 것이 아니다. 덱을 쓰는 `KFileWriter` 가 이것이 비지 않으면 거절하고, 메시를
+    // 비우고 새로 짓는 곳(remap 결과 등)은 원본 메시의 것을 옮겨 받는다
+    std::map<int, size_t> readerLostElements;
     std::string name_;                      // Mesh name
 
     // Grid dimensions (for structured meshes)
@@ -423,6 +428,12 @@ public:
     }
 
     // Clear all data
+    // 원본 메시가 잃은 요소를 이 메시로 옮겨 받는다(DF-14) — 비우고 새로 짓는 메시(remap 결과)가 원본의 덮인 번호를 모른 채
+    // 쓰이지 않게. 복사(`=`)로 시작하는 메시는 표가 저절로 따라온다
+    void inheritReaderLoss(const Mesh& src) {
+        for (const auto& [pid, n] : src.readerLostElements) readerLostElements[pid] += n;
+    }
+
     void clear() {
         nodes.clear();
         elements.clear();
@@ -432,6 +443,7 @@ public:
         solidAllNodes.clear();
         partIncompleteSolids.clear();
         thickShellIds.clear();
+        readerLostElements.clear();
         name_.clear();
         dimI = dimJ = dimK = 0;
         gridDimensionsSet = false;

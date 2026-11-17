@@ -966,6 +966,18 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     // 고아 수는 칸이 모자란 2차 카드가 있을 때만 **상한**이다 — 못 읽은 칸의 절점이 고아로 잡힌다.
     // 센 값이 0 이면 그것은 참이다(참조가 줄어도 참 고아가 사라지지는 않는다).
     const bool mmOrphanUnsure = !mesh.getPartIncompleteSolids().empty() && mmBox.orphanNodes > 0;
+    // ★리더가 같은 번호의 뒤 카드에 덮여 잃은 요소(2026-11-17 · DF-14) — 솔리드 · 셸처럼 족을 건넌 번호도 요소 표가 하나라 앞 정의를
+    //   잃는다. 위 파트 목록은 남은 요소로 만드니 요소를 다 잃은 파트는 목록에 없다 — 그 수를 `parts_missing` 으로 싣는다.
+    //   고아 절점(`orphan_nodes`)은 잃은 요소만 쓰던 절점을 이미 센다
+    size_t mmLostElements = 0, mmPartsMissing = 0;
+    for (const auto& [pid, n] : mesh.readerLostElements) {
+        mmLostElements += n;
+        if (!byPart.count(pid)) ++mmPartsMissing;
+    }
+    if (mmLostElements > 0)
+        console.warning("[modelmeta] 요소 번호가 겹쳐 리더가 앞 정의 " + std::to_string(mmLostElements) + "개를 잃었다 — 요소가 하나도 남지 "
+                        "않은 파트 " + std::to_string(mmPartsMissing) + "개는 parts 목록에 없다. 솔리드 · 셸처럼 족을 건넌 겹침은 LS-DYNA 는 "
+                        "받지만 이 도구는 한 표로 읽는다 — 덱을 쓰는 op 은 이 덱을 거절한다(info 가 겹친 블록을 짚는다)");
 
     const double mb[6] = {mmBox.allMin.x, mmBox.allMin.y, mmBox.allMin.z,
                           mmBox.allMax.x, mmBox.allMax.y, mmBox.allMax.z};
@@ -1003,6 +1015,8 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
        << (mmOrphanUnsure ? "\"절점 칸이 모자란 2차 카드가 있어 못 읽은 칸의 절점을 고아로 센다 — 센 값은 "
                             "상한일 뿐이다(" + std::to_string(mmBox.orphanNodes) + "개)\""
                           : std::string("null")) << ",\n"
+       << "    \"element_id_collisions\": " << mmLostElements << ",\n"
+       << "    \"parts_missing\": " << mmPartsMissing << ",\n"
        << "    \"second_order_solid_pids\": [";
     {
         size_t i = 0;

@@ -1041,6 +1041,7 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
     console.info("Generating flat mesh from bent mesh...");
     FlatMeshGenerator generator;
     Mesh flatMesh = generator.generateFlatMesh(bentMesh);
+    flatMesh.inheritReaderLoss(bentMesh);   // DF-14 — 새로 지은 메시라 굽은 덱이 잃은 요소를 옮겨 받는다(쓰기가 거절한다)
     // 두께 셸(`*ELEMENT_TSHELL` — 리더가 육면체 칸으로 읽는다)은 펼쳐도 두께 셸이다 — 같은 번호의 요소를 그 키워드로 쓴다(2026-11-08 —
     // 원본 없는 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다)
     for (int eid : bentMesh.thickShellIds)
@@ -1714,11 +1715,12 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
                             std::to_string(idDup.nodeMerged) + "개 · 요소 " + std::to_string(idDup.elemMerged) +
                             "개(족을 건넌 겹침 포함)를 뺀 수다)");
         // 족을 건너 같은 요소 번호(셸 1 · 솔리드 1) — LS-DYNA 는 족마다 번호를 따로 두어 받으므로 단정하지 않는다(rc · --strict 와 무관).
-        // 이 도구의 리더는 한 표로 합쳐 뒤 정의만 남긴다 — 위 Elements 가 적고 op 이 앞 요소를 잃을 수 있다. ⚠ 항목 줄은 플랫폼이 미정의
+        // 이 도구의 리더는 한 표로 합쳐 뒤 정의만 남긴다 — 위 Elements 가 적고, 덱을 쓰는 op 은 이 덱을 거절한다(DF-14). ⚠ 항목 줄은 플랫폼이 미정의
         // 참조로 집어 가지 않게 `  알림 line N …` 꼴이다(`kfile_inspect._RE_REF_ITEM` 은 `  line` 으로 시작하는 줄을 읽는다)
         if (!idDup.crossFamily.empty()) {
             console.warning("요소 번호가 족을 건너 겹친다 " + std::to_string(idDup.crossFamily.size()) +
-                            "건 — LS-DYNA 는 족마다 번호를 따로 두지만 이 도구의 리더는 한 표로 합친다(단정하지 않는다)");
+                            "건 — LS-DYNA 는 족마다 번호를 따로 두지만 이 도구의 리더는 한 표로 합친다(단정하지 않는다) — "
+                            "덱을 쓰는 op 은 이 덱을 거절한다");
             for (const auto& d : idDup.crossFamily) {
                 const auto w = inclWhere(d.line);
                 console.println("  알림 line " + std::to_string(w.first) + " " + d.keyword + ": " + d.what +

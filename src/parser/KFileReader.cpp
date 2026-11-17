@@ -16,6 +16,19 @@
 
 namespace KooRemapper {
 
+// ★리더가 요소를 담는 한 자리(2026-11-17 · DF-14) — 같은 번호가 이미 있으면 덮이는 앞 정의를 `Mesh::readerLostElements` 에 PID 별로
+//   적는다(솔리드 1 · 셸 1 처럼 족을 건넌 번호도 — 요소 표가 하나다). 앞 요소의 곁표(2차 솔리드 전체 절점 · 두께 셸 번호)도 지운다 —
+//   남기면 뒤 요소(예: 셸)가 앞 솔리드의 절점 목록이나 두께 셸 표지를 물려받는다. 부르는 쪽이 곁표를 새로 채우는 것은 이 뒤다
+static void addReadElement(Mesh& mesh, const Element& e) {
+    const auto it = mesh.elements.find(e.id);
+    if (it != mesh.elements.end()) {
+        ++mesh.readerLostElements[it->second.partId];
+        mesh.solidAllNodes.erase(e.id);
+        mesh.thickShellIds.erase(e.id);
+    }
+    mesh.addElement(e);
+}
+
 // Detect PENTA6 from any degenerate HEX8 node pattern and normalize
 // to standard form: n[2]=n[3], n[6]=n[7].
 // Returns true if element is PENTA6 (nodeIds may be reordered).
@@ -263,7 +276,7 @@ void KFileReader::addSecondOrderSolid(int eid, int pid, const std::vector<int>& 
         elem.nodeIds = c;
         elem.type = ElementType::PENTA6;
     }
-    mesh_.addElement(elem);
+    addReadElement(mesh_, elem);
     mesh_.solidAllNodes[eid] = std::move(full);
     if (!complete) mesh_.partIncompleteSolids[pid]++;
 }
@@ -626,7 +639,7 @@ bool KFileReader::parseElementSolidSection(std::ifstream& file) {
     // 두께 셸(`*ELEMENT_TSHELL`)도 이 칸으로 읽는다 — 그 번호를 적어 둔다(원본 없는 쓰기가 `*ELEMENT_TSHELL` 로 쓴다 · 2026-11-08)
     const bool tshell = currentKeyword_.rfind("ELEMENT_TSHELL", 0) == 0;
     auto addSolid = [&](const Element& e) {
-        mesh_.addElement(e);
+        addReadElement(mesh_, e);
         if (tshell) mesh_.thickShellIds.insert(e.id);
     };
     std::string line;
@@ -1045,7 +1058,7 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
 
                     Element elem(eid, pid, nodeIds);
                     elem.type = ElementType::QUAD4;
-                    mesh_.addElement(elem);
+                    addReadElement(mesh_, elem);
                     elementCount++;
                     int extra = shellExtraCards(line);
                     if (extra > 0) eatExtraCards(extra);
@@ -1071,7 +1084,7 @@ bool KFileReader::parseElementShellSection(std::ifstream& file) {
 
                 Element elem(eid, pid, nodeIds);
                 elem.type = ElementType::QUAD4;
-                mesh_.addElement(elem);
+                addReadElement(mesh_, elem);
                 elementCount++;
                 int extra = kwInfo.extraCards + (kwInfo.thicknessCard ? 1 : 0);
                 if (extra > 0) eatExtraCards(extra);

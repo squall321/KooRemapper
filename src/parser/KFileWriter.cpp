@@ -102,11 +102,32 @@ static bool secondOrderWritable(const Mesh& mesh, std::string& why) {
     return true;
 }
 
+// ★리더가 같은 번호의 뒤 카드에 덮여 잃은 요소가 있으면 쓰지 않는다(2026-11-17 · DF-14 · 사용자 결정 「감지 · 경고 · 쓰기 거절」).
+//   요소 표가 번호 하나로 열쇠를 잡아, 솔리드 1 과 셸 1 처럼 족을 건넌 번호(LS-DYNA 는 족마다 따로 받는다)도 앞 정의를 잃는다. 그대로
+//   쓰면 잃은 요소가 산출 덱에서 말없이 빠진다 — 원본을 베끼는 쓰기도 원본 셸 블록과 번호가 같은 솔리드를 건너뛰므로 같다.
+//   표는 리더만 채우고(`Mesh::readerLostElements`), 새로 짓는 메시는 원본 것을 옮겨 받는다. 파일을 열기 **전에** 본다
+static bool readerLossWritable(const Mesh& mesh, std::string& why) {
+    if (mesh.readerLostElements.empty()) return true;
+    size_t total = 0;
+    std::string pids;
+    size_t shown = 0;
+    for (const auto& [pid, n] : mesh.readerLostElements) {
+        total += n;
+        if (shown++ < 5) pids += (pids.empty() ? "" : ", ") + std::to_string(pid);
+    }
+    if (mesh.readerLostElements.size() > 5) pids += " 외 " + std::to_string(mesh.readerLostElements.size() - 5) + "개";
+    why = "입력 덱의 요소 번호가 겹쳐 리더가 앞 정의 " + std::to_string(total) + "개를 잃었다(잃은 요소의 PID " + pids +
+          ") — 이대로 쓰면 그 요소가 산출 덱에서 빠진다. 솔리드 · 셸처럼 족을 건넌 겹침은 LS-DYNA 는 받지만 이 도구는 한 표로 읽는다 — "
+          "겹친 번호를 옮긴 덱으로 다시 돌린다(info 가 겹친 블록을 짚는다)";
+    return false;
+}
+
 bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& mesh,
                                       const std::string& sourceFile,
                                       bool useMappedPositions) {
     errorMessage_.clear();
     if (!secondOrderWritable(mesh, errorMessage_)) return false;
+    if (!readerLossWritable(mesh, errorMessage_)) return false;
 
     // Slurp source so we can stream it out while substituting NODE/ELEMENT
     // blocks. Reading first guards against the case where filename and
@@ -273,6 +294,7 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
                             bool useMappedPositions) {
     errorMessage_.clear();
     if (!secondOrderWritable(mesh, errorMessage_)) return false;
+    if (!readerLossWritable(mesh, errorMessage_)) return false;
 
     // 원본 덱이 없는 경로 — 호출자가 setNewline 으로 정해 준 개행을 쓴다(기본 LF).
     DeckWriter writer(filename, newline_);

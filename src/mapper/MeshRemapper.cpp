@@ -331,6 +331,9 @@ bool MeshRemapper::step4_MapNodes() {
     // Create result mesh by copying structure
     resultMesh_.clear();
     resultMesh_.setName(flatMesh_->getName() + "_mapped");
+    // DF-14 — 평판 · 굽은 덱이 리더에서 잃은 요소를 옮겨 받는다(쓰기가 거절한다). 굽은 덱이 잃으면 매핑 형상이 모자란다
+    resultMesh_.inheritReaderLoss(*flatMesh_);
+    if (bentMesh_) resultMesh_.inheritReaderLoss(*bentMesh_);
 
     // Get bounding box of flat mesh
     const Vector3D& minBound = flatMin_;
@@ -445,6 +448,9 @@ bool MeshRemapper::step4_MapNodesParallel() {
     // Create result mesh by copying structure
     resultMesh_.clear();
     resultMesh_.setName(flatMesh_->getName() + "_mapped");
+    // DF-14 — 평판 · 굽은 덱이 리더에서 잃은 요소를 옮겨 받는다(쓰기가 거절한다). 굽은 덱이 잃으면 매핑 형상이 모자란다
+    resultMesh_.inheritReaderLoss(*flatMesh_);
+    if (bentMesh_) resultMesh_.inheritReaderLoss(*bentMesh_);
 
     // Get bounding box of flat mesh
     const Vector3D& minBound = flatMin_;
