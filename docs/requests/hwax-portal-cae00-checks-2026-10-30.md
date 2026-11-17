@@ -4,7 +4,7 @@
 **정본** DynaForge 쪽 결정 · 계약은 KooRemapper `platform/docs/REQUEST-postprocess-operation.md` §10, `docs/01-plan/features/{postprocess-reservation-1028,sphere-risk-map-1029}.plan.md`, 총괄 `drop-twin-1028.checklist.md`. KooSlurm 쪽은 KooSlurm `docs/sso_enable_20261029/{icn401_apply_check,sso_enable_procedure}.md`(origin `46c647e4`).
 
 ## 0. 순서 — 한 줄씩
-1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261115-093042Z` 를 받는다) → §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 확인.
+1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261117-212938Z` 를 받는다) → §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 확인.
 2. **icn401** — `git pull && sudo ./dashboard/start_production.sh` → §3 확인(KooSlurm 문서 §2).
 3. **비밀 하나를 두 곳에** — icn401 `HEAX_GATEWAY_SECRET`(backend_5010/.env) = cae00 `KOORM_KOOSLURM_SSO_SECRET`(KooRemapper platform/.env) → §2 · §3-3.
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
@@ -16,12 +16,12 @@ SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
 10-30 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7`) · `dev_rev` 를 예약 때 반입 규칙으로(`3574342`) · **변형 뷰어 1단계** — 리포트에 StepForge fe_cad 묶음 붙이기(REST `POST /reports/{id}/cad` · MCP `attach_cad`, `aa63e2a`) · 맵에서 각도를 고르면 「형상 보기」(`d37fcbb`). 그 판의 **마이그레이션 셋**(0015 · 0016 · 0017 — 모두 null 허용 칸 · 유일 제약, 옛 코드에 영향 없음) — 그 뒤 0018 · 0019 · 0020 이 더해져
-지금은 0015 ~ 0020 여섯이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로다(§1-5).
+지금은 0015 ~ 0020 여섯이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로였고(§1-5) **11-17 판에서 다시 바뀌었다**(`248ec9bc` — §1-6).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`8b49d2a`) · `revision_matches_binary` true |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `8b49d2a` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`c37bd03`) · `revision_matches_binary` true |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `c37bd03` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0020 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
 | MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 90개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` · `clear_report_unlink` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
@@ -187,6 +187,37 @@ git 으로 들어오는 파이썬(백엔드 · MCP 서버) · 정의 파일 `pla
 로컬 경로(`upload_local_path` · `save_result_to_path`)를 보지 못한다. 확인은 `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` —
 폴더가 보이면 바인드가 있다.
 
+## 1-6. cae00 — 11-17 반영분(요소 번호 겹침 DF-14 · 적재 공식 답 · environment · inspect sha256)
+**바이너리가 바뀐 판이다**(`248ec9bc41c5c7a3…` · glibc 요구 2.35). Drive 판 `dist-20261117-212938Z`(소스 `c37bd03`)에서 11-15 판과 다른 파일은
+`BUILD_INFO.txt` · `koorm-bin.tar.gz` · `cli.sif` · 콘솔 묶음 `koorm-frontend-dist.tar.gz` 넷이다 — api · mcp · nginx · postgres SIF 는 sha256
+이 같다(실측). 마이그레이션은 없다(0020 그대로). MCP 도구 90 · 연산 65 그대로. SP 서브모듈 고정은 `068fd32`(v0.4.88 — 키트 판 2026-11-06 그대로,
+`coreapi` · `ontology` diff 0).
+-  **요소 번호 겹침(DF-14)** — 리더는 요소를 번호 하나로 한 표에 담아, 솔리드 1 과 셸 1 처럼 족을 건넌 번호(LS-DYNA 는 족마다 따로 받는다)도 앞
+  정의를 잃는다. 예전엔 그 요소가 말없이 빠져 파트 목록이 줄고, 덱을 쓰는 op 은 그 요소가 빠진 덱을 냈다. 이제 덱을 쓰는 op(map · shellmap ·
+  unfold · squeeze · tetremesh · prestress 의 뒤집기 임시 덱 등 `KFileWriter` 를 거치는 것)은 그런 덱을 **거절**한다(rc 1 · 「입력 덱의 요소
+  번호가 겹쳐 리더가 앞 정의 N개를 잃었다 …」). 덱을 쓰지 않는 op(contact detect · surfview 등)은 그대로 돈다(앞 요소 없이). 파일
+  메타(modelmeta)에 `element_id_collisions`(잃은 정의 수) · `parts_missing`(요소가 다 빠진 파트 수)이 생기고 inspect_file 의 `meta.modelmeta`
+  에도 실린다 — 콘솔 파일 패널이 경고를 보인다. 겹친 덱으로 돌던 흐름은 이제 실패로 멈추니 번호를 옮긴 덱으로 다시 올린다(`info` 가 겹친 블록 ·
+  범위를 짚는다).
+-  **외부 적재의 공식 답(결정 문서 D4)** — `/system/capabilities`(MCP `system_capabilities`)에 `intake` 묶음(method · path · public_url ·
+  mcp_url · token `kr_pat` · portal_auth_required false · max_upload_mb · max_report_mb · batch false)이 생긴다. `public_url` 은 `platform/.env`
+  의 **`KOORM_PUBLIC_BASE`**(포털 오리진 — 끝 `/` 없이, 예 `https://<포털오리진:포트>`)가 있어야 채워진다(비면 null — 지어내지 않는다). 넣으면
+  api · mcp 를 재기동한다. 같은 값이 MCP `upload_instructions` 의 명령 주소가 된다. 401 이 나면 그 도구의 note 가 detail 글로 까닭을 가른다.
+-  **environment(결정 문서 D5)** — 리포트 응답(찾기 · 요약 · 세션 리포트 목록 · 메타 고침)과 원샷 intake 응답에 `environment` 가 생긴다.
+  `KOORM_APP_ENV` 가 production 이면 `prod` · development 면 `dev` · 그 밖이면 `unknown`.
+-  **inspect sha256(리스크 앱 RK-06)** — inspect_file 응답에 파일 행의 `sha256` 이 생긴다(덱 지문 — 그동안은 세션 파일 목록에만 있었다).
+-  **알고 받을 것** — SmartTwinPreprocessor SIF v137 은 옛 바이너리 `c5f74c18` 을 담고 있어 그 SIF 로 도는 REMAP 체인은 아직 옛 동작이다(다시
+  굽는 것은 pyKooCAE 쪽 몫 — 알렸다). 감독자가 되살린 MCP 의 `/data` 바인드 빠짐(§1-5)은 이번 판에도 그대로다.
+
+| 확인 | 명령 | 기대값 |
+|---|---|---|
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `c37bd03` · `revision_matches_binary` true |
+| 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `248ec9bc41c5c7a386d66ab56c9514ea7dd68fa3d077e04ce68f9b74a11c3ebf` |
+| 새 동작이 든 바이너리 | `platform/backend/bin/KooRemapper help modelmeta \| grep -c element_id_collisions` | 1 이상(옛 바이너리면 0) |
+| 적재 공식 답 | MCP `system_capabilities` 의 `intake` | 묶음이 있다 · `public_url` 은 `KOORM_PUBLIC_BASE` 를 넣었으면 그 주소, 아니면 null |
+| 환경 | MCP `find_reports` 의 항목 | `environment` 가 `prod` |
+| MCP 바인드 | `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` | 폴더가 보인다(감독자가 되살린 MCP 면 안 보인다 — §1-5) |
+
 ## 2. cae00 — 후처리 예약(7-1) 설정
 `platform/.env`(KooRemapper)에 둘. **값은 화면 · 로그 · 채팅에 붙이지 않는다.**
 ```
@@ -291,7 +322,7 @@ KooSlurm `docs/sso_enable_20261029/sso_enable_procedure.md`. 켜기 전에 설 �
 - 걸린 예약이 없을 때 켠다 — 켜는 순간 신원이 admin → 실제 사용자로 바뀌어 켜기 전 예약은 403 으로 닫힌다.
 
 ## 8. 되돌리기
-- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261108-234149Z`) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다.
+- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261115-093042Z` — 코드 `8b49d2a` · 바이너리 `c5f74c18`) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 11-17 판도 마이그레이션이 없고 새 칸은 응답에만 있다(DB 에 남는 것이 없다) — 되돌리면 겹친 덱을 쓰는 op 이 다시 그 요소가 빠진 덱을 낸다.
 - **KooSlurm** — 그쪽 문서의 되돌리기 절.
 
 ## 9. 남은 사람 결정(참고)

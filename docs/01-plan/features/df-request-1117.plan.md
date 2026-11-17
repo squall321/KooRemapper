@@ -56,3 +56,13 @@
 - 캠페인 개체 · 런 칸(출처 · 유효성 · 추출) · 캠페인 집계 도구의 이름표를 요청서 제안 바탕으로 쓰고 확인받는다.
 - 다른 플랫폼에 기대는 것 — KooChainRun KC-01 · KC-02 · KC-05(이 박스에 리포 없음 — 꼴을 못 봤다) · MatNexus MN-01 · ReportArchive
   RA-02.
+
+## 배포(11-17 UTC)
+- main `c37bd03`(코드 끝) · Drive `dist-20261117-212938Z`(바이너리 `248ec9bc` · glibc 2.35 — 11-15 판과 다른 파일은 `BUILD_INFO.txt` ·
+  `koorm-bin.tar.gz` · `cli.sif` · 콘솔 묶음, 나머지 SIF 넷은 같다) · 가장 오래된 `dist-20261031-214338Z` 가 지워졌다.
+- compat 빌드는 빌더 SIF 로 스크립트와 같은 세 단계를 `-j8` 로 돌렸다(스크립트는 `-j$(nproc)` = 32 — 가용 39 GB 에서 earlyoom 위험).
+- dev — 살아 있는 잡 0 을 보고 API · MCP 재기동(MCP 는 start.sh — `/data` 바인드 있음) · 스모크 MCP(도구 90) · deckops 29/29 ·
+  allops 64/64(건너뜀 1) · reports 59/59 · 주 체크아웃 pytest 1055 통과 · 건너뜀 0 · health `c37bd03` matches true.
+- 리포 덱 515 장에 modelmeta 를 돌려 잃은 수가 0 이 아닌 덱이 없다(거짓 양성 없음) · 겹친 시험 덱 둘에서 modelmeta 와 info 의 원본 줄
+  셈이 같다(20 · 20).
+- cae00 점검 문서 §1-6 · §0 · §1 · §8 을 이 판에 맞췄다. cae00 이 받는 것은 사용자의 다음 update-all 이다.

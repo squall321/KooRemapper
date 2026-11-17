@@ -14,7 +14,7 @@
 - [x] B-4 modelmeta 칸 · 콘솔 경고
 - [x] B-5 회귀 시험 — 겹친 덱으로 modelmeta 칸 · 덱 쓰는 op 마다 거절 · 겹침 없는 덱은 그대로
 - [x] B-6 플랫폼 — kfile_modelmeta 통과 · 콘솔 파일 패널 경고 · 백엔드 시험
-- [ ] B-7 빌드 · 회귀 전부 · compat 빌드 · 플랫폼 bin
+- [x] B-7 빌드 · 회귀 전부 · compat 빌드 · 플랫폼 bin
 
 ## C. DF-01 의 틈
 - [x] C-1 `.env.example` 에 `KOORM_PUBLIC_BASE`
@@ -23,7 +23,7 @@
 - [x] C-3 D4 `capabilities.intake` · D5 `environment` · inspect `sha256`(사용자 결정 11-17 — 셋 다)
 
 ## D. 올리기
-- [ ] D-1 커밋 · main · 살아 있는 잡 확인 뒤 dev 재기동 · 스모크 · pytest
+- [x] D-1 커밋 · main · 살아 있는 잡 확인 뒤 dev 재기동 · 스모크 · pytest
 - [ ] D-2 Drive 게시 · cae00 점검 문서 · 포털 알림
 - [ ] D-3 요청 쪽 답신(사용자가 전한다)
 
