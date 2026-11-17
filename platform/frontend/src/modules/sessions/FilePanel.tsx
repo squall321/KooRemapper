@@ -146,6 +146,15 @@ export function FilePanel({ sessionId, files }: { sessionId: string; files: Sess
                       {m.bbox_min && m.bbox_max && (
                         <div>bbox(요소 기준): [{m.bbox_min.map((n) => n.toFixed(1)).join(', ')}] → [{m.bbox_max.map((n) => n.toFixed(1)).join(', ')}]</div>
                       )}
+                      {/* ★요소 번호가 겹쳐 리더가 잃은 요소가 있으면 **말한다**(DF-14). 솔리드 · 셸처럼 족을 건넌 번호는
+                          LS-DYNA 는 받지만 이 도구는 한 표로 읽어 파트가 목록에서 조용히 빠졌다 — 덱을 쓰는 op 은 이 덱을 거절한다. */}
+                      {!!m.modelmeta?.element_id_collisions && (
+                        <div className="text-[11px]" style={{ color: '#a33' }}>
+                          ⚠ 요소 번호가 겹쳐 앞 정의 {m.modelmeta.element_id_collisions.toLocaleString()}개를 잃었다
+                          {m.modelmeta.parts_missing ? ` — 요소가 다 빠진 파트 ${m.modelmeta.parts_missing.toLocaleString()}개는 목록에 없다` : ''}.
+                          덱을 쓰는 오퍼레이션은 이 덱을 거절한다 — 겹친 번호를 옮긴 덱을 올리라.
+                        </div>
+                      )}
                       {/* ★고아 절점이 있으면 **말한다.** bbox 로 낙하판을 놓는 쪽이 `*NODE`
                           전체를 쓰면 기기 밖에 생긴다 — 현장에서 53mm 밖이었다. */}
                       {!!m.modelmeta?.orphan_nodes && (

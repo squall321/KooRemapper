@@ -53,6 +53,11 @@ def run_modelmeta(path: Path, *, detect: bool = False, timeout: int = 120) -> di
                 "orphan_nodes": model.get("orphan_nodes"),
                 # 절점 칸이 모자란 2차 카드가 있으면 위 값이 null(상한일 뿐)이고 까닭이 여기 온다 — null 만 넘기면 까닭이 끊긴다.
                 "orphan_nodes_reason": model.get("orphan_nodes_reason"),
+                # ★리더가 같은 번호의 뒤 카드에 덮여 잃은 요소 수 · 요소가 하나도 남지 않아 `parts` 에 없는 파트 수(2026-11-17 · DF-14).
+                #   솔리드 · 셸처럼 족을 건넌 번호도 이 도구는 한 표로 읽는다 — 0 이 아니면 파트 목록이 덱보다 적고, 덱을 쓰는 op 은
+                #   거절한다. 옛 바이너리는 이 칸을 내지 않는다(None)
+                "element_id_collisions": model.get("element_id_collisions"),
+                "parts_missing": model.get("parts_missing"),
                 "bbox_basis": model.get("bbox_basis"),
                 "bbox_all_min": model.get("bbox_min"),
                 "bbox_all_max": model.get("bbox_max"),

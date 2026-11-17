@@ -99,6 +99,9 @@ export interface ModelMeta {
   // 2차 솔리드 파트가 있으면 센 고아는 상한일 뿐이라 0 이 아닐 때 null 로 온다 — 까닭은 `orphan_nodes_reason`.
   orphan_nodes?: number | null
   orphan_nodes_reason?: string | null
+  // 리더가 같은 번호의 뒤 카드에 덮여 잃은 요소 수 · 요소가 다 빠져 parts 에 없는 파트 수(DF-14). 옛 바이너리면 없다
+  element_id_collisions?: number | null
+  parts_missing?: number | null
   bbox_basis?: string
   bbox_all_min?: number[]
   bbox_all_max?: number[]
