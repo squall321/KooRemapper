@@ -113,6 +113,28 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
         }
     }
 
+    // A grid slot holds exactly one element. Propagation picks each
+    // neighbour's slot from the centroid direction alone and never checks
+    // whether that slot is already taken; when two elements land on the same
+    // (i,j,k), everything that walks the grid slot by slot keeps one and
+    // drops the other without a word (unfold wrote 53 of 100 elements with
+    // rc 0). Refuse here instead.
+    {
+        std::set<std::tuple<int, int, int>> slots;
+        for (const auto& [id, elem] : mesh.elements) {
+            slots.insert({elem.i, elem.j, elem.k});
+        }
+        if (slots.size() != mesh.elements.size()) {
+            errorMessage_ = "Grid indexing failed: " +
+                std::to_string(mesh.elements.size() - slots.size()) + " of " +
+                std::to_string(mesh.elements.size()) +
+                " elements share an (i,j,k) slot with another element " +
+                "(dims=" + std::to_string(dimI_) + "x" +
+                std::to_string(dimJ_) + "x" + std::to_string(dimK_) + ")";
+            return false;
+        }
+    }
+
     // REQ-003: Sort axes so the smallest-span dimension is K (thickness).
     // After this call, dimI >= dimJ >= dimK by convention; downstream
     // mapping code relies on K being the thinnest extent.

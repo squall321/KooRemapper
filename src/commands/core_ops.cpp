@@ -1052,6 +1052,14 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
         return 1;
     }
 
+    // 펼친 메시는 굽은 메시와 요소 수가 같아야 한다 — 칸마다 요소를 다시 짓다가 빠뜨린 것이 있으면 쓰지 않는다(2026-11-20 — 색인이 겹친
+    // 덱에서 100 요소 가운데 53 만 rc 0 으로 썼다. 색인기가 먼저 거절하고, 이 검사는 그 뒤를 받친다)
+    if (flatMesh.getElementCount() != bentMesh.getElementCount()) {
+        console.error("Unfold lost elements: generated " + std::to_string(flatMesh.getElementCount()) + " of " +
+                      std::to_string(bentMesh.getElementCount()) + " - refusing to write an incomplete mesh");
+        return 1;
+    }
+
     // Print dimensions
     std::cout << "\n";
     console.header("Unfolded Mesh Dimensions");

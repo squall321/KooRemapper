@@ -954,6 +954,10 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 주의사항
 - 입력 메시는 반드시 **규칙적 HEX8 구조화 메시**여야 합니다
 - 비구조화 메시에는 사용할 수 없습니다
+- 구조화 메시라도 격자 색인이 겹치면(두 요소가 같은 (i,j,k) 칸에 놓이면) 거절한다 — 「Grid indexing failed: N of M elements share an
+  (i,j,k) slot …」 · rc 1 · 산출 없음. 2026-11-20 전엔 겹친 만큼 요소를 빼고 rc 0 으로 썼다(100 요소 덱이 53 요소로). 심하게 감긴 덱에서
+  나고 `generate` 가 지은 덱도 그렇다(helix 20×5×3 · wave 10×10×2). `map` 의 굽은 기준으로 넣어도 같은 글로 거절한다.
+  회귀 `test_unfold_element_loss.py`
 
 ---
 
