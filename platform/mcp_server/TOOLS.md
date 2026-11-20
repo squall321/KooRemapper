@@ -96,6 +96,17 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `publish_report_to_datahub` | report_id, project, stage, variation?, doe?, unit?, title? | POST /reports/{id}/publish-datahub | AI Data Hub 에 범용 sim_report 레코드로 등재(eng_meta 연계) |
 | `delete_report` | report_id | DELETE /reports/{id} | 리포트 삭제(원본 HTML 포함) |
 
+## 캠페인 묶음 적재
+한 과제 · 한 판의 런 수백 ~ 천 개를 캠페인 하나로 묶어 받는다. 파일 본문은 MCP 로 오지 않는다 — 런마다 REST intake 에 `campaign_id` ·
+`run_key` 를 붙여 보낸다(한 호출에 리포트 하나). 상태 단어는 pending(목록에만 있다) · received(받았다) · skipped(같은 내용이라 건너뛰었다) ·
+rejected(거절 — 까닭은 `reject_reason`)이고, `ingest_state` 는 그 런의 마지막 시도 결과 · `report_id` 는 그 런이 가진 리포트다.
+| 도구 | 인자 | REST | 설명 |
+|---|---|---|---|
+| `create_campaign` | name, project?, dev_rev?, analysis_method?, analysis_target?, doe_strategy?, drop_height_mm?, duration_ms?, thickness_axis?, impactor? | POST /campaigns | 캠페인을 만든다. 같은 이름을 이미 썼으면 오류(409) — 글에 있던 캠페인의 id 가 있다. 만든 사람만 본다(목록 · 고침 · 지우기는 없다) |
+| `ingest_campaign_manifest` | campaign_id, runs[]({run_key, doe?, pitch?, roll?}) | POST /campaigns/{id}/runs | 런 목록을 올린다 — 새 run_key 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 보낸 칸만 맞춘다. 한 요청 5,000 런까지 · 한 요청 안 겹친 run_key 는 거절 · 런을 빼는 길은 없다 |
+| `campaign_ingest_status` | campaign_id, state?, limit?, offset? | GET /campaigns/{id}/ingest-status | 목록 수 · 상태별 수(`listed = pending + received + skipped + rejected` · `with_report`) · 런마다 상태 · report_id · sha256 · 거절 까닭 |
+| — (REST 전용) | intake 폼 + campaign_id, run_key(둘 다) | POST /reports/intake | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이 다시 오면 건너뛰고(200 · skipped) 다른 내용이면 거절(409 · 가진 리포트는 그대로). 목록에 없는 run_key 는 400. 런을 찾은 뒤의 4xx 는 까닭이 런에 적힌다(401 · 429 · 요청 꼴 422 · 5xx 는 적히지 않는다). 올리기 길은 토큰 하나에 분당 한도가 있다(429 `Retry-After`) |
+
 ## 과제 · 개발 개정 (온톨로지)
 
 과제의 정본은 **SP 허브**다 — 여기에 과제를 만들거나 고치는 도구는 **없다**(있으면 다음
@@ -183,7 +194,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 90개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 93개)와 같아야 한다.
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.

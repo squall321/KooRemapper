@@ -196,6 +196,10 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    ⚠ **대용량(전각도 낙하 등, 압축해도 수백 MB~GB)은 문자열 인제스트 말고 REST intake** —
    `report_upload_instructions()` 가 로컬 리포트+K파일을 한 호출로 올리는 명령을 준다
    (`POST /reports/intake`: file·kfile·scenario·project… multipart, .gz 가능 → 세션 생성/K링크까지).
+   런이 수백 ~ 천 개인 묶음은 **캠페인**으로 받는다 — `create_campaign` → `ingest_campaign_manifest(campaign_id, runs=[{run_key, doe,
+   pitch, roll} …])` → 런마다 intake 에 `campaign_id` · `run_key` 를 붙여 보낸다(같은 내용이 다시 오면 건너뛰고 다른 내용이면 거절) →
+   `campaign_ingest_status` 로 `listed = pending + received + skipped + rejected` 를 맞춘다. 다시 올릴 때는 pending · rejected 런만
+   걸러 보낸다(건너뛰는 런도 파일을 통째로 보내야 건너뛴다 · 올리기 길에는 분당 한도가 있다 — 429 `Retry-After`).
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
    StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에

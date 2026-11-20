@@ -613,3 +613,60 @@ class RecipeRun(Base):
         DateTime(timezone=True), server_default=func.now(), index=True, nullable=False
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# ───────────── 캠페인 — 런 묶음과 그 적재 상태(요청서 DF-01 · 마이그레이션 0021) ─────────────
+# 계획 docs/01-plan/features/df-campaign-intake-1120.plan.md
+
+
+class Campaign(Base):
+    __tablename__ = "campaigns"
+    # 이름은 만든 사람 안에서 유일 — id 를 잊었을 때 같은 이름으로 다시 만들기를 부르면 409 가 id 를 돌려준다.
+    __table_args__ = (UniqueConstraint("created_by", "name", name="uq_campaigns_owner_name"),)
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)  # ULID
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    project: Mapped[str | None] = mapped_column(String(64))
+    dev_rev: Mapped[str | None] = mapped_column(String(8))
+    # 어휘 칸 셋은 온 글 그대로 둔다 — 목록은 요청 쪽 것이고 여기서 검증하지 않는다.
+    analysis_method: Mapped[str | None] = mapped_column(String(64))
+    analysis_target: Mapped[str | None] = mapped_column(String(64))
+    doe_strategy: Mapped[str | None] = mapped_column(String(64))
+    drop_height_mm: Mapped[float | None] = mapped_column(Float)
+    duration_ms: Mapped[float | None] = mapped_column(Float)
+    thickness_axis: Mapped[str | None] = mapped_column(String(1))  # X | Y | Z
+    impactor: Mapped[dict | None] = mapped_column(JSONB)  # {mass_g, height_mm, ke_mj}
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CampaignRun(Base):
+    """캠페인의 런 하나 — 목록(매니페스트)으로 먼저 생기고, 리포트가 들어오면 묶인다.
+
+    `ingest_state` 는 **마지막 시도의 결과**(pending · received · skipped · rejected)다. `report_id` ·
+    `content_sha256` · `ingested_at` 은 이 런이 **가진 리포트**를 말하고, 뒤의 시도가 거절돼도 남는다.
+    """
+
+    __tablename__ = "campaign_runs"
+    __table_args__ = (UniqueConstraint("campaign_id", "run_key", name="uq_campaign_runs_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    run_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    # 리포트(또는 그 세션)가 지워지면 비고, 그 런은 다시 받을 수 있다.
+    report_id: Mapped[str | None] = mapped_column(
+        ForeignKey("impact_reports.id", ondelete="SET NULL"), index=True
+    )
+    doe: Mapped[str | None] = mapped_column(String(64))
+    pitch: Mapped[float | None] = mapped_column(Float)
+    roll: Mapped[float | None] = mapped_column(Float)
+    # 가진 리포트 HTML 바이트의 sha256 — 세션에 저장된 리포트 파일의 sha256 과 같은 값.
+    content_sha256: Mapped[str | None] = mapped_column(String(64))
+    ingest_state: Mapped[str] = mapped_column(String(12), default="pending", server_default="pending", nullable=False)
+    reject_reason: Mapped[str | None] = mapped_column(Text)
+    ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

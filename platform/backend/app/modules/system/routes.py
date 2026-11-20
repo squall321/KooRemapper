@@ -15,6 +15,7 @@ from app.models import ImpactReport, Job, User
 from app.runner import catalog
 from app.shared.auth import get_current_user
 from app.shared.features import ontology_state
+from app.modules.campaigns.services import STATES as CAMPAIGN_STATES
 from app.modules.users.routes import mcp_add_command, mcp_public_url
 from app.shared.responses import ok
 
@@ -162,6 +163,9 @@ _PARITY = [
     {"feature": "해석 온톨로지 코어 다리(cae → 코어 · 사람 선 확정)", "web": False, "mcp": True,
      "note": "보기는 report_cae 의 bridges(선 · 끊긴 사람 선 · 후보) — 확정 · 지우기는 REST POST · DELETE /reports/{id}/cae/bridges"
              "(리포트 주인 · 시스템 관리자). 웹 화면은 아직 없다"},
+    {"feature": "캠페인 묶음 적재(런 목록 · 적재 상태)", "web": False, "mcp": True,
+     "note": "create_campaign · ingest_campaign_manifest · campaign_ingest_status(REST /campaigns …) — 리포트 본문은 REST intake 에 "
+             "campaign_id · run_key 를 붙여 보낸다. 웹 화면은 아직 없다"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,
@@ -193,7 +197,10 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
         # ★외부 적재의 공식 답(2026-11-17 · 결정 문서 D4) — 게이트웨이 카탈로그(GW-01)가 이것을 그대로 싣는다. 토큰은 이 서버가
         #   발급한 kr_ PAT(Authorization: Bearer)이고 API 가 스스로 검증하므로 포털 관문(portal_auth)이 필요 없다. 운영 게이트웨이가
         #   그 헤더를 실제로 넘기는지는 이 칸이 보증하지 않는다 — 401 이면 detail 글로 가른다(MCP `upload_instructions`).
-        #   공개 주소는 운영자가 KOORM_PUBLIC_BASE 를 넣어야 채워진다(비면 null). 한 호출에 리포트 하나 — 묶음 적재는 아직 없다
+        #   공개 주소는 운영자가 KOORM_PUBLIC_BASE 를 넣어야 채워진다(비면 null).
+        #   ★`batch` 는 캠페인 묶음 적재(2026-11-20 · DF-01)가 있다는 뜻이다 — 런 목록을 먼저 올리고 런마다 이 길에
+        #   `campaign_id` · `run_key` 를 붙여 보내면 같은 내용은 건너뛴다. 한 호출에 리포트 하나인 것은 그대로다
+        #   (`reports_per_call`). 분당 한도는 올리기 길 전체가 토큰 하나에 나눠 쓴다(넘으면 429 `Retry-After`).
         "intake": {
             "method": "POST",
             "path": "/api/v1/reports/intake",
@@ -204,6 +211,16 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
             "portal_auth_required": False,
             "max_upload_mb": settings.max_upload_mb,
             "max_report_mb": settings.max_report_mb,
-            "batch": False,
+            "batch": True,
+            "reports_per_call": 1,
+            "rate_limit_per_min": (settings.ratelimit_upload_per_min
+                                   if settings.ratelimit_enabled and settings.ratelimit_upload_per_min > 0 else None),
+            "campaign": {
+                "create": "/api/v1/campaigns",
+                "manifest": "/api/v1/campaigns/{campaign_id}/runs",
+                "status": "/api/v1/campaigns/{campaign_id}/ingest-status",
+                "form_fields": ["campaign_id", "run_key"],
+                "states": list(CAMPAIGN_STATES),
+            },
         },
     })

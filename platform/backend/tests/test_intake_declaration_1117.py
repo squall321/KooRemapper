@@ -39,7 +39,17 @@ def test_capabilities_declares_intake(monkeypatch):
     monkeypatch.setattr(settings, "public_base", "")
     it = _caps()["intake"]
     assert it["method"] == "POST" and it["path"] == "/api/v1/reports/intake", it
-    assert it["token"] == "kr_pat" and it["portal_auth_required"] is False and it["batch"] is False, it
+    assert it["token"] == "kr_pat" and it["portal_auth_required"] is False, it
+    # 묶음 적재(11-20 · DF-01) — 캠페인 길이 생겼고, 한 호출에 리포트 하나인 것은 그대로다
+    assert it["batch"] is True and it["reports_per_call"] == 1, it
+    assert it["campaign"] == {"create": "/api/v1/campaigns", "manifest": "/api/v1/campaigns/{campaign_id}/runs",
+                              "status": "/api/v1/campaigns/{campaign_id}/ingest-status",
+                              "form_fields": ["campaign_id", "run_key"],
+                              "states": ["pending", "received", "skipped", "rejected"]}, it
+    monkeypatch.setattr(settings, "ratelimit_enabled", True)
+    assert _caps()["intake"]["rate_limit_per_min"] == settings.ratelimit_upload_per_min
+    monkeypatch.setattr(settings, "ratelimit_enabled", False)
+    assert _caps()["intake"]["rate_limit_per_min"] is None       # 한도를 껐으면 숫자를 내지 않는다
     assert it["max_upload_mb"] == settings.max_upload_mb and it["max_report_mb"] == settings.max_report_mb, it
     assert it["public_url"] is None, it   # 주소를 모르면 지어내지 않는다
 

@@ -22,6 +22,7 @@ import json
 
 from app.models import SOURCE_SELF, ImpactCase, ImpactReport, OntoObject, OntoRelation, Session, SessionFile
 from app.reports import analyze, blockstore, cad_bundle, onto_package, parser, render_result
+from app.modules.campaigns import services as camp_svc
 from app.modules.reports import bridges
 from app.reports.scenario import ScenarioParseError, summarize_scenario
 from app.modules.sessions import services as sess_svc
@@ -222,6 +223,7 @@ async def ingest_report(
     focus: str | None = None,
     shared_affiliation: str = "",
     reservation: dict | None = None,
+    campaign_run_id: int | None = None,
 ) -> ImpactReport:
     """리포트 HTML 을 파싱·정규화해 ImpactReport + ImpactCase 로 저장한다.
 
@@ -231,6 +233,9 @@ async def ingest_report(
     `reservation` — 후처리 예약(7-1)이 반입할 때의 예약 원장(`job_key` · `conditions` …). `job_key` 가
     유일 키(`external_job_key`)가 되고, 리포트에 낙하 높이가 없으면 예약 조건의 `height` 로 채운다
     (리포트 자신의 값은 덮지 않는다). 같은 키가 이미 있으면 커밋에서 IntegrityError — 부르는 쪽이 다룬다.
+
+    `campaign_run_id` — 캠페인 런의 것으로 받을 때(DF-01). 쓰기 직전에 그 런 행을 잠그고, 이미 리포트를 가졌으면 아무것도
+    쓰지 않고 `campaigns.RunTaken` 을 던진다. 리포트와 같은 커밋으로 런에 묶는다(리포트는 들어갔는데 런이 빈 중간 상태가 없다).
     """
     text = raw.decode("utf-8", errors="replace")
     # 파싱을 스레드로 오프로드(대형 HTML JSON 로드가 이벤트 루프를 막지 않게).
@@ -256,6 +261,8 @@ async def ingest_report(
         source_kfile_id = (await _resolve_session_kfile(db, session.id, kfile_id)).id
 
     # ── 여기부터 디스크/DB 쓰기 ──
+    if campaign_run_id is not None:
+        await camp_svc.lock_free_run(db, campaign_run_id)  # 같은 런이 동시에 와도 리포트는 하나 — 잠금은 커밋까지
     file_row = await _store_report_html(session, filename, raw)
     db.add(file_row)
     await db.flush()  # source_file_id 확보
@@ -337,6 +344,8 @@ async def ingest_report(
     # 중간 상태를 만들지 않는다. 이을 것이 없으면(수동 메타 미기입) 조용히 지나간다.
     # ★이미 사람이 확정한 개정은 **건드리지 않는다**(`set_revision` 의 manual 보호).
     await _link_revision(db, report)
+    if campaign_run_id is not None:
+        await camp_svc.bind_run(db, campaign_run_id, report_id=rid, sha256=file_row.sha256)
     await db.commit()
     await db.refresh(report)
     # SRC-09 — 반입을 굳힌 **뒤에** 과제 잇기(붙는 것만 · 이 리포트만). 깨져도 반입은 그대로고, 결과는 부르는 쪽이 응답 · 잡 경고에 싣는다.

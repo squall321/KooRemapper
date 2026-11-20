@@ -1,7 +1,9 @@
 # 충격 리포트 인제스트/조회 REST 라우트 (/api/v1).
 from __future__ import annotations
 
+import asyncio
 import gzip
+import hashlib
 import io
 import logging
 import zlib
@@ -14,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import ImpactReport, User
+from app.modules.campaigns import services as camp_svc
 from app.modules.reports import bridges, services as svc
 from app.modules.reports.schemas import CaseRead, ReportListItem, ReportRead
 from app.modules.sessions import services as sess_svc
@@ -24,7 +27,7 @@ from app.reports import bundle as bundle_mod
 from app.reports.cad_bundle import CadBundleError
 from app.reports.onto_package import OntoPackageError
 from app.reports.render_result import RenderResultError
-from app.shared.responses import ok
+from app.shared.responses import fail, ok
 
 logger = logging.getLogger("koorm.reports")
 
@@ -181,6 +184,58 @@ async def ingest_report(
     )
 
 
+async def _campaign_run(
+    campaign_id: str | None = Form(default=None),       # 캠페인 런의 것으로 받을 때 — run_key 와 함께 온다(DF-01)
+    run_key: str | None = Form(default=None),           # 그 캠페인의 런 목록에 있는 열쇠
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """intake 의 `campaign_id` · `run_key` 를 런 하나로 푼다 — 안 왔으면 None(지금까지의 intake 그대로).
+
+    런을 찾은 뒤 라우트에서 난 4xx 는 그 글을 런의 거절 까닭으로 적고 그대로 다시 던진다(받음 + 건너뜀 + 거절 = 목록 수가 맞으려면
+    거절도 행에 남아야 한다). 5xx 는 적지 않는다 — 런 상태는 앞 그대로다. 런을 찾기 전의 오류(하나만 옴 · 남의 캠페인 · 목록에 없는
+    열쇠)는 적을 런이 없다.
+    """
+    campaign_id, run_key = (campaign_id or "").strip(), (run_key or "").strip()
+    if not campaign_id and not run_key:
+        yield None
+        return
+    if not campaign_id or not run_key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "campaign_id 와 run_key 는 함께 보냅니다.")
+    if await camp_svc.get_owned(db, user.id, campaign_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "캠페인을 찾을 수 없습니다.")
+    run_id = await camp_svc.find_run_id(db, campaign_id, run_key)
+    if run_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"run_key {run_key!r} 가 이 캠페인의 런 목록에 없습니다 — POST /campaigns/{campaign_id}/runs 로 목록을 먼저 올립니다.")
+    try:
+        yield {"id": run_id, "campaign_id": campaign_id, "run_key": run_key}
+    except HTTPException as exc:
+        if 400 <= exc.status_code < 500:
+            await db.rollback()                           # 잠금 · 반쯤 쓴 것을 놓고 적는다(뒤로는 run_id 만 쓴다)
+            await camp_svc.mark(db, run_id, "rejected", str(exc.detail))
+        raise
+
+
+async def _answer_held_run(db: AsyncSession, run: dict, sha: str):
+    """런이 이미 리포트를 가졌을 때의 답 — 같은 지문이면 건너뜀(200), 다르면 거절(409). 안 가졌으면 None."""
+    got = await camp_svc.held(db, run["id"])
+    if got is None:
+        return None
+    report_id, have, session_id = got
+    base = {"campaign_id": run["campaign_id"], "run_key": run["run_key"], "report_id": report_id,
+            "session_id": session_id, "content_sha256": have, "environment": settings.environment}
+    if have == sha:
+        await camp_svc.mark(db, run["id"], "skipped")
+        return ok({**base, "ingest_state": "skipped"}, message="같은 내용의 리포트를 이미 받았습니다 — 건너뜁니다.")
+    why = (f"이 런은 이미 다른 내용의 리포트를 가졌습니다 — 가진 것 sha256 {have} · 온 것 sha256 {sha}. "
+           "가진 리포트는 그대로 둡니다.")
+    await camp_svc.mark(db, run["id"], "rejected", why)
+    return fail(why, status_code=status.HTTP_409_CONFLICT,
+                data={**base, "ingest_state": "rejected", "offered_sha256": sha})
+
+
 @router.post(
     "/reports/intake",
     dependencies=[Depends(rate_limit("upload", settings.ratelimit_upload_per_min))],
@@ -199,6 +254,7 @@ async def report_intake(
     variation: str | None = Form(default=None),
     doe: str | None = Form(default=None),
     focus: str | None = Form(default=None),
+    run: dict | None = Depends(_campaign_run),          # 폼 칸 campaign_id · run_key — 캠페인 런의 것으로 받는다(DF-01)
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -208,6 +264,10 @@ async def report_intake(
     "전각도 낙하/전위치 충격/deep 리포트를 K파일과 함께" 올리는 걸 한 호출로 얇게 조립한다
     (안에서 하는 일은 기존 경로 그대로 — 로직 복제 없음). 파일은 전부 .gz 로 올려 전송을 줄일
     수 있다(서버가 해제). 반환: session_id·report_id·kfile_id.
+
+    `campaign_id` · `run_key` 가 오면 그 캠페인 런의 것으로 받는다(DF-01). 런이 리포트를 안 가졌으면 지금과 똑같이 받고 런에
+    묶는다(201 · `ingest_state: "received"`). 가졌으면 아무것도 저장하지 않고 답한다 — 리포트 HTML 의 sha256 이 같으면 건너뜀
+    (200 · `"skipped"`), 다르면 거절(409 · `"rejected"`).
     """
     if kind is not None and kind not in _KINDS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"kind 는 {sorted(_KINDS)} 중 하나여야 합니다.")
@@ -232,6 +292,13 @@ async def report_intake(
                        "n_media": len(b["media"]), "skipped": b["skipped"]}
         if b.get("note"):
             bundle_info["note"] = b["note"]
+    # 캠페인 런 — 지문은 저장할 HTML 바이트의 것이다(.gz 는 푼 뒤 · 묶음은 그 안의 HTML). 이미 가진 런은 세션 · K 파일을 만들기 전에 답한다.
+    sha: str | None = None
+    if run is not None:
+        sha = await asyncio.to_thread(lambda: hashlib.sha256(raw).hexdigest())
+        answered = await _answer_held_run(db, run, sha)
+        if answered is not None:
+            return answered
     k_raw, k_name = (None, None)
     if kfile is not None:
         k_raw, k_name = await _read_upload(kfile, what="K파일", decompress_cap_mb=settings.max_upload_mb)
@@ -262,6 +329,7 @@ async def report_intake(
             focus=focus,
             shared_affiliation=verified_affiliation(
                 request.headers, user.email, settings.heax_gateway_secret),
+            campaign_run_id=run["id"] if run else None,
         )
         media_summary: dict | None = None
         if bundle_media:
@@ -275,6 +343,9 @@ async def report_intake(
                    "source_kfile_id": report.source_kfile_id,
                    "task_links": getattr(report, "auto_task_links", None),   # 반입 뒤 과제 잇기(SRC-09)
                    "environment": settings.environment}                      # dev · prod · unknown(D5)
+        if run is not None:
+            payload.update(campaign_id=run["campaign_id"], run_key=run["run_key"], ingest_state="received",
+                           content_sha256=sha)
         onto_summary: dict | None = None
         if bundle_onto:
             # 후처리 꾸러미(같은 이름 줄기) — 실패해도 리포트 반입은 막지 않고 까닭을 돌려준다(사용자 결정 10-31 (가))
@@ -294,11 +365,17 @@ async def report_intake(
                                        f"GET /reports/{payload['report_id']}/cae 로 실렸는지 보고, 안 실렸으면 꾸러미만 "
                                        f"POST /reports/{payload['report_id']}/cae 로 붙인다 — 까닭이 꾸러미에 있으면 다시 붙여도 "
                                        "실패한다"}
-    except ValueError as exc:
+    except (ValueError, camp_svc.RunTaken) as exc:
         if created_here:
             await sess_svc.delete_session(db, s)          # 신규 세션+K 통째로 정리(cascade+rmtree)
         elif krow is not None:
             await sess_svc.delete_file(db, krow)          # 기존 세션엔 방금 넣은 K만 회수
+        if isinstance(exc, camp_svc.RunTaken):
+            # 같은 런이 동시에 와 먼저 간 쪽이 리포트를 가졌다 — 이쪽은 아무것도 쓰지 않았으니 가진 것으로 답한다(리포트는 하나)
+            answered = await _answer_held_run(db, run, sha)
+            if answered is not None:
+                return answered
+            raise HTTPException(status.HTTP_409_CONFLICT, "같은 런이 동시에 올라왔습니다 — 다시 올립니다.")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
     if bundle_info:
         payload["bundle"] = bundle_info

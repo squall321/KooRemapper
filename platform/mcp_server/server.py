@@ -857,7 +857,8 @@ async def list_session_jobs(session_id: str, ctx: Context) -> list:
 async def system_capabilities(ctx: Context) -> dict:
     """플랫폼 기능 카탈로그 — 오퍼레이션 수, MCP 도구 수, 웹/MCP 패리티 매트릭스,
     Claude 연결 방법 힌트, 외부 적재의 공식 답 `intake`(경로 · 메서드 · 토큰 종류 · 크기 상한 · 포털 관문 필요 여부 · 묶음 적재
-    여부 · 공개 주소 — 운영자가 KOORM_PUBLIC_BASE 를 넣지 않았으면 null). / Capability + web-MCP parity matrix + connect hints + intake."""
+    여부 `batch` 와 캠페인 길 `campaign` · 한 호출의 리포트 수 · 분당 한도 · 공개 주소 — 운영자가 KOORM_PUBLIC_BASE 를 넣지 않았으면
+    null). / Capability + web-MCP parity matrix + connect hints + intake."""
     return await _get(ctx, "/system/capabilities")
 
 
@@ -932,10 +933,15 @@ async def report_upload_instructions(project: str = "", filename: str = "") -> d
             "명령": curl,
             "폼필드": "file(리포트,필수) · kfile(원본 K) · scenario(scenario.json) · "
                      "kind(deep|sphere|impact) · project · dev_rev · variation · doe · focus · "
-                     "session_id(기존)/session_name(새 세션)",
+                     "session_id(기존)/session_name(새 세션) · campaign_id + run_key(캠페인 런의 것으로 받을 때 — 둘 다)",
             "대용량": ".gz 로 올리면 서버가 해제. 전송 상한 512MB(압축 크기), 해제 상한 "
                      "2048MB(KOORM_MAX_REPORT_MB). 베어러 경로(/apps/kooremapper_api)는 portal_auth 없이 kr_ PAT 검증.",
         },
+        "캠페인 묶음 적재": ("런 수백 ~ 천 개는 캠페인으로 — create_campaign → ingest_campaign_manifest(런 목록) → 런마다 위 명령에 "
+                      "-F campaign_id=<id> -F run_key=<열쇠> 를 붙여 보낸다(한 호출에 리포트 하나). 같은 런에 같은 내용이 다시 "
+                      "오면 건너뛰고(200 · ingest_state skipped) 다른 내용이면 거절한다(409). 올리기 길은 토큰 하나에 분당 "
+                      "한도가 있다(system_capabilities 의 intake.rate_limit_per_min — 넘으면 429 와 Retry-After 초). "
+                      "다시 올릴 때는 campaign_ingest_status 로 pending · rejected 런만 걸러 보낸다."),
         "웹 UI": f"포탈 로그인 후 {origin}/apps/kooremapper/ 에서 세션을 열고 '리포트 업로드'.",
         "토큰 발급": f"웹 UI 로그인→MCP 토큰 화면에서 kr_ PAT, 또는 REST POST {api}/auth/login→JWT→"
                     f"POST {api}/me/tokens. 환경변수 KR_PAT 에 둔다.",
@@ -1073,6 +1079,90 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
     files = {"file": ("render_result.zip", raw, "application/zip")}
     async with _client() as c:
         return _unwrap(await c.post(f"/reports/{_seg(report_id)}/renders", files=files, headers=_forward_headers(ctx)))
+
+
+# ── 캠페인 묶음 적재(DF-01 · 계획 df-campaign-intake-1120) ───────────────────────────────────────────────────────────────
+# 한 과제 · 한 판의 런 수백 ~ 천 개를 캠페인 하나로 묶어 받는다. ★파일 본문은 이 도구들로 오지 않는다 — 런마다 REST intake 에
+# campaign_id · run_key 를 붙여 보낸다(report_upload_instructions). 상태 단어 · 건수 상한은 백엔드와 같아야 한다
+# (test_mcp_tools_contract 가 대조한다).
+CAMPAIGN_STATES = ("pending", "received", "skipped", "rejected")
+CAMPAIGN_RUNS_MAX = 5000
+_A_CAMPAIGN_ID = "캠페인 id — create_campaign 응답의 campaign_id(같은 이름으로 다시 만들면 오류 글에 그 id 가 있다)."
+
+
+@mcp.tool()
+async def create_campaign(
+    name: Annotated[str, Field(description="캠페인 이름(1~255자) — 내 캠페인 안에서 하나뿐이어야 한다.")],
+    ctx: Context,
+    project: Annotated[str | None, Field(
+        description="과제명(선택 · 64자까지) — 적어 두는 값이다. 리포트 메타는 intake 폼의 project 가 정한다.")] = None,
+    dev_rev: Annotated[str | None, Field(
+        description="개발단계(선택) — pre|dv1..dvr|pv1..pvr|pra|mp. 적어 두는 값이다(리포트 메타는 intake 폼의 dev_rev).")] = None,
+    analysis_method: Annotated[str | None, Field(description="해석 방법(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
+    analysis_target: Annotated[str | None, Field(description="해석 대상(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
+    doe_strategy: Annotated[str | None, Field(description="DOE 전략(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
+    drop_height_mm: Annotated[float | None, Field(description="낙하 높이 mm(선택 · 0 이상).")] = None,
+    duration_ms: Annotated[float | None, Field(description="해석 지속 시간 ms(선택 · 0 이상).")] = None,
+    thickness_axis: Annotated[str | None, Field(description="두께 축(선택) — X · Y · Z.")] = None,
+    impactor: Annotated[dict | None, Field(
+        description="충격자(선택) — {mass_g, height_mm, ke_mj} 가운데 아는 것만(0 이상). 다른 열쇠는 거절된다.")] = None,
+) -> dict:
+    """캠페인(한 과제 · 한 판의 런 묶음)을 만든다 — 응답의 `campaign_id` 로 런 목록을 올리고 리포트를 받는다.
+
+    같은 이름을 이미 썼으면 오류고, 그 글에 있던 캠페인의 id 가 있다(id 를 잊었을 때도 이렇게 찾는다 — 캠페인 목록 · 고침 ·
+    지우기 도구는 없다). 차례 — `create_campaign` → `ingest_campaign_manifest`(런 목록) → 런마다 REST intake 에 `campaign_id` ·
+    `run_key` 를 붙여 리포트를 보낸다(`report_upload_instructions`) → `campaign_ingest_status` 로 수를 맞춘다.
+    캠페인은 만든 사람만 본다.
+    Create a campaign (a batch of runs); the same name again is an error whose message carries the existing id."""
+    body = {k: v for k, v in {
+        "name": name, "project": project, "dev_rev": dev_rev, "analysis_method": analysis_method,
+        "analysis_target": analysis_target, "doe_strategy": doe_strategy, "drop_height_mm": drop_height_mm,
+        "duration_ms": duration_ms, "thickness_axis": thickness_axis, "impactor": impactor,
+    }.items() if v is not None}
+    return await _post(ctx, "/campaigns", body)
+
+
+@mcp.tool()
+async def ingest_campaign_manifest(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    runs: Annotated[list[dict], Field(description=(
+        f"런 목록(1~{CAMPAIGN_RUNS_MAX}건) — 항목마다 run_key(필수 · 빈칸 없는 글 128자까지 · `stcx:<잡 id>:<DOE>` 꼴을 권한다) · "
+        "doe · pitch · roll(선택). 다른 열쇠는 거절된다."))],
+    ctx: Context,
+) -> dict:
+    """캠페인의 런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
+
+    새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 **보낸 칸**(doe · pitch · roll)만 맞춘다 — 안 보낸 칸은
+    그대로고 null 을 보내면 비운다. 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고, 목록에서 런을 빼는 길은
+    없다. 목록에 없는 `run_key` 로 온 리포트는 거절된다 — 목록을 먼저 올린다. 응답은 `added` · `updated` · `unchanged` · `listed`.
+    Upload a campaign's run manifest (idempotent upsert; runs are never removed)."""
+    return await _post(ctx, f"/campaigns/{_seg(campaign_id)}/runs", {"runs": runs})
+
+
+@mcp.tool()
+async def campaign_ingest_status(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    state: Annotated[str | None, Field(
+        description=f"이 상태의 런만(선택) — {_one_of(CAMPAIGN_STATES)}. 비우면 모두.")] = None,
+    limit: Annotated[int, Field(
+        description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 수(`counts`)는 이 값과 무관하게 캠페인 전체다.")] = 200,
+    offset: Annotated[int, Field(description="건너뛸 런 수(목록 순서) — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """캠페인의 적재 상태 — 목록 수 · 상태별 수(`counts`) · 런마다 상태 · report_id · 지문(sha256) · 거절 까닭.
+
+    `counts.listed = pending + received + skipped + rejected` 가 늘 맞는다. `ingest_state` 는 그 런의 **마지막 시도 결과**고
+    `report_id` 는 그 런이 **가진 리포트**다 — 가진 리포트가 있는데 뒤에 다른 내용이 와 거절된 런은 rejected 이면서 report_id 가
+    있다(`counts.with_report` 가 리포트를 가진 런 수). pending = 목록에만 있다(또는 가졌던 리포트가 지워졌다) · received = 받았다 ·
+    skipped = 같은 내용이 다시 와 건너뛰었다 · rejected = 거절(`reject_reason`).
+    ★다시 올리기 전에 `state` 를 pending · rejected 로 걸러 그 런만 보낸다 — 건너뛰는 런도 파일을 통째로 보내야 건너뛴다.
+    ★런에 적히지 않는 실패 — 401(토큰) · 429(분당 한도) · 요청 꼴 오류(file 칸 없음) · 게이트웨이가 앞에서 막은 요청 · 5xx 는
+    런 상태를 바꾸지 않는다(앞 그대로다).
+    Ingest status of a campaign: counts (listed = pending+received+skipped+rejected) and per-run state/report/sha256/reason."""
+    params = {"limit": limit, "offset": offset}
+    if state is not None:
+        params["state"] = state
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/ingest-status", params)
 
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────

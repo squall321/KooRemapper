@@ -136,6 +136,7 @@ PATH_CALLS = (
     ("compare_task_revisions", lambda v: {"task_key": v}),
     ("ontology_object", lambda v: {"type_slug": v, "key": v}),
     ("recipe_get", lambda v: {"name": v}),
+    ("ingest_campaign_manifest", lambda v: {"campaign_id": v, "runs": [{"run_key": "k"}]}),
 )
 
 

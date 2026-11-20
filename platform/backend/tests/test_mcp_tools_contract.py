@@ -185,6 +185,39 @@ def test_the_cae_allowed_values_are_the_backend_constraints():
     assert c["CAE_SEVERITIES"] == ranked, "판정은 높은 것부터 — 소견만 쓰는 INFO 는 파트 판정에 없다"
 
 
+# ── 캠페인 묶음 적재 도구(DF-01 · 11-20) ─────────────────────────────────────
+
+CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_ingest_status")
+
+
+@needs_mcp
+def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
+    got = _probe("schemas", *CAMPAIGN_TOOLS)["tools"]
+    assert set(got) == set(CAMPAIGN_TOOLS), sorted(got)
+    missing = [f"{t}.{a}" for t in CAMPAIGN_TOOLS for a, spec in (got[t].get("properties") or {}).items()
+               if not str(spec.get("description") or "").strip()]
+    assert not missing, missing
+    # 도구의 인자가 REST 본문의 칸과 같다 — 한쪽에만 칸이 생기면 그 칸은 MCP 로 못 보내거나 422 가 된다(모르는 칸은 거절)
+    from app.modules.campaigns.routes import CampaignBody
+    assert set(got["create_campaign"]["properties"]) == set(CampaignBody.model_fields)
+    c = _server_constants()
+    status = got["campaign_ingest_status"]["properties"]
+    assert all(v in status["state"]["description"] for v in c["CAMPAIGN_STATES"])
+    assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in status["limit"]["description"]
+    assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in got["ingest_campaign_manifest"]["properties"]["runs"]["description"]
+
+
+def test_the_campaign_allowed_values_are_the_backend_constraints():
+    c = _server_constants()
+    from app.modules.campaigns.routes import RunsBody
+    from app.modules.campaigns.services import STATES
+    assert c["CAMPAIGN_STATES"] == STATES
+    limit = _query("/api/v1/campaigns/{campaign_id}/ingest-status", "limit")
+    assert c["CAMPAIGN_RUNS_MAX"] == next(m.le for m in limit.metadata if hasattr(m, "le"))
+    assert c["CAMPAIGN_RUNS_MAX"] == next(m.max_length for m in RunsBody.model_fields["runs"].metadata
+                                          if hasattr(m, "max_length"))
+
+
 # ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────
 # 예전엔 경로에 사용자 값을 그대로 넣어 `ID?` 가 `DELETE /api/v1/reports/ID`(리포트 지우기)로, `#` 이 뒤를 자르고, `..` 이 남의 길로
 # 갔다. 이제 경로의 사용자 값은 모두 `_seg(…)`(quote safe='' + 점 칸 감싸기)를 지나고, ★`/` · `\` 가 든 값은 거절한다 — 백엔드
@@ -230,6 +263,7 @@ PATHS = {   # 도구 → 백엔드가 받아야 할 경로(s 는 `_seg` 로 감�
     "compare_task_revisions": "/api/v1/ontology/tasks/{k}/compare",
     "ontology_object": "/api/v1/ontology/objects/{s}/{k}",
     "recipe_get": "/api/v1/recipes/{s}",
+    "ingest_campaign_manifest": "/api/v1/campaigns/{s}/runs",
 }
 
 
