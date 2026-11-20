@@ -145,15 +145,16 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
     std::ifstream in(path);
     if (!in.is_open()) return;
     size_t lineNo = 0;
-    const int sfw = 10;                        // `*PART` 카드 2 와 `*SECTION_*` 은 8I10 이다
     std::string line, kw;
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
-    int setW = 10;                             // `*SET_PART` 카드 폭(8I10 · long 이면 20)
+    // `*PART` 카드 2 · `*SECTION_SOLID` · `*SET_PART` 의 칸 폭 — 표준 · i10 은 10, long(`LONG=Y` · 접미사 `+`)은 20 이다. long 은 표준에서
+    // 20 칸 이하인 칸이 다 20 칸이다(Vol_I 19315-19316). 예전엔 앞의 둘을 늘 10 으로 읽어 long 덱의 PID 가 0 이었다(「No *PART」)
+    int cardW = 10;
 
     auto flush = [&]() {
         if (kw == "*PART" || kw == "*PART_TITLE") {
             for (size_t k = 0; k + 1 < buf.size(); k += 2) {
-                auto f = cardFields(buf[k + 1], sfw);
+                auto f = cardFields(buf[k + 1], cardW);
                 PartDef pd;
                 pd.pid = fieldInt(f, 0);
                 if (pd.pid <= 0) continue;
@@ -170,7 +171,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             for (const auto& l : buf) {
                 if (!isDataLine(l)) continue;
                 if (di == want) {
-                    auto f = cardFields(l, sfw);
+                    auto f = cardFields(l, cardW);
                     int sid = fieldInt(f, 0);
                     if (sid > 0 && !idx.secElform.count(sid)) idx.secElform[sid] = fieldInt(f, 1);
                 }
@@ -187,7 +188,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             for (const auto& l : buf) {
                 if (!isDataLine(l)) continue;
                 if (di < tn) { ++di; continue; }
-                const auto f = cardFields(l, setW);
+                const auto f = cardFields(l, cardW);
                 if (di++ == tn) { sid = fieldInt(f, 0); continue; }
                 for (size_t q = 0; q < (column ? std::min<size_t>(1, f.size()) : f.size()); ++q) {
                     const int v = fieldInt(f, q);
@@ -218,7 +219,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) idx.fieldWidth = w;
             }
-            setW = KooRemapper::keywordFieldWidth(line, idx.fieldWidth) >= 20 ? 20 : 10;
+            cardW = KooRemapper::keywordFieldWidth(line, idx.fieldWidth) >= 20 ? 20 : 10;
             if (starts(kw, "*PART") && kw != "*PART" && kw != "*PART_TITLE" &&
                 std::find(idx.partVariants.begin(), idx.partVariants.end(), kw) ==
                     idx.partVariants.end())
@@ -766,12 +767,16 @@ struct Writer {
         *out << l << "\n";
     }
 
+    // 일반 카드의 ID 칸 폭(`*PART` 카드 2 · `*SECTION` · `*MAT` · `*EOS` · `*HOURGLASS`) — 표준 · i10 은 10, long 은 20(Vol_I 19315-19316).
+    // `fw` 는 버퍼한 블록의 키워드 폭이다(`onKeyword` 가 내보낸 뒤에 바꾼다)
+    int idW() const { return fw >= 20 ? 20 : 10; }
+
     void flushBlock() {
         if (act == Act::PART) {
             const size_t firstCard = cardIdx.empty() ? buf.size() : cardIdx.front();
             std::vector<std::string> emit;
             for (size_t k = 0; k + 1 < cardIdx.size(); k += 2) {
-                int pid = fieldInt(cardFields(buf[cardIdx[k + 1]], 10), 0);
+                int pid = fieldInt(cardFields(buf[cardIdx[k + 1]], idW()), 0);
                 if (pid <= 0 || !inSorted(sel, pid)) continue;
                 emit.push_back(buf[cardIdx[k]]);
                 emit.push_back(buf[cardIdx[k + 1]]);
@@ -790,7 +795,7 @@ struct Writer {
             // 파트는 경고다), 조용히 빠뜨리는 쪽이 훨씬 나쁘다. 수로 적는다.
             bool hit = false;
             for (size_t i : cardIdx) {
-                int pid = fieldInt(cardFields(buf[i], 10), 0);
+                int pid = fieldInt(cardFields(buf[i], idW()), 0);
                 if (pid > 0 && inSorted(sel, pid)) { hit = true; break; }
             }
             if (hit) {
@@ -807,7 +812,7 @@ struct Writer {
                                                                   : &nd.hgids;
             bool hit = false;
             for (size_t i : cardIdx) {
-                int id = fieldInt(cardFields(buf[i], 10), 0);
+                int id = fieldInt(cardFields(buf[i], idW()), 0);
                 if (id <= 0) continue;
                 if (inSorted(*want, id)) { hit = true; break; }
                 if (starts(kw, "*MAT") && inSorted(nd.tmids, id)) { hit = true; break; }
@@ -1261,7 +1266,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             remaining = 0;
             dataIdx = 0;
             inMat = starts(kw, "*MAT");
-            if (inMat) matLines.push_back(line);
+            if (inMat || kw == "*KEYWORD") matLines.push_back(line);   // `*KEYWORD` — 재질 훑기가 덱 폭(long 20)을 거기서 읽는다
             inElem = starts(kw, "*ELEMENT");
             if (inElem) {
                 info = KooRemapper::parseElementKeyword(line);
@@ -1333,7 +1338,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             const int nid = fieldInt(cardFields(line, fw), 0);
             if (nid > 0) nodes.push_back(nid);
         } else if (starts(kw, "*SECTION")) {
-            int id = fieldInt(cardFields(line, 10), 0);
+            int id = fieldInt(cardFields(line, fw >= 20 ? 20 : 10), 0);
             if (id > 0) secIds.push_back(id);
         } else if (starts(kw, "*SET_NODE")) {
             const int sfw = (fw >= 20) ? 20 : 10;
