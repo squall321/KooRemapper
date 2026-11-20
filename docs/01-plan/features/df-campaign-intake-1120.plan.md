@@ -21,7 +21,7 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
 | REST | `GET /campaigns/{id}/ingest-status` | 목록 수 · 상태별 수 · 런마다 상태 · report_id · 지문 · 거절 까닭 |
 | REST | `POST /reports/intake` 폼 칸 `campaign_id` · `run_key` | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이면 건너뛰고 다른 내용이면 거절 |
 | MCP | `create_campaign` · `ingest_campaign_manifest` · `campaign_ingest_status` | 위 REST 셋을 그대로 부른다(파일 본문은 MCP 로 나르지 않는다) |
-| 선언 | `capabilities.intake` | `batch` 를 켜고 캠페인 길 · 분당 호출 한도를 싣는다 |
+| 선언 | `capabilities.intake` | `batch` 를 켜고 캠페인 길(`campaign`) · 분당 호출 한도(`rate_limit_per_min`) · 한 호출의 리포트 수(`reports_per_call`)를 싣는다 |
 
 화면(콘솔)은 이 단계에 없다.
 
@@ -44,15 +44,17 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
    `report_id` · `session_id` 와 `ingest_state: "skipped"` 를 준다.
 5. **거절(다른 내용)** — 런이 리포트를 가졌는데 지문이 다르면 409 다. 가진 리포트는 그대로 두고, 까닭에 두 지문을 적는다.
 6. **거절(그 밖)** — 런을 찾은 뒤에 난 4xx(리포트 해석 실패 · 케이스 없음 · 크기 상한 · 깨진 gzip · 묶음 오류 · 없는 세션 …)는 그 글을 까닭으로
-   런에 적고 원래 응답 그대로 돌려준다. 5xx 는 적지 않는다(런 상태는 앞 그대로다).
+   런에 적고 원래 응답 그대로 돌려준다. 5xx 는 적지 않는다(런 상태는 앞 그대로다). 런을 찾기 전이거나 라우트에 닿지 않은 실패 — 401 ·
+   429(분당 한도) · 요청 꼴 오류 422(`file` 칸 없음) · 게이트웨이가 막은 요청 — 도 적히지 않는다.
 7. **목록에 없는 run_key** — 400 이고 런 행을 만들지 않는다(목록을 먼저 올린다). `campaign_id` · `run_key` 는 함께 와야 한다(하나만 오면 400).
 8. **동시에 같은 런** — 저장 직전에 런 행을 잠근다. 늦은 쪽은 아무것도 쓰기 전에 물러나 4 · 5 의 답을 한다 — 리포트는 하나만 생긴다.
 9. **리포트 · 세션을 지우면** — 런의 `report_id` 가 비고(FK), 상태는 읽을 때 `pending` 으로 보인다(받았거나 건너뛴 런만 — 거절된 런은 까닭과
    함께 `rejected` 로 남는다). 그 런은 다시 받을 수 있다.
 10. **수 맞춤** — `counts` 는 `listed = pending + received + skipped + rejected` 이고 `with_report`(리포트를 가진 런 수)를 따로 준다.
 11. **권한** — 캠페인은 만든 사람만 본다(남의 것 · 없는 것은 404). 리포트 읽기 공유(같은 소속)는 지금 그대로다.
-12. **목록 다시 올리기** — 새 `run_key` 는 `pending` 으로 더하고, 있는 것은 상태 · 리포트를 그대로 둔 채 `doe` · `pitch` · `roll` 만 온 값으로
-    맞춘다. 한 요청 안에 같은 `run_key` 가 둘이면 422 다. 목록에서 런을 빼는 길은 없다.
+12. **목록 다시 올리기** — 새 `run_key` 는 `pending` 으로 더하고, 있는 것은 상태 · 리포트를 그대로 둔 채 `doe` · `pitch` · `roll` 가운데 **보낸
+    칸만** 온 값으로 맞춘다(안 보낸 칸은 그대로 · null 을 보내면 비운다). 한 요청 안에 같은 `run_key` 가 둘이면 422 다. 목록에서 런을 빼는 길은
+    없다. 한 요청에 5,000 런까지.
 13. **세션** — `session_id` 를 보내면 그 세션에, 안 보내면 지금처럼 호출마다 새 세션에 담긴다.
 
 ## 4. 선택지 문장이 말하지 않아 조정 세션이 고른 읽기(확인받을 것)
@@ -65,6 +67,16 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
 - 어휘 칸(analysis_method · analysis_target · doe_strategy)은 온 글 그대로 둔다 — 길이만 본다(목록은 요청 쪽 것이고 이 리포 · SP 거울에 없다).
   `thickness_axis` 만 X · Y · Z 로 본다. `impactor` 의 열쇠 이름 `mass_g` · `height_mm` · `ke_mj`.
 - `doe` 는 글로 둔다(숫자가 와도 글로 바꾼다 — 리포트 수동 메타의 `doe` 와 같은 꼴).
+- (지으며 더함) `capabilities.intake` 의 새 칸 이름 — `reports_per_call`(값 1) · `rate_limit_per_min` · `campaign` 아래 `create` · `manifest` ·
+  `status` · `form_fields` · `states`. `batch: true` 는 「캠페인 묶음 적재가 있다」 는 뜻이고 한 호출은 여전히 리포트 하나다. 이름표에 없던
+  칸이다.
+- (지으며 더함) 응답 칸 — 받음 · 건너뜀 응답의 `campaign_id` · `run_key` · `ingest_state` · `content_sha256`, 거절(409) 응답 `data` 의
+  `offered_sha256`, 목록 올리기 응답의 `added` · `updated` · `unchanged` · `listed`, 상태 응답의 `counts`(`with_report` 포함) · `matched` ·
+  `runs`.
+- (지으며 더함) `ingest-status` 가 받는 것 — `state`(상태 단어 하나) · `limit`(기본 200 · 최대 5,000) · `offset`. 런은 올린 차례로 온다.
+- (지으며 더함) 캠페인의 `dev_rev` 는 intake 폼과 같은 꼴만 받는다(틀리면 422) · `project` 는 64 자까지 · `run_key` 는 128 자까지고 빈칸 · 제어
+  문자가 없어야 한다(`stcx:<잡 id>:<DOE>` 꼴은 권할 뿐 검사하지 않는다).
+- (지으며 더함) 런에 적히지 않는 실패(3절 6) — 올린 쪽이 「보냈는데 pending 그대로」 를 보면 이 갈래다.
 
 ## 5. 하지 않는 것
 - 캠페인 목록 · 한 건 읽기 · 고침 · 지우기 · 런 빼기(이름표에 없다). id 를 잊었으면 같은 이름으로 만들기를 부르면 409 가 id 를 준다.
@@ -73,7 +85,7 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
 - KC-01 매니페스트 파일을 그대로 읽기 — 그 꼴을 보지 못했다. 목록은 JSON `{"runs": [...]}` 로 받는다.
 - 출처 · 설정 세대 · 건강 · 추출 칸(② · ③ 단계).
 
-## 6. 검증 사례(시험 `tests/test_campaign_intake.py`)
+## 6. 검증 사례(시험 `tests/test_campaign_intake.py` — 10 · 12 · 13 은 그 밖)
 1. 같은 `run_key` · 같은 지문을 다시 올리면 `skipped` 이고 리포트 수가 늘지 않는다(중복 0) — .gz 로 다시 올려도 같다.
 2. 같은 `run_key` 에 다른 지문은 409 `rejected` · 까닭에 두 지문 · 가진 리포트는 그대로.
 3. 해석 못 하는 파일은 400 이고 런에 `rejected` + 까닭이 남는다. 그 뒤 바른 파일을 올리면 `received` 로 바뀌고 까닭이 지워진다.
@@ -83,7 +95,12 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
 7. 같은 런을 동시에 둘 올리면 리포트는 하나고 다른 하나는 `skipped` 다(세션 · K 파일 찌꺼기 없음).
 8. 목록을 다시 올리면 `added` · `updated` · `unchanged` 가 맞고 받은 런의 상태가 그대로다 · 한 요청 안 겹친 `run_key` 는 422.
 9. 캠페인 없이 부른 intake 는 응답 칸 · 동작이 그대로다(기존 시험).
-10. 큰 리포트(합성 300 MB · 463 MB급)를 지금 상한 안에서 해석할 때의 시간 · 최대 메모리를 잰다(맥락 문서에 숫자).
+10. 큰 리포트(합성 47 ~ 441 MB)를 지금 상한 안에서 해석할 때의 시간 · 최대 메모리를 잰다 — 파싱 구간 네 크기와 실제 HTTP intake 한 번(441 MB).
+    시험 밖이고 숫자는 맥락 문서에 있다.
+11. 요청 꼴 오류(422) · 분당 한도(429)는 런에 적히지 않는다(런은 `pending` 그대로).
+12. 임시 스택(임시 DB 의 API + 이 갈래의 MCP 서버)에서 MCP 도구 셋을 실제 프로토콜로 불러 값으로 잰다 — 시험 밖이고 28 항이 맥락 문서에 있다.
+13. MCP 계약 시험 — 도구 셋의 인자 설명 · 허용 값이 백엔드 제약과 같고 `create_campaign` 의 인자가 REST 본문의 칸과
+    같다(`tests/test_mcp_tools_contract.py`).
 
 ## 7. 올리는 차례(확인받은 뒤)
 1. 갈래를 main 에 합친다 → dev DB 에 `alembic upgrade head`(0021) → 살아 있는 잡이 없을 때 API · MCP 재기동 → 스모크.
@@ -95,3 +112,4 @@ DynaForge 개발 요청서 v1.0(11-17)의 DF-01 이고 설계안 `df-request-111
 - 1,393 건을 실제로 올린 때의 디스크(cae00) · 걸리는 시간 · 운영 게이트웨이의 본문 크기 · 시간 한도. 게이트웨이가 앞에서 막은 요청은 우리에게
   닿지 않아 런에 적히지 않는다.
 - KC-01 매니페스트의 꼴.
+- dev · 운영 스택에서의 값 — 임시 스택(임시 DB · 워커 없음 · 같은 박스)에서만 쟀다. dev 에는 main 에 합치고 0021 을 올린 뒤에 잰다.

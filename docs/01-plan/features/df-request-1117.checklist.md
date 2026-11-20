@@ -30,3 +30,5 @@
 
 ## E. 2차 설계서
 - [ ] E-1 나머지 13건 설계서와 이름표 — 확인받기(설계안 `df-request-1117.design.md` 를 썼다 · 사용자 확인 대기)
+  - ① 단계(DF-01 캠페인 적재)는 11-20 에 갈래 `corelink-int` 에 지었다 — `df-campaign-intake-1120.plan.md`. main 합치기 · dev DB · 게시는 확인
+    뒤.
