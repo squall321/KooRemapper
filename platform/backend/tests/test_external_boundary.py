@@ -115,7 +115,11 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   StepForge 도 같은 날 따라왔다(그쪽 통합 갈래 land/b7 의 1ed5644d — 서브모듈 가리킴 13e6b02 확인 · 그쪽 main 은 동결이라 아직 7744159).
     #   11-17 13e6b02 → 068fd32(v0.4.88 · ls-remote 로 main 끝 확인) — 검토함 · 별칭 후보 · 헬스체크(ADR 0073 ~ 0076). 키트 2026-11-06 그대로 ·
     #   coreapi · ontology 는 diff 0 — 받는 쪽에 닿는 것이 없다. StepForge main 은 13e6b02(27b2132b)라 알렸다(11-17).
+    #   11-20 068fd32 → 3196156(v0.4.98 · ls-remote 로 main 끝 확인) — 코어 구독 · 날짜 칸 색인 · 앞머리(ADR 0079 · 0084 ~ 0088). 키트 2026-11-06
+    #   그대로(키트 폴더 diff 0). coreapi 는 바뀌었다 — 새 길 `GET /api/core/sp-definitions`(형제 SP 구독용 · 우리는 안 부른다) · 카탈로그의 최근
+    #   수정 시각 질의(응답 꼴 그대로). 가져오기는 `scope` · `label_prefix` 칸을 더 받는다(우리 정의에는 없다). 받는 쪽은 그대로.
+    #   StepForge main 은 38950d0(v0.4.89 · 그쪽 3404c449)이라 알렸다(11-20).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "068fd325cea07e655fe2f9e2cdd139d2c7173e8d" in status, status
+    assert "31961561439c9475958c3c44aa20fa5fe23f50e4" in status, status
