@@ -462,9 +462,9 @@ void KFileWriter::writeShellSections(std::ostream& file, const Mesh& mesh) {
 }
 
 void KFileWriter::copyShellBlocks(std::ostream& file, std::istream& src) {
-    skippedShell_.clear();
+    skippedGrid_.clear();
     bool copying = false;
-    int skipped = -1;   // 옮기지 않는 변형 블록 안이면 `skippedShell_` 의 그 자리
+    int skipped = -1;   // 옮기지 않는 변형 블록 안이면 `skippedGrid_` 의 그 자리
     std::string line;
     while (std::getline(src, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -472,20 +472,21 @@ void KFileWriter::copyShellBlocks(std::ostream& file, std::istream& src) {
             const std::string name = gridReaderKeywordName(line);
             if (name == "END") break;   // 리더도 첫 `*END` 에서 멈춘다
             const bool shellFamily = name.rfind("ELEMENT_SHELL", 0) == 0 || name.rfind("ELEMENT_TSHELL", 0) == 0;
-            copying = shellFamily && gridReaderReadsKeyword(line);
+            const bool reads = gridReaderReadsKeyword(line);
+            copying = shellFamily && reads;
             skipped = -1;
-            if (shellFamily && !copying) {
-                // 리더가 읽지 않는 변형 — 메시에 없어 옮기지 않는다. 무엇이 빠졌는지 부르는 쪽이 알리게 센다
-                for (size_t i = 0; i < skippedShell_.size(); ++i)
-                    if (skippedShell_[i].keyword == name) skipped = static_cast<int>(i);
+            if ((shellFamily || name.rfind("ELEMENT_SOLID", 0) == 0) && !reads) {
+                // 리더가 읽지 않는 격자 변형 — 메시에 없어 산출에도 없다. 무엇이 빠졌는지 부르는 쪽이 알리게 센다
+                for (size_t i = 0; i < skippedGrid_.size(); ++i)
+                    if (skippedGrid_[i].keyword == name) skipped = static_cast<int>(i);
                 if (skipped < 0) {
-                    skippedShell_.push_back({name, 0, 0});
-                    skipped = static_cast<int>(skippedShell_.size()) - 1;
+                    skippedGrid_.push_back({name, 0, 0});
+                    skipped = static_cast<int>(skippedGrid_.size()) - 1;
                 }
-                ++skippedShell_[skipped].blocks;
+                ++skippedGrid_[skipped].blocks;
             }
         } else if (skipped >= 0 && line.find_first_not_of(" \t") != std::string::npos && line[0] != '$') {
-            ++skippedShell_[skipped].lines;
+            ++skippedGrid_[skipped].lines;
         }
         if (copying) file << line << "\n";
     }

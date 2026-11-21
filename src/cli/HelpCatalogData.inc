@@ -353,7 +353,7 @@ quality:
 )KRH"}},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper tetremesh tet.yaml"},
      {},
-     {"산출은 메시(*NODE · 요소)만이다 — *PART · *SECTION · *MAT 같은 메시 밖 카드는 원본 덱에서 옮겨 붙인다", "셸 · 두께 셸은 리더가 읽은 블록(*ELEMENT_SHELL 과 _THICKNESS · _BETA · _MCID · _OFFSET · _DOF · *ELEMENT_TSHELL)을 읽은 덱에서", "  줄째 옮긴다 — 두께 카드 · 8절점 셸의 N5-N8 이 그대로다(2026-11-21 전엔 4절점 · 두께 카드 없이 rc 0 으로 썼다).", "  리더가 안 읽는 셸 · 두께 셸 변형(*ELEMENT_SHELL_COMPOSITE · *ELEMENT_TSHELL_BETA …)은 싣지 않고 [WARN] 으로 키워드마다", "  블록 수 · 데이터 줄 수를 찍는다(산출은 그대로). 그 밖의 안 읽는 것(*ELEMENT_SOLID_ORTHO · 빔 …)은 경고 없이 없다(원래부터)", "산출 첫 줄이 읽은 덱의 칸 폭을 선언한다(*KEYWORD · I10=Y · LONG=Y) — 예전엔 I10=Y 덱도 8칸으로 썼다. 번호가 그 칸에", "  안 들어가면 쓰지 않고 rc 1"}},
+     {"산출은 메시(*NODE · 요소)만이다 — *PART · *SECTION · *MAT 같은 메시 밖 카드는 원본 덱에서 옮겨 붙인다", "셸 · 두께 셸은 리더가 읽은 블록(*ELEMENT_SHELL 과 _THICKNESS · _BETA · _MCID · _OFFSET · _DOF · *ELEMENT_TSHELL)을 읽은 덱에서", "  줄째 옮긴다 — 두께 카드 · 8절점 셸의 N5-N8 이 그대로다(2026-11-21 전엔 4절점 · 두께 카드 없이 rc 0 으로 썼다).", "  리더가 안 읽는 솔리드 · 셸 · 두께 셸 변형(*ELEMENT_SOLID_ORTHO · *ELEMENT_SHELL_COMPOSITE · *ELEMENT_TSHELL_BETA …)은 싣지", "  않고 [WARN] 으로 키워드마다 블록 수 · 데이터 줄 수를 찍는다(산출은 그대로 · 솔리드 변형은 다시 나누지도 않는다).", "  그 밖의 안 읽는 것(빔 · 질량 …)은 경고 없이 없다(원래부터)", "산출 첫 줄이 읽은 덱의 칸 폭을 선언한다(*KEYWORD · I10=Y · LONG=Y) — 예전엔 I10=Y 덱도 8칸으로 썼다. 번호가 그 칸에", "  안 들어가면 쓰지 않고 rc 1"}},
     {"meshfix", "표면·재메시", "TET4 파트를 Gmsh 로 전체 재메시 (gmsh 실행 파일 필요)", "gmsh 재메시", "KooRemapper meshfix <config.yaml>",
      {{"meshfix.yaml", R"KRH(model: demo_flat_tet.k
 output: remeshed.k

@@ -355,7 +355,7 @@ def body(binary, root):
               "rc %d 빠진 것 %s" % (rc, sorted(set(range(1, 101)) - set(got))))
         same_rows(tag, os.path.join(d, "box.k"), o, name, 10)
 
-    print("[T-8] tetremesh — 싣지 않은 셸 · 두께 셸 변형 블록을 경고로 찍는다(산출은 그대로)")
+    print("[T-8] tetremesh — 싣지 않은 셸 · 두께 셸 · 솔리드 변형 블록을 경고로 찍는다(산출은 그대로)")
 
     def skipped(out):
         """경고 줄에서 {키워드: (블록 수, 데이터 줄 수)}."""
@@ -389,6 +389,30 @@ def body(binary, root):
           rc == 0 and skipped(out) == {"*ELEMENT_SHELL_COMPOSITE": (2, 10)}, "rc %d %r" % (rc, skipped(out)))
     check("T-8b 같은 변형이 두 블록 — 산출은 변형 없는 덱의 산출과 같다", rc == 0 and undated(o) == plain,
           "%d 줄 · 변형 없는 덱 %d 줄" % (len(undated(o)), len(plain)))
+
+    def solid_ortho(hx, eids):
+        return "*ELEMENT_SOLID_ORTHO\n" + "".join(
+            "%8d%8d" % (e, 1) + "".join("%8d" % n for n in h[2:10]) + "\n" + "%10.3f" * 3 % (1.0, 0.0, 0.0) + "\n"
+            + "%10.3f" * 3 % (0.0, 1.0, 0.0) + "\n" for e, h in zip(eids, hx))
+
+    d, s = case_dir(root, "t8c", binary)
+    put(d, s, base + solid_ortho(hx, range(4001, 4006)))
+    rc, out, o = tet(binary, d)
+    check("T-8c 안 읽는 솔리드 변형 — rc 0 · 블록 1 · 데이터 줄 15 를 경고로(다시 나누지 않았다고 적는다)",
+          rc == 0 and skipped(out) == {"*ELEMENT_SOLID_ORTHO": (1, 15)}
+          and any("ELEMENT_SOLID_ORTHO" in l and "다시 나누지" in l for l in out.splitlines()), "rc %d %r" % (rc, skipped(out)))
+    check("T-8c 안 읽는 솔리드 변형 — 산출은 변형 없는 덱의 산출과 같다(변형 블록은 없다)",
+          rc == 0 and undated(o) == plain and not kwlines(o, "*ELEMENT_SOLID_ORTHO"),
+          "%d 줄 · 변형 없는 덱 %d 줄 %r" % (len(undated(o)), len(plain), kwlines(o, "*ELEMENT_")))
+
+    d, s = case_dir(root, "t8d", binary)
+    put(d, s, base + "*ELEMENT_BEAM\n" + "".join("%8d" * 5 % (e, 1, h[2], h[3], h[4]) + "\n" for e, h in zip(range(5001, 5006), hx))
+        + "*ELEMENT_MASS\n" + "".join("%8d%8d%16.4f\n" % (e, h[2], 0.001) for e, h in zip(range(6001, 6006), hx)))
+    rc, out, o = tet(binary, d)
+    check("T-8d 빔 · 질량 블록 — rc 0 · 경고 없이 없다(격자 족 변형만 알린다) · 산출은 변형 없는 덱의 산출과 같다",
+          rc == 0 and not skipped(out) and "싣지 않았다" not in out and undated(o) == plain
+          and not kwlines(o, "*ELEMENT_BEAM") and not kwlines(o, "*ELEMENT_MASS"),
+          "rc %d %r %r" % (rc, skipped(out), kwlines(o, "*ELEMENT_")))
 
     print("[N-6] 공백 없이 붙인 폭 접미사 — 블록을 한 번만 쓴다")
     d, s = case_dir(root, "n6", binary)

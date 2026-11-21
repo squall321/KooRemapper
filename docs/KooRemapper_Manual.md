@@ -4662,10 +4662,11 @@ KooRemapper tetremesh <config.yaml>
 번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 rc 1 이다([§3.1(n)](#31-yaml-공통-규칙-모든-op) · 회귀
 `test_writer_width_shells.py` S · T · W-3). 첫 `*END` 뒤의 셸 블록은 옮기지 않는다(리더도 거기서 멈춘다 · T-7).
 리더가 읽지 않는 요소 변형(`*ELEMENT_SHELL_COMPOSITE` · `*ELEMENT_SOLID_ORTHO` · 빔 …)과 `*PART` · `*SECTION_*` · `*MAT_*` 같은 메시 밖 카드는
-산출에 싣지 않는다(원래부터 · 원본 덱에서 옮겨 붙인다). 그 가운데 ★**셸 · 두께 셸 변형 블록**(`*ELEMENT_SHELL_COMPOSITE` ·
-`*ELEMENT_TSHELL_BETA` …)은 쓴 뒤 `[WARN]` 으로 알린다(2026-11-21) — 키워드마다 블록 수와 데이터 줄 수(주석 · 빈 줄은 안 센다)를 한 줄씩 찍는다.
-산출은 그 블록이 없는 덱의 산출과 같다(싣지 않는 것은 그대로다 · rc 0). `report_only: true` 는 산출을 쓰지 않으니 찍지 않는다. 그 밖의
-것(`*ELEMENT_SOLID_ORTHO` 같은 솔리드 변형 · 빔 · 메시 밖 카드)은 지금도 **경고 없이** 없다(회귀 `test_writer_width_shells.py` T-8).
+산출에 싣지 않는다(원래부터 · 원본 덱에서 옮겨 붙인다). 그 가운데 ★**솔리드 · 셸 · 두께 셸 변형 블록**(`*ELEMENT_SOLID_ORTHO` ·
+`*ELEMENT_SHELL_COMPOSITE` · `*ELEMENT_TSHELL_BETA` …)은 쓴 뒤 `[WARN]` 으로 알린다(2026-11-21) — 키워드마다 블록 수와 데이터 줄 수(주석 · 빈
+줄은 안 센다)를 한 줄씩 찍는다. 솔리드 변형의 요소는 메시에 없어 **사면체로 다시 나누지도 않는다**(그 줄에 그렇게 적는다). 산출은 그 블록이 없는
+덱의 산출과 같다(싣지 않는 것은 그대로다 · rc 0). `report_only: true` 는 산출을 쓰지 않으니 찍지 않는다. 그 밖의 것(빔 · 질량 같은 격자 밖 요소
+· 메시 밖 카드)은 지금도 **경고 없이** 없다(회귀 `test_writer_width_shells.py` T-8).
 
 ---
 
