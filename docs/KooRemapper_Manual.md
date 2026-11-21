@@ -350,6 +350,33 @@ Commands:
 BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물을 냈습니다(2026-09-18 실행 확인).
 바이너리의 `--help` 공통 규칙과 `help squeeze` 주의는 아직 이 두 op 을 예외로 적고 있으나 **문구가 뒤처진 것**입니다([§1](#1-개요) 표 참조).
 
+**2026-11-21 에 다시 쟀습니다.** 도움말 예시가 있는 64 op 가운데 설정 YAML 을 받는 55 op 을 BOM 붙인 설정으로 돌려, 종료 코드 · 화면 ·
+산출이 BOM 없는 쪽과 **전부 같았습니다**. 그 전까지 `cleanup-nodes` 와 `extract-parts` 는 제 손으로 설정을 읽어 BOM 붙은 설정에
+`'model' is required in YAML config` 로 종료 코드 1 이었습니다(이날 고침 — 회귀 `test_yaml_common_rules.py` 의 `ONE_ARG_CMDS`).
+
+⚠ **이 약속은 설정 YAML 까지입니다 — 덱(`.k`) 맨 앞의 BOM 은 op 마다 다릅니다.** 같은 날 덱을 받는 58 op 을 BOM 붙인 덱으로 돌려 잰
+것이며, 아래 가운데 **고친 것은 없습니다**(재기만 했습니다).
+
+- **BOM 없는 쪽과 같음 14** — `unfold` · `extract-surface` · `tetremesh` · `strain` · `info` · `modelmeta` · `linkage-fit` · `section` ·
+  `surfview` · `stackdiagram` · `id_floor` · `extract-parts` · `cleanup-nodes` · `neutralaxis`.
+- **산출에 줄 하나가 더 실림 23**(종료 코드 0) — 쓰는 쪽이 낸 `*KEYWORD` 바로 뒤에 BOM 이 붙은 원본 `*KEYWORD` 줄이 한 번 더 실립니다.
+  `map` · `shellmap`(평판 덱 쪽) · `convert` · `refine` · `elform` · `disconnect` · `offset` · `wrap` · `restack` · `update` · `iga` ·
+  `prestress` · `squeeze` · `formstrain` · `warpage` · `bend` · `indent` · `matdb` · `assemble` · `load` · `boundary` · `rbe` ·
+  `cad_solid_merge_to_deck`.
+- **산출 맨 앞에 BOM 이 그대로 실림 19**(종료 코드 0 · 나머지 바이트는 같음) — `cclip` · `meshfix` · `cnrb2solid` · `merge` · `strip` ·
+  `cnrb2spring` · `contact` · `relax` · `stabilize` · `database` · `hfdamp` · `implicit` · `explicit` · `modal` · `ale` · `optimize` ·
+  `stackwrap` · `applyfold` · `rebind_entities_after_remesh`.
+- ★**`matswap` 의 번들 파일이 BOM 으로 시작하면 종료 코드 0 으로 틀린 덱이 나옵니다** — 첫 줄 `*PARAMETER` 가 읽히지 않아(`params=5` →
+  `params=0`) 번들이 새 번호를 받지 못합니다. 파트는 지워진 옛 SECID · HGID 를 가리키고 번들 카드는 `&HGID1` 같은 매개변수 이름째
+  실립니다([§23](#23-matswap--재료-번들-교체)). 모델 덱 쪽 BOM 은 위의 「줄 하나」 뿐입니다.
+- `apply_carryover_plan` 은 종료 코드 1 로 멈춥니다 — 덱은 바이트가 달라져 `deck_sha` 로(계약 그대로), 조각 파일은 「키워드 밖의 데이터
+  줄」 로.
+- **인클루드 파일** 맨 앞의 BOM 은 잰 범위에서 결과를 바꾸지 않았습니다 — 쪼갠 덱을 그대로 받는 18 op, `flatten_includes: true` 로 펼쳐
+  도는 42 op 모두 BOM 없는 인클루드와 종료 코드 · 화면 · 산출이 같았습니다.
+
+그러니 **덱 · 번들 · 조각 파일은 BOM 없이 저장하십시오.** BOM 으로 시작하는 덱이나 BOM 붙은 `*KEYWORD` 줄이 낀 덱을 LS-DYNA 가 받는지는
+재지 못했습니다(라이선스 만료). JSON 입력(계획 · 대응표)의 BOM 과 도움말 예시 밖의 설정 꼴도 재지 않았습니다.
+
 #### (f) 단독 op 의 `output` 은 필수
 
 단독 op(`wrap`·`update`·`restack`·`bend`·`indent`·`formstrain`·`convert`·`refine`·`elform`·`disconnect`·`iga`·`warpage`·`offset`·
@@ -2242,6 +2269,11 @@ Rubber_HG
 ```
 
 > **대상 PART 카드**: `*PART` 데이터 줄이 PID·SECID·MID 3칸뿐인 모델(예: `generate box` 출력)도 인식합니다(예전엔 `PID not found`).
+
+> ⚠ **번들 파일은 BOM 없이 저장하십시오**(2026-11-21 실측 · 고치지 않음). BOM 으로 시작하면 첫 줄 `*PARAMETER` 가 읽히지 않아 화면이
+> `params=5 cards=31` 에서 `params=0 cards=36` 으로 바뀌고, **종료 코드 0** 으로 `Updated PID 1 -> SECID=1 MID=1 HGID=1`(BOM 없으면
+> `SECID=3 … HGID=3`)인 덱이 나옵니다 — 그 SECID · HGID 는 바로 앞에서 지운 번호이고, 번들 카드는 `&HGID1` · `&SECID1` 을 매개변수
+> 이름째 싣습니다. 화면의 `params=0` 이 표지입니다([§3.1(e)](#31-yaml-공통-규칙-모든-op)).
 
 ### 파라미터 이름 접두사 규칙
 
@@ -5503,6 +5535,11 @@ KooRemapper cleanup-nodes <config.yaml>
   열어(잘라 비워) 놓고 주 덱을 다시 흘려 읽는다. 2026-11-07 전엔 같은 파일이면 입력이 0 바이트가 되고 되읽기도 빈 덱을 보아 rc 0 이었다.
   설정 YAML · 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일도 덮지 않는다 — 산출 덱은 그 변형 카드를 그대로 실으니
   덮으면 산출이 가리키는 파일이 사라진다(재검토 R3 과 같은 규칙 · 회귀 M 절).
+- ★**파일 맨 앞의 UTF-8 BOM 은 건너뛴다**(설정 YAML · 주 덱 · 인클루드 · 산출에 싣지 않는다 — 2026-11-21). 인클루드 닫힘은 전부터 BOM 을
+  뗐는데 이 op 이 제 손으로 파일을 걷는 다섯 자리(섹션 훑기 · 참조 훑기 · 상자 재기 · 고쳐 쓰기 · 설정 읽기)는 떼지 않았다. BOM 으로 시작하는
+  인클루드의 첫 줄이 `*PART` 면 **rc 0 으로 쓰이는 절점 둘을 지웠고**(보고 `used_by_elements` 20 → 18), 첫 줄이 `*ELEMENT_SOLID` 면 보고가
+  `used_by_elements 0` 이었으며, 첫 줄이 `*NODE` 인 인클루드와 BOM 붙은 설정은 rc 1, 주 덱의 BOM 은 산출에 그대로 실렸다. 지금은 BOM 이
+  있든 없든 rc · 보고 · 산출 바이트가 같다(회귀 N 절 여섯 꼴).
 
 ### 47.4 되읽기 검증 — 이 op 의 유일한 강한 증거
 
@@ -5725,7 +5762,8 @@ wrote」 는 바꿔 넣은 뒤에만 찍는다).
   줄이 키워드 줄로 읽히지 않았다. 고른 파트의 요소가 주 덱과 인클루드에 나뉘어 있고 그 인클루드의 첫 줄이 `*ELEMENT_SOLID` 면 **rc 0 · 되읽기 0
   으로 인클루드 쪽 요소가 빠진 덱**이 나왔고, 첫 줄이 `*NODE` · `*PART` 인 인클루드와 `LONG=Y` 주 덱은 「미정의 절점」 · 「No *PART」 같은
   엉뚱한 까닭으로 rc 1 이었으며, `$` 주석 · `*KEYWORD` 로 시작하는 파일은 rc 0 이지만 BOM 바이트가 산출 한가운데 실렸다. 지금은 BOM 이 있든 없든
-  산출이 바이트까지 같다. 회귀 `test_extract_parts_long.py` B(아홉 꼴 × 네 항) · `test_seatbelt_card_layout.py` F-3.1.
+  산출이 바이트까지 같다. 회귀 `test_extract_parts_long.py` B(아홉 꼴 × 네 항) · `test_seatbelt_card_layout.py` F-3.1. **설정 YAML** 맨 앞의
+  BOM 도 같은 날 떼게 했다 — 그 전엔 첫 키를 못 읽어 `'model' is required in YAML config` 로 rc 1 이었다(회귀 Bj).
 - **못 읽는 인클루드가 하나라도 있으면 거절한다**(rc=1) — 못 찾음 · 못 엶 · 16단을 넘은 중첩 · 따라가지 않는 파일 인클루드
   (`*INCLUDE_TRANSFORM` · `_AUTO_OFFSET` · `_BINARY` · `_NASTRAN` · `_STAMPED_*` … — 안을 모르니 고른 파트가 거기 있는지 증명할 수
   없다). 줄마다 「파일:줄」 을 댄다. 그 안의 파트가 조용히 빠지는 쪽이 훨씬 나쁘다. `*INCLUDE_PATH` · `_PATH_RELATIVE` 는 탐색 경로라

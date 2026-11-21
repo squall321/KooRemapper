@@ -249,3 +249,60 @@
   T-8d(빔 · 질량 블록 → 경고 없이 없다). 고치기 전 판은 T-8c 경고 항이 빨갛다. 119 항 · 단위 245 · 도움말 시험 초록.
 - **전제를 말하던 글 셋** — 매뉴얼 43.8 · 도움말(tetremesh 주) · SKILL 의 「솔리드 변형은 경고 없이 없다」 를 「솔리드 · 셸 · 두께 셸 변형은
   경고」 로. 경고 없이 없는 것은 빔 · 질량 같은 격자 밖 요소와 메시 밖 카드다(빔 · 질량은 T-8d 로 쟀다).
+- **변이 여덟(H-5)** — 솔리드 족을 세지 않는다 · 요소 블록이면 다 센다(빔 · 질량도) · 리더가 읽는 블록도 센다 · 솔리드 줄 끝을 셸 것으로 쓴다 ·
+  솔리드 변형 블록을 산출에 옮긴다, 그리고 앞 커밋 변이 셋을 새 코드에 다시(두께 셸 족을 안 센다 · 경고를 안 찍는다 · 셸 변형 블록을 산출에
+  옮긴다). 모두 빨갛다(`test_writer_width_shells.py` — 단위 시험은 이 변이들을 못 본다).
+
+## 2026-11-21 · BOM 이웃 셋(H-4)
+
+- **고치기 전 실측** — cleanup-nodes · extract-parts 는 BOM 붙은 설정 YAML 에 rc 1 「'model' is required in YAML config」 였다. cleanup-nodes 의
+  덱 쪽은 꼴마다 달랐다. 주 덱의 BOM 은 산출 첫 줄에 실렸고(`LONG=Y` 주 덱은 보고도 달랐다), BOM 으로 시작하는 인클루드의 첫 줄이 `*PART` 면
+  **rc 0 으로 쓰이는 절점 둘을 지웠으며**(지운 절점 3 · `used_by_elements` 18 — 쌍둥이는 1 · 20), 첫 줄이 `*ELEMENT_SOLID` 면 보고의
+  `used_by_elements` 가 0 이었고(산출은 같았다), 첫 줄이 `*NODE` 면 rc 1 이었다.
+- **지은 것** — `yamlSkipBOM` 한 줄을 여섯 자리에 넣었다. cleanup-nodes 의 덱 걸음 넷(섹션 훑기 · 참조 훑기 · 상자 재기 · 고쳐 쓰기)과 설정
+  읽기, extract-parts 의 설정 읽기다. 새 함수는 없다 — 인클루드 닫힘과 주 덱 리더가 쓰던 그 함수다.
+- **시험** — 실패하는 시험을 먼저 썼다. `test_cleanup_nodes.py` N 절 여섯 꼴(BOM 없는 쌍둥이와 rc · 보고 · 산출 바이트를 견준다 — 93 항),
+  `test_extract_parts_long.py` Bj(77 항), `test_yaml_common_rules.py` 의 한 인자 명령 목록에 둘(124 항). 고치기 전 판에서 새 항이 모두
+  빨갛다.
+- **변이 여섯** — 뗀 줄 여섯을 하나씩 지웠다. 모두 빨갛다. 커밋 `2fcd8f7`.
+- **매뉴얼** — 3.1(e)에 다시 잰 날과 두 op 을, 47.3 과 48.2 에 한 줄씩 적었다. 3.1(e)의 「예외는 없습니다」 는 설정 YAML 55 op 실측으로
+  그대로 선다(아래 H-6).
+- **건드리지 않은 글** — `help squeeze` 주의의 「이 op 만은 아직 BOM 이 붙으면 rc=1」 은 9-18 부터 뒤처진 문장이다(매뉴얼 머리의 표와 MCP
+  카탈로그가 그렇게 적고 있고, 이번 Y 열에서도 squeeze 는 같았다). 받은 결정 밖이라 그대로 두고 보고에 적는다.
+
+## 2026-11-21 · BOM 훑기 표(H-6 — 재기만)
+
+- **잰 법** — 도움말 카탈로그(`tools/help/ops_help.py` 의 `OPS` 64)의 예시를 그대로 차려 돌리는 훑기(`bomsweep.py` — 스크래치)다. op 마다
+  맨 것을 두 번 돌려 흔들리는 줄(날짜 · 걸린 시간)을 배우고, 입력에 BOM 을 붙인 쌍둥이를 돌려 rc · 화면 · 산출 파일을 견준다. 꼴은 넷이다.
+  M 은 덱 맨 앞(전부, 그리고 덱이 여럿이면 하나씩), I 는 덱을 `*KEYWORD` + `*INCLUDE` + `*END` 로 쪼갠 뒤 인클루드 맨 앞, F 는 그 쪼갠 덱에
+  `flatten_includes: true` 를 준 것, Y 는 설정 YAML 맨 앞이다. 바이너리는 H-4 를 고친 판(`2fcd8f7`)이고 통째로 두 번 돌려 결과가 같았다.
+- **Y(설정 YAML)** — 설정을 받는 55 op 모두 같다. 매뉴얼 3.1(e)가 카탈로그 예시 꼴 전부에서 선다.
+- **I · F(인클루드)** — BOM 붙은 인클루드와 BOM 없는 인클루드의 결과는 58 op 모두 같다. 다만 쪼갠 덱 자체가 rc 0 인 것은 18 op 뿐이고
+  (나머지 40 은 쪼갠 덱을 거절하거나 실패한다 — 대개 `flatten_includes` 안내) 펼쳐 도는 쪽은 50 op 가운데 42 가 rc 0 이다. 뜻 있는 비교는
+  그 18 과 42 다.
+- **M(덱 맨 앞) 58 op**
+  - 같음 14 — unfold · extract-surface · tetremesh · strain · info · modelmeta · linkage-fit · section · surfview · stackdiagram · id_floor ·
+    extract-parts · cleanup-nodes · neutralaxis.
+  - 줄 하나가 더 실림 23(rc 0 · 쓰는 쪽 `*KEYWORD` 뒤에 BOM 붙은 원본 `*KEYWORD` 줄 · 12 바이트) — map · shellmap(평판 덱 쪽) · convert ·
+    refine · elform · disconnect · offset · wrap · restack · update · iga · prestress · squeeze · formstrain · warpage · bend · indent · matdb ·
+    assemble · load · boundary · rbe · cad_solid_merge_to_deck.
+  - 산출 맨 앞에 BOM 이 실림 19(rc 0 · 나머지 바이트 같음) — cclip · meshfix · cnrb2solid · merge · strip · cnrb2spring · contact · relax ·
+    stabilize · database · hfdamp · implicit · explicit · modal · ale · optimize · stackwrap · applyfold · rebind_entities_after_remesh.
+  - ★matswap — **번들** 덱이 BOM 으로 시작하면 **rc 0 으로 틀린 덱**이다. 첫 줄 `*PARAMETER` 가 안 읽혀 화면이 `params=5 cards=31` 에서
+    `params=0 cards=36` 이 되고, 파트는 지워진 옛 SECID · HGID 를 가리키며(`Updated PID 1 -> SECID=1 MID=1 HGID=1` — 맨 것은 3 · 1 · 3) 번들
+    카드는 `&HGID1` · `&LCID1` · `&MID1` · `&SECID1` 을 이름째 싣는다. 모델 덱 쪽 BOM 은 「줄 하나」 뿐이다.
+  - apply_carryover_plan — rc 1. 덱은 바이트가 달라져 `deck_sha` 로(계약 그대로), 조각 파일은 「조각 1째 줄 — 키워드 밖의 데이터 줄」 로
+    거절한다(까닭 글이 BOM 을 말하지 않는다).
+- **갈래** — 설치된 판(Drive 에 올라 있는 바이너리 · 소스 `c37bd03`)으로 map · convert · merge · cclip · matswap 을 돌려 같은 결과를 봤다.
+  이번에 들인 것이 아니라 **기존**이다. 뿌리는 둘로 보인다(코드로 확인한 것은 아니다) — 원본을 따라 쓰는 쪽이 BOM 붙은 `*KEYWORD` 줄을
+  키워드로 못 알아보는 것, 덱을 줄째 옮기는 op 들이 첫 줄을 그대로 싣는 것.
+- **못 잰 것** — BOM 으로 시작하는 덱 · BOM 붙은 `*KEYWORD` 줄이 낀 덱을 LS-DYNA 가 받는지(라이선스 만료) · JSON 입력(계획 · 대응표)의
+  BOM · 카탈로그 예시 밖의 설정 꼴.
+- **곁에서 본 것(BOM 아님)** — 쪼갠 덱(I 의 맨 것)에서 `strain` 은 rc 0 「Loaded 0 nodes, 0 elements」 로 72 바이트 CSV 를 내고, `squeeze`
+  (`squeeze <mesh> <config> <prefix>` 꼴)는 rc 0 「Loaded 0 nodes, 0 elements, 0 parts」 로 380 바이트 dynain 을 낸다. `assemble` 은 같은 덱을
+  거절한다. 10-17 쪼갠 덱 탐침의 목록에 이미 있는지는 대조하지 않았다.
+- **한 것 · 안 한 것** — 받은 문장대로 표의 것은 고치지 않았다. 매뉴얼 3.1(e)에 표를, 23 장 번들 포맷에 주의 한 단을 실었고 미룬 목록과
+  보고에 올린다. matswap 번들은 rc 0 으로 틀린 덱이라 보고 맨 앞에 둔다.
+- **추세** — 목록 밖 기존 결함은 열(N-1 ~ N-8 · h · i)에서 BOM 이웃 셋으로 열셋이 됐고 모두 닫았다. H-6 이 잰 채로 남긴 것은 네 줄이다 —
+  덱 BOM 이 산출에 실리는 두 족(23 · 19 op), matswap 번들(rc 0 틀림), apply_carryover_plan 조각의 까닭 글. 곁에서 본 쪼갠 덱 둘은 따로다.
+  전부 기존이다.

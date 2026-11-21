@@ -109,6 +109,18 @@
   쓴다 · tetremesh 가 리더가 안 읽는 셸 변형(`*ELEMENT_SHELL_COMPOSITE` …)을 경고 없이 산출에서 뺀다(rc 0 — 매뉴얼은 「싣지 않는다」 고
   적는다) · extract-parts 가 인클루드 · 덱의 UTF-8 BOM 을 떼지 않는다(BOM + `*ELEMENT_SOLID` 로 시작하는 인클루드의 첫 블록이 rc 0 으로
   빠진다).
+  → **셋 다 닫았다**(11-21 사용자 결정) — `-` 접미사는 리더가 표준 폭으로 읽고(`6e033bf`), tetremesh 는 싣지 않은 셸 · 두께 셸 · 솔리드
+  변형을 경고로 찍으며(`9f4b922` · `0a638e6` — 산출은 그대로), extract-parts 는 BOM 을 뗀다(`d04b5e8`). BOM 이웃인 cleanup-nodes(덱 걸음 ·
+  설정 YAML)와 extract-parts 설정 YAML 도 같이 닫았다(`2fcd8f7` — cleanup-nodes 는 BOM + `*PART` 로 시작하는 인클루드에서 rc 0 으로 쓰이는
+  절점 둘을 지웠다).
+- (11-21 BOM 훑기 — 재기만 · 사용자 결정으로 이번엔 안 고침 · 설치된 판에도 있는 기존) 덱 맨 앞의 UTF-8 BOM. ★matswap 의 **번들** 파일이
+  BOM 으로 시작하면 rc 0 으로 틀린 덱(첫 줄 `*PARAMETER` 를 못 읽어 `params=0` — 파트가 지워진 옛 SECID · HGID 를 가리키고 번들 카드가
+  `&HGID1` 을 이름째 싣는다) · 23 op 이 BOM 붙은 원본 `*KEYWORD` 줄을 산출에 한 번 더 싣는다(map · convert · assemble 족 …) · 19 op 이
+  BOM 을 산출 맨 앞에 그대로 싣는다(merge · strip · contact · implicit 족 …) · apply_carryover_plan 이 BOM 붙은 조각을 「키워드 밖의 데이터
+  줄」 로 거절한다(까닭 글이 BOM 을 말하지 않는다). 표는 매뉴얼 3.1(e) · `deferred-defects-round2-1120.context-notes.md` H-6 절. LS-DYNA 가
+  그런 덱을 받는지는 못 쟀다(라이선스 만료).
+- (11-21 훑다 곁에서 본 것 — BOM 아님 · 10-17 쪼갠 덱 목록과 대조 안 함) 주 덱이 `*INCLUDE` 뿐일 때 `strain` 은 rc 0 「Loaded 0 nodes」 로
+  빈 CSV 를, `squeeze <mesh> <config> <prefix>` 는 rc 0 「0 nodes, 0 elements, 0 parts」 로 빈 dynain 을 낸다(`assemble` 은 같은 덱을 거절).
 - (11-21 코드로만 읽은 것 — 안 쟀다) `cnrb2solid` · `cnrb2spring` 이 `LONG=Y` 덱에 쓰는 좌표 칸 · `idMaxima()` 를 쓰는 다른 자리(assemble ·
   `cad_solid_merge_to_deck` · `apply_carryover_plan`)가 정수 상한 위의 번호를 내는지.
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
