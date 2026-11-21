@@ -27,6 +27,7 @@
   · F 절 — `*INCLUDE` 를 읽지 않으면 그 안이 쓰는 절점을 고아로 본다(닫힘은 정본 — 깊이 · `␣+` 이음 · 인클루드 안 `*END`)
   · H 절 — `_TITLE` 제목줄이 SID 줄을 한 줄 밀어낸다
   · M 절 — output · report 가 설정 YAML · 따라가지 않는 변형 인클루드의 파일이면 거절한다(그 위에 썼다 — 재검토 R3 과 같은 규칙)
+  · N 절 — 설정 YAML · 주 덱 · 인클루드 맨 앞의 UTF-8 BOM 을 뗀다(BOM 없는 쌍둥이와 rc · 보고 · 산출 바이트가 같다 — 2026-11-21)
 
 usage: test_cleanup_nodes.py <KooRemapper 바이너리>
 """
@@ -530,6 +531,61 @@ def main():
             after = open(os.path.join(md, keep), "rb").read() if os.path.exists(os.path.join(md, keep)) else None
             check("%s ★%s → rc 1 · 그 파일 바이트 그대로" % (tag, what), rc == 1 and after == before and "같은 파일" in out,
                   (rc, after == before, out[-300:]))
+
+        # ── N: ★UTF-8 BOM — 설정 YAML · 주 덱 · 인클루드 맨 앞의 세 바이트를 뗀다(2026-11-21) ─────────────────
+        # 윈도우 편집기가 붙이는 BOM 은 그 파일의 **첫 줄**을 키워드 아닌 줄로 만든다. 예전엔 설정의 첫 키를 못 읽어 rc 1 이었고, 인클루드
+        # 첫 줄이 `*PART` 면 고차 솔리드의 둘째 절점 줄을 못 읽어 **쓰이는 절점을 rc 0 으로 지웠다**(실측). 같은 덱의 BOM 없는 쌍둥이와
+        # rc · 보고 · 산출 바이트가 같아야 한다. 산출은 BOM 없이 쓴다(쌍둥이와 같은 바이트).
+        BOM = b"\xef\xbb\xbf"
+
+        def nl(nid, x, fw=8):
+            return "%*d" % (fw, nid) + ("%16.7f" if fw < 20 else "%20.7f") * 3 % (x, 0.0, 0.0)
+
+        NODES_A = [nl(n, float(n)) for n in range(1, 11)]
+        NODES_B = [nl(n, 40.0 + n) for n in range(11, 21)]          # 둘째 절점 줄의 열 — 상자를 x 60 까지 넓힌다
+        ORPHAN = [nl(101, 5.5)]
+        ELEM = ["*ELEMENT_SOLID", "%8d%8d" % (1, 1), "".join("%8d" % n for n in range(1, 11)),
+                "".join("%8d" % n for n in range(11, 21))]
+        PART = ["*PART", "hex20", "%10d%10d%10d" % (1, 1, 1), "*SECTION_SOLID", "%10d%10d" % (1, 23)]
+        YAML_N = "model: main.k\noutput: out.k\nmode: safe\nreport: rep.json\n"
+        single = ["*KEYWORD", "*NODE"] + NODES_A + NODES_B + ORPHAN + ELEM + PART + ["*END"]
+        long_cube = (["*KEYWORD LONG=Y", "*NODE"] + [nl(n, float(n), 20) for n in range(1, 9)] + [nl(101, 4.5, 20)]
+                     + ["*ELEMENT_SOLID", "%20d%20d" % (1, 1), "".join("%20d" % n for n in range(1, 9)), "*END"])
+        shapes = [
+            ("N-1", "설정 YAML 에 BOM", {"main.k": single}, ("cn.yaml",), 20),
+            ("N-2", "주 덱에 BOM", {"main.k": single}, ("main.k",), 20),
+            ("N-3", "LONG=Y 주 덱에 BOM(폭 선언이 첫 줄이다)", {"main.k": long_cube}, ("main.k",), 8),
+            ("N-4", "인클루드 첫 줄이 *PART", {"main.k": ["*KEYWORD", "*NODE"] + NODES_A + NODES_B + ORPHAN + ELEM
+                                              + ["*INCLUDE", "inc.k", "*END"], "inc.k": PART}, ("inc.k",), 20),
+            ("N-5", "인클루드 첫 줄이 *ELEMENT_SOLID", {"main.k": ["*KEYWORD", "*NODE"] + NODES_A + NODES_B + ORPHAN + PART
+                                                       + ["*INCLUDE", "inc.k", "*END"], "inc.k": ELEM}, ("inc.k",), 20),
+            ("N-6", "인클루드 첫 줄이 *NODE", {"main.k": ["*KEYWORD", "*NODE"] + NODES_A + ORPHAN + ELEM + PART
+                                              + ["*INCLUDE", "inc.k", "*END"], "inc.k": ["*NODE"] + NODES_B}, ("inc.k",), 20),
+        ]
+
+        def run_shape(sub, files, bom):
+            os.makedirs(sub)
+            for name, lines in list(files.items()) + [("cn.yaml", None)]:
+                body = (YAML_N if lines is None else "\n".join(lines) + "\n").encode()
+                with open(os.path.join(sub, name), "wb") as f:
+                    f.write((BOM if name in bom else b"") + body)
+            rc, out = run(binary, sub, "cleanup-nodes", "cn.yaml")
+            rep = open(os.path.join(sub, "rep.json")).read().replace(sub, "") if os.path.exists(os.path.join(sub, "rep.json")) else None
+            outp = os.path.join(sub, "out.k")
+            return rc, rep, open(outp, "rb").read() if os.path.exists(outp) else None, out
+
+        for tag, what, files, bom, used in shapes:
+            rc0, rep0, out0, log0 = run_shape(os.path.join(d, "bom_" + tag + "_plain"), files, ())
+            rc1, rep1, out1, log1 = run_shape(os.path.join(d, "bom_" + tag + "_bom"), files, bom)
+            base = rc0 == 0 and rep0 is not None and out0 is not None
+            j0 = json.loads(rep0) if rep0 else {}
+            check("%s 바탕 — BOM 없는 쌍둥이는 rc 0 · 요소가 쓰는 절점 %d · 지운 절점 1" % (tag, used),
+                  base and j0["nodes"]["used_by_elements"] == used and j0["nodes"]["deleted"] == 1
+                  and j0["verify"]["undefined_by_elements"] == 0, (rc0, j0.get("nodes"), log0[-300:]))
+            check("%s ★%s — rc · 보고가 쌍둥이와 같다" % (tag, what), base and rc1 == rc0 and rep1 == rep0,
+                  (rc1, (json.loads(rep1).get("nodes") if rep1 else None), log1[-300:]))
+            check("%s ★%s — 산출 바이트가 쌍둥이와 같다(BOM 없이 쓴다)" % (tag, what), base and out1 == out0,
+                  (None if out1 is None else (len(out1), out1[:12]), None if out0 is None else len(out0)))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

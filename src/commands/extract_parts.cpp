@@ -1505,6 +1505,7 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     }
     std::ifstream yf(yamlFile);
     if (!yf.is_open()) { console.error("Cannot open config: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     Opts o;
     enum class List { NONE, PARTS, TITLES };

@@ -51,6 +51,7 @@ ONE_ARG_CMDS = [
     "offset", "wrap", "update", "cnrb2solid", "cnrb2spring", "hfdamp", "battery", "modelmeta",
     "assemble",
     "matswap", "tetremesh", "meshfix",
+    "cleanup-nodes", "extract-parts",
 ]
 
 # BOM 을 붙여도 첫 키를 읽는지 — 같은 설정을 BOM 있이/없이 돌려 결과가 같은지 본다

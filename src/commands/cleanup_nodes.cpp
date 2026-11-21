@@ -174,6 +174,7 @@ void scanSectionsStream(std::istream& in, SectionMap& sm) {
 void scanSections(const std::string& path, SectionMap& sm) {
     std::ifstream in(path);
     if (!in.is_open()) return;
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(정본 닫힘 · 주 덱 리더와 같다) — 안 떼면 첫 줄이 키워드로 안 읽힌다
     scanSectionsStream(in, sm);
 }
 
@@ -424,6 +425,7 @@ void scanRefs(const std::string& path, bool isMain, const Opts& o,
               const std::map<int, int>& pidNodes, Scan& sc, long long& paramRefLines) {
     std::ifstream in(path);
     if (!in.is_open()) return;
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(scanSections 와 같다)
     scanRefsStream(in, path, isMain, o, pidNodes, sc, paramRefLines);
 }
 
@@ -548,6 +550,7 @@ struct Box {
 void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& del, Box& box) {
     std::ifstream in(path);
     if (!in.is_open()) return;
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(scanSections 와 같다)
     std::string line, kw;
     int fw = deckFw;
     bool node = false;
@@ -588,6 +591,7 @@ bool rewriteDeck(const Opts& o, const Scan& sc, const std::vector<int>& del,
                  long long& setsEmptied) {
     std::ifstream in(o.model);
     if (!in.is_open()) { console.error("Cannot reopen model: " + o.model); return false; }
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(scanSections 와 같다) — 산출에 싣지 않는다
     KooRemapper::DeckWriter w(o.output, KooRemapper::deck_newline::detect(o.model));
     if (!w.ok()) { console.error("Cannot open output: " + o.output); return false; }
     std::ostream& out = w.stream();
@@ -817,6 +821,7 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
     }
     std::ifstream yf(yamlFile);
     if (!yf.is_open()) { console.error("Cannot open config: " + yamlFile); return 1; }
+    KooRemapper::yamlSkipBOM(yf);   // 윈도우 편집기가 붙인 BOM 이 첫 키를 망가뜨렸다
 
     Opts o;
     bool keepGiven = false;

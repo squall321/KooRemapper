@@ -30,6 +30,7 @@
       제 걸음(색인 · 요소 훑기 · 쓰기 · 되읽기)은 안 뗐다 — 첫 줄이 키워드 줄로 안 읽혀, BOM 으로 시작하는 인클루드의 첫 줄이
       `*ELEMENT_SOLID` 면 **rc 0 으로 고른 요소 하나가 빠진 덱**을 썼고, `*NODE` · `*PART` 면 rc 1, `LONG=Y` 주 덱이면 폭을 못 읽어
       rc 1 이었다. 이제 BOM 이 있는 덱의 보고 · 산출이 BOM 없는 쌍둥이와 **바이트까지 같다**(산출에 BOM 은 싣지 않는다)
+      설정 YAML 맨 앞의 BOM 도 같다(Bj — 예전엔 첫 키를 못 읽어 rc 1)
 
 usage: test_extract_parts_long.py <KooRemapper 바이너리>
 """
@@ -188,14 +189,15 @@ def i10_pair(main_head, main_w, inc_head, inc_w, suffix=""):
 
 def extract_tree(binary, d, tag, files, parts, bom=()):
     """폴더 하나에 파일들을 쓰고(`main.k` 가 주 덱) extract-parts 를 돌린다 — (rc, 콘솔, 보고, 산출 글 또는 None).
-    `bom` 에 든 이름의 파일은 UTF-8 BOM 으로 시작한다."""
+    `bom` 에 든 이름의 파일은 UTF-8 BOM 으로 시작한다(설정은 `x.yaml`)."""
     sub = os.path.join(d, tag)
     os.makedirs(sub)
     for name, lines in files.items():
         with open(os.path.join(sub, name), "wb") as f:
             f.write((BOM if name in bom else b"") + ("\n".join(lines) + "\n").encode("ascii"))
-    with open(os.path.join(sub, "x.yaml"), "w") as f:
-        f.write("model: main.k\noutput: out.k\nparts: %s\nreport: rep.json\n" % parts)
+    with open(os.path.join(sub, "x.yaml"), "wb") as f:
+        f.write((BOM if "x.yaml" in bom else b"") +
+                ("model: main.k\noutput: out.k\nparts: %s\nreport: rep.json\n" % parts).encode("ascii"))
     rc, out = run(binary, sub, "extract-parts", "x.yaml")
     rpath, opath = os.path.join(sub, "rep.json"), os.path.join(sub, "out.k")
     rep = json.load(open(rpath)) if os.path.exists(rpath) else {}
@@ -262,6 +264,8 @@ def bom_cases():
         ("Bi", "★★고른 파트의 요소가 주 덱과 인클루드에 나뉜다",
          {"main.k": sh[:1] + inc + elems[:3] + elems[5:] + sm + st, "inc.k": [elems[0], ints(8, 2, 1), elems[4]] + nodes},
          ("inc.k",), "[1]"),
+        # 설정 YAML 의 맨 앞 — 예전엔 첫 키 `model` 을 못 읽어 rc 1 「'model' is required in YAML config」 이었다
+        ("Bj", "★설정 YAML", {"main.k": sh + sm + st}, ("x.yaml",)),
     )
 
 
