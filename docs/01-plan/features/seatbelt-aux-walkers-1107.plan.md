@@ -123,6 +123,16 @@
   빈 CSV 를, `squeeze <mesh> <config> <prefix>` 는 rc 0 「0 nodes, 0 elements, 0 parts」 로 빈 dynain 을 낸다(`assemble` 은 같은 덱을 거절).
 - (11-21 코드로만 읽은 것 — 안 쟀다) `cnrb2solid` · `cnrb2spring` 이 `LONG=Y` 덱에 쓰는 좌표 칸 · `idMaxima()` 를 쓰는 다른 자리(assemble ·
   `cad_solid_merge_to_deck` · `apply_carryover_plan`)가 정수 상한 위의 번호를 내는지.
+- (11-21 검토 한 차례 — 설치된 판 · 새 판에서 같은 결과인 기존 여섯 · 받은 문장대로 목록만) 전부 두께 셸(`*ELEMENT_TSHELL`)인 덱을 `unfold` 하면
+  두께 방향이 격자 k 로 바뀐다(rc 0 — 입력의 n1-4 → n5-8 거리 1.0 · 2.0 이 산출에서 0.25) · `*KEYWORD` 줄의 폭 선언을 부분 문자열로
+  읽는다(`JOBID=LONGRUN` 이 `LONG=Y` 로 — 설치된 판의 map · squeeze 는 절점 68 · 솔리드 200 칸의 섞인 덱, 새 판은 네 op 모두 `*KEYWORD LONG=Y`
+  로 스스로 맞는 덱) · `*KEYWORD` 가 둘이거나 들여쓴 덱에서 리더(마지막 선언)와 쓰기(첫 줄)의 폭 판정이 갈린다 · `*KEYWORD_ID I10=Y` 를 폭
+  선언으로 읽지 않는다(rc 1 · 까닭 글이 엉뚱 — 「Element 1 has 0 neighbors」) · 좌표 쓰기가 음수 · 세 자리 지수(`-1.5e-120`)를 17 자로 써 16
+  칸을 넘는다 · int 상한(2147483647)을 넘는 절점 번호를 squeeze · tetremesh 가 rc 0 으로 빼고 쓴다(map · unfold 는 rc 1 「non-existent node 0」
+  · 「Mesh has no nodes」). `deferred-defects-round2-1120.context-notes.md` 「검토 한 차례」 절.
+- (11-21 내가 정한 것 — 사용자가 뒤집을 수 있다) 틈(안쪽 균열 — 맞닿은 면의 절점을 따로 둔 자리)이 있는 덱의 `unfold` 는 거절한다(「share no
+  face」). 11-17 판까지는 rc 0 으로 틈을 붙여 썼다(256 절점 → 252 · 경고 없음). 「붙이고 경고」 로 바꾸는 것은 `unfold` 가 틈을 청하게 하고
+  경고를 찍는 작은 고침이다. `map` 은 틈 덱을 굽은 기준으로 그대로 받는다.
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
 - battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
 - I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.
