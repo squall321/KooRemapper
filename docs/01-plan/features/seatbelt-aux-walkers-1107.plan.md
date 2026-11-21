@@ -119,8 +119,15 @@
   BOM 을 산출 맨 앞에 그대로 싣는다(merge · strip · contact · implicit 족 …) · apply_carryover_plan 이 BOM 붙은 조각을 「키워드 밖의 데이터
   줄」 로 거절한다(까닭 글이 BOM 을 말하지 않는다). 표는 매뉴얼 3.1(e) · `deferred-defects-round2-1120.context-notes.md` H-6 절. LS-DYNA 가
   그런 덱을 받는지는 못 쟀다(라이선스 만료).
+  → **닫았다**(11-21 · 3차 1판) — 덱 · 번들 · 조각 · 격자 파일을 여는 자리에서 BOM 을 떼고 산출에 싣지 않는다(`bbc3513` · `5242abe` ·
+  `cd52b79` — matswap 번들 둘 · ale 재료 파일 · warpage · bend 격자의 첫 행 · 스칼라 절점 바닥까지). 덱 맨 앞 BOM 은 58 op 가운데 57 이 BOM
+  없는 쪽과 같고, 남은 apply_carryover_plan 은 덱을 `deck_sha` 로 · 조각을 BOM 을 말하는 까닭 글로 거절한다(조각을 떼고 받는 것은 뒤집을 수
+  있는 선택지 — 다른 팀이 보는 rc 가 바뀐다). JSON 입력(계획 · 대응표 · `range_diff` · 재료 DB)의 BOM 은 rc 1 그대로이고 까닭 글이 BOM 을
+  말하지 않는다(재기만). LS-DYNA 는 여전히 못 쟀다. `deferred-defects-round3-1121.context-notes.md` 5절.
 - (11-21 훑다 곁에서 본 것 — BOM 아님 · 10-17 쪼갠 덱 목록과 대조 안 함) 주 덱이 `*INCLUDE` 뿐일 때 `strain` 은 rc 0 「Loaded 0 nodes」 로
   빈 CSV 를, `squeeze <mesh> <config> <prefix>` 는 rc 0 「0 nodes, 0 elements, 0 parts」 로 빈 dynain 을 낸다(`assemble` 은 같은 덱을 거절).
+  → **닫았다**(11-21 · 3차 1판 · `09a57a7`) — 둘 다 절점이나 요소(솔리드 · 셸)를 하나도 못 읽으면 rc 1 로 멈추고 산출을 쓰지 않는다. 까닭
+  글이 주 덱의 `*INCLUDE` 장수와 첫 이름을 말한다(인클루드를 읽게 넓히지는 않았다). 셸뿐인 덱의 squeeze 는 예전처럼 돈다.
 - (11-21 코드로만 읽은 것 — 안 쟀다) `cnrb2solid` · `cnrb2spring` 이 `LONG=Y` 덱에 쓰는 좌표 칸 · `idMaxima()` 를 쓰는 다른 자리(assemble ·
   `cad_solid_merge_to_deck` · `apply_carryover_plan`)가 정수 상한 위의 번호를 내는지.
 - (11-21 검토 한 차례 — 설치된 판 · 새 판에서 같은 결과인 기존 여섯 · 받은 문장대로 목록만) 전부 두께 셸(`*ELEMENT_TSHELL`)인 덱을 `unfold` 하면
@@ -133,6 +140,7 @@
 - (11-21 내가 정한 것 — 사용자가 뒤집을 수 있다) 틈(안쪽 균열 — 맞닿은 면의 절점을 따로 둔 자리)이 있는 덱의 `unfold` 는 거절한다(「share no
   face」). 11-17 판까지는 rc 0 으로 틈을 붙여 썼다(256 절점 → 252 · 경고 없음). 「붙이고 경고」 로 바꾸는 것은 `unfold` 가 틈을 청하게 하고
   경고를 찍는 작은 고침이다. `map` 은 틈 덱을 굽은 기준으로 그대로 받는다.
+  → 11-21 사용자 결정 — 거절 그대로 둔다.
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
 - battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
 - I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.

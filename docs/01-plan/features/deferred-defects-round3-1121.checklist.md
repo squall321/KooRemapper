@@ -8,12 +8,15 @@
 
 ## B. 1판 — 덱 머리 BOM · `*INCLUDE` 뿐인 주 덱(L-02 · L-03)
 - [x] B-1 다시 재기 — matswap 번들 · cad_solid_merge_to_deck 조각 · `strain` · `squeeze` (설치된 판 `f20d5d5b`)
-- [ ] B-2 회귀 시험 `test_deck_bom.py` — 고치기 전 빨강 확인
-- [ ] B-3 덱 · 번들 읽기에 BOM 떼기(원본을 따라 쓰는 쓰기 · assemble 족 · op 마다의 덱 읽기 · matswap)
-- [ ] B-4 조각 — cad_solid_merge_to_deck 은 뗀다 · apply_carryover_plan 은 까닭 글
-- [ ] B-5 `strain` · `squeeze` 명령줄 꼴 — 빈 메시 거절 · 시험
-- [ ] B-6 훑기 다시(58 op × 꼴 넷) · JSON 입력의 BOM 재기 · 변이
-- [ ] B-7 매뉴얼 3.1(e) · 23 장 · 도움말 · 미룬 목록
+- [x] B-2 회귀 시험 `test_deck_bom.py` — 고치기 전 빨강 확인(`353d92c` — 빨강 59)
+- [x] B-3 덱 · 번들 읽기에 BOM 떼기(원본을 따라 쓰는 쓰기 · assemble 족 · op 마다의 덱 읽기 · matswap) — `bbc3513` · 남은 자리 넷
+  `5242abe` · 격자 파일 `cd52b79`(시험 259 항)
+- [x] B-4 조각 — cad_solid_merge_to_deck 은 뗀다 · apply_carryover_plan 은 까닭 글(`bbc3513`)
+- [x] B-5 `strain` · `squeeze` 명령줄 꼴 — 빈 메시 거절 · 시험(`09a57a7` — `test_include_only_main.py` 15 항)
+- [x] B-6 훑기 다시(58 op × 꼴 넷) · JSON 입력의 BOM 재기 · 변이 — 덱 BOM 57 / 58 같음 · 인클루드 · 설정 YAML 차이 0 · 변이 38 / 38 빨강 ·
+  BOM 없는 덱은 설치된 판과 64 / 64 같음
+- [x] B-7 매뉴얼 3.1(e) · 23 장 · 도움말 · 미룬 목록 — 매뉴얼은 7 · 10 · 13 · 21 · 35 · 49 · 52 장까지 · 도움말은 바꿀 문장이 없다(맥락 노트
+  5-4)
 - [ ] B-8 전체 재기(단위 · 회귀 · 백엔드 pytest · 계약)
 - [ ] B-9 올리기 — main · pykoocae-53 에 빌드 알림 · 호환 빌드 · 잡 확인 뒤 설치 · 재기동 · 스모크 · SIF 확인 · Drive · 알림(커밋 · 바이너리
   sha256 · 판정 꾸러미)

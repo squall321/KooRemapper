@@ -35,3 +35,66 @@
 - `LONG=Y` — cnrb2solid 는 rc 0 에 「WARNING: NSID=0 not found or empty, skipping PID=0」 을 찍고 솔리드를 하나도 만들지 않는다(표준 판은 24 개
   · CNRB 카드를 10 칸으로 읽어 NSID 가 0). cnrb2spring 은 rc 1 「덱에 *CONSTRAINED_NODAL_RIGID_BODY 가 없습니다」(있다). 목록이 적은 「좌표 칸」
   보다 앞의 문제다 — 두 op 은 `LONG=Y` 카드를 읽지 못한다. 읽게 할지 거절할지는 2판에서 선택지로 묻는다.
+
+## 5. 1판 결과(2026-11-21 · 코드 `cd52b79`)
+### 5-1. 지은 것
+- 커밋 다섯 — 시험 `353d92c` · BOM 떼기 `bbc3513` · 빈 메시 거절 `09a57a7` · 남은 자리 넷 `5242abe` · 격자 파일 `cd52b79`.
+- 시험 — `test_deck_bom.py` 는 고치기 전 빨강 59 → 9 → 0(151 항), 화면 대조 · ale · BOM 덱 계획을 더해 빨강 5 → 0(237 항), 격자 쌍둥이를 더해
+  빨강 10 → 0(259 항). `test_include_only_main.py` 는 빨강 12 → 0(15 항). 단위 246 그대로(`scalarNodeMaxIdFile` 의 BOM + I10 항은 그 안).
+- BOM 을 건너뛰는 줄이 든 소스는 스물다섯 파일이다(`git diff ee210f0 cd52b79 -- src include` 는 29 파일 · +83 −4) — 쓰는 쪽
+  `writeFileWithSource` · 조립기의 기본 모델 읽기 둘 · prestress 의 변형 메시 복사 · op 마다의 덱 읽기 · matswap 번들 **둘**(YAML 꼴은 조립기
+  `mw_parseBundle`, 옛 자리 인자 꼴은 `matswap.cpp` 의 `msw_parseBundle` — 옛 꼴은 모델 덱도 제 손으로 읽는다) · cad_solid_merge_to_deck 조각 ·
+  ale 재료 파일 · `scalarNodeMaxIdFile` · 격자 리더 둘. 새 함수는 없다 — 있던 `yamlSkipBOM` · `yamlStripBOM` 을 여는 자리에서 부른다.
+- 빈 메시 판정은 `Mesh::getElementCount()` 로 한다 — 솔리드 · 셸 · 두께 셸을 다 센다. 솔리드만 세면 셸뿐인 덱의 squeeze 가 빨개진다(시험 F 항).
+  까닭 글은 `include_scan::emptyMeshWhy` 한 자리에서 짓는다.
+
+### 5-2. 재서 확인한 것(바이너리 sha `2a4604f0` — `cd52b79` 를 지은 dev 판)
+- **BOM 없는 덱은 그대로다** — 도움말 사례 64 를 설치된 판(`f20d5d5b`)과 새 판으로 돌려 rc · 화면 · 산출이 64 / 64 같다. 처음엔 `modelmeta`
+  화면 하나가 달랐는데 코드가 아니라 자리 탓이었다(dev 바이너리 곁의 `materials/material_db.json` — 이웃 없는 폴더에 복사해 다시 재니 같다).
+- **BOM 훑기 다시**(58 op × 꼴 넷) — 덱 맨 앞 BOM 은 57 / 58 같음(지난 판은 달라지는 op 이 44 · 이번 1). 남은 하나 apply_carryover_plan 은
+  설계대로다(덱 → `deck_sha` · 조각 셋 → `fragment` 의 BOM 까닭). 인클루드 BOM(쪼갠 꼴 58 op · 펼친 꼴 50 op) · 설정 YAML BOM(55 op)은 차이 0.
+  지난 훑기와 달라진 다른 줄은 일곱 — strain 셋 · squeeze 둘이 쪼갠 덱을 rc 1 로 거절하는 것(L-03 · 설계)과 `modelmeta` 둘(위의 이웃 탓).
+- **변이** — 넣은 줄을 하나씩 되돌려 시험이 빨개지는지 봤다. 36 줄 가운데 34 빨강, 산 둘을 조이고 격자 리더 두 줄을 더해 38 / 38 빨강.
+  · 산 것 ① 옛 꼴 matswap 의 모델 덱 BOM — 번들 쪽만 쟀다 ② apply_carryover_plan 조각 — 첫 `[ERROR]` 줄만 봐서, BOM 을 안 뗀 채 검사를 이어
+  엉뚱한 까닭이 한 줄 더 붙는 변이가 살았다.
+- **JSON 입력의 BOM**(재기만 · 안 고침) — 계획(`plan_json — 계획 JSON 문법 — 0째 바이트: 값이 아니다`) · 대응표(id_floor ·
+  cad_solid_merge_to_deck) · `range_diff`(rebind) · 재료 DB(`Cannot load database from: …`) 모두 rc 1 이고 까닭 글이 BOM 을 말하지 않는다.
+- `info` · `modelmeta` 는 `*INCLUDE` 뿐인 주 덱에서 인클루드를 읽는다 — 고칠 것 없음.
+
+### 5-3. 재다 나온 것(목록 밖)
+- **내가 들인 것 둘**(`bbc3513` → `5242abe` 에서 고침 · 판을 내기 전) — apply_carryover_plan 의 거짓 `deck_changed`(뗀 줄을 BOM 든 파일 바이트와
+  견줬다) · applyfold 의 거짓 「바이트 크기가 달라졌다」 경고. 둘 다 rc 와 산출은 같아 회귀 시험이 못 봤고, 쌍둥이 훑기를 화면까지 견줘서
+  나왔다. 그래서 `test_deck_bom.py` 가 이제 화면도 견준다(시각 · 걸린 시간은 가린다).
+- **설치된 판에도 있던 것**(이번에 고침) — ale 재료 파일의 BOM(`*MAT_` 블록이 통째로 빠지고 `*EOS_` 만 실린다 · rc 0) · warpage · bend 격자
+  파일의 BOM(첫 행이 조용히 빠진다 — 리더가 둘이고 열쇠가 셋이라 쌍둥이 여섯으로 쟀다 · 설치된 판 `f20d5d5b` 에서 같은 결과) · BOM 붙은 덱에서
+  낸 이월 계획을 적용하면 BOM 이 실린 덱을 썼다(rc 0). `scalarNodeMaxIdFile` 은 BOM 붙은 `I10=Y` 덱의 `*NODE_SCALAR` 900000 을 8 칸(9000)으로
+  읽어 meshfix 가 새 절점을 9001 부터 냈다 — 이것은 새 판을 재다 나왔고 설치된 바이너리로 따로 돌리지는 않았다(그 함수에 든 것은 BOM
+  건너뛰기뿐이라 코드로는 같다).
+- **이월 조각의 거절 — 앞서 읽은 것을 바로잡는다.** 「계획의 sha 가 달라 거절이 강제된다」 가 아니다. 조각은 sha 가 달라도 값 대조가 지나면
+  경고(`fragment_bytes`)로 받는다. BOM 조각이 거절되는 것은 조각 검사(`fragment`)가 걸려서이고, 그때만 sha 차이가 `file_mismatch` 오류로 같이
+  선다. 그러니 「BOM 을 떼고 받는다」 는 뒤집을 수 있는 선택지다 — 값은 같으니 경고와 함께 rc 0 이 된다. 다만 다른 팀이 보는 rc 가 바뀌므로
+  이번엔 거절 그대로에 까닭 글만 고쳤다.
+- **2판에 넘긴 것** — `info` 가 `LONG=Y` 덱에서 거짓 「섹션 1 / 재질 1 이 정의되지 않았습니다」 를 찍고 `--strict` 는 rc 1 · applyfold 경고의
+  숫자(`%+lld` 에 double) · `LONG=Y` 쌍둥이에서 rc 0 이 아닌 op 열여섯(ale · apply_carryover_plan · cad_solid_merge_to_deck · cclip ·
+  cnrb2spring · convert · disconnect · extract-parts · matswap · meshfix · neutralaxis · offset · rbe · refine · restack · stackwrap)과
+  `I10=Y` 의 셋(apply_carryover_plan · cad_solid_merge_to_deck · extract-parts)의 까닭 · L-04a 는 고친 넓히기 도우미로 다시 잰다(4절의 수치는
+  그때 견준다).
+- **4판 후보** — meshfix 가 퇴화한 면에서 gmsh 를 7 분 돌려 로그 2.7 GB 를 썼다(시간 · 로그 상한이 없다 · 실패 때 남기는 `__mf.log` 가 그
+  크기다). 그 뒤로 gmsh 를 부를 수 있는 훑기는 `prlimit --fsize` 와 시간 한도를 걸고 돌린다.
+- **적기만 한 것** — tetremesh 가 `*NODE_SCALAR` 를 산출에 옮겨야 하는지(판정 안 함) · 셸뿐인 덱의 squeeze 가 셸 번호에
+  `*INITIAL_STRESS_SOLID` 를 쓴다.
+
+### 5-4. 도움말은 그대로 둔다
+- 덱 BOM 의 옛 전제(「op 마다 다르다」)를 말하는 도움말 문장이 없다 — `ops_help.py` 의 BOM 은 두 군데뿐이다(apply_carryover_plan 의 계획 JSON
+  BOM — 지금도 맞다 · squeeze **설정 YAML** 주의 — 9 월부터 뒤처진 줄이고 매뉴얼 1절 표가 이미 그렇게 적는다). 그래서 카탈로그를 다시 내지
+  않았고 바이너리의 도움말 글은 설치된 판과 같다. 전제를 말하던 글은 매뉴얼 3.1(e) · 7 · 10 · 13 · 21 · 23 · 35 · 49 · 52 장과 미룬 목록이고
+  같은 커밋에서 고쳤다.
+
+### 5-5. 범위 추세(1판)
+- 목록의 두 줄(L-02 · L-03)을 닫는 동안 목록 밖에서 나온 것이 열여덟이다 — 이번에 고친 것 일곱(cad_solid_merge_to_deck 조각 자리 · matswap
+  둘째 번들 파서 · prestress 복사 · ale 재료 파일 · 스칼라 절점 바닥 · BOM 덱 계획 · 격자 첫 행), 내가 들였다가 판 전에 고친 것 둘, 시험을
+  조인 것 둘, 뒤 판으로 넘긴 것 넷(info 거짓 미정의 · applyfold 숫자 · meshfix 상한 · L-04a 가 목록보다 넓다), 적기만 한 것 셋(JSON BOM 까닭 글
+  · tetremesh `*NODE_SCALAR` · squeeze 셸 응력 카드 — 뒤 둘은 결함인지 판정하지 않았다).
+- 2차까지의 추세는 목록 밖 기존 결함이 열 → 열셋 → 검토 아홉이었다. 판을 거듭해도 줄지 않는다 — 2판을 열 때 이 수치를 선택지에 같이 싣는다.
+- 배운 것 — rc 와 산출만 견주는 회귀는 거짓 화면 줄을 못 본다 · 첫 오류 줄만 읽는 시험은 변이를 살린다 · 덱이 아닌 글 입력(격자)은 쌍둥이
+  항을 따로 둬야 한다 · 옛 판 / 새 판 대조는 바이너리 이웃(`materials/`)까지 같은 자리에서 한다.

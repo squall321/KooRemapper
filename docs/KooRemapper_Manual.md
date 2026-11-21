@@ -354,28 +354,37 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 산출이 BOM 없는 쪽과 **전부 같았습니다**. 그 전까지 `cleanup-nodes` 와 `extract-parts` 는 제 손으로 설정을 읽어 BOM 붙은 설정에
 `'model' is required in YAML config` 로 종료 코드 1 이었습니다(이날 고침 — 회귀 `test_yaml_common_rules.py` 의 `ONE_ARG_CMDS`).
 
-⚠ **이 약속은 설정 YAML 까지입니다 — 덱(`.k`) 맨 앞의 BOM 은 op 마다 다릅니다.** 같은 날 덱을 받는 58 op 을 BOM 붙인 덱으로 돌려 잰
-것이며, 아래 가운데 **고친 것은 없습니다**(재기만 했습니다).
+**덱(`.k`) 맨 앞의 BOM 도 떼고 읽습니다**(2026-11-21 고침). 덱 · 번들 · 조각 · 격자 파일을 여는 자리에서 BOM 을 건너뛰고, 산출에는 싣지
+않습니다. 덱을 받는 58 op 을 BOM 붙인 덱으로 다시 돌려 57 op 이 BOM 없는 쪽과 종료 코드 · 화면 · 산출이 같았습니다(회귀
+`test_deck_bom.py`).
 
-- **BOM 없는 쪽과 같음 14** — `unfold` · `extract-surface` · `tetremesh` · `strain` · `info` · `modelmeta` · `linkage-fit` · `section` ·
-  `surfview` · `stackdiagram` · `id_floor` · `extract-parts` · `cleanup-nodes` · `neutralaxis`.
-- **산출에 줄 하나가 더 실림 23**(종료 코드 0) — 쓰는 쪽이 낸 `*KEYWORD` 바로 뒤에 BOM 이 붙은 원본 `*KEYWORD` 줄이 한 번 더 실립니다.
-  `map` · `shellmap`(평판 덱 쪽) · `convert` · `refine` · `elform` · `disconnect` · `offset` · `wrap` · `restack` · `update` · `iga` ·
-  `prestress` · `squeeze` · `formstrain` · `warpage` · `bend` · `indent` · `matdb` · `assemble` · `load` · `boundary` · `rbe` ·
-  `cad_solid_merge_to_deck`.
-- **산출 맨 앞에 BOM 이 그대로 실림 19**(종료 코드 0 · 나머지 바이트는 같음) — `cclip` · `meshfix` · `cnrb2solid` · `merge` · `strip` ·
-  `cnrb2spring` · `contact` · `relax` · `stabilize` · `database` · `hfdamp` · `implicit` · `explicit` · `modal` · `ale` · `optimize` ·
-  `stackwrap` · `applyfold` · `rebind_entities_after_remesh`.
-- ★**`matswap` 의 번들 파일이 BOM 으로 시작하면 종료 코드 0 으로 틀린 덱이 나옵니다** — 첫 줄 `*PARAMETER` 가 읽히지 않아(`params=5` →
-  `params=0`) 번들이 새 번호를 받지 못합니다. 파트는 지워진 옛 SECID · HGID 를 가리키고 번들 카드는 `&HGID1` 같은 매개변수 이름째
-  실립니다([§23](#23-matswap--재료-번들-교체)). 모델 덱 쪽 BOM 은 위의 「줄 하나」 뿐입니다.
-- `apply_carryover_plan` 은 종료 코드 1 로 멈춥니다 — 덱은 바이트가 달라져 `deck_sha` 로(계약 그대로), 조각 파일은 「키워드 밖의 데이터
-  줄」 로.
-- **인클루드 파일** 맨 앞의 BOM 은 잰 범위에서 결과를 바꾸지 않았습니다 — 쪼갠 덱을 그대로 받는 18 op, `flatten_includes: true` 로 펼쳐
-  도는 42 op 모두 BOM 없는 인클루드와 종료 코드 · 화면 · 산출이 같았습니다.
+- **남은 하나는 `apply_carryover_plan` 이고 계약대로 멈춥니다**(§52.2). 계획이 BOM 없는 덱에서 나온 것이면 BOM 붙은 덱은 바이트가 달라
+  `deck_sha` 로 거절하고, 그 줄이 BOM 을 말합니다. BOM 붙은 덱에서 낸 계획은 그대로 적용하고 산출에는 BOM 을 싣지 않습니다. **조각 파일**이
+  BOM 으로 시작하면 고치지 않고 거절합니다(「UTF-8 BOM 으로 시작한다 — 조각은 BOM 없이 싣는다」).
+- `cad_solid_merge_to_deck` 은 조각의 BOM 을 떼고 넣습니다(종료 코드 0 그대로 — §49).
+- `matswap` 의 번들([§23](#23-matswap--재료-번들-교체)), `ale` 의 `material:` 에 준 재료 파일([§35](#35-ale--ale-변환)), `warpage` · `bend`
+  의 격자 파일(`dat_file` · `dat_top` · `dat_bottom`)도 뗍니다.
+- **인클루드 파일** 맨 앞의 BOM 은 이번에도 결과를 바꾸지 않았습니다 — 덱을 인클루드로 쪼개 돌린 58 op(쪼갠 덱을 그대로 받는 16 · 거절하는
+  42), `flatten_includes: true` 로 펼쳐 돌린 50 op(도는 41) 모두 BOM 없는 인클루드와 종료 코드 · 화면 · 산출이 같았습니다.
+- **JSON 입력은 떼지 않습니다** — 계획 · 대응표 · `range_diff` · 재료 DB 가 BOM 으로 시작하면 종료 코드 1 이고 까닭 글은 BOM 을 말하지
+  않습니다(「0째 바이트: 값이 아니다」 · `Cannot load database from: …`). JSON 은 BOM 없이 저장하십시오.
 
-그러니 **덱 · 번들 · 조각 파일은 BOM 없이 저장하십시오.** BOM 으로 시작하는 덱이나 BOM 붙은 `*KEYWORD` 줄이 낀 덱을 LS-DYNA 가 받는지는
-재지 못했습니다(라이선스 만료). JSON 입력(계획 · 대응표)의 BOM 과 도움말 예시 밖의 설정 꼴도 재지 않았습니다.
+**고치기 전 판은 이렇게 됐습니다**(2026-11-21 에 잰 것 — ★ 셋은 종료 코드 0 으로 틀린 덱입니다). 옛 판을 쓰는 자리에서는 덱 · 번들 · 조각 ·
+격자 파일을 BOM 없이 저장하십시오.
+
+- ★`matswap` 의 번들이 BOM 으로 시작하면 **틀린 덱**이 나왔습니다 — 첫 줄 `*PARAMETER` 가 읽히지 않아(`params=5` → `params=0`) 파트가 지워진
+  옛 SECID · HGID 를 가리키고 번들 카드가 `&HGID1` 같은 매개변수 이름째 실렸습니다.
+- ★`warpage` · `bend` 의 격자 파일이 BOM 으로 시작하면 **격자의 첫 행이 조용히 빠졌습니다** — 첫 줄이 숫자로 읽히지 않아서입니다. `bend` 는
+  화면도 같고 산출만 달랐습니다(세 줄 격자의 `warpage` 와 한쪽에만 BOM 이 붙은 `dat_pair` 는 종료 코드 1).
+- ★`ale` 의 재료 파일이 BOM 으로 시작하면 `*MAT_` 블록이 통째로 빠지고 `*EOS_` 만 실렸습니다(파트가 가리키는 MID 가 덱에 없습니다).
+- `cad_solid_merge_to_deck` 은 조각의 BOM 붙은 `*KEYWORD` 줄을 앞 블록의 데이터 줄 자리에 실었습니다.
+- 23 op 은 제 `*KEYWORD` 바로 뒤에 BOM 붙은 원본 `*KEYWORD` 줄을 한 번 더 실었고(`map` · `convert` · `assemble` 족 …), 19 op 은 산출 맨
+  앞에 BOM 을 그대로 실었습니다(`merge` · `strip` · `contact` · `implicit` 족 …).
+- `apply_carryover_plan` 은 BOM 붙은 조각을 「키워드 밖의 데이터 줄」 이라는 엉뚱한 까닭으로 거절했고, BOM 붙은 덱에서 낸 계획을 적용하면 BOM
+  이 실린 덱을 썼습니다.
+
+BOM 으로 시작하는 덱을 LS-DYNA 가 받는지는 재지 못했습니다(라이선스 만료) — 솔버에 바로 넣는 덱은 BOM 없이 저장하십시오. 이 도구가 쓰는 덱은
+BOM 을 싣지 않습니다. 도움말 예시 밖의 설정 꼴은 재지 않았습니다.
 
 #### (f) 단독 op 의 `output` 은 필수
 
@@ -847,6 +856,11 @@ swelling 파트는 dynain에 포함되지 않습니다.
 
 접두어 끝의 `.k` 는 떼고 씁니다(`out.k` 를 줘도 `out.k`·`out.dynain`).
 
+> **빈 메시는 거절합니다**(2026-11-21 · 이 명령줄 꼴). `<mesh.k>` 에서 절점이나 요소(솔리드 · 셸)를 하나도 읽지 못하면 종료 코드 1 로 멈추고
+> `.k` · `.dynain` 을 쓰지 않습니다(이미 있던 산출도 그대로 둡니다). 이 꼴은 `*INCLUDE` 를 따라가지 않으므로 주 덱이 `*INCLUDE` 뿐이면 여기에
+> 걸리고, 까닭 글이 `*INCLUDE` 장수와 첫 이름을 말합니다 — 닫힘을 펼친 한 파일을 주십시오. 셸뿐인 덱은 예전처럼 돕니다. 고치기 전 판은 같은
+> 덱에 종료 코드 0 으로 `Part 1 not found in mesh, skipping` 경고 하나와 메시 없는 `.k` · 요소 0 인 `.dynain` 을 썼습니다.
+
 ---
 
 ## 8. generate / generate-var — 메시 생성
@@ -1059,6 +1073,11 @@ KooRemapper.exe strain <ref_mesh.k> <def_mesh.k> <output.csv> [--type engineerin
 | `def_mesh.k` | 변형 형상 메시 (입력) | — |
 | `output.csv` | 변형률 결과 CSV (출력) | — |
 | `--type` | 변형률 계산 방식 | `engineering` |
+
+> **빈 메시는 거절합니다**(2026-11-21). 두 메시 가운데 하나라도 절점이나 요소(솔리드 · 셸)를 하나도 읽지 못하면 종료 코드 1 로 멈추고 CSV 를
+> 쓰지 않습니다(이미 있던 CSV 도 그대로 둡니다). 이 명령은 `*INCLUDE` 를 따라가지 않으므로 주 덱이 `*INCLUDE` 뿐이면 여기에 걸립니다 — 까닭
+> 글이 그 덱의 이름과 `*INCLUDE` 장수 · 첫 이름을 말합니다. 인클루드 닫힘을 펼친 한 파일을 주십시오. 고치기 전 판은 같은 덱에 종료 코드 0 으로
+> 머리 한 줄뿐인 CSV 를 썼습니다(회귀 `test_include_only_main.py`).
 
 ### 변형률 유형
 
@@ -1720,6 +1739,10 @@ $$\varepsilon_{11} = d \cdot \kappa_1, \quad \varepsilon_{22} = d \cdot \kappa_2
 
 값은 모델 길이 단위의 처짐이며, 격자는 대상 파트의 평면 바운딩 박스에 펼칩니다. warpage 의 dat 는 행 0 이 2축 **최소**라 방향이 반대입니다(§21).
 
+파일 맨 앞의 UTF-8 BOM 은 떼고 읽습니다(2026-11-21 고침 · `dat_file` · `dat_top` · `dat_bottom`). 고치기 전 판은 BOM 이 붙으면 첫 줄이 숫자로
+읽히지 않아 **격자의 첫 행이 조용히 빠졌습니다** — 종료 코드 0 에 화면도 같고 산출만 달랐으며, `dat_pair` 의 한쪽에만 붙으면 `Top and bottom
+grids must have same dimensions` 로 종료 코드 1 이었습니다.
+
 ---
 
 ## 14. indent — 압입/엠보싱
@@ -2124,6 +2147,10 @@ operations:
 0  0   0   0  0
 ```
 
+파일 맨 앞의 UTF-8 BOM 은 떼고 읽습니다(2026-11-21 고침). 고치기 전 판은 BOM 이 붙으면 첫 줄이 숫자로 읽히지 않아 **격자의 첫 행이 조용히
+빠졌습니다** — 네 줄 격자는 종료 코드 0 에 산출만 달랐고(화면의 곡률 범위 `[0, 3236.36]` → `[0, 2707.03]`), 세 줄 격자는 `Grid too small
+(min 3×3): 2×5` 로 종료 코드 1 이었습니다.
+
 ### 동작
 1. .dat 격자 로드 (`mask_value` 결측은 주변 보간)
 2. 바이리니어 보간으로 각 노드 위치의 처짐 계산
@@ -2276,10 +2303,11 @@ Rubber_HG
 
 > **대상 PART 카드**: `*PART` 데이터 줄이 PID·SECID·MID 3칸뿐인 모델(예: `generate box` 출력)도 인식합니다(예전엔 `PID not found`).
 
-> ⚠ **번들 파일은 BOM 없이 저장하십시오**(2026-11-21 실측 · 고치지 않음). BOM 으로 시작하면 첫 줄 `*PARAMETER` 가 읽히지 않아 화면이
-> `params=5 cards=31` 에서 `params=0 cards=36` 으로 바뀌고, **종료 코드 0** 으로 `Updated PID 1 -> SECID=1 MID=1 HGID=1`(BOM 없으면
-> `SECID=3 … HGID=3`)인 덱이 나옵니다 — 그 SECID · HGID 는 바로 앞에서 지운 번호이고, 번들 카드는 `&HGID1` · `&SECID1` 을 매개변수
-> 이름째 싣습니다. 화면의 `params=0` 이 표지입니다([§3.1(e)](#31-yaml-공통-규칙-모든-op)).
+> **번들 파일 맨 앞의 UTF-8 BOM 은 떼고 읽습니다**(2026-11-21 고침 — YAML 꼴 · 옛 자리 인자 꼴 둘 다, 옛 꼴은 모델 덱도). 고치기 전 판은 BOM
+> 으로 시작하는 번들의 첫 줄 `*PARAMETER` 를 읽지 못해 화면이 `params=5 cards=31` 에서 `params=0 cards=36` 으로 바뀌고, **종료 코드 0** 으로
+> `Updated PID 1 -> SECID=1 MID=1 HGID=1`(바른 것은 `SECID=3 … HGID=3`)인 덱을 냈습니다 — 그 SECID · HGID 는 바로 앞에서 지운 번호이고 번들
+> 카드는 `&HGID1` · `&SECID1` 을 매개변수 이름째 실었습니다. 옛 판에서는 화면의 `params=0` 이 표지입니다
+> ([§3.1(e)](#31-yaml-공통-규칙-모든-op)).
 
 ### 파라미터 이름 접두사 규칙
 
@@ -3335,6 +3363,9 @@ elform: 11                 # ALE ELFORM (11=multi-mat, 12=single, 기본 11)
 ```
 
 > **v1.8.0 정정**: config 키는 `ale_parts`(각 항목 `{pid, material}`) / `fsi_pids` 입니다(help·`examples/ale`. 구버전의 `parts`/`preset`/`lagrangian_pids` 정정). `fsi_pids` 는 최상위 리스트이며(파트별 아님), 폭발물 기폭점은 최상위 `detonation: {pid, x, y, z, lt}` 로 지정합니다.
+
+> **재료 파일 맨 앞의 UTF-8 BOM 은 떼고 읽습니다**(2026-11-21 고침). 고치기 전 판은 `material:` 에 준 파일이 BOM 으로 시작하면 종료 코드 0 에
+> `*MAT_` 블록이 통째로 빠지고 `*EOS_` 만 실렸습니다 — 파트가 가리키는 MID 가 덱에 없는 덱입니다.
 
 ### 재료 프리셋 (14종)
 
@@ -6151,6 +6182,8 @@ StepForge 와의 경계 합의(저쪽 `docs/BOUNDARY-DYNAFORGE.md` §1·§3-3)�
   번호 이동을 되짚을 수 있고, 뒤에 재결속·대조가 읽는다.
 - 저쪽 **자리표시 물성**(RO = E = 1.0 — 일부러 눈에 띄게 둔 값)은 그대로 넣고 MID 마다 경고한다.
   해석 전에 실물 물성으로 바꿔야 한다.
+- 조각 파일 맨 앞의 UTF-8 BOM 은 떼고 넣는다(2026-11-21). 그 전 판은 rc 0 에 조각의 BOM 붙은 `*KEYWORD` 줄을 앞 블록의 데이터 줄 자리에
+  실었다(되읽기 검증은 통과라고 말했다). 대응표 JSON 앞의 BOM 은 그대로 거절한다(「대응표 JSON 문법 — 0째 바이트: 값이 아니다」).
 
 ### 49.5 아직 하지 않는 것
 
@@ -6319,6 +6352,12 @@ CAD 개정이 오면 StepForge 가 덱 PID 마다 처리(그대로 · 강체 옮
 - 지문은 **담은 줄을 낸 바이트**의 것이다 — 줄은 덱을 담을 때 읽고 지문은 적용할 때 파일을 다시 열어 잰다. 잰 바이트가 담은 줄을 내지
   않으면(그 사이에 주 덱 · 인클루드 파일이 바뀌었다) `deck_changed` 로 거절한다(적대적 검토 11-07 — 계획이 바뀐 뒤의 덱 것이면 지문이
   맞아 옛 줄을 고쳐 썼다). 인클루드 파일은 닫힘이 담는 꼴(맨 앞 BOM 을 떼고 첫 `*END` 앞까지)로 견준다 — 그 뒤만 바뀐 것은 같은 줄이다.
+- ★**맨 앞의 UTF-8 BOM**(2026-11-21) — 지문은 파일 바이트 그대로 재므로 BOM 도 지문에 든다. BOM 없는 덱에서 낸 계획을 BOM 붙은 덱에 적용하면
+  `deck_sha` 이고 그 줄이 BOM 을 말한다(「이 덱은 UTF-8 BOM 으로 시작한다 — 계획을 낸 덱에 BOM 이 없었다면 그 세 바이트만으로 지문이
+  다르다」). BOM 붙은 덱에서 낸 계획은 그대로 적용하고 산출에는 BOM 을 싣지 않는다 — 담은 줄과의 대조는 BOM 을 뺀 바이트로 한다(그 전 판은
+  rc 0 에 BOM 이 실린 덱을 썼다). **조각**이 BOM 으로 시작하면 고치지 않고 거절한다 — `fragment` 줄이 「조각 1째 줄 — UTF-8 BOM 으로
+  시작한다 — 조각은 BOM 없이 싣는다」 를 말하고, 조각 검사가 걸렸으므로 sha256 · 바이트 차이도 경고(`fragment_bytes`)가 아니라
+  `file_mismatch` 로 같이 선다. 그 전 판의 까닭 글은 「키워드 밖의 데이터 줄」 이었다. 계획 JSON 앞의 BOM 은 `plan_json` 으로 거절한다.
 
 ### 52.3 처리
 
