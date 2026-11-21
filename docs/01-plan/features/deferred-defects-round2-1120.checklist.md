@@ -48,8 +48,8 @@
 - [x] F-3 검토 한 차례(찾은 것은 소스에서 확인한 뒤 고친다) — 아홉 가운데 셋 고침(1 · 6 · 9) · 여섯은 목록(2 · 3 · 4 · 5 · 7 · 8)
 
 ## G. 올리기
-- [ ] G-1 main 합치기 · 푸시
-- [ ] G-2 호환 빌드 · GLIBC 확인 · 잡 확인 뒤 설치
-- [ ] G-3 dev DB 0021 · 재기동 · health · 스모크
-- [ ] G-4 cli.sif · api.sif 안에서 바이너리 확인 · Drive 게시 · `BUILD_INFO.txt` · `SHA256SUMS`
+- [x] G-1 main 합치기 · 푸시 — `e7a6ef7`(빨리 감기)
+- [x] G-2 호환 빌드 · GLIBC 확인 · 잡 확인 뒤 설치 — `f20d5d5b` · GLIBC_2.35 · 잡 0
+- [x] G-3 dev DB 0021 · 재기동 · health · 스모크 — MCP 93 · deckops 29/29 · allops 64/64 · reports 59/59 · 캠페인 탐침 17/17
+- [x] G-4 cli.sif · api.sif 안에서 바이너리 확인 · Drive 게시 · `BUILD_INFO.txt` · `SHA256SUMS` — `dist-20261121-120311Z`
 - [ ] G-5 알림 · cae00 점검 문서 · 1차 체크리스트 닫기 · 메모리

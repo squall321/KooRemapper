@@ -360,3 +360,30 @@
   트리의 환경 탓 · 고치기 전과 같은 넷) · MCP 계약 시험 23 통과 · 3 건너뜀(mcp.sif 없는 자리). 백엔드는 `gmsh` · `materials` 이웃을 둔 사본
   바이너리로 스크래치 DB 에서 돌렸다(작업 트리의 맨 `build/dev/bin` 으로는 `test_job_launcher.py` 넷이 더 빨갛다 — 환경 탓). LS-DYNA 로는 못
   쟀다(라이선스 만료).
+
+## 2026-11-21 · 올리기(G)
+- **G-1 main** — `corelink-int` 를 main 에 빨리 감기로 올렸다(`e7a6ef7` — 갈래 · origin/main · 주 체크아웃이 같은 커밋). 올리기 직전 SP main
+  HEAD · `KIT_VERSION`(2026-11-06) · `CHANGES.md` 를 다시 봤다 — 그대로다(고정 `3196156`).
+- **G-2 호환 빌드 · 설치** — debian:12 빌더 · `-j8`. 바이너리 sha256
+  `f20d5d5bbdcb1a4a7962b209542d17992cb15e7fc539d6d06a218e5e6b13fe97`(8,997,256 바이트 · GLIBC_2.35 · `--version` 1.8.0). 호환 빌드의 단위 시험
+  246 통과 · 이번에 바꾼 회귀 파일 일곱이 그 바이너리로 전부 통과. 살아 있는 잡 0 을 본 뒤 11:57:30Z 에 `build/linux/bin` ·
+  `platform/backend/bin` 에 깔았다.
+- **G-3 dev** — DB `0020 → 0021_campaigns` · API 재기동 11:58:08Z · MCP 는 `start.sh` 로 11:58:27Z(`/data` 바인드 있음). 스모크 — MCP PASS(도구
+  93 · 연산 65) · deckops 29/29 · allops 64/64(건너뜀 1) · reports 59/59 · 캠페인 탐침 17/17(만들기 → 목록 → 받음 201 → 다른 내용 409 → 같은
+  내용 200 → 리포트 지움 → pending). 탐침이 만든 캠페인 `dev-smoke-campaign-20261121T120207Z` 가 dev DB 에 남아 있다 — 지우는 길이 없다.
+- **G-4 SIF · Drive** — `cli.sif` 를 다시 지었다(141,717,504 바이트 · sha256 앞 `3241c33e` · 안의 바이너리가 같은 sha). api.sif 안에서도 깐
+  바이너리가 돈다(1.8.0). Drive 판 `dist-20261121-120311Z` 게시 12:03:15Z — 11-17 판과 다른 파일은 `BUILD_INFO.txt` · `koorm-bin.tar.gz` ·
+  `cli.sif` 셋이고 api · mcp · nginx · postgres SIF 와 콘솔 묶음은 sha256 이 같다. 가장 오래된 판 `dist-20261107-083706Z` 가 지워졌다(넷을
+  남긴다). 게시 뒤 dev health 가 `revision e7a6ef7 · revision_matches_binary true` 다. 되돌릴 판은 `dist-20261117-212938Z`(코드 `c37bd03` ·
+  바이너리 `248ec9bc`).
+- **게시 뒤 주 체크아웃 백엔드 pytest**(스크래치 DB · 깐 바이너리) — 1068 통과 · 1 실패. 실패는
+  `test_supervisor_log.py::test_heartbeat_line_carries_a_timestamp` 로, 12:09:01 에 분마다 도는 감독자와 잠금이 겹쳐 로그가 「이미 감독자가 돌고
+  있다」 한 줄이었다. 분 경계를 피해 그 파일만 다시 돌려 넷 다 통과 — 환경 탓이다(작업 트리에서 건너뛰던 열둘과 `.env` 탓 넷이 여기서는 돈다).
+  뒤에 dev DB 의 잡 수가 그대로임을 봤다(실패 3 · 성공 10 · 살아 있는 것 0).
+- **Post v52 알림(KooD3plotReader `d2f0d6b` — 보 파트 적분점 응력)** — 우리 검사기(`onto_package.check` · 구운 api.sif 안)에 v51 · v52 의 deep
+  꾸러미를 넣어 둘 다 통과를 봤다(행 5 · 선 1 · 경고 0 · `worst_von_mises` 칸 3 → 4). 받는 쪽은 고칠 것이 없다. 운영에 깔 판은 그쪽이 정한다 —
+  cae00 점검 문서 §5-1 에 한 줄.
+- **문서** — cae00 점검 문서에 §1-7(반영분 · 알고 받을 것 · 확인 표)과 판 정보(§0 · §1 표 · §8 되돌리기)를 고쳤다. 이 뒤의 커밋은 문서뿐이라
+  health `revision` 은 `e7a6ef7` 로 남는다.
+- **못 잰 것** — 운영(cae00) 스택(운영 쪽 `update-all`) · LS-DYNA 로 읽히는지(라이선스 만료) · 옛 코드를 0021 DB 에 돌리는 되돌리기(표 꼴로만
+  봤다).
