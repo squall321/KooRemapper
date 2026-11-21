@@ -4,6 +4,7 @@
 #include "parser/DeckWriter.h"
 #include <string>
 #include <fstream>
+#include <vector>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
@@ -87,6 +88,18 @@ public:
     void setVerbatimShellSource(const std::string& path) { verbatimShellSource_ = path; }
 
     /**
+     * 그렇게 쓴 뒤 — 그 덱의 셸 · 두께 셸 족 블록 가운데 리더가 읽지 않아(`gridReaderReadsKeyword`) 산출에 **옮기지 않은** 것.
+     * 키워드(대문자 · 접미사 뗌)마다 블록 수와 데이터 줄 수(주석 · 빈 줄은 뺀다)를 처음 나온 차례로 준다 — 부르는 쪽이 경고로 찍는다
+     * (2026-11-21 — tetremesh 가 `*ELEMENT_SHELL_COMPOSITE` 블록을 rc 0 · 말 없이 뺐다).
+     */
+    struct SkippedShellBlocks {
+        std::string keyword;
+        size_t blocks = 0;
+        size_t lines = 0;
+    };
+    const std::vector<SkippedShellBlocks>& skippedShellBlocks() const { return skippedShell_; }
+
+    /**
      * Set whether to include header comment
      */
     void setIncludeHeader(bool include) { includeHeader_ = include; }
@@ -105,6 +118,7 @@ private:
     // 원본 덱의 개행. 이것이 없어서 CRLF 덱이 왕복마다 LF 로 바뀌었다.
     DeckNewline newline_ = DeckNewline::LF;
     std::string verbatimShellSource_;   // 비었으면 셸을 메시에서 짓는다
+    std::vector<SkippedShellBlocks> skippedShell_;   // `copyShellBlocks` 가 옮기지 않은 셸 · 두께 셸 변형
 
     void writeHeader(std::ostream& file);
     void writeNodeSection(std::ostream& file, const Mesh& mesh, bool useMappedPositions);

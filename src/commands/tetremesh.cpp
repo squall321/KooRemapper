@@ -461,6 +461,11 @@ int runTetRemesh(const std::string& configPath,
             console.error("Failed to write output: " + writer.getErrorMessage());
             return 1;
         }
+        // 리더가 읽지 않는 셸 · 두께 셸 변형 블록은 옮기지 않았다 — 산출은 그대로 두고 빠진 것을 키워드 · 줄 수로 알린다(2026-11-21)
+        for (const auto& b : writer.skippedShellBlocks()) {
+            console.warning("리더가 읽지 않는 셸 변형 블록은 산출에 싣지 않았다 — *" + b.keyword + " 블록 " + std::to_string(b.blocks) +
+                            " 개 · 데이터 줄 " + std::to_string(b.lines) + "(원본 덱에서 옮겨 붙인다)");
+        }
         console.success("Output written");
     }
 

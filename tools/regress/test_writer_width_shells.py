@@ -38,6 +38,7 @@ usage: test_writer_width_shells.py <KooRemapper 바이너리>
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -346,6 +347,41 @@ def body(binary, root):
         check(tag + " — rc 0 · 솔리드 100 개 전부", rc == 0 and sorted(got) == list(range(1, 101)),
               "rc %d 빠진 것 %s" % (rc, sorted(set(range(1, 101)) - set(got))))
         same_rows(tag, os.path.join(d, "box.k"), o, name, 10)
+
+    print("[T-8] tetremesh — 싣지 않은 셸 · 두께 셸 변형 블록을 경고로 찍는다(산출은 그대로)")
+
+    def skipped(out):
+        """경고 줄에서 {키워드: (블록 수, 데이터 줄 수)}."""
+        return {m.group(1): (int(m.group(2)), int(m.group(3))) for m in
+                re.finditer(r"WARN[^\n]*싣지 않았다[^\n]*?(\*ELEMENT_\w+) 블록 (\d+) 개 · 데이터 줄 (\d+)", out)}
+
+    def undated(path):
+        return [l for l in lines_of(path) if not l.startswith("$ Date")]
+
+    d, s = case_dir(root, "t8_plain", binary)
+    hx = hexes(s)
+    base = shell_block("*ELEMENT_SHELL", range(1001, 1006))
+    put(d, s, base)
+    rc, out, o = tet(binary, d)
+    plain = undated(o)
+    check("T-8 변형 없는 덱 — rc 0 · 변형 경고 없음", rc == 0 and not skipped(out) and "싣지 않았다" not in out, "rc %d %r" % (rc, skipped(out)))
+
+    d, s = case_dir(root, "t8a", binary)
+    put(d, s, base + shell_comp(hx, range(2001, 2006)) + tshell_beta(hx, range(3001, 3006), 0.0))
+    rc, out, o = tet(binary, d)
+    check("T-8a 안 읽는 변형 둘 — rc 0 · 키워드마다 블록 1 · 데이터 줄 10 을 경고로",
+          rc == 0 and skipped(out) == {"*ELEMENT_SHELL_COMPOSITE": (1, 10), "*ELEMENT_TSHELL_BETA": (1, 10)}, "rc %d %r" % (rc, skipped(out)))
+    check("T-8a 안 읽는 변형 둘 — 산출은 변형 없는 덱의 산출과 같다(변형 블록은 없다)",
+          rc == 0 and undated(o) == plain and not kwlines(o, "*ELEMENT_SHELL_COMPOSITE") and not kwlines(o, "*ELEMENT_TSHELL"),
+          "%d 줄 · 변형 없는 덱 %d 줄 %r" % (len(undated(o)), len(plain), kwlines(o, "*ELEMENT_")))
+
+    d, s = case_dir(root, "t8b", binary)
+    put(d, s, base + shell_comp(hx[:3], range(2001, 2004)) + "$ 주석 줄\n\n" + shell_comp(hx[3:5], range(2004, 2006)))
+    rc, out, o = tet(binary, d)
+    check("T-8b 같은 변형이 두 블록 · 주석과 빈 줄 — 블록 2 · 데이터 줄 10(주석 · 빈 줄은 안 센다)",
+          rc == 0 and skipped(out) == {"*ELEMENT_SHELL_COMPOSITE": (2, 10)}, "rc %d %r" % (rc, skipped(out)))
+    check("T-8b 같은 변형이 두 블록 — 산출은 변형 없는 덱의 산출과 같다", rc == 0 and undated(o) == plain,
+          "%d 줄 · 변형 없는 덱 %d 줄" % (len(undated(o)), len(plain)))
 
     print("[N-6] 공백 없이 붙인 폭 접미사 — 블록을 한 번만 쓴다")
     d, s = case_dir(root, "n6", binary)
