@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 덱 · 번들 · 조각 입력 맨 앞에 UTF-8 BOM 이 붙어도 rc 와 산출이 BOM 없는 쌍둥이와 같은지 op 마다 보는 회귀 시험
+# 덱 · 번들 · 조각 · 격자 입력 맨 앞에 UTF-8 BOM 이 붙어도 rc 와 산출이 BOM 없는 쌍둥이와 같은지 op 마다 보는 회귀 시험
 """덱 맨 앞의 UTF-8 BOM — 덱을 받는 모든 op (2026-11-21 · 미룬 결함 3차 1판 L-02).
 
 왜 이 시험이 있나.
@@ -25,9 +25,14 @@
   줄이 「BOM」 을 말한다 · 어느 쪽도 덱을 쓰지 않는다. 계획이 **BOM 붙은 그 덱**에서 나온 것이면(deck.sha256 이 BOM 째 바이트의 것)
   rc 0 이고 산출 덱이 BOM 없는 쌍둥이와 같다 — 설치된 판(11-21)은 rc 0 에 BOM 이 실린 덱을 썼고, 첫 판은 `deck_changed` 로 막았다.
 
-  matswap 의 옛 자리 인자 꼴(`matswap <모델> <번들> <pid> <산출>`)은 번들을 읽는 자리가 따로다 — 번들에 BOM 을 붙여 따로 잰다.
+  matswap 의 옛 자리 인자 꼴(`matswap <모델> <번들> <pid> <산출>`)은 모델 · 번들을 읽는 자리가 따로다 — 각각에 BOM 을 붙여 따로
+  잰다(모델 쪽은 변이 확인이 찾았다 — 그 줄을 지워도 초록이었다).
   ale 의 `material:` 에 재료 파일 경로를 주면 그 파일도 읽는 자리가 따로다 — 실측(11-21)으로 BOM 이 붙으면 rc 0 에 `*MAT_NULL`
   블록이 통째로 빠지고 `*EOS_` 만 실렸다(파트가 가리키는 MID 가 덱에 없다). 도움말 사례는 붙박이 이름(air)이라 따로 잰다.
+  warpage · bend 의 **격자 파일**(`dat_file` · `dat_top` · `dat_bottom`)은 덱이 아니라 숫자 줄이다 — 실측(11-21 · 설치된 판)으로 BOM 이
+  붙으면 첫 줄이 숫자로 안 읽혀 **조용히 빠졌다**. 격자가 세 줄이면 rc 1 「Grid too small … 2×5」(엉뚱한 까닭), 네 줄이면 rc 0 에 다른
+  덱이 나왔다(warpage 곡률 범위 3236.36 → 2707.03 · bend 는 화면까지 같았다). dat_pair 는 한쪽만 붙으면 rc 1 「same dimensions」,
+  둘 다 붙으면 rc 0 에 다른 덱. 이제 두 격자 리더가 BOM 을 떼고 읽는다.
 
 usage: test_deck_bom.py <KooRemapper 바이너리> [op ...]     (op 을 주면 그 op 만 돈다 — 변이 확인용)
 """
@@ -214,19 +219,23 @@ def carryover(case, plain):
           (rc, differs(p_decks, decks)[:2], [l[:160] for l in text.splitlines() if l.startswith("[ERROR]")][:3]))
     for frag in case.decks[1:]:
         rc, text, outs = case.go([frag])
-        line = next((l for l in text.splitlines() if l.startswith("[ERROR]") and os.path.basename(frag) in l), "")
+        errs = [l for l in text.splitlines() if l.startswith("[ERROR]") and os.path.basename(frag) in l]
         check("★apply_carryover_plan · 조각 %s 에 BOM → rc 1 · 까닭 글이 「BOM」 을 말한다 · 덱을 쓰지 않는다" % os.path.basename(frag),
-              rc == 1 and "BOM" in line and "키워드 밖의 데이터 줄" not in line and not any(r.endswith(".k") for r in outs),
-              (rc, sorted(outs), line or text[-300:]))
+              rc == 1 and any("BOM" in l for l in errs) and not any(r.endswith(".k") for r in outs),
+              (rc, sorted(outs), errs or text[-300:]))
+        # BOM 을 뗀 첫 줄로 나머지 검사를 잇는다 — 안 떼고 이으면 같은 조각에 엉뚱한 까닭이 한 줄 더 붙는다(변이 확인이 찾았다)
+        check("★apply_carryover_plan · 조각 %s 에 BOM → 그 조각의 어느 줄도 「키워드 밖의 데이터 줄」 을 말하지 않는다"
+              % os.path.basename(frag),
+              bool(errs) and not any("키워드 밖의 데이터 줄" in l for l in errs), errs)
 
 
 def legacy_matswap(binary, top):
     """옛 자리 인자 꼴 — 번들을 `matswap.cpp` 의 제 리더가 읽는다(YAML 꼴은 조립기 쪽 리더)."""
-    def go(tag, bom):
+    def go(tag, boms):
         d = os.path.join(top, "legacy_" + tag)
         shutil.copytree(os.path.join(REPO, "examples", "matswap"), os.path.join(d, "examples", "matswap"))
-        if bom:
-            p = os.path.join(d, "examples", "matswap", "rubber.k")
+        for name in boms:
+            p = os.path.join(d, "examples", "matswap", name)
             with open(p, "rb") as f:
                 data = f.read()
             with open(p, "wb") as f:
@@ -235,13 +244,14 @@ def legacy_matswap(binary, top):
         out = os.path.join(d, "out.k")
         data = DATE.sub(b"<D>", open(out, "rb").read()) if os.path.isfile(out) else None
         return rc, [l for l in text.splitlines() if "Bundle cards:" in l], data, text
-    p_rc, p_line, p_out, p_text = go("plain", False)
+    p_rc, p_line, p_out, p_text = go("plain", [])
     if not check("matswap(옛 자리 인자 꼴) · 번들 그대로 rc 0 · 화면에 Bundle cards 줄", p_rc == 0 and p_line and p_out, p_text[-400:]):
         return
-    rc, line, out, text = go("bom", True)
-    check("★matswap(옛 자리 인자 꼴) · 번들에 BOM → rc 같음 · Bundle cards 줄 같음 · 산출 바이트 같음 · 산출에 BOM 없음",
-          rc == p_rc and line == p_line and out == p_out and out is not None and BOM not in out,
-          (rc, p_line, line, "산출 %s" % ("같음" if out == p_out else "다름"), text[-200:]))
+    for label, tag, boms in (("번들", "bom", ["rubber.k"]), ("모델 덱", "bom_model", ["two_cubes.k"])):
+        rc, line, out, text = go(tag, boms)
+        check("★matswap(옛 자리 인자 꼴) · %s에 BOM → rc 같음 · Bundle cards 줄 같음 · 산출 바이트 같음 · 산출에 BOM 없음" % label,
+              rc == p_rc and line == p_line and out == p_out and out is not None and BOM not in out,
+              (rc, p_line, line, "산출 %s" % ("같음" if out == p_out else "다름"), text[-200:]))
 
 
 ALE_MAT = """*MAT_NULL
@@ -271,6 +281,43 @@ def ale_custom(binary, top):
     carried = sorted(r for r, d in outs.items() if BOM in d)
     check("★ale(재료 파일) · 재료 파일에 BOM → rc 같음 · 산출 바이트 같음(`*MAT_NULL` 이 남는다) · 산출에 BOM 없음",
           rc == p_rc and not diff and not carried, ("rc %d" % rc, "BOM 실린 산출 %s" % carried, diff[:3], text[-200:]))
+
+
+GRID3 = "0 0 0 0 0\n0 50 100 50 0\n0 0 0 0 0\n"
+GRID4 = "0 0 0 0 0\n0 50 100 50 0\n0 80 160 80 0\n0 0 0 0 0\n"
+GRID_B = "0 0 0 0 0\n0 0.1 0.2 0.1 0\n0 0.2 0.3 0.2 0\n0 0 0 0 0\n"
+GRID_T = "1 1 1 1 1\n1 1.1 1.2 1.1 1\n1 1.2 1.3 1.2 1\n1 1 1 1 1\n"
+BEND = ("base_model: box.k\noutput: box_bent\nmaterial:\n  E: 210000\n  nu: 0.3\noperations:\n  - type: bend\n    target_pid: 1\n"
+        "    plane: xy\n    mode: deform\n")
+BEND_PAIR = BEND + "    source: dat_pair\n    dat_top: t.dat\n    dat_bottom: b.dat\n"
+GRIDS = (  # (op, 이름표, 덮어쓸 파일, BOM 을 붙일 격자)
+    ("warpage", "세 줄 격자", {"warp.dat": GRID3}, ["warp.dat"]),
+    ("warpage", "네 줄 격자", {"warp.dat": GRID4}, ["warp.dat"]),
+    ("bend", "dat 네 줄", {"g.dat": GRID_B, "bend.yaml": BEND + "    source: dat\n    dat_file: g.dat\n"}, ["g.dat"]),
+    ("bend", "dat_pair 윗면만", {"t.dat": GRID_T, "b.dat": GRID_B, "bend.yaml": BEND_PAIR}, ["t.dat"]),
+    ("bend", "dat_pair 아랫면만", {"t.dat": GRID_T, "b.dat": GRID_B, "bend.yaml": BEND_PAIR}, ["b.dat"]),
+    ("bend", "dat_pair 둘 다", {"t.dat": GRID_T, "b.dat": GRID_B, "bend.yaml": BEND_PAIR}, ["t.dat", "b.dat"]),
+)
+
+
+def grids(binary, top, only):
+    """warpage · bend 의 격자 파일 — 숫자 줄뿐인 글 파일이다. BOM 이 붙으면 첫 줄이 숫자로 안 읽혀 조용히 빠졌다."""
+    for n, (op, label, files, boms) in enumerate(GRIDS):
+        if only and op not in only:
+            continue
+        case = Case(binary, os.path.join(top, "grid_%d" % n), next(o for o in OPS if o["name"] == op))
+        for fname, content in files.items():
+            with open(os.path.join(case.base, fname), "w", encoding="utf-8") as f:
+                f.write(content)
+        p_rc, p_text, p_outs = case.go()
+        if not check("%s(격자 · %s) · 그대로 rc 0 · 산출이 있다" % (op, label), p_rc == 0 and bool(p_outs), p_text[-400:]):
+            continue
+        rc, text, outs = case.go(boms)
+        check("★%s(격자 · %s) · 격자 파일에 BOM → rc 같음 · 산출 바이트 같음" % (op, label),
+              rc == p_rc and not differs(p_outs, outs), ("rc %d" % rc, differs(p_outs, outs)[:3], text[-200:]))
+        check("★%s(격자 · %s) · 격자 파일에 BOM → 화면이 같다(시각 · 걸린 시간은 가린다)" % (op, label),
+              screen(text) == screen(p_text), [(a, b) for a, b in zip(screen(p_text), screen(text)) if a != b][:2])
+        shutil.rmtree(os.path.dirname(case.base), ignore_errors=True)
 
 
 def main():
@@ -328,6 +375,7 @@ def main():
             legacy_matswap(binary, top)
         if not only or "ale" in only:
             ale_custom(binary, top)
+        grids(binary, top, only)
     finally:
         shutil.rmtree(top, ignore_errors=True)
     if only:

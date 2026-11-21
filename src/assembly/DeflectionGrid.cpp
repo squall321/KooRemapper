@@ -1,4 +1,5 @@
 #include "assembly/DeflectionGrid.h"
+#include "util/YamlComment.h"  // yamlSkipBOM — 격자 파일 맨 앞의 BOM
 #include <fstream>
 #include <sstream>
 #include <cmath>
@@ -16,6 +17,7 @@ bool DeflectionGrid::loadFromFile(const std::string& filename) {
         return false;
     }
 
+    yamlSkipBOM(file);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 첫 줄이 숫자로 안 읽혀 격자의 첫 행이 조용히 빠졌다(실측 2026-11-21)
     data_.clear();
     std::string line;
     while (std::getline(file, line)) {

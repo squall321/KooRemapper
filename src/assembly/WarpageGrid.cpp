@@ -1,4 +1,5 @@
 #include "assembly/WarpageGrid.h"
+#include "util/YamlComment.h"  // yamlSkipBOM — 격자 파일 맨 앞의 BOM
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -75,6 +76,7 @@ bool WarpageGrid::loadFromFile(const std::string& filepath, double maskValue, do
 
 void WarpageGrid::parseTabDelimitedFile(const std::string& filepath) {
     std::ifstream file(filepath);
+    yamlSkipBOM(file);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 첫 줄이 숫자로 안 읽혀 격자의 첫 행이 조용히 빠졌다(실측 2026-11-21)
     std::string line;
     data_.clear();
 
