@@ -14,7 +14,8 @@
     B. 쪼갠 덱 · 옵션 없음 — rc 1 이고 `flatten_includes` 를 안내한다(조용한 무편집 없음)
     C. 쪼갠 덱 · `flatten_includes: true` — rc 0 이고 산출이 A 와 같다(주석·빈 줄·*KEYWORD·*END 만 빼고 대조) ·
        주 덱 옆 임시 파일(`.*.kr_tmp_flat_*.k`)이 남지 않는다
-  그리고 펼칠 수 없는 닫힘(없는 파일)은 펼치지 않고 까닭을 말한다(D).
+  그리고 펼칠 수 없는 닫힘(없는 파일 · 칸 폭이 주 덱과 갈리는 인클루드)은 펼치지 않고 까닭을 말한다(D). 폭 규칙은
+  `include_closure::widthMixWhy` 하나고 extract-parts 도 같이 쓴다(2026-11-21 — 그쪽 시험은 test_extract_parts_long.py 의 W).
 
 usage: test_flatten_includes.py <KooRemapper 바이너리>
 """
@@ -154,6 +155,44 @@ def main():
         check("D-2 참·거짓이 아닌 값은 말하고 펼치지 않는다", "참·거짓으로 읽지 못했다" in out and rc == 1, out[-300:])
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+    def edit(path, fn):
+        txt = open(path).read()
+        open(path, "w").write(fn(txt))
+
+    # (이름, 주 덱을 고친다, 인클루드를 고친다, 기대 — 거절 까닭의 한 토막 또는 None(rc 0))
+    for tag, what, on_main, on_body, want in (
+            ("D-3", "인클루드가 제 `*KEYWORD I10=Y`(주 덱은 표준)", None, lambda t: "*KEYWORD I10=Y\n" + t,
+             "body_box.k 의 *KEYWORD 폭(10)이 주 덱(8)과 다르다"),
+            ("D-4", "주 덱의 `*INCLUDE -`", lambda t: t.replace("*INCLUDE\n", "*INCLUDE -\n"), None,
+             "*INCLUDE + / *INCLUDE - (그 파일의 칸 폭을 바꾼다)가 있다"),
+            ("D-5", "인클루드 안의 `*INCLUDE +`", None, lambda t: t + "*INCLUDE +\nextra.k\n",
+             "body_box.k 에 *INCLUDE + / - 가 있다"),
+            ("D-6", "인클루드가 제 맨 `*KEYWORD`(주 덱과 같은 폭)", None, lambda t: "*KEYWORD\n" + t, None)):
+        d = tempfile.mkdtemp(prefix="flt_d_")
+        try:
+            spec = specs["convert"]
+            prep(spec, d)
+            for c in spec["cmds"][:-1]:
+                run(binary, d, c)
+            split(os.path.join(d, "box.k"))
+            open(os.path.join(d, "extra.k"), "w").write("$ empty\n")
+            if on_main:
+                edit(os.path.join(d, "box.k"), on_main)
+            if on_body:
+                edit(os.path.join(d, "body_box.k"), on_body)
+            with open(os.path.join(d, "convert.yaml"), "a") as f:
+                f.write("\nflatten_includes: true\n")
+            rc, out = run(binary, d, spec["cmds"][-1])
+            wrote = os.path.exists(os.path.join(d, "box_hex20.k"))
+            if want:
+                check("%s %s — 펼치지 않는다(rc 1 · 까닭이 폭이다 · 산출 없음)" % (tag, what),
+                      rc == 1 and want in out and not wrote, (rc, wrote, [l for l in out.splitlines() if "ERROR" in l][:2]))
+            else:
+                check("%s %s — 펼친다(rc 0)" % (tag, what), rc == 0 and wrote,
+                      (rc, wrote, [l for l in out.splitlines() if "ERROR" in l][:2]))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
 
     print("[E 마스터 덱 + 다른 파트 인클루드 — 주 덱에 대상이 있으면 예전처럼 고치고 말한다]")
     d = tempfile.mkdtemp(prefix="flt_e_")

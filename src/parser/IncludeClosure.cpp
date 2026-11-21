@@ -318,6 +318,56 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
 
 }  // namespace
 
+void WidthMarks::feed(const std::string& l) {
+    const size_t g = l.find_first_not_of(" \t");
+    if (g == std::string::npos || l[g] != '*') return;
+    if (!widthSet_) {   // `deckFieldWidth` 와 같은 걸음 — 폭을 말한 첫 `*KEYWORD`, 말이 없으면 표준
+        const int w = keywordCardDeckWidth(l);
+        if (w > 0) { width = w; widthSet_ = true; }
+        else if (deckscan::upper(l.substr(g, 8)) == "*KEYWORD") widthSet_ = true;
+    }
+    if (!deckscan::isKeywordLine(l)) return;   // 아래 둘은 1열 규칙(닫힘의 걸음과 같다)
+    const std::string kw = deckscan::keywordToken(l);
+    if (kw.rfind("*KEYWORD", 0) == 0) hasKeyword = true;
+    if (kw == "*INCLUDE" && !includeSign) {
+        const size_t b = l.find_first_not_of(" \t", g + 8);          // "*INCLUDE" 뒤
+        if (b != std::string::npos && (l[b] == '+' || l[b] == '-')) includeSign = l[b];
+    }
+}
+
+std::string widthMixWhy(const WidthMarks& main, const std::vector<std::pair<std::string, WidthMarks>>& files) {
+    if (main.includeSign) return "*INCLUDE + / *INCLUDE - (그 파일의 칸 폭을 바꾼다)가 있다 — 한 폭으로 펼칠 수 없다";
+    for (const auto& f : files) {
+        if (f.second.includeSign) return f.first + " 에 *INCLUDE + / - 가 있다 — 한 폭으로 펼칠 수 없다";
+        if (f.second.hasKeyword && f.second.width != main.width)
+            return f.first + " 의 *KEYWORD 폭(" + std::to_string(f.second.width) + ")이 주 덱(" + std::to_string(main.width) +
+                   ")과 다르다 — 펼치면 그 파일의 칸을 다른 폭으로 읽는다";
+    }
+    return std::string();
+}
+
+std::string widthMixWhy(const std::string& mainPath, const Closure& c) {
+    if (c.files.empty() && c.refs.empty()) return std::string();
+    auto scan = [](const std::string& path) {
+        WidthMarks m;
+        std::ifstream in(path);
+        std::string l;
+        bool first = true;
+        while (std::getline(in, l)) {
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (first && l.size() >= 3 && l.compare(0, 3, "\xEF\xBB\xBF") == 0) l.erase(0, 3);
+            first = false;
+            if (deckscan::isKeywordLine(l) && deckscan::keywordToken(l) == "*END") break;   // 닫힘의 걸음과 같다
+            m.feed(l);
+        }
+        return m;
+    };
+    std::vector<std::pair<std::string, WidthMarks>> marks;
+    marks.reserve(c.files.size());
+    for (const auto& f : c.files) marks.emplace_back(f.path, scan(f.path));
+    return widthMixWhy(scan(mainPath), marks);
+}
+
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
              std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin) {
     out.clear();
@@ -333,27 +383,17 @@ bool inlined(const std::vector<std::string>& mainLines, const std::string& mainP
         return false;
     }
     if (!c.cycles.empty()) { why = "*INCLUDE 가 이미 읽은 파일로 돌아온다(순환): " + c.cycles[0]; return false; }
-    const int mainFw = deckFieldWidth(mainLines);
-    auto widthCard = [](const std::vector<std::string>& L) {
-        for (const auto& l : L) {
-            if (deckscan::isDataLine(l) || deckscan::keywordToken(l) != "*INCLUDE") continue;
-            const size_t a = l.find_first_not_of(" \t");
-            const size_t b = l.find_first_not_of(" \t", a + 8);
-            if (b != std::string::npos && (l[b] == '+' || l[b] == '-')) return true;
+    {
+        WidthMarks mainMarks;
+        for (const auto& l : mainLines) mainMarks.feed(l);
+        std::vector<std::pair<std::string, WidthMarks>> marks;
+        marks.reserve(c.files.size());
+        for (const auto& f : c.files) {
+            marks.emplace_back(f.path, WidthMarks());
+            for (const auto& l : f.lines) marks.back().second.feed(l);
         }
-        return false;
-    };
-    if (widthCard(mainLines)) { why = "*INCLUDE + / *INCLUDE - (그 파일의 칸 폭을 바꾼다)가 있다 — 한 폭으로 펼칠 수 없다"; return false; }
-    for (const auto& f : c.files) {
-        if (widthCard(f.lines)) { why = f.path + " 에 *INCLUDE + / - 가 있다 — 한 폭으로 펼칠 수 없다"; return false; }
-        bool hasKw = false;
-        for (const auto& l : f.lines)
-            if (!deckscan::isDataLine(l) && deckscan::keywordToken(l).rfind("*KEYWORD", 0) == 0) { hasKw = true; break; }
-        if (hasKw && deckFieldWidth(f.lines) != mainFw) {
-            why = f.path + " 의 *KEYWORD 폭(" + std::to_string(deckFieldWidth(f.lines)) + ")이 주 덱(" + std::to_string(mainFw) +
-                  ")과 다르다 — 펼치면 그 파일의 칸을 다른 폭으로 읽는다";
-            return false;
-        }
+        why = widthMixWhy(mainMarks, marks);
+        if (!why.empty()) return false;
     }
     out.reserve(mainLines.size());
     if (origin) origin->reserve(mainLines.size());

@@ -1785,6 +1785,15 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
                                    "조용히 빠질 수 있어 거절한다", bad,
                         "따라가는 것은 맨 *INCLUDE 다(주 덱 폴더 먼저 · 그다음 *INCLUDE_PATH 폴더 · 깊이 16) — 변형 인클루드는 펼친 덱으로 돌려라");
     }
+    // ★폭이 섞인 닫힘은 거절한다 — 산출은 주 덱의 `*KEYWORD` 한 줄 아래에 모든 파일의 카드를 그대로 싣는다. `*INCLUDE +` · `-` 나
+    //   제 `*KEYWORD` 로 폭이 다른 인클루드의 카드를 실으면 LS-DYNA 가 그 카드를 주 덱 폭으로 읽는다(예전엔 rc 0 · 되읽기 0 이었다).
+    //   고쳐 쓰는 op 의 `flatten_includes` 와 같은 규칙이다(`include_closure::widthMixWhy`)
+    {
+        const std::string mix = KooRemapper::include_closure::widthMixWhy(o.model, im.closure());
+        if (!mix.empty())
+            return fail("include", "인클루드의 칸 폭이 주 덱과 섞인다 — " + mix + ". 산출은 한 폭으로만 쓸 수 있어 거절한다", {},
+                        "주 덱과 인클루드를 같은 폭으로 맞춰라(인클루드의 *KEYWORD 줄 · *INCLUDE 의 + / - 를 주 덱에 맞게)");
+    }
     if (idx.parts.empty()) return fail("parts", "No *PART definitions found (or only *PART_* variants we cannot chunk)");
     const std::map<int, int> pidNodes = pidNodeCounts(idx);
 

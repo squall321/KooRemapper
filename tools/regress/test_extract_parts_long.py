@@ -21,6 +21,11 @@
   N   되읽기가 long 에서도 잡는다 — 없는 재질 · 없는 섹션을 가리키는 파트를 고르면 표준 꼴과 같이 rc 1 · 수 1 · 산출 없음
   V   `*PART_INERTIA` 블록의 칸 0 이 고른 PID 면 통째로 싣는다 — 표준 꼴과 같다
   R   `renumber: true` — 표준 꼴과 같다(보고 · 산출 낱말)
+  W   ★인클루드의 칸 폭이 주 덱과 갈리는 덱(2026-11-21) — 산출은 주 덱의 `*KEYWORD` 한 줄 아래에 모든 파일의 카드를 그대로 싣는다.
+      예전엔 long 주 덱 + 표준 폭 인클루드(제 `*KEYWORD` · `*INCLUDE -`) · 표준과 I10 이 갈리는 꼴이 rc 0 으로 폭 섞인 산출을 냈다
+      (LS-DYNA 는 그 카드를 주 덱 폭으로 읽는다). 이제 고쳐 쓰는 op 의 `flatten_includes` 와 같은 규칙으로 거절한다 — 어느 파일에든
+      `*INCLUDE +` · `-` 가 있거나, 인클루드가 제 `*KEYWORD` 를 갖고 그 폭이 주 덱과 다르다. rc 1 · 까닭 글 · 산출 없음.
+      폭이 같은 꼴(머리 없는 인클루드 · 같은 폭의 제 `*KEYWORD` · 키워드 접미사 `%`)은 그대로 rc 0 이다. 읽지 않는 줄(`*END` 뒤)은 안 본다
 
 usage: test_extract_parts_long.py <KooRemapper 바이너리>
 """
@@ -146,6 +151,89 @@ def diff(a, b):
     return {k: (a.get(k), b.get(k)) for k in sorted(set(a) | set(b)) if a.get(k) != b.get(k)}
 
 
+def split3(text):
+    """model() 의 글을 (머리 — 절점 · 요소, 가운데 — 파트 · 섹션 · 재질 · 세트, 꼬리 — `*CONTROL_TERMINATION` 부터)로."""
+    L = text.splitlines()
+    a = next(i for i, l in enumerate(L) if l.startswith("*PART"))
+    b = next(i for i, l in enumerate(L) if l.startswith("*CONTROL_TERMINATION"))
+    return L[:a], L[a:b], L[b:]
+
+
+def i10_pair(main_head, main_w, inc_head, inc_w, suffix=""):
+    """(주 덱, 인클루드) — 인클루드가 절점과 요소 1(파트 1) · 2(파트 2)를 제 폭으로, 주 덱이 요소 3(파트 2)을 제 폭으로 갖는다."""
+    def n(x, y, z):
+        return 1 + x + 4 * y + 8 * z
+
+    def elems(w, sfx, *pairs):
+        L = ["*ELEMENT_SOLID" + sfx]
+        for eid, pid, ix in pairs:
+            L += [ints(w, eid, pid), ints(w, n(ix, 0, 0), n(ix + 1, 0, 0), n(ix + 1, 1, 0), n(ix, 1, 0),
+                                           n(ix, 0, 1), n(ix + 1, 0, 1), n(ix + 1, 1, 1), n(ix, 1, 1))]
+        return L
+
+    inc = ([inc_head] if inc_head else []) + ["*NODE" + suffix]
+    inc += ["%*d%16.7f%16.7f%16.7f" % (inc_w, n(ix, iy, iz), ix, iy, iz)
+            for iz in range(2) for iy in range(2) for ix in range(4)]
+    inc += elems(inc_w, suffix, (1, 1, 0), (2, 2, 1))
+    main = [main_head, "*INCLUDE", "inc.k"] + elems(main_w, "", (3, 2, 2))
+    main += ["*PART", "p1", ints(10, 1, 1, 1), "*PART", "p2", ints(10, 2, 1, 1), "*SECTION_SOLID", ints(10, 1, 1),
+             "*MAT_ELASTIC", ints(10, 1) + reals(10, 7.85e-9, 2.1e5, 0.3), "*END"]
+    return main, inc
+
+
+def extract_tree(binary, d, tag, files, parts):
+    """폴더 하나에 파일들을 쓰고(`main.k` 가 주 덱) extract-parts 를 돌린다 — (rc, 콘솔, 보고, 산출 글 또는 None)."""
+    sub = os.path.join(d, tag)
+    os.makedirs(sub)
+    for name, lines in files.items():
+        with open(os.path.join(sub, name), "w") as f:
+            f.write("\n".join(lines) + "\n")
+    with open(os.path.join(sub, "x.yaml"), "w") as f:
+        f.write("model: main.k\noutput: out.k\nparts: %s\nreport: rep.json\n" % parts)
+    rc, out = run(binary, sub, "extract-parts", "x.yaml")
+    rpath, opath = os.path.join(sub, "rep.json"), os.path.join(sub, "out.k")
+    rep = json.load(open(rpath)) if os.path.exists(rpath) else {}
+    return rc, out, rep, (open(opath).read() if os.path.exists(opath) else None)
+
+
+def width_mix_cases():
+    """(이름표, 무엇, 파일들, 고를 파트, 기대) — 기대는 "same"(표준 기준과 낱말 같음) · "two"(파트 2 의 요소 둘) · 거절 까닭의 한 토막."""
+    sh, sm, st = split3(model(False))
+    lh, lm, lt = split3(model(True))
+
+    def tree(head, mid, tail, inc_head=None, sfx=""):
+        return {"main.k": head + ["*INCLUDE" + sfx, "inc.k"] + tail, "inc.k": ([inc_head] if inc_head else []) + mid}
+
+    def pair(*a):
+        main, inc = i10_pair(*a)
+        return {"main.k": main, "inc.k": inc}
+
+    std_kw, long_kw, i10_kw = "*KEYWORD", "*KEYWORD LONG=Y", "*KEYWORD I10=Y"
+    return (
+        ("Wa", "표준 + 표준(머리 없음)", tree(sh, sm, st), "[1, 2, 7]", "same"),
+        ("Wb", "long + long(머리 없음)", tree(lh, lm, lt), "[1, 2, 7]", "same"),
+        ("Wc", "long + long(제 `*KEYWORD LONG=Y`)", tree(lh, lm, lt, long_kw), "[1, 2, 7]", "same"),
+        ("Wd", "★long + 표준(제 `*KEYWORD`)", tree(lh, sm, lt, std_kw), "[1, 2, 7]", "inc.k 의 *KEYWORD 폭(8)이 주 덱(20)"),
+        ("We", "표준 + long(제 `*KEYWORD LONG=Y`)", tree(sh, lm, st, long_kw), "[1, 2, 7]",
+         "inc.k 의 *KEYWORD 폭(20)이 주 덱(8)"),
+        ("Wf", "표준 + long(머리 없음 · `*INCLUDE +`)", tree(sh, lm, st, None, " +"), "[1, 2, 7]", "*INCLUDE + / *INCLUDE -"),
+        ("Wg", "★long + 표준(머리 없음 · `*INCLUDE -`)", tree(lh, sm, lt, None, " -"), "[1, 2, 7]", "*INCLUDE + / *INCLUDE -"),
+        ("Wh", "★표준 + I10(제 `*KEYWORD I10=Y`)", pair(std_kw, 8, i10_kw, 10), "[2]", "inc.k 의 *KEYWORD 폭(10)이 주 덱(8)"),
+        ("Wi", "★I10 + 표준(제 `*KEYWORD`)", pair(i10_kw, 10, std_kw, 8), "[2]", "inc.k 의 *KEYWORD 폭(8)이 주 덱(10)"),
+        ("Wj", "I10 + I10(머리 없음)", pair(i10_kw, 10, None, 10), "[2]", "two"),
+        ("Wk", "표준 + I10(머리 없음 · 키워드 접미사 `%`)", pair(std_kw, 8, None, 10, " %"), "[2]", "two"),
+        ("Wl", "I10 + I10(제 `*KEYWORD I10=Y`)", pair(i10_kw, 10, i10_kw, 10), "[2]", "two"),
+        ("Wm", "표준 + 표준(제 `*KEYWORD`)", pair(std_kw, 8, std_kw, 8), "[2]", "two"),
+        # 안쪽 인클루드의 부호 — long 주 덱 → 머리 없는 mid.k → `*INCLUDE -` 로 표준 폭 파일
+        ("Wn", "★long → mid.k → `*INCLUDE -` 표준", {"main.k": lh + ["*INCLUDE", "mid.k"] + lt, "mid.k": ["*INCLUDE -", "inc.k"],
+                                                  "inc.k": sm}, "[1, 2, 7]", "mid.k 에 *INCLUDE + / - 가 있다"),
+        # 읽지 않는 줄은 안 본다 — 인클루드의 `*END` 뒤 · 주 덱의 `*END` 뒤(닫힘도 거기서 멈춘다)
+        ("Wo", "long + long · 인클루드 `*END` 뒤 표준 `*KEYWORD` · `*INCLUDE -`",
+         tree(lh, lm + ["*END", std_kw, "*INCLUDE -", "none.k"], lt), "[1, 2, 7]", "same"),
+        ("Wp", "long + long · 주 덱 `*END` 뒤 `*INCLUDE -`", tree(lh, lm, lt + ["*INCLUDE -", "none.k"]), "[1, 2, 7]", "same"),
+    )
+
+
 SHAPES = (("L", "LONG=Y", True, "", 20), ("P", "표준 덱 + 접미사 `+`", False, " +", 8),
           ("M", "LONG=Y 덱 + 접미사 `-`", True, " -", 20))
 
@@ -224,6 +312,25 @@ def main():
               ids == list(range(1, 29)), (got["s"][0], got["s"][1].get("verify"), ids[:5], len(ids)))
         check("R-2 renumber — LONG=Y 가 표준과 같다(보고 · 산출 낱말)", got["l"] == got["s"],
               (got["l"][0], diff(got["l"][1], got["s"][1])))
+
+        # ── W: 인클루드의 칸 폭이 주 덱과 갈리는 덱 ──────────────────────────
+        for tag, what, files, parts, want in width_mix_cases():
+            rc, out, r, t = extract_tree(binary, d, tag, files, parts)
+            if want == "same":
+                check("%s %s — rc 0 · 되읽기 0 · 산출이 표준 기준과 낱말 단위로 같다" % (tag, what),
+                      rc == 0 and r.get("verify") == ZERO and t is not None and cards(t) == cs,
+                      (rc, r.get("verify"), r.get("refusals"), out[-300:]))
+            elif want == "two":
+                got = [rows[i][0] for k, rows in cards(t or "") if k == "*ELEMENT_SOLID" for i in range(0, len(rows), 2)]
+                check("%s %s — rc 0 · 되읽기 0 · 파트 2 의 요소 2 · 3 · `*KEYWORD` 줄은 주 덱 것" % (tag, what),
+                      rc == 0 and r.get("verify") == ZERO and sorted(got) == ["2", "3"] and
+                      (t or "").splitlines()[:1] == files["main.k"][:1], (rc, r.get("verify"), got, r.get("refusals"), out[-300:]))
+            else:
+                ref = r.get("refusals") or [{}]
+                check("%s %s — rc 1 · 까닭이 폭이다 · 산출 없음" % (tag, what),
+                      rc == 1 and t is None and r.get("output_written") is False and ref[0].get("kind") == "include" and
+                      "칸 폭이 주 덱과 섞인다" in ref[0].get("message", "") and want in ref[0].get("message", "") and
+                      want in out, (rc, t is None, ref, out[-300:]))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

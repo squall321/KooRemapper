@@ -13,9 +13,9 @@
 - [x] B-3 임시 스택에서 동시 올리기 둘의 최고 RSS
 
 ## C. 폭 섞인 인클루드 거절(C-4)
-- [ ] C-1 판정 함수 하나(`include_closure`) — `inlined` 와 extract-parts 가 같이 쓴다
-- [ ] C-2 시험 a ~ m(rc · 까닭 글 · 거절 때 산출 없음) · 변이 확인
-- [ ] C-3 매뉴얼 48.2 · 도움말 문장
+- [x] C-1 판정 함수 하나(`include_closure`) — `inlined` 와 extract-parts 가 같이 쓴다
+- [x] C-2 시험 a ~ m(rc · 까닭 글 · 거절 때 산출 없음) · 변이 확인 — W 16 항 · `test_flatten_includes.py` D-3 ~ D-6 · 변이 아홉
+- [x] C-3 매뉴얼 48.2 · 도움말 문장
 
 ## D. 쓰기 함수 · tetremesh · unfold · id_floor
 - [ ] D-1 회귀 시험 `test_writer_width_shells.py` — 고치기 전 빨강 확인

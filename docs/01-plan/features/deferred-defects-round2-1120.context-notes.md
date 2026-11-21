@@ -35,3 +35,34 @@
 ## 2026-11-21 · 파싱 줄(B) 닫음
 - `_PARSE_LOCK` 을 넣고 쟀다 — 값과 경계(동시 40 건에서 연결 풀이 바닥나 23 건이 500)는 `df-campaign-intake-1120.plan.md` 9절. 경계는 고치지
   않고 보고한다(선택지 「줄만 세운다」 의 범위 밖).
+
+## 2026-11-21 · 폭 섞인 인클루드 거절(C) 닫음
+- **판정 함수는 하나** — `include_closure::WidthMarks`(파일 하나의 폭 표지 — 첫 `*INCLUDE ±` 부호 · 제 `*KEYWORD` 가 있나 · 그 폭)와
+  `widthMixWhy`. `inlined`(`flatten_includes: true` 의 길)가 쓰던 블록을 그 함수로 옮겼고(까닭 글은 바이트 그대로), extract-parts 는 덱을
+  담지 않으므로 파일을 흘려 읽는 겹침(`widthMixWhy(mainPath, closure)`)을 쓴다. 관문은 닫힘 검사 바로 뒤 · 「No *PART」 검사 앞이다 — 폭이
+  섞인 덱에서 파트를 못 읽은 것은 폭 탓이므로 그 까닭을 먼저 말한다.
+- **꼴 a ~ m(고친 뒤)** — 같은 폭 셋(a · b · c)과 I10 주 덱 + 맨 인클루드 넷(j · k · l · m)은 rc 0 · 되읽기 0. 폭이 갈리는 여섯
+  (d ~ i)은 rc 1 · 산출 없음 · 까닭이 폭이다. 고치기 전엔 d · g · h · i 가 rc 0(폭이 섞인 산출), e · f 가 「미정의 파트 4」 · 「No *PART」
+  였다.
+- **더 잰 꼴** — 빈칸 없는 `*INCLUDE+` · `*INCLUDE-`(n1 · n2)는 앞뒤 같은 rc 1 「따라가지 않는 파일 인클루드」(닫힘이 맨 `*INCLUDE` 만
+  따라간다). 제 `*KEYWORD` 가 없는 중간 파일 안의 `*INCLUDE -`(n3)는 예전 rc 0(조용한 섞임) → 지금 rc 1. 인클루드의 `*END` 뒤에 다른 폭
+  `*KEYWORD` 가 있는 꼴(n6)은 rc 0(그 줄은 읽히지 않는다).
+- **내 탐침이 잡은 과한 거절 하나(n7)** — 첫 판은 주 덱을 끝까지 읽어, 주 덱 `*END` 뒤의 `*INCLUDE -`(닫힘도 extract-parts 도 읽지 않는
+  줄)까지 거절했다. 흘려 읽기가 어느 파일이든 첫 `*END` 에서 멈추게 고쳤다(시험 Wo · Wp · 변이 M2). `inlined` 는 담아 온 주 덱 줄을 끝까지
+  보던 그대로다(바꾸지 않았다 — 앞뒤 둘 다 rc 1 인 것을 탐침 꼴 8 로 확인).
+- **`inlined` 옮김이 같은지** — `convert` + `flatten_includes: true` 로 열 꼴(대조 · 제 `*KEYWORD` I10 · long · 맨(같은 폭) · 주 덱
+  `*INCLUDE -` · `+` · 안쪽 `*INCLUDE +` · I10 주 덱 + 맨 `*KEYWORD` 인클루드 · `*END` 뒤 `*INCLUDE -` · 들여 쓴 `*KEYWORD`)을 설치된
+  바이너리(248ec9bc)와 새 바이너리로 돌려 rc · 까닭 글 · 산출 유무가 열 꼴 모두 같았다. 이 글을 못 박은 회귀가 없어
+  `test_flatten_includes.py` 에 D-3 ~ D-6 을 더했다.
+- **변이** — extract-parts 쪽 다섯(M1 관문 끔 → W 일곱 항 빨강 · M2 `*END` 에서 안 멈춤 → Wo · Wp · M3 제 `*KEYWORD` 폭 안 봄 → Wd · We ·
+  Wh · Wi · M4 안쪽 부호 안 봄 → Wn · M5 주 덱 부호 안 봄 → Wf · Wg), `inlined` 쪽 넷(M6 판정을 버림 → D-3 · D-4 · D-5 · M3 → D-3 ·
+  M4 → D-5 · M5 → D-4). 아홉 다 빨갰다.
+- **규칙의 값** — 넉넉한 쪽으로 거절한다. 주 덱이 long · i10 이고 인클루드가 맨 `*KEYWORD` 로 시작하면 그 몸이 주 덱 폭으로 쓰였어도
+  거절이다(`flatten_includes` 가 전부터 그랬다 — 인클루드의 `*KEYWORD` 줄이 그 파일의 폭을 정하는지 LS-DYNA 로 잴 수 없어 짐작하지 않는다).
+  최종 보고에 적는다.
+- **★새로 본 기존 결함 N-5(BOM) — 고치지 않았다(범위 밖 · 사용자에게 묻는다)** — extract-parts 가 UTF-8 BOM 을 떼지 않는다. 설치된
+  바이너리와 새 바이너리가 같다. (가) BOM 으로 시작하는 인클루드의 첫 줄이 `*ELEMENT_SOLID` 면 **rc 0 인데 고른 요소 둘 가운데 하나만**
+  실린다(첫 블록이 말없이 빠진다). (나) 첫 블록이 `*NODE` 면 rc 1(되읽기 미정의 절점 16). (다) 첫 줄이 `$` 주석이나 `*KEYWORD` 면 멀쩡하다.
+  (라) BOM + `*PART` 로 시작하는 인클루드는 rc 1 「No *PART」. (마) BOM 이 붙은 한 파일 `*KEYWORD LONG=Y` 덱은 rc 1 「No *PART」(표준 폭은
+  된다 — 산출 첫 줄에 BOM 이 남는다). 닫힘 리더(`include_closure`)는 BOM 을 뗀다 — extract-parts 의 제 걸음만 다르다.
+- 추세 — 목록 밖 기존 결함이 N-1 ~ N-4 · h · i 에 이어 N-5 로 일곱이 됐다. 모두 전부터 있던 것이고 이번에 들인 것은 없다.

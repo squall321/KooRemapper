@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace KooRemapper {
@@ -134,6 +135,25 @@ struct LineOrigin {
 };
 bool inlined(const std::vector<std::string>& mainLines, const std::string& mainPath, const Closure& c,
              std::vector<std::string>& out, std::string& why, std::vector<LineOrigin>* origin = nullptr);
+
+// ★닫힘을 **한 폭**으로 읽을 수 있나 — `inlined` 의 폭 규칙을 덱을 담지 않는 소비자(extract-parts)도 같이 쓴다(2026-11-21).
+// 예전엔 extract-parts 가 이 규칙을 거치지 않아, long 주 덱 아래 표준 폭 인클루드의 10칸 카드를 `*KEYWORD LONG=Y` 한 줄 아래에
+// 그대로 실었다(rc 0 — LS-DYNA 는 그 카드를 20칸으로 읽는다).
+// 파일 하나의 폭 표지 — 그 파일의 줄을 차례로 먹인다.
+struct WidthMarks {
+    char includeSign = 0;      // 첫 `*INCLUDE +` · `*INCLUDE -` 의 부호(없으면 0) — 끌어올 파일의 폭을 바꾼다(Vol_I 19349)
+    bool hasKeyword = false;   // 제 `*KEYWORD` 카드가 있다
+    int width = 8;             // 첫 `*KEYWORD` 가 정한 폭(`deckFieldWidth` 와 같은 규칙)
+    void feed(const std::string& line);
+private:
+    bool widthSet_ = false;
+};
+// 한 폭으로 읽을 수 없으면 까닭(빈 글자 = 읽을 수 있다) — 어느 파일에든 `*INCLUDE +` · `-` 가 있거나, 인클루드 파일이 제 `*KEYWORD` 를
+// 갖고 그 폭이 주 덱과 다르다. `files` 는 (경로, 표지)를 닫힘의 차례로.
+std::string widthMixWhy(const WidthMarks& main, const std::vector<std::pair<std::string, WidthMarks>>& files);
+// 같은 판정을 파일을 흘려 읽어 한다(`readPaths` 의 닫힘 — 줄을 담지 않는다). 어느 파일이든 첫 `*END` 앞까지 본다(닫힘이 걷는 줄 —
+// `inlined` 는 담아 온 주 덱 줄을 끝까지 본다). 인클루드가 없으면 읽지 않는다.
+std::string widthMixWhy(const std::string& mainPath, const Closure& c);
 
 // 같은 파일인가 — 정규 경로(`weakly_canonical` — `./a.k` · 절대 경로 · 심볼릭 링크)가 같거나, 둘 다 있으면 같은 파일(하드 링크 —
 // `equivalent`)이다. 빈 경로는 아무것과도 같지 않다.
