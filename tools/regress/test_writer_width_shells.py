@@ -34,6 +34,8 @@
   N-6 squeeze · map — `*NODE%` · `*ELEMENT_SOLID%`(공백 없는 접미사) 블록은 한 번만(198 · 100)
   N-7 `*NODE-` · `*ELEMENT_SOLID-` · `*ELEMENT_SHELL-`(공백 없는 표준 폭 접미사) × unfold · map · squeeze · tetremesh — 공백 있는 꼴과
       산출이 바이트까지 같다(표준 덱은 맨 키워드 덱과도 같다) · `LONG=Y` 덱 안에서도 그 블록은 표준 폭으로 읽는다
+  N-9 `*END-`(붙여 쓴 접미사) 뒤에 죽은 블록이 있는 덱 × 네 op — 끝 줄은 `*END` 하나 · 산출이 `*END` · `*END -` 덱의 산출과
+      바이트 같다(예전엔 map · squeeze 산출에 `*END-` 와 `*END` 가 둘 나갔다 — 리더는 끝으로 읽고 쓰기 고리만 지나쳤다)
   M-1 map — 평판의 두께 셸은 `*ELEMENT_SOLID` 에 없고 `*ELEMENT_TSHELL` 블록 그대로
 
 usage: test_writer_width_shells.py <KooRemapper 바이너리>
@@ -581,6 +583,20 @@ def body(binary, root):
             except (ValueError, KeyError) as e:
                 bad = ["칸을 못 읽는다 — %s" % e]
             check(name + " — 좌표가 원본과 같다", bool(nd) and not bad, bad[:3])
+
+    print("[N-9] `*END-` — 쓰기도 리더와 같은 자리에서 끝낸다")
+    # 끝 뒤에 죽은 블록(절점 1 을 딴 자리에 두는 `*NODE`)을 둔다 — 읽히지 않아야 하고, 산출은 끝 줄의 철자와 무관해야 한다
+    _, s = case_dir(root, "n9_src", binary)
+    dead = "*NODE\n       1 9.0 9.0 9.0\n"
+    ends = {suf: outputs("n9_end%d" % i, s.replace("*END\n", "*END" + suf + "\n" + dead)) for i, suf in enumerate(("", " -", "-"))}
+    for op, _, _ in OPS:
+        rc, data, o, out = ends["-"][op]
+        got = [l for l in lines_of(o) if l.upper().startswith("*END")]
+        check("N-9 `*END-` 덱 %s — rc 0 · 절점 198 줄 · 끝 줄은 `*END` 하나" % op, rc == 0 and len(rows(o, "*NODE")) == 198 and got == ["*END"],
+              "rc %d 절점 %d %r %s" % (rc, len(rows(o, "*NODE")), got, out[-300:]))
+        check("N-9 `*END-` 덱 %s — 산출이 `*END` 덱 · `*END -` 덱의 산출과 바이트 같다" % op,
+              data is not None and data == ends[""][op][1] and data == ends[" -"][op][1],
+              "rc %d · `*END` rc %d · `*END -` rc %d" % (rc, ends[""][op][0], ends[" -"][op][0]))
 
     print("[M-1] map — 평판의 두께 셸")
     d, s = case_dir(root, "m1", binary)

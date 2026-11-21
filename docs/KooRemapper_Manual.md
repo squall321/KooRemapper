@@ -578,6 +578,7 @@ S2 · 회귀 `tools/regress/test_staged_write.py` W).
   꼴을 모르는 키워드로 넘겨 `unfold` · `map` 은 「Mesh has no nodes」 로 멈췄고(rc 1), `squeeze` 는 **rc 0 으로 아무것도 누르지 않은
   덱**을, `tetremesh` 는 **rc 0 으로 절점 · 솔리드가 빠진 덱**을 썼습니다. 이름 가운데의 `-`(`*MAT_BLATZ-KO_RUBBER`)는 그대로 이름입니다.
   LS-DYNA 가 붙여 쓴 꼴을 받는지는 재지 못했습니다(라이선스 만료). 회귀 `test_writer_width_shells.py` N-7.
+  `*END-` 도 `*END` 와 같은 끝입니다 — 다시 쓰는 op 은 거기서 끝내고 `*END` 하나를 씁니다(N-9).
 - 원본의 셸 블록 줄을 **다시 읽지 않습니다**. 예전엔 솔리드 블록에서 뺄 셸 번호를 원본 줄에서 8칸으로 다시 세어, `I10=Y` 덱의 10칸 셸 줄 ·
   두께 카드 · 리더가 안 읽는 변형(`*ELEMENT_TSHELL_BETA` · `*ELEMENT_SHELL_COMPOSITE`)의 줄에서 나온 수와 번호가 같은 **솔리드가 산출에서
   빠졌습니다**(rc 0). 이제는 리더가 메시에 담은 사실(셸 · 두께 셸 표지)로만 가립니다 — `map` 의 결과 메시도 그 표지를 옮깁니다.

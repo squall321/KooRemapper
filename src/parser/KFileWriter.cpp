@@ -6,7 +6,6 @@
 #include <ctime>
 #include <algorithm>
 #include <fstream>
-#include <cctype>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
@@ -14,28 +13,6 @@
 namespace KooRemapper {
 
 namespace {
-// Case-insensitive prefix check for keyword detection.
-// Accepts variants like "*NODE", "*node ", "*NODE_RIGID_SURFACE" (when
-// prefix="*NODE"); the caller decides whether sub-variants should be
-// treated as "same family".
-bool startsWithKeyword(const std::string& line, const char* keyword) {
-    size_t i = 0;
-    // Allow leading whitespace before '*'
-    while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
-    size_t k = 0;
-    while (keyword[k] != '\0') {
-        if (i >= line.size()) return false;
-        char a = static_cast<char>(std::toupper(static_cast<unsigned char>(line[i])));
-        char b = static_cast<char>(std::toupper(static_cast<unsigned char>(keyword[k])));
-        if (a != b) return false;
-        ++i; ++k;
-    }
-    // Match if the keyword ends here or is followed by space/_/end-of-line
-    if (i >= line.size()) return true;
-    char next = line[i];
-    return next == ' ' || next == '\t' || next == '_' || next == '\r';
-}
-
 // 키워드 줄은 리더와 같은 규칙(`deckscan::isKeywordLine` — 1열 `*` + 글자 · Vol_I 17940). 들여쓴 `*` 줄은 앞 블록의 데이터다 —
 // 예전엔 들여쓴 `  *END` 를 끝으로 보아 거기서 `*END` 를 쓰고 원본의 `*END` 를 또 베꼈다(`*END` 가 둘 · 2026-11-08 재검토)
 using deckscan::isKeywordLine;
@@ -223,7 +200,9 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
                     inSkipBlock = true;
                     continue;
                 }
-                if (startsWithKeyword(line, "*END")) {
+                // 끝도 리더가 뽑는 이름으로 — `*END-` 를 리더 · `firstEndLine` 은 끝으로 읽는데 여기만 지나쳐 `*END-` 를 베끼고
+                // `*END` 를 또 썼다(끝이 둘 · 2026-11-21 검토). `*END_X` 는 리더에게도 끝이 아니다
+                if (name == "END") {
                     emitOurNodes();
                     emitOurElems();
                     writeEnd(out);
