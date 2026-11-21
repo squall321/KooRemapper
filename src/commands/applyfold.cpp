@@ -375,7 +375,12 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
     std::ifstream fa(model, std::ios::binary | std::ios::ate);
     std::ifstream fb(outDeck, std::ios::binary | std::ios::ate);
     if (fa.is_open() && fb.is_open()) {
-        const long long sa = (long long)fa.tellg(), sb = (long long)fb.tellg();
+        long long sa = (long long)fa.tellg();
+        const long long sb = (long long)fb.tellg();
+        char head[3] = {0, 0, 0};
+        fa.seekg(0);
+        // 맨 앞 BOM 은 떼고 읽어 산출에 싣지 않는다 — 덱 내용끼리 견준다(안 빼면 좌표가 그대로여도 세 바이트 차로 아래 경고가 났다)
+        if (fa.read(head, 3) && std::string(head, 3) == "\xEF\xBB\xBF") sa -= 3;
         console.keyValue("Byte size", std::to_string(sa) + " → " + std::to_string(sb));
         if (sa != sb)
             console.warning("바이트 크기가 달라졌다(" + num("%+lld", (double)(sb - sa)) +

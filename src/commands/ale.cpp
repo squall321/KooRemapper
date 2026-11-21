@@ -295,6 +295,7 @@ static std::string ale_presetMaterial(const std::string& preset, int mid, int eo
 static std::string ale_customMaterial(const std::string& path, int mid, int eosid) {
     std::ifstream fin(path);
     if (!fin.is_open()) return "";
+    KooRemapper::yamlSkipBOM(fin);   // 맨 앞 BOM 은 건너뛴다 — 첫 `*MAT_` 줄을 키워드로 못 알아봐 블록이 통째로 빠졌다
     std::vector<std::string> blines;
     std::string ln;
     while (std::getline(fin, ln)) {

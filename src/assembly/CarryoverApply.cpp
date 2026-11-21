@@ -495,13 +495,16 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     const std::string tag = "[apply_carryover_plan] ";
 
     // ── ① 덱 — 지문 · 폭 ────────────────────────────────────────────────────
+    bool deckBom = false;
     {
         std::string bytes;
         if (!readBytes(baseModelPath_, bytes)) { problem(0, "deck_read", "덱을 다시 열지 못했다: " + baseModelPath_); return false; }
         rep.deckShaIn = util::sha256Hex(bytes);
         // 지문은 **고칠 줄을 낸 바이트**의 것이어야 한다 — 줄(rawLines_)은 덱을 담을 때 읽고 지문은 여기서 파일을 다시 열어 잰다. 그 사이에
         // 파일이 바뀌면 지금 바이트의 지문을 계획과 견주고 처음 읽은 줄을 고쳐 썼다(계획이 지금 덱의 것이면 옛 덱에 적용된다 · 적대적 검토 11-07)
-        if (!carryover::bytesGiveLines(bytes, rawLines_, false))
+        // 맨 앞 BOM 은 덱을 담을 때 떼고 읽었다(줄에 없다) — 지문은 파일 바이트 그대로 재고 줄 대조만 BOM 을 뺀 바이트로 한다
+        deckBom = bytes.compare(0, 3, "\xEF\xBB\xBF") == 0;
+        if (!carryover::bytesGiveLines(deckBom ? bytes.substr(3) : bytes, rawLines_, false))
             problem(0, "deck_changed", "덱 파일이 읽은 뒤 바뀌었다(" + baseModelPath_ + ") — 잰 지문은 지금 바이트의 것이고 고칠 줄은 처음 읽은 "
                                        "것이라 계획과 견줄 수 없다 · 파일을 그대로 두고 다시 돌린다");
     }
@@ -524,7 +527,10 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
     if (v2) rep.deckFrom = plan.deckFrom;   // 덱을 relpath 로 찾지 않는다 — 부르는 쪽이 준 model 이 그 덱이다(sha256 이 지킨다)
     if (!plan.deckSha256.empty() && plan.deckSha256 != rep.deckShaIn)
         problem(0, "deck_sha", "이 덱의 sha256 " + rep.deckShaIn + " 이 계획의 deck.sha256 " + plan.deckSha256 + " 와 다르다 — 계획은 다른 덱(" +
-                                   plan.deckRelpath + ")을 전제했다");
+                                   plan.deckRelpath + ")을 전제했다" +
+                                   (deckBom ? " · 이 덱은 UTF-8 BOM 으로 시작한다 — 계획을 낸 덱에 BOM 이 없었다면 그 세 바이트만으로 "
+                                              "지문이 다르다(BOM 없이 저장해 다시 돌린다)"
+                                            : ""));
     if (!plan.unreadCards.empty()) {
         std::set<std::string> u(plan.unreadCards.begin(), plan.unreadCards.end());
         warn(0, "unread_cards", "계획을 지은 리더가 모르는 카드 — " + join(u) + " · 그 번호는 계획의 deck.max 에 없다(우리 바닥으로 다시 센다)");

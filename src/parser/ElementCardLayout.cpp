@@ -2,6 +2,7 @@
 #include "parser/ElementCardLayout.h"
 
 #include "parser/DeckScan.h"   // 카드 칸 읽기(cardFields · fieldInt) — 격자 밖 요소 걸음이 쓴다
+#include "util/YamlComment.h"  // yamlSkipBOM — 덱 맨 앞의 BOM
 
 #include <algorithm>
 #include <cctype>
@@ -866,6 +867,7 @@ bool isScalarNodeKeyword(const std::string& kw) { return kw == "*NODE_SCALAR" ||
 int scalarNodeMaxIdFile(const std::string& path) {
     std::ifstream in(path);
     if (!in.is_open()) return 0;
+    yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 `*KEYWORD I10=Y` 줄을 못 알아봐 스칼라 절점 번호를 8칸으로 읽었다
     // 덱 폭은 첫 `*KEYWORD` 카드가 정한다(`deckFieldWidth` 와 같다) — 흘려 읽으니 그 줄에서 정한다
     int deckFw = 8, fw = 8, m = 0;
     bool kwSeen = false, inScalar = false;

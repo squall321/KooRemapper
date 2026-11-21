@@ -472,5 +472,9 @@ TEST(IncludeClosure_readerMax_와_흘려_읽기는_스칼라_절점_번호도_�
     ASSERT_EQ(rm.node, 900);                       // 인클루드의 *NODE 5 와 *NODE_SCALAR 900 의 큰 쪽(주 덱은 부르는 쪽이 센다)
     ASSERT_EQ(scalarNodeMaxIdFile(m), 950);        // 주 덱을 흘려 읽는 판 — 줄을 담지 않는다
     ASSERT_EQ(scalarNodeMaxIdFile(s.put("i10.k", "*KEYWORD I10=Y\n*NODE_SCALAR\n  12345678         1\n*END\n")), 12345678);
+    // 맨 앞 BOM 은 떼고 읽는다 — 안 떼면 `*KEYWORD I10=Y` 줄을 키워드로 못 알아봐 번호를 8칸(1234)으로 읽었다(실측 11-21 —
+    // meshfix 가 스칼라 절점 900000 을 9000 으로 읽어 새 절점을 9001 부터 냈다)
+    ASSERT_EQ(scalarNodeMaxIdFile(s.put("i10_bom.k", "\xEF\xBB\xBF*KEYWORD I10=Y\n*NODE_SCALAR\n  12345678         1\n*END\n")),
+              12345678);
     ASSERT_EQ(scalarNodeMaxIdFile((s.root / "없다.k").string()), 0);
 }

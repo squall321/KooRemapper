@@ -17,14 +17,22 @@
 
 무엇을 보나(도움말 사례를 판으로 쓴다 — 제 명령이 읽는 덱은 명령줄 → 설정이 가리키는 파일 → `*INCLUDE` 자식 순으로 찾는다).
   op 마다 덱 입력 전부에(여럿이면 하나씩도) BOM 을 붙여 돌린다 → rc 가 같다 · 산출 파일이 BOM 없는 쌍둥이와 바이트로 같다(날짜 ·
-  시각 줄은 가린다) · 어느 산출에도 BOM 바이트가 없다.
+  시각 줄은 가린다) · 어느 산출에도 BOM 바이트가 없다 · **화면**도 같다(시각 · 걸린 시간은 가린다).
+  화면을 보는 까닭 — BOM 을 떼고 읽게 한 첫 판이 rc 와 산출은 같은데 화면에 거짓 줄을 냈다(실측 11-21). applyfold 는 입력 크기에
+  BOM 세 바이트를 넣어 세어 「바이트 크기가 달라졌다」 를, apply_carryover_plan 은 뗀 줄을 파일 바이트와 견줘 `deck_changed` 를 냈다.
   matswap — 화면의 `bundle:` 줄(params · cards)도 같다.
-  apply_carryover_plan — 덱에 붙이면 rc 1 `deck_sha` · 조각에 붙이면 rc 1 에 그 조각 줄이 「BOM」 을 말한다 · 어느 쪽도 덱을 쓰지 않는다.
+  apply_carryover_plan — 덱에 붙이면 rc 1 `deck_sha`(그 줄이 「BOM」 을 말하고 `deck_changed` 는 없다) · 조각에 붙이면 rc 1 에 그 조각
+  줄이 「BOM」 을 말한다 · 어느 쪽도 덱을 쓰지 않는다. 계획이 **BOM 붙은 그 덱**에서 나온 것이면(deck.sha256 이 BOM 째 바이트의 것)
+  rc 0 이고 산출 덱이 BOM 없는 쌍둥이와 같다 — 설치된 판(11-21)은 rc 0 에 BOM 이 실린 덱을 썼고, 첫 판은 `deck_changed` 로 막았다.
 
   matswap 의 옛 자리 인자 꼴(`matswap <모델> <번들> <pid> <산출>`)은 번들을 읽는 자리가 따로다 — 번들에 BOM 을 붙여 따로 잰다.
+  ale 의 `material:` 에 재료 파일 경로를 주면 그 파일도 읽는 자리가 따로다 — 실측(11-21)으로 BOM 이 붙으면 rc 0 에 `*MAT_NULL`
+  블록이 통째로 빠지고 `*EOS_` 만 실렸다(파트가 가리키는 MID 가 덱에 없다). 도움말 사례는 붙박이 이름(air)이라 따로 잰다.
 
 usage: test_deck_bom.py <KooRemapper 바이너리> [op ...]     (op 을 주면 그 op 만 돈다 — 변이 확인용)
 """
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -40,6 +48,7 @@ from ops_help import OPS  # noqa: E402
 
 BOM = b"\xef\xbb\xbf"
 DATE = re.compile(rb"\d{4}[-/]\d{2}[-/]\d{2}|\d{2}:\d{2}:\d{2}")
+CLOCK = re.compile(r"\[\d{4}-\d{2}-\d{2} [\d:.]+\]|\d+(\.\d+)?\s*(ms|s|초)\b|\d{4}[-/]\d{2}[-/]\d{2}|\d{2}:\d{2}:\d{2}")
 GMSH_OPS = ("meshfix",)
 FAILS, OKS = [], []
 
@@ -53,6 +62,11 @@ def check(name, cond, detail=""):
 def call(binary, cwd, cmd, timeout=900):
     p = subprocess.run([binary] + cmd.split()[1:], cwd=cwd, capture_output=True, timeout=timeout)
     return p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace")
+
+
+def screen(text):
+    """화면에서 시각 · 걸린 시간을 가린 줄들 — 쌍둥이끼리 견준다."""
+    return [CLOCK.sub("<T>", l) for l in text.splitlines()]
 
 
 def snapshot(d):
@@ -135,8 +149,9 @@ class Case:
                 raise RuntimeError("준비 명령 실패 %s: %s" % (c, text[-400:]))
         self.decks = find_decks(self.base, self.cmd)
 
-    def go(self, bom=()):
-        """base 를 run 으로 복사하고 bom 의 파일 맨 앞에 BOM 을 붙여 제 명령을 돌린다 → (rc, 화면, 산출 {이름: 바이트})."""
+    def go(self, bom=(), patch=None):
+        """base 를 run 으로 복사하고 bom 의 파일 맨 앞에 BOM 을 붙여(patch 가 있으면 그 뒤에 부른다) 제 명령을 돌린다
+        → (rc, 화면, 산출 {이름: 바이트})."""
         shutil.rmtree(self.run, ignore_errors=True)
         shutil.copytree(self.base, self.run)
         for rel in bom:
@@ -145,6 +160,8 @@ class Case:
                 data = f.read()
             with open(p, "wb") as f:
                 f.write(BOM + data)
+        if patch:
+            patch(self.run)
         before = snapshot(self.run)
         rc, text = call(self.binary, self.run, self.cmd)
         outs = {r: DATE.sub(b"<D>", d) for r, d in snapshot(self.run).items() if before.get(r) != d}
@@ -172,8 +189,29 @@ def carryover(case, plain):
     """apply_carryover_plan — 거절은 그대로 · 조각의 까닭 글이 BOM 을 말한다."""
     deck = case.decks[0]
     rc, text, outs = case.go([deck])
-    check("★apply_carryover_plan · 덱에 BOM → rc 1 · `deck_sha` · 덱을 쓰지 않는다",
-          rc == 1 and "deck_sha" in text and not any(r.endswith(".k") for r in outs), (rc, sorted(outs), text[-300:]))
+    sha = next((l for l in text.splitlines() if "deck_sha" in l), "")
+    check("★apply_carryover_plan · 덱에 BOM → rc 1 · `deck_sha` 줄이 「BOM」 을 말한다 · `deck_changed` 는 없다 · 덱을 쓰지 않는다",
+          rc == 1 and "BOM" in sha and "deck_changed" not in text and not any(r.endswith(".k") for r in outs),
+          (rc, sorted(outs), sha[-200:], [l[:80] for l in text.splitlines() if "deck_changed" in l]))
+
+    def from_bom_deck(run):
+        """계획의 deck.sha256 을 BOM 붙은 덱 바이트의 것으로 바꾼다 — 그 덱에서 낸 계획."""
+        plan = next(os.path.join(run, t) for t in case.spec["files"]["c.yaml"].split() if t.endswith("plan.json"))
+        with open(plan, encoding="utf-8") as f:
+            t = f.read()
+        with open(os.path.join(run, deck), "rb") as f:
+            new = hashlib.sha256(f.read()).hexdigest()
+        old = json.loads(t)["deck"]["sha256"]
+        assert t.count(old) == 1
+        with open(plan, "w", encoding="utf-8") as f:
+            f.write(t.replace(old, new))
+
+    rc, text, outs = case.go([deck], patch=from_bom_deck)
+    decks = {r: d for r, d in outs.items() if r.endswith(".k")}
+    p_decks = {r: d for r, d in plain[2].items() if r.endswith(".k")}
+    check("★apply_carryover_plan · BOM 덱에서 낸 계획(deck.sha256 이 BOM 째) → rc 0 · 산출 덱이 쌍둥이와 같다 · BOM 없음",
+          rc == 0 and bool(p_decks) and not differs(p_decks, decks) and not any(BOM in d for d in outs.values()),
+          (rc, differs(p_decks, decks)[:2], [l[:160] for l in text.splitlines() if l.startswith("[ERROR]")][:3]))
     for frag in case.decks[1:]:
         rc, text, outs = case.go([frag])
         line = next((l for l in text.splitlines() if l.startswith("[ERROR]") and os.path.basename(frag) in l), "")
@@ -204,6 +242,35 @@ def legacy_matswap(binary, top):
     check("★matswap(옛 자리 인자 꼴) · 번들에 BOM → rc 같음 · Bundle cards 줄 같음 · 산출 바이트 같음 · 산출에 BOM 없음",
           rc == p_rc and line == p_line and out == p_out and out is not None and BOM not in out,
           (rc, p_line, line, "산출 %s" % ("같음" if out == p_out else "다름"), text[-200:]))
+
+
+ALE_MAT = """*MAT_NULL
+$      MID        RO
+         9 1.290E-12
+*EOS_LINEAR_POLYNOMIAL
+$    EOSID        C0        C1        C2        C3        C4        C5        C6
+         9       0.0       0.0       0.0       0.0       0.4       0.4       0.0
+       0.0       0.0
+"""
+
+
+def ale_custom(binary, top):
+    """ale 의 사용자 재료 파일 — `material:` 에 경로를 주면 그 파일의 첫 `*MAT_` · `*EOS_` 블록을 옮겨 싣는다."""
+    case = Case(binary, os.path.join(top, "ale_custom"), next(o for o in OPS if o["name"] == "ale"))
+    for fname, content in (("mat.k", ALE_MAT),
+                           ("ale.yaml", "model: box.k\noutput: box_ale.k\nale_parts:\n  - pid: 1\n    material: mat.k\n")):
+        with open(os.path.join(case.base, fname), "w", encoding="utf-8") as f:
+            f.write(content)
+    p_rc, p_text, p_outs = case.go()
+    deck = p_outs.get("box_ale.k", b"")
+    if not check("ale(재료 파일) · 그대로 rc 0 · 산출에 `*MAT_NULL` · `*EOS_LINEAR_POLYNOMIAL` 이 실린다",
+                 p_rc == 0 and b"*MAT_NULL" in deck and b"*EOS_LINEAR_POLYNOMIAL" in deck, p_text[-400:]):
+        return
+    rc, text, outs = case.go(["mat.k"])
+    diff = differs(p_outs, outs)
+    carried = sorted(r for r, d in outs.items() if BOM in d)
+    check("★ale(재료 파일) · 재료 파일에 BOM → rc 같음 · 산출 바이트 같음(`*MAT_NULL` 이 남는다) · 산출에 BOM 없음",
+          rc == p_rc and not diff and not carried, ("rc %d" % rc, "BOM 실린 산출 %s" % carried, diff[:3], text[-200:]))
 
 
 def main():
@@ -249,6 +316,8 @@ def main():
                 diff = differs(p_outs, outs)
                 check("★%s · BOM 덱(%s) → rc 같음 · 산출 바이트 같음 · 산출에 BOM 없음" % (name, os.path.basename(label)),
                       rc == p_rc and not diff and not carried, ("rc %d" % rc, "BOM 실린 산출 %s" % carried, diff[:3], text[-200:]))
+                check("★%s · BOM 덱(%s) → 화면이 같다(시각 · 걸린 시간은 가린다)" % (name, os.path.basename(label)),
+                      screen(text) == screen(p_text), [(a, b) for a, b in zip(screen(p_text), screen(text)) if a != b][:2])
                 if name == "matswap":
                     def bundle(t):
                         return [l for l in t.splitlines() if "bundle:" in l]
@@ -257,6 +326,8 @@ def main():
             shutil.rmtree(root, ignore_errors=True)
         if not only or "matswap" in only:
             legacy_matswap(binary, top)
+        if not only or "ale" in only:
+            ale_custom(binary, top)
     finally:
         shutil.rmtree(top, ignore_errors=True)
     if only:
