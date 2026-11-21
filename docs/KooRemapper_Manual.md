@@ -4693,6 +4693,9 @@ KooRemapper tetremesh <config.yaml>
 칸 폭은 읽은 덱의 `*KEYWORD` 선언을 따르고 산출 첫 줄이 그 폭을 선언한다 — 예전엔 `I10=Y` 덱도 맨 `*KEYWORD` 아래 8칸으로 써서 9자리
 번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 rc 1 이다([§3.1(n)](#31-yaml-공통-규칙-모든-op) · 회귀
 `test_writer_width_shells.py` S · T · W-3). 첫 `*END` 뒤의 셸 블록은 옮기지 않는다(리더도 거기서 멈춘다 · T-7).
+새로 내는 절점 · 요소 번호가 LS-DYNA 정수 상한 2147483647 을 넘게 되면(덱의 가장 큰 번호가 상한 바로 아래일 때) 쓰지 않고 rc 1 이다(2026-11-21)
+— 예전엔 번호가 넘쳐 음수 번호의 절점 · 솔리드가 rc 0 으로 나갔다(요소 번호가 상한인 셸 하나만 있어도). 덱의 번호를 낮춘 뒤 다시 돌린다(회귀
+I-2).
 리더가 읽지 않는 요소 변형(`*ELEMENT_SHELL_COMPOSITE` · `*ELEMENT_SOLID_ORTHO` · 빔 …)과 `*PART` · `*SECTION_*` · `*MAT_*` 같은 메시 밖 카드는
 산출에 싣지 않는다(원래부터 · 원본 덱에서 옮겨 붙인다). 그 가운데 ★**솔리드 · 셸 · 두께 셸 변형 블록**(`*ELEMENT_SOLID_ORTHO` ·
 `*ELEMENT_SHELL_COMPOSITE` · `*ELEMENT_TSHELL_BETA` …)은 쓴 뒤 `[WARN]` 으로 알린다(2026-11-21) — 키워드마다 블록 수와 데이터 줄 수(주석 · 빈

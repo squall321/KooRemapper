@@ -25,6 +25,8 @@
   T-7 tetremesh — 첫 `*END` 뒤의(읽히지 않는) 셸 블록은 산출에 살아나지 않는다
   W-3 표준 덱의 `%` 블록에 9자리 번호 — tetremesh · squeeze 는 rc 1 · 산출 없음 · 까닭에 번호
   I-1 id_floor — 최대 2147483647 은 rc 1 · JSON 없음 / 최대 2147483646 은 rc 0 · `elem_start` 2147483647
+  I-2 tetremesh — 새 절점 · 요소 번호가 2147483647 을 넘게 되면 rc 1 · 산출 없음(예전엔 음수 번호의 솔리드가 rc 0 으로 나갔다) ·
+      꼭 맞게 남으면 rc 0 · 최대 번호 2147483647 · `I10=Y` · `LONG=Y` · 8칸 덱의 `%` 블록 · iterate
   N-1 `I10=Y` · `LONG=Y` 메시 덱 × unfold · map · squeeze · tetremesh — 선언 · 줄 길이 · 번호 집합(map 은 좌표도)
   N-2 squeeze — `I10=Y` 덱의 10칸 셸 1001~1005 가 있어도 솔리드 100 개 전부
   N-3 squeeze — 두께 카드(1.0 · 2.5 · 37.0)가 있어도 솔리드 전부 · 카드 그대로
@@ -54,6 +56,8 @@ SQ = "parts:\n  - pid: 1\n    eps_x: -0.01\n    eps_y: -0.01\n    eps_z: 0.0\nma
 TET = "model: box.k\noutput: tet_out.k\nbackend: localimprove\ntarget_pids: [1]\n"
 SKIN = ("*SECTION_SHELL\n$#   secid    elform\n         2         2\n       0.1       0.1       0.1       0.1\n"
         "*PART\nSKIN\n$#     pid     secid       mid\n         2         2         1\n")
+TET2 = (((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0), (0.5, 0.5, 1.0), (0.5, 0.5, -1.0)), ((1, 2, 3, 4), (1, 3, 2, 5)))
+TETQ = "model: box.k\noutput: tet_out.k\nbackend: localimprove\nquality:\n  min_jacobian: 0.9\n"
 OPS = (("unfold", ("unfold", "box.k", "unf.k"), "unf.k"), ("map", ("map", "box.k", "box.k", "map.k"), "map.k"),
        ("squeeze", ("squeeze", "box.k", "sq.yaml", "sq"), "sq.k"), ("tetremesh", ("tetremesh", "tet.yaml"), "tet_out.k"))
 
@@ -186,6 +190,25 @@ def mesh_only(text, w, decl):
     return "\n".join(out) + "\n*END\n"
 
 
+def tet2_deck(w, decl, top_node=0, top_elem=0, suffix=""):
+    """사면체 둘(절점 5)의 메시 덱 — TETQ 로 돌리면 tetremesh 가 절점 · 요소를 새로 낸다. top_node 는 어디에도 안 쓰이는 절점
+    하나의 번호, top_elem 은 둘째 사면체의 번호다(새 번호는 그 위로 나온다)."""
+    rw = 20 if w == 20 else 16
+    pts = list(enumerate(TET2[0], 1)) + ([(top_node, (9.0, 9.0, 9.0))] if top_node else [])
+    L = ["*KEYWORD" + decl, "*NODE" + suffix] + ["%*d" % (w, n) + "".join("%*.6f" % (rw, c) for c in p) for n, p in pts]
+    L += ["*ELEMENT_SOLID" + suffix] + ["".join("%*d" % (w, v) for v in (e, 1) + t + (t[3],) * 4)
+                                        for e, t in zip((1, top_elem or 2), TET2[1])]
+    return "\n".join(L) + "\n*END\n"
+
+
+def tet2(binary, root, name, text, extra=""):
+    d = os.path.join(root, name)
+    os.makedirs(d)
+    write(os.path.join(d, "box.k"), text)
+    write(os.path.join(d, "tet.yaml"), TETQ + extra)
+    return tet(binary, d)
+
+
 def tet(binary, d):
     rc, out = run(binary, d, "tetremesh", "tet.yaml")
     return rc, out, os.path.join(d, "tet_out.k")
@@ -290,6 +313,31 @@ def body(binary, root):
         else:
             got = json.load(open(p)).get("elem_start") if os.path.exists(p) else None
             check("I-1 %s — rc 0 · elem_start 2147483647" % tag, rc == 0 and got == INT_MAX, "rc %d %r %s" % (rc, got, out[-300:]))
+
+    print("[I-2] tetremesh — 새 번호가 정수 상한을 넘는가")
+    rc, out, o = tet2(binary, root, "i2_base", tet2_deck(10, " I10=Y", top_node=1000, top_elem=2000))
+    kn = sum(1 for v in ids(rows(o, "*NODE"), 10) if v > 1000)
+    ke = sum(1 for v in ids(rows(o, "*ELEMENT_SOLID"), 10) if v > 2000)
+    check("I-2 대조 — rc 0 · 새 절점 · 새 요소가 있다(%d · %d)" % (kn, ke), rc == 0 and kn > 0 and ke > 0, "rc %d %s" % (rc, out[-300:]))
+    for tag, kw, k, name in (("절점", "top_node", kn, "*NODE"), ("요소", "top_elem", ke, "*ELEMENT_SOLID")):
+        rc, out, o = tet2(binary, root, "i2_fit_" + kw, tet2_deck(10, " I10=Y", **{kw: INT_MAX - k}))
+        got = ids(rows(o, name), 10)
+        check("I-2 %s 번호가 꼭 맞게 남는다(최대 %d) — rc 0 · 최대 2147483647 · 음수 없음" % (tag, INT_MAX - k),
+              rc == 0 and bool(got) and max(got) == INT_MAX and min(got) > 0, "rc %d %r %s" % (rc, sorted(got)[-2:], out[-300:]))
+        rc, out, o = tet2(binary, root, "i2_over_" + kw, tet2_deck(10, " I10=Y", **{kw: INT_MAX - k + 1}))
+        check("I-2 %s 번호가 하나 모자란다(최대 %d) — rc 1 · 산출 없음 · 까닭에 상한" % (tag, INT_MAX - k + 1),
+              rc == 1 and not os.path.exists(o) and str(INT_MAX) in out and "상한" in out,
+              "rc %d made %s %s" % (rc, os.path.exists(o), out[-300:]))
+    for tag, name, text, extra in (
+            ("I10=Y", "i10", tet2_deck(10, " I10=Y", top_elem=INT_MAX), ""),
+            ("LONG=Y", "long", tet2_deck(20, " LONG=Y", top_elem=INT_MAX), ""),
+            ("8칸 덱의 % 블록", "w8", tet2_deck(10, "", top_elem=INT_MAX, suffix=" %"), ""),
+            ("I10=Y · iterate", "iter", tet2_deck(10, " I10=Y", top_elem=INT_MAX), "iterate:\n  quality_target: 0.9\n"),
+            ("I10=Y · 절점", "i10n", tet2_deck(10, " I10=Y", top_node=INT_MAX), "")):
+        rc, out, o = tet2(binary, root, "i2_max_" + name, text, extra)
+        check("I-2 %s — 최대 2147483647 은 rc 1 · 산출 없음 · 까닭에 상한" % tag,
+              rc == 1 and not os.path.exists(o) and str(INT_MAX) in out and "상한" in out,
+              "rc %d made %s %s" % (rc, os.path.exists(o), out[-300:]))
 
     print("[N-1] I10=Y · LONG=Y 메시 덱 — 선언 · 줄 길이 · 번호")
     for tag, w, decl in (("I10=Y", 10, " I10=Y"), ("LONG=Y", 20, " LONG=Y")):

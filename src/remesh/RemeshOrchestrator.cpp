@@ -46,8 +46,8 @@ RemeshSummary RemeshOrchestrator::run(Mesh& mesh) {
     }
 
     // 2. Per-patch process.
-    int nextNodeId = std::max(findMaxNodeId(mesh), nodeFloor_) + 1;
-    int nextElemId = std::max(findMaxElemId(mesh), elemFloor_) + 1;
+    long long nextNodeId = (long long)std::max(findMaxNodeId(mesh), nodeFloor_) + 1;
+    long long nextElemId = (long long)std::max(findMaxElemId(mesh), elemFloor_) + 1;
 
     for (auto& patch : patches) {
         RemeshResult r = backend_->run(patch.task);
@@ -71,6 +71,22 @@ RemeshSummary RemeshOrchestrator::run(Mesh& mesh) {
             s.messages.push_back(msg.str());
             if (r.minJacBefore < s.minJacAfter) s.minJacAfter = r.minJacBefore;
             continue;
+        }
+
+        // ★새 번호가 LS-DYNA 정수 상한(2147483647 — Vol_I 19325)을 넘게 되면 이 패치부터 손대지 않는다(2026-11-21). 예전엔 int 가
+        //   넘쳐 음수 번호의 절점 · 솔리드가 rc 0 으로 나갔다(요소 번호가 상한인 셸 하나만 있어도). 메시를 바꾸기 **전에** 센다
+        {
+            long long newNodes = 0;
+            for (size_t i = 0; i < r.nodes.size(); ++i)
+                if (i >= patch.patchToOrig.size() || patch.patchToOrig[i] < 0) ++newNodes;
+            const long long lastNode = nextNodeId + newNodes - 1;
+            const long long lastElem = nextElemId + (long long)r.tets.size() - 1;
+            const bool nodeOver = newNodes > 0 && lastNode > 2147483647LL;
+            if (nodeOver || (!r.tets.empty() && lastElem > 2147483647LL)) {
+                idError_ = std::string(nodeOver ? "새 절점 번호 " : "새 요소 번호 ") + std::to_string(nodeOver ? lastNode : lastElem) +
+                           " — LS-DYNA 정수 상한 2147483647 을 넘는다. 이 덱 위로는 번호를 더 낼 수 없다 — 덱의 번호를 낮춘 뒤 다시 돌린다";
+                break;
+            }
         }
 
         // 2a. Decide global node IDs for each patch-local index.
@@ -100,7 +116,7 @@ RemeshSummary RemeshOrchestrator::run(Mesh& mesh) {
                     mesh.addNode(n);
                 }
             } else {
-                globalId = nextNodeId++;
+                globalId = (int)nextNodeId++;
                 Node n(globalId, r.nodes[i].position);
                 n.setMappedPosition(r.nodes[i].position);
                 mesh.addNode(n);
@@ -122,7 +138,7 @@ RemeshSummary RemeshOrchestrator::run(Mesh& mesh) {
 
         // 2c. Insert new TET4 elements.
         for (const auto& t : r.tets) {
-            int newId = nextElemId++;
+            int newId = (int)nextElemId++;
             std::array<int, 8> nodeIds;
             int g0 = patchIdxToGlobalId[t.n[0]];
             int g1 = patchIdxToGlobalId[t.n[1]];

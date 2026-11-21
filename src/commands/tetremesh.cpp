@@ -421,6 +421,11 @@ int runTetRemesh(const std::string& configPath,
     } else {
         summary = orch.run(mesh);
     }
+    // 새 번호가 정수 상한을 넘게 되는 덱은 쓰지 않는다(발급이 그 패치에서 멈췄다 — 메시는 반만 바뀌었을 수 있다)
+    if (!orch.idError().empty()) {
+        console.error(orch.idError());
+        return 1;
+    }
 
     std::cout << "\n";
     console.header("TET Remesh Summary");
