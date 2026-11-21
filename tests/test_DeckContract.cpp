@@ -356,6 +356,25 @@ TEST(gridReaderReadsKeyword_는_KFileReader_분기와_같다) {
     fs::remove(tmp, ec);
 }
 
+TEST(gridReaderKeywordName_은_리더와_쓰기가_같이_쓰는_블록_이름이다) {
+    // 리더(`KFileReader`)와 쓰기(`KFileWriter`)가 이 함수 하나로 블록을 가른다 — 폭 접미사(`%` · `+`)와 뒤 글은 이름에 들지 않는다.
+    // 예전 쓰기는 제 눈(`*NODE` + 빈칸)으로 갈라, 리더가 읽은 `*NODE%` 블록을 원본에서 한 번 더 옮겼다(2026-11-21).
+    ASSERT_EQ(gridReaderKeywordName("*NODE"), std::string("NODE"));
+    ASSERT_EQ(gridReaderKeywordName("*NODE%"), std::string("NODE"));
+    ASSERT_EQ(gridReaderKeywordName("*NODE +"), std::string("NODE"));
+    ASSERT_EQ(gridReaderKeywordName("*element_solid%"), std::string("ELEMENT_SOLID"));
+    ASSERT_EQ(gridReaderKeywordName("*ELEMENT_SOLID_TITLE  $ 뒤 글"), std::string("ELEMENT_SOLID_TITLE"));
+    ASSERT_EQ(gridReaderKeywordName("*NODE_SCALAR"), std::string("NODE_SCALAR"));
+    // `-` 는 이름 글자다 — 빈칸 없이 붙은 `*NODE-` 는 리더가 `*NODE` 로 읽지 않는다(쓰기도 같은 답을 낸다)
+    ASSERT_EQ(gridReaderKeywordName("*NODE-"), std::string("NODE-"));
+    ASSERT_EQ(gridReaderKeywordName("*NODE -"), std::string("NODE"));
+    // 키워드 줄이 아닌 것 — 0열이 `*` 가 아니거나 다음 글자가 글자가 아니다
+    ASSERT_EQ(gridReaderKeywordName("  *NODE"), std::string(""));
+    ASSERT_EQ(gridReaderKeywordName("$ *NODE"), std::string(""));
+    ASSERT_EQ(gridReaderKeywordName("*"), std::string(""));
+    ASSERT_EQ(gridReaderKeywordName("*1"), std::string(""));
+}
+
 TEST(forEachNonGridElementCard_리더가_안_읽는_격자_변형을_센다) {
     const std::string hex = "       1       2       3       4       5       6       7       8";
     const std::vector<std::string> L = {
@@ -1117,4 +1136,45 @@ TEST(KFileWriter_TET10_은_두_카드_꼴로_전체_절점을_쓴다) {
     const auto n = deckscan::cardFields(L[c1 + 1], 8);
     ASSERT_EQ(n.size(), (size_t)10);
     ASSERT_EQ(deckscan::fieldInt(n, 9), 10);
+}
+
+TEST(KFileWriter_writeFile_은_폭을_선언하고_넘치는_번호는_쓰지_않는다) {
+    // 메시만 쓰는 길은 `setIdFieldWidth` 가 정한 폭 하나로 쓴다 — 그 폭을 `*KEYWORD` 줄에 선언하고(선언 없이 10 · 20칸 카드를 쓰면
+    // LS-DYNA 가 8칸으로 읽는다), 실수 칸은 long 에서 20칸이다(Vol_I 19315-19353). 폭에 안 들어가는 번호는 파일을 열기 전에 거절한다.
+    namespace fs = std::filesystem;
+    Mesh m;
+    const int big = 123456789;                                         // 9 자리 — 8칸에 안 들어간다
+    for (int i = 0; i < 8; ++i) m.addNode(Node(big + i, 1.0 * (i & 1), 1.0 * ((i >> 1) & 1), 1.0 * (i >> 2)));
+    m.addElement(Element(1, 1, {big, big + 1, big + 3, big + 2, big + 4, big + 5, big + 7, big + 6}));
+    const fs::path tmp = fs::temp_directory_path() / "koorm_writer_width.k";
+    std::error_code ec;
+    fs::remove(tmp, ec);
+    {
+        KFileWriter w;                                                 // 기본 폭 8
+        ASSERT_FALSE(w.writeFile(tmp.string(), m));
+        ASSERT_TRUE(w.getErrorMessage().find("8칸에 들어가지 않는 번호") != std::string::npos);
+        ASSERT_TRUE(w.getErrorMessage().find(std::to_string(big)) != std::string::npos);
+        ASSERT_FALSE(fs::exists(tmp));                                 // 거절은 파일을 열기 전이다
+    }
+    struct Want { int fw; const char* head; size_t nodeLine; };
+    for (const Want& want : {Want{10, "*KEYWORD I10=Y", 10 + 3 * 16}, Want{20, "*KEYWORD LONG=Y", 20 + 3 * 20}}) {
+        KFileWriter w;
+        w.setIdFieldWidth(want.fw);
+        ASSERT_TRUE(w.writeFile(tmp.string(), m));
+        std::ifstream in(tmp);
+        std::vector<std::string> L;
+        for (std::string l; std::getline(in, l);) L.push_back(l);
+        in.close();
+        fs::remove(tmp, ec);
+        ASSERT_TRUE(!L.empty());
+        ASSERT_EQ(L[0], std::string(want.head));
+        ASSERT_EQ(deckFieldWidth(L), want.fw);                          // 리더가 같은 폭으로 되읽는다
+        size_t k = 0;
+        while (k < L.size() && L[k] != "*NODE") ++k;
+        ++k;
+        while (k < L.size() && L[k].rfind("$", 0) == 0) ++k;
+        ASSERT_TRUE(k < L.size());
+        ASSERT_EQ(L[k].size(), want.nodeLine);
+        ASSERT_EQ(deckscan::fieldInt(deckscan::cardFields(L[k], want.fw), 0), big);
+    }
 }

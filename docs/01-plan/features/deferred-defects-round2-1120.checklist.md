@@ -18,13 +18,13 @@
 - [x] C-3 매뉴얼 48.2 · 도움말 문장
 
 ## D. 쓰기 함수 · tetremesh · unfold · id_floor
-- [ ] D-1 회귀 시험 `test_writer_width_shells.py` — 고치기 전 빨강 확인
-- [ ] D-2 원본 훑기 지움 + `map` 결과 메시가 두께 셸 번호를 옮긴다(N-2 · N-3 · N-4)
-- [ ] D-3 좌표 폭 · `writeFile` 폭 선언 · 번호가 칸을 넘으면 거절(N-1 · T-4)
-- [ ] D-4 tetremesh — 폭 · 셸 블록 그대로(T-2 · T-3) · unfold 폭
-- [ ] D-5 id_floor int 상한 거절(I-1)
-- [ ] D-6 새 시험 초록 · 변이마다 빨강 · 표준 덱 산출 바이트 동일
-- [ ] D-7 전제를 말하는 글 쓸기(매뉴얼 43.8 · 도움말 · MCP 설명 · SKILL)
+- [x] D-1 회귀 시험 `test_writer_width_shells.py` — 고치기 전 빨강 확인
+- [x] D-2 원본 훑기 지움 + `map` 결과 메시가 두께 셸 번호를 옮긴다(N-2 · N-3 · N-4)
+- [x] D-3 좌표 폭 · `writeFile` 폭 선언 · 번호가 칸을 넘으면 거절(N-1 · T-4)
+- [x] D-4 tetremesh — 폭 · 셸 블록 그대로(T-2 · T-3) · unfold 폭
+- [x] D-5 id_floor int 상한 거절(I-1)
+- [x] D-6 새 시험 초록 · 변이마다 빨강 · 표준 덱 산출 바이트 동일
+- [x] D-7 전제를 말하는 글 쓸기(매뉴얼 43.8 · 도움말 · MCP 설명 · SKILL)
 
 ## E. 색인기 위상 전파
 - [ ] E-1 고치기 전 산출 sha 기준선(`map` · `unfold` — 리포 덱 · 회귀 픽스처)

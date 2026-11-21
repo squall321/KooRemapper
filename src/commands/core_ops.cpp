@@ -1078,6 +1078,7 @@ int runUnfold(const std::string& bentFile, const std::string& outputFile,
     console.info("Writing output: " + outputFile);
     KFileWriter writer;
     writer.setNewline(deck_newline::detect(bentFile));   // 원본 덱의 개행을 따른다
+    writer.setIdFieldWidth(reader.deckFieldWidth());     // 칸 폭도 — `I10=Y` · `LONG=Y` 덱을 맨 `*KEYWORD` 아래 8칸으로 썼다(2026-11-21)
     if (!writer.writeFile(outputFile, flatMesh)) {
         console.error("Failed to write output: " + writer.getErrorMessage());
         return 1;

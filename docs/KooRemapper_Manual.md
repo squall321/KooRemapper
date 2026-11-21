@@ -473,9 +473,10 @@ BOM 을 붙인 설정으로 둘 다 **종료 코드 0** 으로 정상 산출물�
 LS-DYNA 는 주 덱의 **첫** `*END` 에서 읽기를 멈춥니다(그 뒤 줄은 해석에 들지 않습니다). 덱을 고쳐 쓰는 op 이 덧붙이는 카드
 (접촉 · SPC · 구속 · `*DATABASE_*` · 감쇠 · CNRB 를 바꾼 솔리드 · 배터리 `*INCLUDE` · `squeeze` 의 dynain `*INCLUDE` · 열팽창 · DR 카드 ·
 `map` prestress 의 `*INCLUDE` …)는 그 앞에 **한 번** 넣고, `*END` 가 없으면 덱 끝에 붙입니다. 메시를 다시 쓰는 op(`map` · `shellmap` ·
-`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다. 그 쓰기의 `*KEYWORD` 찾기 · 칸 폭 · 셸 번호 미리 훑기도
+`squeeze`)은 원본의 첫 `*END` 에서 끝내고 그 뒤 원본 줄은 **그대로** 둡니다. 그 쓰기의 `*KEYWORD` 찾기 · 칸 폭도
 첫 `*END` 앞만 봅니다(2026-11-08 여섯째 검토 — 첫 `*END` 뒤의 읽히지 않는 셸 블록에 산 솔리드와 같은 번호가 있으면 그 솔리드를 쓰지
-않았고(map rc 0) · 첫 `*END` 뒤의 `*KEYWORD I10=Y` 가 앞 덱의 칸 폭을 바꿨습니다 · 회귀 `test_kfilewriter_blocks.py` A 절).
+않았고(map rc 0) · 첫 `*END` 뒤의 `*KEYWORD I10=Y` 가 앞 덱의 칸 폭을 바꿨습니다 · 회귀 `test_kfilewriter_blocks.py` A 절). 셸 번호를
+원본 줄에서 미리 훑던 걸음은 2026-11-21 에 없앴습니다 — 솔리드 블록에서 뺄 요소는 리더가 메시에 담은 사실로 가립니다((n)).
 
 ★키워드 줄은 **1열이 `*`** 이고 그다음이 글자인 줄뿐입니다(「키워드 앞 `*` 는 1열」 · Vol_I 17940 · 리더 `KFileReader` 와 같은 규칙).
 들여쓴 `  *END` · `  *INCLUDE` · `  *NODE`(`*COMMENT` 글 속 등)는 끝도 인클루드도 블록도 아니라 앞 블록의 데이터입니다. 덱을 걷는
@@ -527,6 +528,29 @@ S2 · 회귀 `tools/regress/test_staged_write.py` W).
 보이는 이름 `<줄기>__mf.{stl,geo,msh,log}`(있는 것만)로 바꿔 남겨 플랫폼이 산출로 올리고, `[ERROR]` 의 See log · 남긴 목록 · 남긴
 `.geo` 의 Merge · Save 도 그 이름을 댑니다(마지막 검토 — 표지를 붙인 뒤 그 파일이 걸러져 세션에 안 올라갔고 말은 표지 이름을 댔다 ·
 회귀 T-K · `test_job_launcher.py`). 남길 이름도 쓸 파일이라 그 이름의 입력이 있으면 gmsh 전에 거절합니다.
+
+#### (n) 메시를 다시 쓰는 op 은 덱이 선언한 칸 폭 하나로 쓴다 · 번호가 안 들어가면 거절 (2026-11-21)
+
+메시를 다시 쓰는 op(`map` · `shellmap` · `squeeze` · `unfold` · `tetremesh` · `generate`)은 **덱이 선언한 칸 폭 하나**로 씁니다 — 맨
+`*KEYWORD` 는 정수 8칸 · 실수 16칸, `*KEYWORD I10=Y` 는 10 · 16, `*KEYWORD LONG=Y` 는 20 · 20 입니다(Vol_I 19300–19365).
+
+- **원본을 따라 쓰는 op**(`map` · `shellmap` · `squeeze`)은 원본(평판 · 압축할 덱)의 첫 `*END` 앞 `*KEYWORD` 줄에서 폭을 읽고, 다시 쓰는
+  `*NODE` · `*ELEMENT_SOLID` 블록을 **맨 키워드 아래 그 폭으로** 씁니다. 셸 · 두께 셸 블록과 그 밖의 카드는 원본 줄 그대로입니다. 예전엔
+  `LONG=Y` 덱의 좌표 칸을 16 으로 썼습니다(절점 줄 68자 — 규격은 80자 · rc 0).
+- **메시만 쓰는 op**(`unfold` · `tetremesh` · `generate`)은 산출 첫 줄이 폭을 선언합니다 — `unfold` · `tetremesh` 는 읽은 덱의 폭을 따르고
+  (`*KEYWORD` · `*KEYWORD I10=Y` · `*KEYWORD LONG=Y`), `generate` 는 늘 맨 `*KEYWORD` 입니다. 예전엔 `I10=Y` · `LONG=Y` 덱을 읽고도 맨
+  `*KEYWORD` 아래 8칸으로 써서 9자리 번호의 칸이 붙었습니다(rc 0).
+- **번호가 그 칸에 안 들어가면 쓰지 않습니다** — 8칸 덱에 99,999,999 를 넘는 절점 · 요소 · 파트 번호가 있으면 산출을 만들기 전에 **종료
+  코드 1** 입니다(「8칸에 들어가지 않는 번호가 있다 — 절점 번호 <번호>. 이 쓰기는 덱이 선언한 칸 폭(8) 하나로 쓴다 — 번호를 낮추거나
+  `*KEYWORD I10=Y` 로 선언한 덱으로 다시 돌린다」). 맨 `*KEYWORD` 덱이 `*NODE %` 처럼 블록마다 폭을 넓혀 그 번호를 담은 꼴이 여기에
+  걸립니다. 예전엔 칸이 붙은 깨진 덱을 rc 0 으로 썼습니다. 10칸 이상은 LS-DYNA 정수 상한(2147483647)이 다 들어가 걸리지 않습니다.
+- 다시 쓸 블록은 **리더가 읽는 이름**으로 가릅니다 — `*NODE%` · `*ELEMENT_SOLID%` 처럼 접미사를 공백 없이 붙인 줄도 그 블록입니다. 예전엔
+  쓰기 쪽만 그 줄을 `*NODE` 로 보지 않아, 원본 블록을 그대로 베끼고 메시에서 한 번 더 썼습니다(절점 · 솔리드가 두 번 · rc 0).
+- 원본의 셸 블록 줄을 **다시 읽지 않습니다**. 예전엔 솔리드 블록에서 뺄 셸 번호를 원본 줄에서 8칸으로 다시 세어, `I10=Y` 덱의 10칸 셸 줄 ·
+  두께 카드 · 리더가 안 읽는 변형(`*ELEMENT_TSHELL_BETA` · `*ELEMENT_SHELL_COMPOSITE`)의 줄에서 나온 수와 번호가 같은 **솔리드가 산출에서
+  빠졌습니다**(rc 0). 이제는 리더가 메시에 담은 사실(셸 · 두께 셸 표지)로만 가립니다 — `map` 의 결과 메시도 그 표지를 옮깁니다.
+
+회귀 `tools/regress/test_writer_width_shells.py`(74 항 — S · T · W · I · N · M 절) · 단위 시험 `tests/test_DeckContract.cpp`.
 
 ---
 
@@ -586,7 +610,8 @@ $$\mathbf{x}(\xi, \eta, \zeta) = \sum_{i=1}^{8} N_i(\xi, \eta, \zeta) \, \mathbf
 $$N_i = \frac{1}{8}(1 + \xi_i\xi)(1 + \eta_i\eta)(1 + \zeta_i\zeta)$$
 
 ### 출력
-- `output.k`: 매핑된 위치의 상세 메시
+- `output.k`: 매핑된 위치의 상세 메시 — 칸 폭은 평판 덱의 `*KEYWORD` 선언을 따르고 번호가 그 칸에 안 들어가면 쓰지 않는다
+  ([§3.1(n)](#31-yaml-공통-규칙-모든-op))
 
 ### 주의사항
 - 참조 메시는 반드시 **규칙적 HEX8 구조** 필요
@@ -633,7 +658,8 @@ Options:
 $$\mathbf{x}' = \mathbf{x}_{shell}(u,v) + \frac{z}{t/2} \cdot \frac{t}{2} \hat{\mathbf{n}}(u,v)$$
 
 ### 출력
-- `output.k`: 매핑된 상세 고체 메시
+- `output.k`: 매핑된 상세 고체 메시 — 칸 폭은 `flat_detail` 덱의 `*KEYWORD` 선언을 따르고 번호가 그 칸에 안 들어가면 쓰지 않는다
+  ([§3.1(n)](#31-yaml-공통-규칙-모든-op))
 
 ### 주의사항
 - 가전개(developable) 면에 최적화; 비가전개 면에서 왜곡 경고 출력
@@ -782,7 +808,8 @@ $$\sigma_{xx} = -(\lambda + 2\mu)\varepsilon_x - \lambda(\varepsilon_y + \vareps
 swelling 파트는 dynain에 포함되지 않습니다.
 
 ### 출력
-- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트) + dynain `*INCLUDE`
+- `<prefix>.k`: 압축된 메시 + 열팽창 카드 (swelling 파트) + dynain `*INCLUDE` — 칸 폭은 입력 덱의 `*KEYWORD` 선언을 따르고 번호가 그
+  칸에 안 들어가면 쓰지 않는다([§3.1(n)](#31-yaml-공통-규칙-모든-op))
 - `<prefix>.dynain`: `*INITIAL_STRESS_SOLID` (eps 파트만)
 
 접두어 끝의 `.k` 는 떼고 씁니다(`out.k` 를 줘도 `out.k`·`out.dynain`).
@@ -948,7 +975,9 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 출력
 
 - `output_flat.k`: 전개된 평면 메시 — 굽힌 덱의 두께 셸(`*ELEMENT_TSHELL`) 칸은 펼친 덱에서도 `*ELEMENT_TSHELL` 이다(2026-11-08 전엔
-  원본 없는 메시 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다 · 회귀 `test_kfilewriter_blocks.py` B-3)
+  원본 없는 메시 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다 · 회귀 `test_kfilewriter_blocks.py` B-3). 산출 첫 줄이 굽힌
+  덱의 칸 폭을 선언한다(`*KEYWORD` · `*KEYWORD I10=Y` · `*KEYWORD LONG=Y` — 2026-11-21 전엔 늘 맨 `*KEYWORD` 아래 8칸이었다 ·
+  [§3.1(n)](#31-yaml-공통-규칙-모든-op))
 - 콘솔: 격자 차원(I, J, K) 및 평면 길이(I=호 길이, J, K) 출력
 
 ### 주의사항
@@ -4610,10 +4639,17 @@ KooRemapper tetremesh <config.yaml>
 
 **근거**: help(`Usage:` + YAML 스키마), pyKooCAE `surface_remesh.md`, 2026-09-18 실행 확인. `report_only: true` 로 먼저 품질 스캔 후 재메시가 안전하다.
 
-★산출은 메시(`*NODE` · 요소)만 쓴다 — 셸은 `*ELEMENT_SHELL`(EID PID N1-N4), 두께 셸은 `*ELEMENT_TSHELL`(EID PID N1-N8)로 쓴다(2026-11-08
-여섯째 검토 — 그 전엔 다 `*ELEMENT_SOLID` 로 써서 셸은 n5-n8 = n1-n4 인 부피 0 육면체로, 두께 셸은 솔리드로 나갔다 · rc 0 · 회귀
-`test_kfilewriter_blocks.py` B-1 · B-2). 셸 요소마다의 두께 카드(`*ELEMENT_SHELL_THICKNESS` 의 둘째 카드)와 `*PART` · `*SECTION_*` ·
-`*MAT_*` 같은 메시 밖 카드는 산출에 싣지 않는다(원래부터 — 원본 덱에서 옮겨 붙인다).
+★산출은 메시(`*NODE` · 요소)만 쓴다. 셸 · 두께 셸은 리더가 읽은 블록(`*ELEMENT_SHELL` 과 그 `_THICKNESS` · `_BETA` · `_MCID` · `_OFFSET` ·
+`_DOF` 변형 · `*ELEMENT_TSHELL`)을 **읽은 덱에서 줄째 옮긴다**(2026-11-21) — 키워드 줄 · 주석 · 두께 카드 · 8절점 셸의 N5-N8 이 그대로
+나간다(`flatten_includes: true` 면 펼친 덱에서 옮긴다). 리메시는 사면체만 바꾼다 — 쓰기 전에 셸 요소(수 · 번호 · 파트 · 절점)가 읽은
+것과 같은지 보고 다르면 rc 1 로 쓰지 않는다. 예전엔 메시에서 `*ELEMENT_SHELL`(EID PID N1-N4)로 다시 써서 두께 카드를 버리고 8절점 셸을
+4절점으로 냈다(rc 0 · 그보다 앞 2026-11-08 전엔 다 `*ELEMENT_SOLID` 로 써서 셸은 n5-n8 = n1-n4 인 부피 0 육면체로, 두께 셸은 솔리드로
+나갔다 · 회귀 `test_kfilewriter_blocks.py` B-1 · B-2).
+칸 폭은 읽은 덱의 `*KEYWORD` 선언을 따르고 산출 첫 줄이 그 폭을 선언한다 — 예전엔 `I10=Y` 덱도 맨 `*KEYWORD` 아래 8칸으로 써서 9자리
+번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 rc 1 이다([§3.1(n)](#31-yaml-공통-규칙-모든-op) · 회귀
+`test_writer_width_shells.py` S · T · W-3). 첫 `*END` 뒤의 셸 블록은 옮기지 않는다(리더도 거기서 멈춘다 · T-7).
+리더가 읽지 않는 요소 변형(`*ELEMENT_SHELL_COMPOSITE` · `*ELEMENT_SOLID_ORTHO` · 빔 …)과 `*PART` · `*SECTION_*` · `*MAT_*` 같은 메시 밖
+카드는 산출에 싣지 않는다(원래부터 — **경고도 없다** · 원본 덱에서 옮겨 붙인다).
 
 ---
 
@@ -6172,6 +6208,9 @@ fragment_map: fragment_abc.json       # (선택) 받은 조각의 대응표 — 
 - 그 번호로 쓴 조각은 `cad_solid_merge_to_deck`(§49)가 **옮기지 않고** 넣는다 — 두 op 이 같은 바닥을 본다.
 - `fragment_map` 을 주면 쓴 범위마다 아래끝이 바닥 이상이면 `above`, 아니면 `below` 이고 하나라도 `below` 면 rc 1 이다
   (그 조각은 넣을 때 옮겨진다). 회귀 `tools/regress/test_id_floor.py` 10항.
+- ★네 번호 가운데 하나라도 LS-DYNA 정수 상한(2147483647 · Vol_I 19325)을 넘으면 **내지 않는다** — rc 1 · JSON 없음 · 까닭 글에 그 이름과
+  번호(2026-11-21). 예전엔 요소 번호가 상한인 덱에 `elem_start: 2147483648` 을 rc 0 으로 냈다 — 받는 쪽이 그 번호로 조각을 지으면 솔버가
+  못 읽는다. 덱의 번호를 낮춘 뒤 다시 돌린다. 최대가 2147483646 이면 rc 0 · 2147483647 을 낸다. 회귀 `test_writer_width_shells.py` I-1.
 
 ## 52. `apply_carryover_plan` — StepForge 이월 계획을 덱에 적용하기(판 1 · 2)
 

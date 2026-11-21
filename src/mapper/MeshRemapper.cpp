@@ -600,6 +600,9 @@ bool MeshRemapper::step5_CopyElements() {
 
         stats_.elementsProcessed++;
     }
+    // 두께 셸 표지도 옮긴다 — 쓰기가 이 표지로 그 요소를 `*ELEMENT_SOLID` 에서 빼고 원본의 `*ELEMENT_TSHELL` 블록을 그대로 둔다
+    // (2026-11-21 — 쓰기가 원본 글을 다시 읽어 셸 번호를 모으던 것을 없앴다)
+    resultMesh_.thickShellIds = flatMesh_->thickShellIds;
 
     // Copy parts
     for (const auto& pair : flatMesh_->getParts()) {

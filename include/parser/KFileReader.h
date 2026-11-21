@@ -65,6 +65,10 @@ public:
      */
     const std::string& getErrorMessage() const { return errorMessage_; }
 
+    // 마지막으로 읽은 덱이 `*KEYWORD` 로 선언한 정수 칸 폭(8 · 10 · 20). 원본 없이 메시를 다시 쓰는 op(tetremesh · unfold)이 같은 폭으로
+    // 쓰려고 본다 — 예전엔 `I10=Y` · `LONG=Y` 덱을 맨 `*KEYWORD` 아래 8칸으로 썼다(2026-11-21)
+    int deckFieldWidth() const { return deckFw_; }
+
     /**
      * Get number of lines processed
      */

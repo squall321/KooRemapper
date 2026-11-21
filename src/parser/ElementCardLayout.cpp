@@ -709,18 +709,23 @@ std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r) {
     return out;
 }
 
-bool gridReaderReadsKeyword(const std::string& keywordLine) {
+std::string gridReaderKeywordName(const std::string& keywordLine) {
     // 리더의 키워드 줄 규칙 그대로 — 0열이 `*` 이고 그다음이 글자인 줄만(`KFileReader::isKeywordLine`). 들여쓴 `*` 줄은 리더에게
     // 키워드가 아니라 앞 블록의 데이터다 — 여기서 너그러우면 그 블록을 「리더가 담았다」 고 보고 아무도 안 본다(11-07).
-    // 이름은 `KFileReader::extractKeyword` 와 같은 토큰 — `*` 뒤 영숫자 · `_` · `-` 를 대문자로(접미사 `%`·`+` 와 공백에서 멈춘다)
     if (keywordLine.size() < 2 || keywordLine[0] != '*' ||
-        !std::isalpha(static_cast<unsigned char>(keywordLine[1]))) return false;
+        !std::isalpha(static_cast<unsigned char>(keywordLine[1]))) return "";
     std::string k;
     for (size_t i = 1; i < keywordLine.size(); ++i) {
         const unsigned char ch = static_cast<unsigned char>(keywordLine[i]);
         if (!std::isalnum(ch) && ch != '_' && ch != '-') break;
         k += static_cast<char>(std::toupper(ch));
     }
+    return k;
+}
+
+bool gridReaderReadsKeyword(const std::string& keywordLine) {
+    const std::string k = gridReaderKeywordName(keywordLine);
+    if (k.empty()) return false;
     if (k == "ELEMENT_SOLID" || k == "ELEMENT_SOLID_TITLE" || k == "ELEMENT_TSHELL" || k == "ELEMENT_TSHELL_TITLE")
         return true;
     // 셸 분기는 줄 수를 확정하지 못하는 변형(COMPOSITE 계열)을 통째로 건너뛴다(`parseElementShellSection`)

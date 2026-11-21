@@ -4,17 +4,17 @@ static const std::vector<OpHelp> kOpHelps = {
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper map demo_bent.k demo_flat_fine.k mapped.k"},
      {},
-     {"bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.", "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면", "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다.", "  재료가 없으면(E · nu 없음 · 기준에 K-파일 재료 없음) 고리는 prestress.output 자리에 CSV 만 쓴다 — 그것이 map 산출과", "  겹치는 것도 map 이 쓰기 전에 거절한다(2026-11-07)", "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.kr_tmp_preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리", "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다. 그 파일을 못 쓰면(디스크 참 ·", "  크기 상한) [WARN] 을 내고 고리는 원래 평판을 쓴다 — 산출은 멀쩡해 종료 코드는 그대로다(2026-11-08)", "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일", "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)", "고리 dynain 의 머리줄 $ Reference mesh: 는 임시 사본 대신 원래 평판 이름과 무엇을 한 사본인지 댄다(2026-11-08 — 지운 임시 이름을 댔다)"}},
+     {"bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.", "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면", "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다.", "  재료가 없으면(E · nu 없음 · 기준에 K-파일 재료 없음) 고리는 prestress.output 자리에 CSV 만 쓴다 — 그것이 map 산출과", "  겹치는 것도 map 이 쓰기 전에 거절한다(2026-11-07)", "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.kr_tmp_preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리", "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다. 그 파일을 못 쓰면(디스크 참 ·", "  크기 상한) [WARN] 을 내고 고리는 원래 평판을 쓴다 — 산출은 멀쩡해 종료 코드는 그대로다(2026-11-08)", "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일", "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)", "고리 dynain 의 머리줄 $ Reference mesh: 는 임시 사본 대신 원래 평판 이름과 무엇을 한 사본인지 댄다(2026-11-08 — 지운 임시 이름을 댔다)", "칸 폭은 평판(flat) 덱의 `*KEYWORD` 선언 하나를 따른다(맨 8 · I10=Y 10 · LONG=Y 20 — 실수 칸은 16 · 16 · 20). 다시 쓰는 *NODE ·", "  *ELEMENT_SOLID 블록은 맨 키워드 아래 그 폭으로 쓰고 셸 · 두께 셸 블록은 원본 줄 그대로다. 번호가 그 칸에 안 들어가면", "  (8칸 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않고 rc 1 — 예전엔 칸이 붙은 덱을 rc 0 으로 썼다(2026-11-21)"}},
     {"shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개", "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper extract-surface demo_bent.k bent_top.k --face top", "KooRemapper shellmap bent_top.k demo_flat_fine.k shellmapped.k"},
      {},
-     {"단일 곡률(원통형) 면에 적합. 이중 곡률이면 왜곡 경고가 난다."}},
+     {"단일 곡률(원통형) 면에 적합. 이중 곡률이면 왜곡 경고가 난다.", "칸 폭은 flat_detail 덱의 `*KEYWORD` 선언 하나를 따른다(맨 8 · I10=Y 10 · LONG=Y 20 — 실수 칸은 16 · 16 · 20). 다시 쓰는 *NODE ·", "  *ELEMENT_SOLID 블록은 맨 키워드 아래 그 폭으로 쓰고 셸 · 두께 셸 블록은 원본 줄 그대로다. 번호가 그 칸에 안 들어가면", "  (8칸 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않고 rc 1 — 예전엔 칸이 붙은 덱을 rc 0 으로 썼다(2026-11-21)"}},
     {"unfold", "메시 매핑", "굽힌 구조화 HEX8 메시를 평면으로 전개 (map 의 역)", "전개 펼치기 flat", "KooRemapper unfold <bent_mesh> <output_flat>",
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper unfold demo_bent.k unfolded.k"},
      {},
-     {}},
+     {"산출 첫 줄이 굽은 덱의 칸 폭을 선언한다(*KEYWORD · *KEYWORD I10=Y · *KEYWORD LONG=Y) — 2026-11-21 전엔 I10=Y · LONG=Y 덱도", "  맨 *KEYWORD 아래 8칸으로 써서 9자리 번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 쓰지 않고 rc 1"}},
     {"generate", "메시 생성", "시험용 곡면 메시 세트(teardrop·arc·torus…) 또는 YAML 박스 메시 생성", "생성 box 박스 teardrop arc", "KooRemapper generate [--dim-i n --dim-j n --dim-k n] <type> <output_prefix>\nKooRemapper generate box <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
@@ -353,7 +353,7 @@ quality:
 )KRH"}},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper tetremesh tet.yaml"},
      {},
-     {}},
+     {"산출은 메시(*NODE · 요소)만이다 — *PART · *SECTION · *MAT 같은 메시 밖 카드는 원본 덱에서 옮겨 붙인다", "셸 · 두께 셸은 리더가 읽은 블록(*ELEMENT_SHELL 과 _THICKNESS · _BETA · _MCID · _OFFSET · _DOF · *ELEMENT_TSHELL)을 읽은 덱에서", "  줄째 옮긴다 — 두께 카드 · 8절점 셸의 N5-N8 이 그대로다(2026-11-21 전엔 4절점 · 두께 카드 없이 rc 0 으로 썼다).", "  리더가 안 읽는 변형(*ELEMENT_SHELL_COMPOSITE · *ELEMENT_SOLID_ORTHO · 빔 …)은 경고 없이 산출에 없다(원래부터)", "산출 첫 줄이 읽은 덱의 칸 폭을 선언한다(*KEYWORD · I10=Y · LONG=Y) — 예전엔 I10=Y 덱도 8칸으로 썼다. 번호가 그 칸에", "  안 들어가면 쓰지 않고 rc 1"}},
     {"meshfix", "표면·재메시", "TET4 파트를 Gmsh 로 전체 재메시 (gmsh 실행 파일 필요)", "gmsh 재메시", "KooRemapper meshfix <config.yaml>",
      {{"meshfix.yaml", R"KRH(model: demo_flat_tet.k
 output: remeshed.k
@@ -453,7 +453,7 @@ material:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper squeeze box.k sq.yaml box_sq"},
      {},
-     {"material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling", "config YAML 은 BOM 없이 저장할 것 — 이 op 만은 아직 BOM 이 붙으면 'No parts defined in squeeze config' 로 rc=1 이다(메모장은 BOM 을 붙인다)"}},
+     {"material 이 없으면 k 파일 재질을 쓴다 — 둘 다 없으면 실패. 등방 팽윤은 parts[].swelling", "config YAML 은 BOM 없이 저장할 것 — 이 op 만은 아직 BOM 이 붙으면 'No parts defined in squeeze config' 로 rc=1 이다(메모장은 BOM 을 붙인다)", "칸 폭은 입력 덱의 `*KEYWORD` 선언 하나를 따른다(맨 8 · I10=Y 10 · LONG=Y 20 — 실수 칸은 16 · 16 · 20). 다시 쓰는 *NODE ·", "  *ELEMENT_SOLID 블록은 맨 키워드 아래 그 폭으로 쓰고 셸 · 두께 셸 블록은 원본 줄 그대로다. 번호가 그 칸에 안 들어가면", "  (8칸 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않고 rc 1 — 예전엔 칸이 붙은 덱을 rc 0 으로 썼다(2026-11-21)"}},
     {"formstrain", "변형·초기응력", "셸 이면각으로 성형 소성변형률 추정 → *INITIAL_STRAIN_SHELL", "성형 forming 곡률", "KooRemapper formstrain <config.yaml>",
      {{"fs.yaml", R"KRH(base_model: examples/formstrain/bent_shell.k
 output: bent_formstrain
@@ -1108,7 +1108,7 @@ fragment_map: examples/cad_solid_merge_to_deck/stepforge_fragment.json
 )KRH"}},
      {"KooRemapper id_floor f.yaml"},
      {"examples/cad_solid_merge_to_deck/deck.k", "examples/cad_solid_merge_to_deck/stepforge_fragment.json"},
-     {"★**요청 때 발행**(2026-10-16) — 대역표를 두지 않는다. 조각을 요청할 때 이 op 이 낸 네 번호를", "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면", "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)", "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다", "  (SECID 는 *SECTION_* 블록을 카드 묶음으로 갈라 센다 — SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히, 줄 수를 모르는 꼴은", "  행마다 첫 칸 숫자를 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · StepForge 591d5b5 와 같은 규칙 · 11-08 ·", "  번호 칸은 부호 +6 · 앞의 0 · 10 자리 · 묶음의 SECID 칸이면 실수 꼴 정수 6.0 도 그 번호다 — 11-08 S8 ·", "  줄 수를 모르는 꼴의 _TITLE 블록도 첫 줄은 제목이다 — 11-08 S10)", "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1 · 한 키워드 아래 쌓인 재질", "  묶음은 센다 — 줄 수를 아는 꼴은 묶음마다, 모르는 꼴은 행마다 첫 칸 숫자 · 2026-11-08)", "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와", "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다", "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)", "  칸으로 읽지 못한 보 족 줄(공백으로 가른 줄)은 EID 를 모르니 그 줄의 정수 최대까지 센다(2026-11-08)", "절점 바닥은 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 센다 — 그 번호는 `*NODE` 와 겹치면 안 된다", "`fragment_map` 을 주면 그 `ranges` 가 바닥 위인지 대조한다 — 아래에 걸치면 rc 1(그 조각은 넣을 때 옮겨진다)", "경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를 읽어 대조한다)가 이 op 이다"}},
+     {"★**요청 때 발행**(2026-10-16) — 대역표를 두지 않는다. 조각을 요청할 때 이 op 이 낸 네 번호를", "  StepForge `export_part_fragment` 의 인자(`node_start`·`elem_start`·`pid_start`·`sid_start` — 이름 그대로)로 주면", "  조각이 그 번호로 쓰이고 `cad_solid_merge_to_deck` 가 **옮기지 않고** 넣는다(대응표 번호 = 덱 번호)", "바닥 = assemble 과 같은 커서(**인클루드 닫힘까지**)의 최대값 + 1. pid_start 는 PID·SECID·MID 셋의 최대값 위다", "  (SECID 는 *SECTION_* 블록을 카드 묶음으로 갈라 센다 — SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히, 줄 수를 모르는 꼴은", "  행마다 첫 칸 숫자를 넉넉히 · 제목 · 두께 · 각도의 숫자는 SECID 가 아니다 · StepForge 591d5b5 와 같은 규칙 · 11-08 ·", "  번호 칸은 부호 +6 · 앞의 0 · 10 자리 · 묶음의 SECID 칸이면 실수 꼴 정수 6.0 도 그 번호다 — 11-08 S8 ·", "  줄 수를 모르는 꼴의 _TITLE 블록도 첫 줄은 제목이다 — 11-08 S10)", "  (열 재질 *MAT_THERMAL_* · *MAT_T01~T18 의 TMID 는 MID 와 독립된 번호라 세지 않는다 — Vol II 3-1 · 한 키워드 아래 쌓인 재질", "  묶음은 센다 — 줄 수를 아는 꼴은 묶음마다, 모르는 꼴은 행마다 첫 칸 숫자 · 2026-11-08)", "★요소 바닥은 **모든 요소 족**이다(2026-11-07) — 솔리드 · 셸 · 티쉘에 더해 보 · 이산 · 질량 · 안전띠 · 플롯 요소와", "  줄 수를 모르는 변형의 EID 까지 센다(리더는 그 요소를 메시에 담지 않는다). `cad_solid_merge_to_deck` 도 이 바닥으로 옮긴다", "  (조각은 셋을 같은 번호로 쓴다 — 삽입도 한 이동량으로 옮긴다)", "  칸으로 읽지 못한 보 족 줄(공백으로 가른 줄)은 EID 를 모르니 그 줄의 정수 최대까지 센다(2026-11-08)", "절점 바닥은 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 보 `_WARPAGE` 의 SN)까지 센다 — 그 번호는 `*NODE` 와 겹치면 안 된다", "`fragment_map` 을 주면 그 `ranges` 가 바닥 위인지 대조한다 — 아래에 걸치면 rc 1(그 조각은 넣을 때 옮겨진다)", "경계 문서의 `id_floor`(Q7 — 대응표의 `ranges` 를 읽어 대조한다)가 이 op 이다", "★네 번호 가운데 하나라도 LS-DYNA 정수 상한 2147483647 을 넘으면 내지 않는다 — rc 1 · JSON 없음(2026-11-21). 예전엔 요소 번호가", "  상한인 덱에 elem_start 2147483648 을 rc 0 으로 냈다(받는 쪽이 그 번호로 지으면 솔버가 못 읽는다) — 덱의 번호를 낮춘 뒤 다시 돌린다"}},
     {"rebind_entities_after_remesh", "메시 편집", "재메시 뒤 덧붙인 블록의 절점·파트·요소 번호를 새 덱 번호에 **다시 묶는다** — 절점은 (파트 이름, 좌표) · 파트는 제목 · 요소는 (파트, 절점 좌표)", "재결속 rebind remesh 재메시 번호 밀림 stepforge range_diff coord_sha 세트 SPC 이력 위치", "KooRemapper rebind_entities_after_remesh <config.yaml>",
      {{"rb.yaml", R"KRH(old_deck: examples/rebind_entities_after_remesh/v1.k
 new_deck: examples/rebind_entities_after_remesh/v2.k

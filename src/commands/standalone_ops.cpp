@@ -1583,6 +1583,18 @@ int runIdFloor(const std::string& yamlFile, ConsoleOutput& console) {
     console.println(std::string("[") + tag + "] " + modelPath + " — 인클루드 닫힘까지 센 최대값 위");
     console.println("  node_start " + std::to_string(nodeStart) + " · elem_start " + std::to_string(elemStart) +
                     " · pid_start " + std::to_string(pidStart) + " · sid_start " + std::to_string(sidStart));
+    // ★다음 번호가 LS-DYNA 정수 상한(2147483647 — Vol_I 19325)을 넘으면 내지 않는다(2026-11-21). 예전엔 요소 번호가 상한인 덱에
+    //   `elem_start: 2147483648` 을 rc 0 으로 냈다 — 받는 쪽이 그 번호로 지으면 솔버가 못 읽는 덱이 된다
+    {
+        const std::pair<const char*, long long> starts[] = {
+            {"node_start", nodeStart}, {"elem_start", elemStart}, {"pid_start", pidStart}, {"sid_start", sidStart}};
+        for (const auto& [name, v] : starts) {
+            if (v <= 2147483647LL) continue;
+            console.error(std::string("[") + tag + "] " + name + " " + std::to_string(v) + " — LS-DYNA 정수 상한 2147483647 을 넘는다. "
+                          "이 덱 위로는 번호를 더 낼 수 없다 — 덱의 번호를 낮춘 뒤 다시 돌린다");
+            return 1;
+        }
+    }
 
     // 대응표를 주면 그 `ranges` 가 바닥 위인지 대조한다(Q7) — 위면 넣을 때 옮기지 않는다(대응표 번호 = 덱 번호)
     std::string checkJson;

@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <fstream>
 #include <cctype>
-#include <set>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/parser]]
@@ -41,52 +40,10 @@ bool startsWithKeyword(const std::string& line, const char* keyword) {
 // 예전엔 들여쓴 `  *END` 를 끝으로 보아 거기서 `*END` 를 쓰고 원본의 `*END` 를 또 베꼈다(`*END` 가 둘 · 2026-11-08 재검토)
 using deckscan::isKeywordLine;
 
-// Uppercased keyword token of a '*' line: "*ELEMENT_SHELL_TITLE" out of
-// "  *element_shell_title   $ comment".
-std::string keywordToken(const std::string& line, size_t firstNonWs) {
-    std::string up;
-    for (size_t i = firstNonWs; i < line.size(); ++i) {
-        char c = static_cast<char>(std::toupper(static_cast<unsigned char>(line[i])));
-        if (c == ' ' || c == '\t' || c == '\r') break;
-        up.push_back(c);
-    }
-    return up;
-}
-
-// Element blocks that KFileReader also loads into mesh.elements but that
-// writeElementSection cannot round-trip (a shell/thick-shell is not an
-// *ELEMENT_SOLID). They stay in the output verbatim, so their EIDs must not
-// be written a second time inside our *ELEMENT_SOLID block.
-bool isVerbatimElementKeyword(const std::string& kw) {
-    // 옵션 변형(*ELEMENT_SHELL_THICKNESS 등)까지 접두어로 잡는다 — 리더가 그 변형도 읽게 된 뒤로
-    // 정확히 같은 이름만 보면 그 EID 가 *ELEMENT_SOLID 블록에 한 번 더 적힌다.
-    return kw.rfind("*ELEMENT_SHELL", 0) == 0 || kw.rfind("*ELEMENT_TSHELL", 0) == 0;
-}
-
-// EID of one element data line — fixed 8-char field when the line is wide
-// enough (same assumption as KFileReader), otherwise the first token.
-int elementLineEid(const std::string& line) {
-    std::string field;
-    if (line.size() >= 48) {
-        field = line.substr(0, 8);
-    } else {
-        size_t i = 0;
-        while (i < line.size() && std::isspace(static_cast<unsigned char>(line[i]))) ++i;
-        size_t j = i;
-        while (j < line.size() && !std::isspace(static_cast<unsigned char>(line[j]))) ++j;
-        field = line.substr(i, j - i);
-    }
-    try {
-        return std::stoi(field);
-    } catch (...) {
-        return 0;
-    }
-}
 }  // namespace
 
 KFileWriter::KFileWriter()
     : precision_(9)
-    , coordFieldWidth_(16)
     , includeHeader_(true)
 {}
 
@@ -122,6 +79,36 @@ static bool readerLossWritable(const Mesh& mesh, std::string& why) {
     return false;
 }
 
+// 번호가 덱의 정수 칸에 들어가나 — 8칸 덱(맨 `*KEYWORD`)에 9자리 번호를 쓰면 칸이 붙은 깨진 덱이 rc 0 으로 나갔다(2026-11-21). 원본이
+// `*NODE %` 처럼 블록마다 폭을 넓혀 그 번호를 담았더라도 이 쓰기는 덱이 선언한 폭 하나로만 쓴다 — 못 담으면 쓰지 않는다. 10칸
+// 이상은 LS-DYNA 정수 상한(2147483647 — 열 자리 · Vol_I 19325)이 다 들어간다. 셸 · 두께 셸은 메시에서 쓸 때만 본다(원본 블록을
+// 그대로 옮기면 그 줄은 원본의 폭이다). 파일을 열기 **전에** 본다
+static bool idsFitField(const Mesh& mesh, int fw, bool shellsFromMesh, std::string& why) {
+    if (fw >= 10) return true;
+    long long limit = 1;
+    for (int i = 0; i < fw; ++i) limit *= 10;
+    auto fits = [&](long long v, const char* what) {
+        if (v < limit) return true;
+        why = std::to_string(fw) + "칸에 들어가지 않는 번호가 있다 — " + what + " " + std::to_string(v) + ". 이 쓰기는 덱이 선언한 칸 폭(" +
+              std::to_string(fw) + ") 하나로 쓴다 — 번호를 낮추거나 `*KEYWORD I10=Y` 로 선언한 덱으로 다시 돌린다";
+        return false;
+    };
+    for (const auto& [id, node] : mesh.nodes)
+        if (!fits(node.id, "절점 번호")) return false;
+    for (const auto& [id, e] : mesh.elements) {
+        if (!shellsFromMesh && (e.type == ElementType::QUAD4 || mesh.thickShellIds.count(id))) continue;
+        if (!fits(e.id, "요소 번호") || !fits(e.partId, "요소의 파트 번호")) return false;
+        if (const auto* all = mesh.allNodesOf(id)) {
+            for (int n : *all)
+                if (!fits(n, "요소가 가리키는 절점 번호")) return false;
+        } else {
+            for (int n : e.nodeIds)
+                if (!fits(n, "요소가 가리키는 절점 번호")) return false;
+        }
+    }
+    return true;
+}
+
 bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& mesh,
                                       const std::string& sourceFile,
                                       bool useMappedPositions) {
@@ -151,21 +138,24 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
     // 원본의 개행을 그대로 따른다. 위 루프가 CR 을 떼므로(그 자체는 옳다 — 남기면 뒤의 파싱이
     // 깨진다) 여기서 되붙이지 않으면 CRLF 덱이 조용히 LF 로 바뀐다. 호출부는 고칠 것이 없다.
     newline_ = deck_newline::detect(sourceFile);
-    // 원본 덱이 선언한 칸 폭을 따른다. 원본의 `*KEYWORD I10=Y` 는 그대로 베껴 나가므로
-    // 이것을 안 하면 **선언은 10칸인데 본문은 8칸인 덱**이 나간다(그 상태로 rc=0 이었다).
-    DeckWriter writer(filename, newline_);
-    if (!writer.ok()) {
-        errorMessage_ = "Cannot create file: " + filename;
-        return false;
-    }
-    std::ostream& out = writer.stream();
 
     // ★원본의 **첫** `*END` 앞만 본다(LS-DYNA · 리더가 거기서 멈춘다). 그 뒤 줄은 아래 걸음이 그대로 베낀다. 예전엔 `*KEYWORD` 찾기 · 폭 ·
     //   셸 번호 미리 훑기가 덱 끝까지 읽어, 첫 `*END` 뒤의 읽히지 않는 셸 블록에 산 솔리드와 같은 번호가 있으면 그 솔리드를 쓰지 않았다
     //   (map rc 0 · 2026-11-08 여섯째 검토)
     const std::vector<std::string> liveLines(srcLines.begin(),
                                              srcLines.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(srcLines)));
+    // 원본 덱이 선언한 칸 폭을 따른다. 원본의 `*KEYWORD I10=Y` 는 그대로 베껴 나가므로
+    // 이것을 안 하면 **선언은 10칸인데 본문은 8칸인 덱**이 나간다(그 상태로 rc=0 이었다).
     idFieldWidth_ = KooRemapper::deckFieldWidth(liveLines);
+    // 번호가 그 칸에 안 들어가면 산출을 만들기 전에 멈춘다(셸 · 두께 셸 블록은 원본 줄을 그대로 옮기므로 보지 않는다)
+    if (!idsFitField(mesh, idFieldWidth_, /*shellsFromMesh=*/false, errorMessage_)) return false;
+
+    DeckWriter writer(filename, newline_);
+    if (!writer.ok()) {
+        errorMessage_ = "Cannot create file: " + filename;
+        return false;
+    }
+    std::ostream& out = writer.stream();
 
     try {
         // ★원본에 `*KEYWORD` 가 **없을 때만** 넣는다. 있는 덱 앞에 맨 `*KEYWORD` 를 끼우면
@@ -187,30 +177,10 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         bool elemEmitted = false;
         bool endSuppressed = false;  // we'll emit our own *END
 
-        // Shell / thick-shell blocks are copied verbatim, but KFileReader put
-        // their elements into mesh.elements too. Collect their EIDs up front
-        // (they can appear after *ELEMENT_SOLID) so writeElementSection leaves
-        // them out instead of re-emitting them as *ELEMENT_SOLID — that used
-        // to produce a deck with the same EID twice.
-        std::set<int> verbatimElemIds;
-        {
-            bool inVerbatimElem = false;
-            for (const std::string& line : liveLines) {   // 첫 `*END` 앞만(뒤의 죽은 셸 번호가 산 솔리드를 지우지 않게)
-                size_t p = 0;
-                while (p < line.size() &&
-                       std::isspace(static_cast<unsigned char>(line[p]))) {
-                    ++p;
-                }
-                if (p >= line.size()) continue;
-                if (isKeywordLine(line)) {
-                    inVerbatimElem = isVerbatimElementKeyword(keywordToken(line, 0));
-                    continue;
-                }
-                if (!inVerbatimElem || line[p] == '$') continue;
-                int eid = elementLineEid(line);
-                if (eid > 0) verbatimElemIds.insert(eid);
-            }
-        }
+        // 셸 · 두께 셸 블록은 원본 줄을 그대로 옮긴다. 리더가 그 요소도 메시에 담았지만 `writeElementSection` 이 메시의 사실(QUAD4 ·
+        // 두께 셸 표지)로 `*ELEMENT_SOLID` 에서 뺀다. 예전엔 여기서 원본의 셸 블록 줄을 8칸으로 다시 읽어 번호를 모았다 — 10칸 줄 ·
+        // 두께 카드 · 리더가 안 읽는 변형(`_BETA` · `_COMPOSITE`)의 줄에서 나온 수와 번호가 같은 솔리드가 산출에서 빠졌다(rc 0 ·
+        // 2026-11-21)
 
         auto emitOurNodes = [&]() {
             if (nodeEmitted) return;
@@ -219,7 +189,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         };
         auto emitOurElems = [&]() {
             if (elemEmitted) return;
-            writeElementSection(out, mesh, &verbatimElemIds);
+            writeElementSection(out, mesh);
             elemEmitted = true;
         };
 
@@ -236,15 +206,16 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
                 // Exiting the previous skip block (if any).
                 inSkipBlock = false;
 
-                const std::string up = keywordToken(line, 0);
-                if (up == "*NODE") {
+                // 블록 이름은 리더가 뽑는 그 이름으로 가른다(`*NODE%` 처럼 접미사를 붙여 쓴 줄도 리더는 `NODE` 로 읽는다)
+                const std::string name = gridReaderKeywordName(line);
+                if (name == "NODE") {
                     // *NODE family — match exact *NODE only, not *NODE_*
                     // variants like *NODE_RIGID_SURFACE.
                     emitOurNodes();
                     inSkipBlock = true;
                     continue;
                 }
-                if (up == "*ELEMENT_SOLID" || up == "*ELEMENT_SOLID_TITLE") {
+                if (name == "ELEMENT_SOLID" || name == "ELEMENT_SOLID_TITLE") {
                     // Exact match only: *ELEMENT_SOLID_ORTHO and friends are
                     // not loaded into mesh.elements, so dropping their block
                     // would lose those elements. Copy them verbatim instead.
@@ -271,7 +242,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         // substitute, emit it now so the output is still well-formed.
         if (!afterEnd) {   // 원본에 *END 가 없었다 — 끝에 쓴다
             if (!nodeEmitted) writeNodeSection(out, mesh, useMappedPositions);
-            if (!elemEmitted) writeElementSection(out, mesh, &verbatimElemIds);
+            if (!elemEmitted) writeElementSection(out, mesh);
             writeEnd(out);
         }
         (void)endSuppressed;
@@ -296,6 +267,17 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
     if (!secondOrderWritable(mesh, errorMessage_)) return false;
     if (!readerLossWritable(mesh, errorMessage_)) return false;
 
+    if (!idsFitField(mesh, idFieldWidth_, /*shellsFromMesh=*/verbatimShellSource_.empty(), errorMessage_)) return false;
+    // 셸 블록을 옮겨 올 덱은 산출을 만들기 전에 연다 — 못 열면 빈 산출을 남기지 않는다
+    std::ifstream shellSrc;
+    if (!verbatimShellSource_.empty()) {
+        shellSrc.open(verbatimShellSource_);
+        if (!shellSrc.is_open()) {
+            errorMessage_ = "셸 블록을 옮겨 올 덱을 열 수 없다: " + verbatimShellSource_;
+            return false;
+        }
+    }
+
     // 원본 덱이 없는 경로 — 호출자가 setNewline 으로 정해 준 개행을 쓴다(기본 LF).
     DeckWriter writer(filename, newline_);
     if (!writer.ok()) {
@@ -309,14 +291,17 @@ bool KFileWriter::writeFile(const std::string& filename, const Mesh& mesh,
         //   아무도 안 준다. 빠지면 LS-DYNA 가 키워드 덱으로 안 읽는다.
         //   `includeHeader_` 밖에 둔다(위와 같은 이유). DynainWriter·IGA·surface_extract 와
         //   같은 차례 — 카드가 먼저, `$` 머리말이 뒤다.
-        file << "*KEYWORD\n";
+        //   본문을 쓰는 그 폭을 선언한다 — 10칸 · 20칸 본문 위에 맨 `*KEYWORD` 를 쓰면 LS-DYNA 가 8칸으로 읽는다(2026-11-21)
+        file << (idFieldWidth_ >= 20 ? "*KEYWORD LONG=Y\n" : idFieldWidth_ == 10 ? "*KEYWORD I10=Y\n" : "*KEYWORD\n");
         if (includeHeader_) {
             writeHeader(file);
         }
 
         writeNodeSection(file, mesh, useMappedPositions);
         writeElementSection(file, mesh);
-        writeShellSections(file, mesh);   // 셸 · 두께 셸은 제 키워드로(예전엔 `*ELEMENT_SOLID` 에 섞였다)
+        // 셸 · 두께 셸은 제 키워드로(예전엔 `*ELEMENT_SOLID` 에 섞였다) — 옮겨 올 덱이 있으면 그 블록을 줄째 옮긴다
+        if (verbatimShellSource_.empty()) writeShellSections(file, mesh);
+        else copyShellBlocks(file, shellSrc);
         writeEnd(file);
 
         if (!writer.close()) {   // 쓰기 · 닫기 실패면 잘린 덱이다(여섯째 검토 S2)
@@ -376,12 +361,10 @@ void KFileWriter::writeNodeSection(std::ostream& file, const Mesh& mesh,
     }
 }
 
-void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh,
-                                      const std::set<int>* skipIds) {
+void KFileWriter::writeElementSection(std::ostream& file, const Mesh& mesh) {
     // Sort elements by ID
     std::vector<std::pair<int, const Element*>> sortedElements;
     for (const auto& [id, elem] : mesh.elements) {
-        if (skipIds && skipIds->count(id)) continue;
         // 셸(QUAD4) · 두께 셸은 솔리드 블록에 쓰지 않는다 — 원본이 있으면 그 블록을 그대로 베끼고, 없으면 `writeShellSections` 가 제
         // 키워드로 쓴다(2026-11-08 — 셸은 n5-n8 = n1-n4 인 겹친 육면체로, 두께 셸은 솔리드로 나갔다)
         if (elem.type == ElementType::QUAD4 || mesh.thickShellIds.count(id)) continue;
@@ -478,13 +461,28 @@ void KFileWriter::writeShellSections(std::ostream& file, const Mesh& mesh) {
     }
 }
 
+void KFileWriter::copyShellBlocks(std::ostream& file, std::istream& src) {
+    bool copying = false;
+    std::string line;
+    while (std::getline(src, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (isKeywordLine(line)) {
+            const std::string name = gridReaderKeywordName(line);
+            if (name == "END") break;   // 리더도 첫 `*END` 에서 멈춘다
+            copying = gridReaderReadsKeyword(line) &&
+                      (name.rfind("ELEMENT_SHELL", 0) == 0 || name.rfind("ELEMENT_TSHELL", 0) == 0);
+        }
+        if (copying) file << line << "\n";
+    }
+}
+
 void KFileWriter::writeEnd(std::ostream& file) {
     file << "*END" << std::endl;
 }
 
 std::string KFileWriter::formatDouble(double value) const {
     std::ostringstream oss;
-    oss << std::setw(coordFieldWidth_)
+    oss << std::setw(realFieldWidth(idFieldWidth_))   // 실수 칸도 덱 폭을 따른다 — 20칸 덱은 20, 그 밖은 16
         << std::scientific
         << std::setprecision(precision_)
         << value;

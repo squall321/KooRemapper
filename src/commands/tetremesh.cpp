@@ -15,10 +15,12 @@
 #include "cli/ConsoleOutput.h"
 #include "util/Timer.h"
 #include "util/YamlComment.h"
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Knowledge graph (lat.md):
@@ -208,6 +210,22 @@ bool readConfig(const std::string& path, Cfg& cfg, std::string& err) {
     return true;
 }
 
+// 셸 · 두께 셸 요소의 지문(수 + 번호 · 파트 · 절점을 번호 차례로 섞은 값). 쓰기가 그 블록을 읽은 덱에서 줄째 옮기므로
+// (`KFileWriter::setVerbatimShellSource`) 리메시가 그 요소를 건드리지 않았음을 쓰기 전에 본다 — 달라졌으면 옮길 줄이 낡은 것이다
+std::pair<size_t, std::uint64_t> shellFingerprint(const KooRemapper::Mesh& mesh) {
+    size_t n = 0;
+    std::uint64_t h = 1469598103934665603ull;
+    auto mix = [&h](int v) { h = (h ^ static_cast<std::uint32_t>(v)) * 1099511628211ull; };
+    for (const auto& [id, e] : mesh.elements) {
+        if (e.type != KooRemapper::ElementType::QUAD4 && !mesh.thickShellIds.count(id)) continue;
+        ++n;
+        mix(e.id);
+        mix(e.partId);
+        for (int nd : e.nodeIds) mix(nd);
+    }
+    return {n, h};
+}
+
 }  // anonymous namespace
 
 int runTetRemesh(const std::string& configPath,
@@ -289,6 +307,7 @@ int runTetRemesh(const std::string& configPath,
     }
     console.success("Loaded " + std::to_string(mesh.getNodeCount()) + " nodes, " +
                    std::to_string(mesh.getElementCount()) + " elements");
+    const auto shellsRead = shellFingerprint(mesh);
     if (splitDeck && !cfg.reportOnly) {
         // 이 op 은 리더가 본 메시만 다시 쓴다 — 메시가 인클루드 안에만 있으면 **빈 덱**이 나간다(실측 rc 0). 주 덱에 메시가
         // 있으면 그것을 고치되 인클루드 안의 메시·카드는 산출에 없다고 말한다.
@@ -428,8 +447,16 @@ int runTetRemesh(const std::string& configPath,
         console.info("Report-only: skipping output write.");
     } else {
         console.info("Writing: " + cfg.output);
+        // 셸 · 두께 셸 블록은 읽은 덱에서 줄째 옮긴다 — 메시는 셸을 4절점 · 파트 번호로만 담아 8절점 셸 · 두께 카드 · 옵션 변형을
+        // 되쓸 수 없다(2026-11-21 — 그것들을 rc 0 으로 잃었다). 리메시는 사면체만 바꾼다 — 셸이 달라졌으면 옮길 줄이 낡았으니 쓰지 않는다
+        if (shellFingerprint(mesh) != shellsRead) {
+            console.error("리메시 뒤의 셸 · 두께 셸 요소가 읽은 것과 다르다 — 그 블록은 읽은 덱에서 그대로 옮기므로 산출을 쓰지 않는다");
+            return 1;
+        }
         KFileWriter writer;
         writer.setNewline(KooRemapper::deck_newline::detect(modelOrig));   // 원본 덱의 개행
+        writer.setIdFieldWidth(reader.deckFieldWidth());   // 덱이 선언한 칸 폭으로(`*KEYWORD` 도 그 폭을 선언한다)
+        writer.setVerbatimShellSource(cfg.model);          // 리더가 읽은 그 덱(펼쳤으면 펼친 덱)
         if (!writer.writeFile(cfg.output, mesh, /*useMappedPositions=*/false)) {
             console.error("Failed to write output: " + writer.getErrorMessage());
             return 1;

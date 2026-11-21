@@ -121,6 +121,10 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
   rc 1 로 멈추고 `flatten_includes` 를 안내한다(ale·convert·restack·load·tetremesh … 27개 op). 사용자가 원하면 config 에
   `flatten_includes: true` 를 넣어 다시 돌려라 — 닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다(안 쪼갠 덱과 같은 산출).
   「모든 파트」 op 은 주 덱에 파트가 있으면 그것만 고치고 인클루드 파트는 고치지 않았다고 `[WARN]` 으로 말한다 — 그 줄을 사용자에게 전하라.
+- 메시를 다시 쓰는 op(`map` · `shellmap` · `squeeze` · `unfold` · `tetremesh`) — 덱이 선언한 칸 폭 하나(맨 `*KEYWORD` 8 · `I10=Y` 10 ·
+  `LONG=Y` 20)로 쓴다. 번호가 그 칸에 안 들어가면(맨 `*KEYWORD` 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않는다(rc 1) — 번호를 낮추거나
+  `*KEYWORD I10=Y` 로 선언한 덱으로 다시 돌리게 하라. `tetremesh` 는 리더가 읽은 셸 · 두께 셸 블록을 줄째 옮기지만, 안 읽는 변형
+  (`*ELEMENT_SHELL_COMPOSITE` …)과 메시 밖 카드는 **경고 없이** 산출에 없다 — 원본 덱에서 옮겨 붙여야 한다고 알려라.
 
 ## StepForge 조각 넣기 · 재메시 뒤 다시 묶기
 
@@ -129,7 +133,8 @@ job 은 `failed` 로 보이지만 산출 덱은 있다 — `get_job(job_id, incl
 
 1. **번호 바닥** — `id_floor`(`model`·`output`). 산출의 `node_start`·`elem_start`·`pid_start`·`sid_start` 를
    StepForge `export_part_fragment` 에 **이름 그대로** 넘긴다(대역표는 없다 — 요청할 때 발행한다). 받은 대응표를
-   `fragment_map` 으로 다시 주면 범위마다 `above`/`below`/`unused` 를 말한다(`below` 면 rc 1).
+   `fragment_map` 으로 다시 주면 범위마다 `above`/`below`/`unused` 를 말한다(`below` 면 rc 1). 네 번호 가운데 하나라도 LS-DYNA
+   정수 상한(2147483647)을 넘으면 번호를 내지 않는다(rc 1 · JSON 없음) — 덱의 번호를 낮춘 뒤 다시 돌려야 한다.
 2. **넣기** — `cad_solid_merge_to_deck`(`model`·`output`·`fragment`·`fragment_map`). 대응표 칸 집합·`unit`·
    `frame: world`·`coord_sha` 가 하나라도 계약과 다르면 아무것도 쓰지 않는다(rc 1). 바닥 위 조각은 번호를 옮기지
    않아 대응표 번호가 곧 덱 번호다. 세트가 든 조각(`ranges.sid` 가 null 이 아님)은 아직 받지 않는다.

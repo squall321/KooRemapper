@@ -1698,19 +1698,8 @@ bool KFileReader::isCommentLine(const std::string& line) const {
 }
 
 std::string KFileReader::extractKeyword(const std::string& line) const {
-    if (line.empty() || line[0] != '*') return "";
-
-    std::string keyword;
-    for (size_t i = 1; i < line.length(); ++i) {
-        char c = line[i];
-        // LS-DYNA keywords can contain letters, numbers, underscores, and hyphens
-        if (std::isalnum(c) || c == '_' || c == '-') {
-            keyword += static_cast<char>(std::toupper(c));
-        } else {
-            break;
-        }
-    }
-    return keyword;
+    // 이름 뽑기는 한 자리(`gridReaderKeywordName`) — 원본을 따라 쓰는 쓰기도 그것으로 블록을 가른다
+    return gridReaderKeywordName(line);
 }
 
 std::vector<std::string> KFileReader::tokenize(const std::string& line) const {

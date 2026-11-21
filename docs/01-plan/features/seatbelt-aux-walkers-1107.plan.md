@@ -98,6 +98,16 @@
 - ★(마지막 검토가 새로 짚은 것 — 물성을 조용히 바꾼다, 먼저 할 것) unfold 가 요소를 rc 0 으로 버린다(`examples/foldable_display/test_small_bent.k`
   100 → 53 · `examples/wave/wave_bent.k` 250 → 238) · tetremesh 가 같은 EID 의 솔리드를 셸로 덮어 잃고 8절점 셸을 4절점으로 · `_THICKNESS` 값을 버리고
   i10 입력을 8칸으로 쓴다 · extract-parts 가 `LONG=Y` 덱을 못 읽는다 · id_floor 의 elem_start 가 int 범위를 넘는다(2147483648).
+  → **다섯 다 닫았다** — unfold 는 11-20 거절 관문(`7edc1d9`), extract-parts 는 11-20(`6285f42`), tetremesh 의 8절점 셸 · 두께 카드 · 칸 폭과
+  id_floor 상한은 11-21(2차 D — `deferred-defects-round2-1120.plan.md`). 「같은 EID 의 솔리드를 셸로 덮어 잃는다」 는 DF-14(11-17 요소 번호 겹침
+  거절)가 이미 막고 있었다.
+- (11-21 2차 D 를 재다 나온 기존 결함 — 사용자 결정 대기) 키워드에 공백 없이 붙인 `-` 접미사(`*NODE-` · `*ELEMENT_SOLID-`)를 리더가 그 블록으로
+  읽지 않는다 — unfold · map 은 rc 1 로 멈추지만 squeeze 는 rc 0 으로 아무것도 누르지 않고 tetremesh 는 rc 0 으로 절점 · 솔리드가 빠진 덱을
+  쓴다 · tetremesh 가 리더가 안 읽는 셸 변형(`*ELEMENT_SHELL_COMPOSITE` …)을 경고 없이 산출에서 뺀다(rc 0 — 매뉴얼은 「싣지 않는다」 고
+  적는다) · extract-parts 가 인클루드 · 덱의 UTF-8 BOM 을 떼지 않는다(BOM + `*ELEMENT_SOLID` 로 시작하는 인클루드의 첫 블록이 rc 0 으로
+  빠진다).
+- (11-21 코드로만 읽은 것 — 안 쟀다) `cnrb2solid` · `cnrb2spring` 이 `LONG=Y` 덱에 쓰는 좌표 칸 · `idMaxima()` 를 쓰는 다른 자리(assemble ·
+  `cad_solid_merge_to_deck` · `apply_carryover_plan`)가 정수 상한 위의 번호를 내는지.
 - output 이 `*INCLUDE_PATH` 로 찾던 인클루드 이름과 같으면 출력 덱이 자기를 끌어온다(rc 0).
 - battery 기본 stacked 설정의 PART 13 → 없는 MID 8 · side 모드 `*BOUNDARY_SPC_SET` → 없는 세트 3(둘 다 LS-DYNA 가 멈춘다).
 - I10 · LONG 주 덱 + battery `use_include: true` 의 칸 폭 · 뒤 연산이 고른 번호(`extract_surface output_pid` 등)를 battery 인클루드와 견주지 않는다.
