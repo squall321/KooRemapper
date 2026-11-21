@@ -139,6 +139,7 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
     {
         std::ifstream fin(modelFullPath);
         if (!fin.is_open()) { console.error("Cannot open model: " + modelFullPath); return 1; }
+        KooRemapper::yamlSkipBOM(fin);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string ln;
         while (std::getline(fin, ln)) {
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();

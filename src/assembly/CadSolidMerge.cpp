@@ -7,6 +7,7 @@
 #include "parser/ElementCardLayout.h"
 #include "parser/FragmentMap.h"
 #include "parser/KFileReader.h"
+#include "util/YamlComment.h"   // yamlSkipBOM — 조각 맨 앞의 BOM
 
 #include <algorithm>
 #include <cstdio>
@@ -224,6 +225,7 @@ bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
     {
         std::ifstream f(op.fragment);
         if (!f.is_open()) { errorMessage_ = tag + "조각을 열지 못했다: " + op.fragment; return false; }
+        yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 조각의 `*KEYWORD` 줄이 앞 블록의 데이터 줄 자리에 실린다
         for (std::string l; std::getline(f, l);) {
             if (!l.empty() && l.back() == '\r') l.pop_back();
             frag.push_back(l);

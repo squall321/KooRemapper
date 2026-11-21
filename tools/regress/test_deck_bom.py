@@ -21,7 +21,9 @@
   matswap — 화면의 `bundle:` 줄(params · cards)도 같다.
   apply_carryover_plan — 덱에 붙이면 rc 1 `deck_sha` · 조각에 붙이면 rc 1 에 그 조각 줄이 「BOM」 을 말한다 · 어느 쪽도 덱을 쓰지 않는다.
 
-usage: test_deck_bom.py <KooRemapper 바이너리>
+  matswap 의 옛 자리 인자 꼴(`matswap <모델> <번들> <pid> <산출>`)은 번들을 읽는 자리가 따로다 — 번들에 BOM 을 붙여 따로 잰다.
+
+usage: test_deck_bom.py <KooRemapper 바이너리> [op ...]     (op 을 주면 그 op 만 돈다 — 변이 확인용)
 """
 import os
 import re
@@ -180,17 +182,48 @@ def carryover(case, plain):
               (rc, sorted(outs), line or text[-300:]))
 
 
+def legacy_matswap(binary, top):
+    """옛 자리 인자 꼴 — 번들을 `matswap.cpp` 의 제 리더가 읽는다(YAML 꼴은 조립기 쪽 리더)."""
+    def go(tag, bom):
+        d = os.path.join(top, "legacy_" + tag)
+        shutil.copytree(os.path.join(REPO, "examples", "matswap"), os.path.join(d, "examples", "matswap"))
+        if bom:
+            p = os.path.join(d, "examples", "matswap", "rubber.k")
+            with open(p, "rb") as f:
+                data = f.read()
+            with open(p, "wb") as f:
+                f.write(BOM + data)
+        rc, text = call(binary, d, "KooRemapper matswap examples/matswap/two_cubes.k examples/matswap/rubber.k 1 out.k")
+        out = os.path.join(d, "out.k")
+        data = DATE.sub(b"<D>", open(out, "rb").read()) if os.path.isfile(out) else None
+        return rc, [l for l in text.splitlines() if "Bundle cards:" in l], data, text
+    p_rc, p_line, p_out, p_text = go("plain", False)
+    if not check("matswap(옛 자리 인자 꼴) · 번들 그대로 rc 0 · 화면에 Bundle cards 줄", p_rc == 0 and p_line and p_out, p_text[-400:]):
+        return
+    rc, line, out, text = go("bom", True)
+    check("★matswap(옛 자리 인자 꼴) · 번들에 BOM → rc 같음 · Bundle cards 줄 같음 · 산출 바이트 같음 · 산출에 BOM 없음",
+          rc == p_rc and line == p_line and out == p_out and out is not None and BOM not in out,
+          (rc, p_line, line, "산출 %s" % ("같음" if out == p_out else "다름"), text[-200:]))
+
+
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print(__doc__)
         return 2
     binary = os.path.abspath(sys.argv[1])
+    only = set(sys.argv[2:])
+    unknown = only - {spec["name"] for spec in OPS}
+    if unknown:
+        print("모르는 op: %s" % " ".join(sorted(unknown)))
+        return 2
     gmsh = os.environ.get("KOOREMAPPER_GMSH", "")
     top = tempfile.mkdtemp(prefix="kr_deck_bom_")
     ran = 0
     try:
         for spec in OPS:
             name = spec["name"]
+            if only and name not in only:
+                continue
             if name in GMSH_OPS and not os.path.isfile(gmsh):
                 print("[%s] 건너뜀 — KOOREMAPPER_GMSH 가 없다" % name)
                 continue
@@ -222,9 +255,14 @@ def main():
                     check("★matswap · BOM 덱(%s) → 화면의 bundle 줄(params · cards)이 같다" % os.path.basename(label),
                           bundle(text) == bundle(p_text) and bundle(text), (bundle(p_text), bundle(text)))
             shutil.rmtree(root, ignore_errors=True)
+        if not only or "matswap" in only:
+            legacy_matswap(binary, top)
     finally:
         shutil.rmtree(top, ignore_errors=True)
-    check("덱을 받는 op 을 쉰 넘게 돌렸다(카탈로그가 비면 이 시험은 아무것도 재지 않는다)", ran >= 50, ran)
+    if only:
+        check("고른 op 을 모두 돌렸다(%s)" % " ".join(sorted(only)), ran == len(only), ran)
+    else:
+        check("덱을 받는 op 을 쉰 넘게 돌렸다(카탈로그가 비면 이 시험은 아무것도 재지 않는다)", ran >= 50, ran)
 
     print()
     if FAILS:

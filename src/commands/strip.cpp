@@ -225,6 +225,7 @@ int runStrip(const std::string& yamlFile, ConsoleOutput& console)
         console.error("Cannot open input: " + modelPath);
         return 1;
     }
+    KooRemapper::yamlSkipBOM(inf);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
 
     KooRemapper::DeckWriter outf_w(outputPath, KooRemapper::deck_newline::detect(modelOrig));
     if (!outf_w.ok()) {

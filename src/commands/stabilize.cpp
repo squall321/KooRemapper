@@ -532,6 +532,7 @@ int runStabilize(const std::string& yamlFile, ConsoleOutput& console) {
     {
         std::ifstream mf(modelPath);
         if (!mf.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
+        KooRemapper::yamlSkipBOM(mf);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string l;
         while (std::getline(mf, l)) {
             if (!l.empty() && l.back()=='\r') l.pop_back();

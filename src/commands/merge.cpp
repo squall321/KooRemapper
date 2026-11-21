@@ -331,6 +331,7 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
         console.error("Cannot open model: " + path);
         return false;
     }
+    KooRemapper::yamlSkipBOM(inf);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
 
     std::string line;
     std::string curKeyword;

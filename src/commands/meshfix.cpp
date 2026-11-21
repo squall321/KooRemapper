@@ -1773,6 +1773,7 @@ static bool spliceMesh(const std::string& modelPath,
     {
         std::ifstream f(modelPath);
         if (!f.is_open()) { err="Cannot open model: "+modelPath; return false; }
+        KooRemapper::yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string line;
         while (std::getline(f, line)) {
             while (!line.empty()&&line.back()=='\r') line.pop_back();

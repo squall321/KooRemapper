@@ -1,6 +1,7 @@
 #include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙
 #include "parser/ElementCardLayout.h"
 #include "parser/KFileWriter.h"
+#include "util/YamlComment.h"   // yamlSkipBOM — 원본 덱 맨 앞의 BOM
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -101,6 +102,7 @@ bool KFileWriter::writeFileWithSource(const std::string& filename, const Mesh& m
         errorMessage_ = "Cannot open source file for preservation: " + sourceFile;
         return false;
     }
+    yamlSkipBOM(src);   // 맨 앞 BOM 은 건너뛴다(리더와 같다) — 안 떼면 원본 `*KEYWORD` 줄이 키워드로 안 읽혀 한 번 더 실린다
     std::vector<std::string> srcLines;
     srcLines.reserve(1024);
     {

@@ -60,6 +60,7 @@ static MswBundle msw_parseBundle(const std::string& path) {
     MswBundle bnd;
     std::ifstream f(path);
     if (!f.is_open()) throw std::runtime_error("Cannot open bundle: " + path);
+    KooRemapper::yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 첫 `*PARAMETER` 가 키워드로 안 읽혀 번들 값이 통째로 빠진다
 
     enum Sec { OTHER, PARAM, PART } sec = OTHER;
     bool partTitle=false, partData=false;
@@ -293,6 +294,7 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     {
         std::ifstream f(modelFile);
         if (!f.is_open()) { console.error("Cannot open model: " + modelFile); return 1; }
+        KooRemapper::yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string ln; while (std::getline(f,ln)) modelLines.push_back(ln);
     }
 

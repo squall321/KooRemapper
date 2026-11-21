@@ -366,6 +366,7 @@ bool ModelAssembler::loadBaseModel(const std::string& filename) {
         errorMessage_ = "Cannot open base model for raw read: " + filename;
         return false;
     }
+    yamlSkipBOM(file);   // 맨 앞 BOM 은 건너뛴다(리더와 같다) — 안 떼면 원본 `*KEYWORD` 줄이 키워드로 안 읽혀 한 번 더 실린다
     deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
     deckFinalNewline_ = deck_newline::endsWithNewline(filename);   // 말미 개행 유무도 기억한다
     std::string line;
@@ -831,6 +832,7 @@ bool ModelAssembler::loadRawOnly(const std::string& filename) {
         errorMessage_ = "Cannot open model: " + filename;
         return false;
     }
+    yamlSkipBOM(file);   // 맨 앞 BOM 은 건너뛴다(리더와 같다) — 안 떼면 원본 `*KEYWORD` 줄이 키워드로 안 읽혀 한 번 더 실린다
     deckNewline_ = deck_newline::detect(filename);   // 뗀 CR 을 쓸 때 되붙이기 위해 기억한다
     deckFinalNewline_ = deck_newline::endsWithNewline(filename);   // 말미 개행 유무도 기억한다
     std::string line;
@@ -12272,6 +12274,7 @@ static MwBundle mw_parseBundle(const std::string& path) {
     MwBundle bnd;
     std::ifstream f(path);
     if (!f.is_open()) throw std::runtime_error("Cannot open bundle: " + path);
+    yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다 — 안 떼면 첫 `*PARAMETER` 가 키워드로 안 읽혀 번들 값이 통째로 빠진다
     enum Sec { OTHER, PARAM, PART } sec = OTHER;
     bool partTitle=false, partData=false;
     std::string ln;

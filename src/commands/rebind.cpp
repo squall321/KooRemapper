@@ -27,6 +27,7 @@
 #include "parser/KFileReader.h"
 #include "parser/NodeRefs.h"
 #include "util/StrictJson.h"
+#include "util/YamlComment.h"      // yamlSkipBOM — 덱 맨 앞의 BOM
 
 #include <algorithm>
 #include <array>
@@ -51,6 +52,7 @@ using cards::toInt;
 bool readLines(const std::string& path, std::vector<std::string>& L) {
     std::ifstream f(path);
     if (!f.is_open()) return false;
+    yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
     for (std::string ln; std::getline(f, ln);) {
         if (!ln.empty() && ln.back() == '\r') ln.pop_back();
         L.push_back(ln);

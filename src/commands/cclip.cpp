@@ -1056,6 +1056,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     {
         std::ifstream mf(modelPath);
         if (!mf.is_open()) { console.error("[cclip] cannot open model: " + modelPath); return 1; }
+        KooRemapper::yamlSkipBOM(mf);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string ln;
         while (std::getline(mf, ln)) { if (!ln.empty() && ln.back()=='\r') ln.pop_back(); lines.push_back(ln); }
     }

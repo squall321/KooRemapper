@@ -309,6 +309,7 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
     console.info("Reading model: " + modelPath);
     std::ifstream modelFile(modelPath);
     if (!modelFile.is_open()) { console.error("Cannot open model: " + modelPath); return 1; }
+    KooRemapper::yamlSkipBOM(modelFile);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
 
     std::vector<std::string> rawLines;
     {

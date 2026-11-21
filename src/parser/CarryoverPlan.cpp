@@ -6,6 +6,7 @@
 #include "parser/ElementCardLayout.h"
 #include "util/StrictJson.h"
 #include "util/Utf8.h"
+#include "util/YamlComment.h"   // yamlStripBOM — 조각 맨 앞의 BOM
 
 #include <algorithm>
 #include <cmath>
@@ -946,6 +947,11 @@ bool scanFragment(const std::vector<std::string>& in, FragmentScan& s, std::vect
     std::vector<size_t> data;                                           // 지금 *PART · *SECTION 블록의 데이터 줄
     auto where = [](size_t i) { return "조각 " + std::to_string(i + 1) + "째 줄"; };
     auto bad = [&](size_t i, const std::string& what) { problems.push_back(where(i) + " — " + what); };
+    // 맨 앞의 UTF-8 BOM(윈도우 편집기가 붙인다) — 그대로 읽으면 첫 `*KEYWORD` 가 키워드로 안 보여 「키워드 밖의 데이터 줄」 이라는 엉뚱한
+    // 까닭만 남았다(2026-11-21). 고치지 않고 거절하되 까닭은 BOM 을 말하고, 나머지 검사는 BOM 을 뗀 첫 줄로 잇는다
+    std::string first = in.empty() ? std::string() : in[0];
+    yamlStripBOM(first);
+    if (!in.empty() && first.size() != in[0].size()) bad(0, "UTF-8 BOM 으로 시작한다 — 조각은 BOM 없이 싣는다");
 
     // *PART · *SECTION 블록을 닫는다 — 빈 줄도 카드다(제목이 비었을 수 있다) · 끝의 빈 줄은 여백이다
     auto flush = [&]() {
@@ -1009,7 +1015,7 @@ bool scanFragment(const std::vector<std::string>& in, FragmentScan& s, std::vect
     };
 
     for (size_t i = 0; i < in.size(); ++i) {
-        const std::string& l = in[i];
+        const std::string& l = i == 0 ? first : in[i];
         FragmentScan::Line& L = s.lines[i];
         L.block = block;
         // 제어 문자(탭 밖) — 주석 · 제목 줄은 글자 그대로 덱에 들어간다. 줄 가운데의 CR 은 다른 리더에서 줄을 끊어 살아 있는 카드가
