@@ -2,6 +2,7 @@
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckScan.h"      // 덧붙이는 자리 — 주 덱의 첫 *END(insertBeforeFirstEnd)
 #include "parser/DeckWriter.h"
+#include "parser/IncludeScan.h"   // emptyMeshWhy — 빈 메시를 거절하는 까닭 글
 #include "util/YamlComment.h"
 #include "relax.h"
 #include "core/Mesh.h"
@@ -64,6 +65,12 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     console.success("Loaded " + std::to_string(mesh.getNodeCount()) + " nodes, " +
                    std::to_string(mesh.getElementCount()) + " elements, " +
                    std::to_string(mesh.getPartCount()) + " parts");
+    // 빈 메시는 누를 것이 없다 — 예전엔 rc 0 으로 메시 없는 `.k` · 요소 0 인 `.dynain` 을 썼다(주 덱이 `*INCLUDE` 뿐일 때 · 2026-11-21)
+    if (const std::string why = KooRemapper::include_scan::emptyMeshWhy(meshFile, mesh.getNodeCount(), mesh.getElementCount());
+        !why.empty()) {
+        console.error(why);
+        return 1;
+    }
 
     // Read squeeze config
     console.info("Reading squeeze config: " + configFile);

@@ -109,5 +109,19 @@ inline Unread scanFile(const std::string& path, size_t maxNames = 8) {
     return out;
 }
 
+// 인클루드를 따라가지 않는 명령이 **빈 메시**를 읽었을 때의 까닭 글(2026-11-21 — strain · squeeze 명령줄 꼴). 주 덱이
+// `*INCLUDE` 를 싣고 있으면 그것을 말한다 — 예전엔 rc 0 으로 빈 산출을 냈다. 메시가 비지 않았으면 빈 글이다.
+inline std::string emptyMeshWhy(const std::string& path, size_t nodes, size_t elems) {
+    if (nodes > 0 && elems > 0) return "";
+    std::string why = path + " 에서 " + (nodes == 0 ? "절점을" : "요소(솔리드 · 셸)를") + " 하나도 읽지 못했다";
+    const Unread u = scanFile(path, 1);
+    if (u.count > 0) {
+        why += " — 주 덱에 *INCLUDE 가 " + std::to_string(u.count) + " 장 있다" +
+               (u.names.empty() ? std::string() : "(" + u.names.front() + (u.count > 1 ? " …" : "") + ")") +
+               ". 이 명령은 인클루드를 따라가지 않는다 — 닫힘을 펼친 한 파일을 준다";
+    }
+    return why;
+}
+
 }  // namespace include_scan
 }  // namespace KooRemapper

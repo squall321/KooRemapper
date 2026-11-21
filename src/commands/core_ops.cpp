@@ -14,6 +14,7 @@
 #include "parser/ElementCardLayout.h"   // hasKeywordCard — 첫 카드 판정 정본
 #include "parser/DeckScan.h"            // 덧붙이는 자리 — 주 덱의 첫 *END(firstEndLine)
 #include "parser/IncludeClosure.h"     // info 가 주 덱을 인클루드까지 읽어 판정한다
+#include "parser/IncludeScan.h"        // emptyMeshWhy — strain 이 빈 메시를 거절하는 까닭 글
 #include "parser/NodeRefs.h"           // 세트·경계조건이 가리키는 절점 — 칸 자리 정본
 #include "parser/DeckScan.h"
 #include "parser/DynainWriter.h"
@@ -954,6 +955,11 @@ int runStrain(const std::string& refFile, const std::string& defFile,
     }
     console.success("Loaded " + std::to_string(defMesh.getNodeCount()) + " nodes, " +
                    std::to_string(defMesh.getElementCount()) + " elements");
+    // 빈 메시는 잴 것이 없다 — 예전엔 rc 0 으로 머리 한 줄뿐인 CSV 를 썼다(주 덱이 `*INCLUDE` 뿐일 때 · 2026-11-21)
+    for (const auto& why : {KooRemapper::include_scan::emptyMeshWhy(refFile, refMesh.getNodeCount(), refMesh.getElementCount()),
+                            KooRemapper::include_scan::emptyMeshWhy(defFile, defMesh.getNodeCount(), defMesh.getElementCount())}) {
+        if (!why.empty()) { console.error(why); return 1; }
+    }
 
     // Setup strain calculator
     StrainCalculator calc;
