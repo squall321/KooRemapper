@@ -1026,6 +1026,11 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
     rc 0 인데 원본에 없던 절점 묶음을 가진 요소가 나갔다(`examples/teardrop/teardrop_bent.k` 250 요소 가운데 15 · 새 절점 5 ·
     `generate` teardrop 기본 크기 13 · scurve 20×5×3 80). 요소 수는 맞아서 눈에 띄지 않는다. 독립된 평판 덱으로 돌린 `map` 산출은
     바뀌지 않는다(굽은 기준을 절점 격자로 읽는다) — 바뀌는 것은 `unfold` 산출과 그것을 평판으로 쓴 `map` 이다.
+  - **틈(안쪽 균열 — 맞닿은 면의 절점을 따로 둔 자리)이 있는 덱은 `unfold` 가 거절한다**(2026-11-21) — 「Failed to order element nodes: elements
+    A and B are neighbours along i in the grid but share no face」 · rc 1 · 산출 없음. 펼친 덱은 격자점마다 절점 하나로 쓰므로 틈이 붙어 나가기
+    때문이다(전에는 rc 0 으로 붙여 썼다 — 256 절점 덱이 252 절점으로 · 경고 없음). `map` 의 굽은 기준으로는 받는다 — 굽은 기준을 격자점마다 절점
+    하나로 읽으니 틈을 붙인 메시와 같은 기준이고, 산출 좌표도 붙인 덱을 기준으로 한 것과 같다(틈의 한쪽 절점만 읽는다 — 벌어진 틈에서 다른 쪽
+    절점의 좌표는 쓰이지 않는다). 회귀 S-1 · S-2.
   - 회귀 `test_unfold_element_loss.py` · 단위 시험 `GridIndexer_*`
 
 ---

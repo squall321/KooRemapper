@@ -317,3 +317,39 @@ TEST(GridIndexer_옆_이웃끼리_열린_쪽을_달리_말하면_절점_순서�
     ASSERT_FALSE(indexer.reorderElementNodes(mesh));
     ASSERT_TRUE(gridtest::contains(indexer.getErrorMessage(), "disagree on which of its faces"));
 }
+
+TEST(GridIndexer_틈을_사이에_둔_격자_이웃은_부른_쪽이_청할_때만_받는다) {
+    // 6×5×5 블록의 i = 3 면에서 안쪽 격자점 넷((3, 2..3, 2..3))의 절점을 겹친다 — i ≥ 3 쪽 요소는 새 절점을 쓴다. 그 격자점에
+    // 닿는 면 아홉 쌍은 격자 이웃인데 면을 나누지 않는다(가운데 쌍은 절점을 하나도 안 나눈다). unfold 는 격자점마다 절점 하나로
+    // 써서 틈을 붙이게 되니 거절하고(기본), map 은 굽은 기준을 읽기만 하니 받는다 — 받을 때도 순서는 표준 순서 하나다
+    const int ni = 6, nj = 5, nk = 5;
+    const auto ids = gridtest::plainIds(ni, nj);
+    auto slit = [&](Mesh& mesh, bool scrambled) {
+        gridtest::addBlock(mesh, ni, nj, nk, ids, gridtest::boxPosition, scrambled, true, 1);
+        std::map<int, int> twin;
+        int next = ids(ni, nj, nk);
+        for (int j = 2; j <= 3; ++j) {
+            for (int k = 2; k <= 3; ++k) {
+                twin[ids(3, j, k)] = ++next;
+                mesh.addNode(next, 3, j, k);
+            }
+        }
+        for (auto& [id, e] : mesh.elements) {
+            if (e.i < 3) continue;
+            for (int& n : e.nodeIds) {
+                auto it = twin.find(n);
+                if (it != twin.end()) n = it->second;
+            }
+        }
+    };
+    Mesh plain, mesh;
+    slit(plain, false);
+    slit(mesh, true);
+    StructuredGridIndexer indexer;
+    ASSERT_FALSE(indexer.reorderElementNodes(mesh));
+    ASSERT_TRUE(gridtest::contains(indexer.getErrorMessage(), "share no face"));
+    ASSERT_TRUE(indexer.reorderElementNodes(mesh, true));
+    for (const auto& [id, e] : mesh.elements) {
+        ASSERT_TRUE(e.nodeIds == plain.elements.at(id).nodeIds);
+    }
+}

@@ -663,7 +663,7 @@ void StructuredGridIndexer::swapAxes(Mesh& mesh, int axis1, int axis2) {
     }
 }
 
-bool StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
+bool StructuredGridIndexer::reorderElementNodes(Mesh& mesh, bool allowSlit) {
     // Reorder nodes within each element so that the local order follows the grid:
     // - Nodes 0-3 are on the k- face (bottom), nodes 4-7 are on the k+ face (top)
     //   Bottom (k-): n0 at (i-,j-), n1 at (i+,j-), n2 at (i+,j+), n3 at (i-,j+)
@@ -683,7 +683,10 @@ bool StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
     // because it reads the reference through the node grid the boundary
     // extractor builds from shared nodes, not through this order. There is no
     // fallback to that estimate: indices that do not agree with the faces are
-    // refused.
+    // refused. The one exception is a slit, and only where the caller asks for
+    // it (allowSlit): the walk gave the two sides neighbouring indices by going
+    // round the slit, and each side still has its faces from its other
+    // neighbours.
     errorMessage_.clear();
 
     std::unordered_map<std::tuple<int,int,int>, const Element*, GridIndexHash> elemLookup;
@@ -752,6 +755,7 @@ bool StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
                     if (common == Element::NODES_PER_FACE) sides.face[axis][side] = f;
                 }
                 if (sides.face[axis][side] < 0) {
+                    if (allowSlit) continue;
                     errorMessage_ = "elements " + std::to_string(id) + " and " + std::to_string(neighbor->id) +
                         " are neighbours along " + AXIS_NAMES[axis] + " in the grid but share no face";
                     return false;

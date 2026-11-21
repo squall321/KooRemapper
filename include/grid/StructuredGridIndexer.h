@@ -72,9 +72,14 @@ public:
      * along the grid, read off the faces shared with the grid neighbours.
      * Standard order: bottom face CCW (n0,n1,n2,n3), top face CCW (n4,n5,n6,n7)
      * where k-axis goes from bottom to top.
+     * @param allowSlit a grid neighbour that shares no face -- the far side of a slit (an interior
+     *        crack whose nodes are doubled) -- counts as no neighbour on that side instead of being
+     *        refused. map passes true: it reads the reference one node per grid point, a closed slit
+     *        reads like the welded mesh. unfold must not: it writes one node per grid point and
+     *        would weld the slit shut
      * @return false (see getErrorMessage) when the indices do not agree with the faces
      */
-    bool reorderElementNodes(Mesh& mesh);
+    bool reorderElementNodes(Mesh& mesh, bool allowSlit = false);
 
     /**
      * Get error message

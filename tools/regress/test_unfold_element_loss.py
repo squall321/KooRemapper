@@ -31,9 +31,16 @@
   R-1 떨어진 두 덩어리(`tests/offset/regression/05_contact_mode.k`) — rc ≠ 0 · 산출 없음 · 글이 못 닿은 요소를 말한다
   M-1 · M-2 U-1 · U-2 의 덱을 `map` 의 굽은 기준으로 — rc 0 · 산출의 요소 번호 · 절점 묶음이 평판 덱과 같고 야코비안이 전부
         양수(예전엔 「only 1/8 corner nodes found」, 11-20 에는 색인 겹침으로 rc 1)
+  S-1 틈 덱(안쪽 균열 — 6×5×5 블록의 i = 3 면에서 안쪽 격자점 넷의 절점을 겹친 것 · 상자와 호) `unfold` — rc ≠ 0 · 산출 없음 ·
+      글이 면을 나누지 않는 격자 이웃을 말한다. 평판은 격자점마다 절점 하나라 틈을 붙이게 된다 — 11-21 전에는 rc 0 으로
+      붙여서 썼다(절점 256 → 252)
+  S-2 같은 틈 덱을 `map` 의 굽은 기준으로 — rc 0 · 요소 번호 · 절점 묶음이 평판 덱과 같고, 절점 좌표가 **틈을 붙인 쌍둥이
+      덱을 기준으로 한 산출과 같다**(1e-6 안). 11-21 색인 재작성이 이 덱을 rc 1 로 막았다(검토가 찾음) — 굽은 기준은 읽기만
+      한다
 
 usage: test_unfold_element_loss.py <KooRemapper 바이너리>
 """
+import math
 import os
 import shutil
 import subprocess
@@ -133,6 +140,34 @@ def drop_elements(src, dst, eids):
         f.write("\n".join(out))
 
 
+CORNERS = ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1))
+
+
+def write_block(path, pos, slit, ni=6, nj=5, nk=5):
+    """ni×nj×nk 블록 덱(절점 · 솔리드만 · 폭 8). slit 이면 i = 3 면의 안쪽 격자점 넷((3, 2..3, 2..3))의 절점을 같은 자리에
+    하나씩 더 두고 i ≥ 3 쪽 요소가 그것을 쓴다 — 그 격자점에 닿는 면 아홉 쌍이 갈라진다(가장자리 고리는 붙어 있다)."""
+    nid = lambda i, j, k: 1 + i + (ni + 1) * (j + (nj + 1) * k)
+    nodes = {nid(i, j, k): pos(i, j, k) for k in range(nk + 1) for j in range(nj + 1) for i in range(ni + 1)}
+    twin = {}
+    if slit:
+        for j in (2, 3):
+            for k in (2, 3):
+                twin[nid(3, j, k)] = len(nodes) + 1
+                nodes[len(nodes) + 1] = pos(3, j, k)
+    lines = ["*KEYWORD", "*NODE"] + ["%8d%16.8f%16.8f%16.8f" % ((n,) + tuple(nodes[n])) for n in sorted(nodes)]
+    lines.append("*ELEMENT_SOLID")
+    eid = 0
+    for k in range(nk):
+        for j in range(nj):
+            for i in range(ni):
+                eid += 1
+                conn = [nid(i + a, j + b, k + c) for a, b, c in CORNERS]
+                lines.append("%8d%8d" % (eid, 1) + "".join("%8d" % (twin.get(n, n) if i >= 3 else n) for n in conn))
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines + ["*END"]) + "\n")
+    return path
+
+
 def unfold_case(binary, d, name, deck):
     """I-1 · rc 0 · 요소 전부 · I-2 를 잰다."""
     out = os.path.join(d, name.split()[0] + "_" + os.path.basename(deck)[:-2] + "_flat.k")
@@ -211,6 +246,41 @@ def main():
                   len(fe) > 0 and set(on) == set(fn) and oe == fe, (len(fe), len(oe), len(fn), len(on)))
             flipped = sorted(e for e, conn in oe.items() if jacobian(on, conn) <= 0)
             check("%s map 산출의 야코비안이 전부 양수" % name, not flipped, (len(flipped), flipped[:8]))
+
+        flat_pos = lambda i, j, k: (2.0 * i, 1.0 * j, 0.4 * k)
+        arc_pos = lambda i, j, k: ((10.0 + 0.4 * k) * math.sin(0.2 * i), 1.0 * j, (10.0 + 0.4 * k) * math.cos(0.2 * i))
+        flat = write_block(os.path.join(root, "s_flat.k"), flat_pos, False)
+        for tag, pos in (("상자", flat_pos), ("호", arc_pos)):
+            stem = "s_box" if pos is flat_pos else "s_arc"
+            slit = write_block(os.path.join(root, stem + "_slit.k"), pos, True)
+            weld = write_block(os.path.join(root, stem + "_weld.k"), pos, False)
+            out_path = os.path.join(root, stem + "_unfold.k")
+            rc, text = run(binary, root, "unfold", slit, out_path)
+            check("S-1 틈 덱(%s) unfold — rc ≠ 0 · 산출 없음 · 글이 면을 나누지 않는 격자 이웃을 말한다" % tag,
+                  rc != 0 and not os.path.exists(out_path) and "share no face" in text, (rc, os.path.exists(out_path), text[-300:]))
+            outs = {}
+            for kind, bent in (("slit", slit), ("weld", weld)):
+                outs[kind] = os.path.join(root, "%s_map_%s.k" % (stem, kind))
+                rc, text = run(binary, root, "map", bent, flat, outs[kind])
+                if not check("S-2 %s 덱(%s)을 map 의 굽은 기준으로 — rc 0 · 산출 있음" % ("틈" if kind == "slit" else "붙인 쌍둥이", tag),
+                             rc == 0 and os.path.exists(outs[kind]), (rc, text[-300:])):
+                    outs = None
+                    break
+            if outs is None:
+                continue
+            fn, fe = read_deck(flat)
+            sn, se = read_deck(outs["slit"])
+            wn, we = read_deck(outs["weld"])
+            check("S-2 틈 덱(%s) map 산출의 요소 번호 · 절점 묶음이 평판 덱(%d 요소)과 같다" % (tag, len(fe)),
+                  len(fe) == 150 and set(sn) == set(fn) and se == fe, (len(fe), len(se), len(fn), len(sn)))
+            far = max(max(abs(a - b) for a, b in zip(sn[n], wn[n])) for n in sn) if set(sn) == set(wn) else None
+            check("S-2 틈 덱(%s) map 산출의 좌표가 붙인 쌍둥이를 기준으로 한 산출과 같다(1e-6 안)" % tag,
+                  far is not None and far <= 1e-6, far)
+            moved = max(max(abs(a - b) for a, b in zip(sn[n], fn[n])) for n in sn) if set(sn) == set(fn) else None
+            check("S-2 틈 덱(%s) map 이 평판을 %s" % (tag, "그대로 둔다(상자 기준)" if pos is flat_pos else "굽힌다(절점이 1 넘게 옮겨진다)"),
+                  moved is not None and (moved <= 1e-6 if pos is flat_pos else moved > 1.0), moved)
+            flipped = sorted(e for e, conn in se.items() if jacobian(sn, conn) <= 0)
+            check("S-2 틈 덱(%s) map 산출의 야코비안이 전부 양수" % tag, not flipped, (len(flipped), flipped[:8]))
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print()

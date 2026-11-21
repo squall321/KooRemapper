@@ -231,7 +231,9 @@ bool MeshRemapper::step1_AnalyzeBentMesh(Mesh& tempMesh) {
     }
 
     // Reorder element nodes along the grid for consistent LS-DYNA ordering
-    if (!indexer_.reorderElementNodes(tempMesh)) {
+    // 틈(절점을 겹쳐 둔 내부 균열)을 사이에 둔 격자 이웃은 받아 준다 — 굽은 기준은 격자점마다 절점 하나로 읽으니 닫힌 틈은
+    // 붙인 메시와 같은 기준이다(2026-11-21 색인 재작성이 이 덱을 rc 1 로 막았던 것을 되돌린다 · unfold 는 그대로 거절한다)
+    if (!indexer_.reorderElementNodes(tempMesh, true)) {
         errorMessage_ = "Failed to order element nodes: " +
                        indexer_.getErrorMessage();
         return false;
