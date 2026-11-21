@@ -43,6 +43,10 @@ logger = logging.getLogger("koorm.reports")
 # 곁파일(blockstore)을 새로 만드는 일은 한 번에 하나 — 1,000각도 리포트는 만드는 동안 전체를 메모리에 올린다(약 3 GB).
 _BLOCK_BUILD_LOCK = asyncio.Lock()
 
+# 리포트 받기는 한 번에 하나 — 풀린 데이터가 파일의 약 8 배라, 동시에 온 올리기가 그만큼 곱해지지 않게 줄을 세운다.
+# 잠금 차례는 이 줄 → 캠페인 런 행 잠금 → `_BLOCK_BUILD_LOCK` 이다. 기다리는 올리기는 제 파일 바이트와 DB 연결을 쥔 채 선다.
+_PARSE_LOCK = asyncio.Lock()
+
 async def _store_report_html(session: Session, filename: str, raw: bytes) -> SessionFile:
     """리포트 HTML 을 세션 디렉토리에 저장하고 SessionFile(kind=report) 로 기록.
 
@@ -205,7 +209,13 @@ async def _store_scenario(
     return row, summary
 
 
-async def ingest_report(
+async def ingest_report(db: AsyncSession, session: Session, **kw) -> ImpactReport:
+    """리포트 받기는 한 번에 하나 — 인자와 동작은 `_ingest_report` 그대로다."""
+    async with _PARSE_LOCK:
+        return await _ingest_report(db, session, **kw)
+
+
+async def _ingest_report(
     db: AsyncSession,
     session: Session,
     *,
@@ -384,11 +394,13 @@ async def attach_media(
     ★선언됐는데 번들에 없는 그림은 `missing_in_bundle` 로 **센다.** 조용히 빼면 받는 쪽이
     "그 위치는 그림이 없다" 로 읽는다(사실은 안 올라온 것이다).
     """
-    try:
-        data = parser.extract_embedded_data(html.decode("utf-8", "replace"))
-    except Exception:          # noqa: BLE001 — 매핑을 못 읽어도 저장은 한다(목록으로만 둔다)
-        data = {}
-    decl = parser.report_media_map(data, report.kind)
+    async with _PARSE_LOCK:    # 여기서도 리포트를 통째로 푼다 — 받기와 같은 줄에 선다
+        try:
+            data = parser.extract_embedded_data(html.decode("utf-8", "replace"))
+        except Exception:      # noqa: BLE001 — 매핑을 못 읽어도 저장은 한다(목록으로만 둔다)
+            data = {}
+        decl = parser.report_media_map(data, report.kind)
+        del data
     by_path = {d["path"]: d for d in decl["declared"]}
     rows: list[dict] = []
     stored_paths: set[str] = set()

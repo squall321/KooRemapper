@@ -8,9 +8,9 @@
 - [x] A-3 계획 · 체크리스트 · 맥락 문서
 
 ## B. 파싱 줄(파이썬)
-- [ ] B-1 `_PARSE_LOCK` — `ingest_report` 전체 · `attach_media` 파싱
-- [ ] B-2 시험(최대 겹침 1 · 잠금 안 파싱) · 변이 확인 · 닿는 기존 시험
-- [ ] B-3 임시 스택에서 동시 올리기 둘의 최고 RSS
+- [x] B-1 `_PARSE_LOCK` — `ingest_report` 전체 · `attach_media` 파싱
+- [x] B-2 시험(최대 겹침 1 · 잠금 안 파싱) · 변이 확인 · 닿는 기존 시험
+- [x] B-3 임시 스택에서 동시 올리기 둘의 최고 RSS
 
 ## C. 폭 섞인 인클루드 거절(C-4)
 - [ ] C-1 판정 함수 하나(`include_closure`) — `inlined` 와 extract-parts 가 같이 쓴다

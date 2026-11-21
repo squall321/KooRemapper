@@ -27,6 +27,6 @@
 - [ ] D-4 Drive 게시 · cae00 점검 문서 · 요청 쪽에 알릴 것
 
 ## E. 파싱 줄(11-20 「줄만 세운다」 — 계획 9절)
-- [ ] E-1 `_PARSE_LOCK` — `ingest_report` 전체 · `attach_media` 파싱
-- [ ] E-2 시험(최대 겹침 1 · 잠금 안 파싱) · 변이 확인
-- [ ] E-3 임시 스택에서 동시 올리기 둘의 최고 RSS
+- [x] E-1 `_PARSE_LOCK` — `ingest_report` 전체 · `attach_media` 파싱
+- [x] E-2 시험(최대 겹침 1 · 잠금 안 파싱) · 변이 확인
+- [x] E-3 임시 스택에서 동시 올리기 둘의 최고 RSS
