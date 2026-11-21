@@ -720,6 +720,10 @@ std::string gridReaderKeywordName(const std::string& keywordLine) {
         if (!std::isalnum(ch) && ch != '_' && ch != '-') break;
         k += static_cast<char>(std::toupper(ch));
     }
+    // 이름 **끝**의 `-` 는 이름 글자가 아니라 표준 폭 접미사다(Vol_I 19342-19348 — 예는 `*NODE -`, 붙여 쓴 `*NODE-` 도 같이 받는다).
+    // 가운데 `-`(`*MAT_BLATZ-KO_RUBBER`)는 이름이다. 폭은 `keywordFieldWidth` 가 같은 줄에서 읽는다 — 예전엔 `NODE-` 로 남아
+    // 리더가 그 블록을 건너뛰었다(squeeze 는 rc 0 으로 아무것도 안 눌렀고 tetremesh 는 rc 0 으로 절점 없는 덱을 썼다 · 2026-11-21)
+    while (!k.empty() && k.back() == '-') k.pop_back();
     return k;
 }
 

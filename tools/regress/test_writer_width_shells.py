@@ -30,6 +30,8 @@
   N-3 squeeze — 두께 카드(1.0 · 2.5 · 37.0)가 있어도 솔리드 전부 · 카드 그대로
   N-4 squeeze — 리더가 안 읽는 `*ELEMENT_TSHELL_BETA` · `*ELEMENT_SHELL_COMPOSITE` 블록이 있어도 솔리드 전부 · 블록 그대로
   N-6 squeeze · map — `*NODE%` · `*ELEMENT_SOLID%`(공백 없는 접미사) 블록은 한 번만(198 · 100)
+  N-7 `*NODE-` · `*ELEMENT_SOLID-` · `*ELEMENT_SHELL-`(공백 없는 표준 폭 접미사) × unfold · map · squeeze · tetremesh — 공백 있는 꼴과
+      산출이 바이트까지 같다(표준 덱은 맨 키워드 덱과도 같다) · `LONG=Y` 덱 안에서도 그 블록은 표준 폭으로 읽는다
   M-1 map — 평판의 두께 셸은 `*ELEMENT_SOLID` 에 없고 `*ELEMENT_TSHELL` 블록 그대로
 
 usage: test_writer_width_shells.py <KooRemapper 바이너리>
@@ -357,6 +359,113 @@ def body(binary, root):
         check("N-6 %s — 다시 쓴 블록은 맨 키워드 아래 8칸" % op, kwlines(o, "*NODE") == ["*NODE"] and {len(r) for r in nd} == {56}
               and kwlines(o, "*ELEMENT_SOLID") == ["*ELEMENT_SOLID"] and {len(r) for r in el} == {80},
               "%s %r" % (kwlines(o, "*NODE") + kwlines(o, "*ELEMENT_SOLID"), nd[:1]))
+
+    print("[N-7] 공백 없이 붙인 `-`(표준 폭) 접미사 — 공백 있는 꼴과 같게 읽는다")
+
+    def suffixed(text, suf, decl=None):
+        """절점 · 솔리드 · 셸 키워드 줄에 suf 를 붙인다(블록의 글은 그대로 — 표준 폭). decl 을 주면 `*KEYWORD` 줄을 바꾼다."""
+        out = []
+        for l in text.splitlines():
+            kw = l.split()[0].upper() if l.startswith("*") else ""
+            out.append(decl if kw == "*KEYWORD" and decl else l + suf if kw in ("*NODE", "*ELEMENT_SOLID", "*ELEMENT_SHELL") else l)
+        return "\n".join(out) + "\n"
+
+    def outputs(tag, text):
+        d, _ = case_dir(root, tag, binary)
+        write(os.path.join(d, "box.k"), text)
+        res = {}
+        for op, args, outn in OPS:
+            rc, out = run(binary, d, *args)
+            o = os.path.join(d, outn)
+            res[op] = (rc, open(o, "rb").read() if os.path.exists(o) else None, o, out)
+        return res
+
+    _, s = case_dir(root, "n7_src", binary)
+    plain, blank, glued = outputs("n7_plain", s), outputs("n7_blank", suffixed(s, " -")), outputs("n7_glued", suffixed(s, "-"))
+    for op, _, _ in OPS:
+        rc, data, o, out = glued[op]
+        nd, el = rows(o, "*NODE"), rows(o, "*ELEMENT_SOLID")
+        check("N-7 표준 덱 %s — rc 0 · 절점 198 줄 · 솔리드 100 줄" % op, rc == 0 and len(nd) == 198 and len(el) == 100,
+              "rc %d 절점 %d 솔리드 %d %s" % (rc, len(nd), len(el), out[-300:]))
+        check("N-7 표준 덱 %s — 산출이 `*NODE -`(공백) 덱 · 맨 키워드 덱의 산출과 바이트 같다" % op,
+              data is not None and data == blank[op][1] and data == plain[op][1],
+              "rc %d · 공백 꼴 rc %d · 맨 키워드 rc %d" % (rc, blank[op][0], plain[op][0]))
+    rc, data, o, out = glued["squeeze"]
+    src_nodes = rows(os.path.join(root, "n7_glued", "box.k"), "*NODE")
+    check("N-7 표준 덱 squeeze — 절점 좌표가 실제로 바뀌었다(아무것도 안 누르고 rc 0 이 아니다)", rc == 0 and rows(o, "*NODE") != src_nodes
+          and len(src_nodes) == 198, "rc %d" % rc)
+
+    # 메시 밖 카드(`*PART-` · `*SECTION_SOLID-` · `*MAT_ELASTIC-` …)도 같은 규칙이다 — 붙여 쓴 꼴과 띄어 쓴 꼴의 산출은 그 키워드 줄의
+    # 철자만 다르다
+    def all_suffixed(text, suf):
+        return "\n".join(l + suf if l.startswith("*") and l.split()[0].upper() not in ("*KEYWORD", "*END") else l
+                         for l in text.splitlines()) + "\n"
+
+    blank, glued = outputs("n7_all_blank", all_suffixed(s, " -")), outputs("n7_all_glued", all_suffixed(s, "-"))
+    for op, _, _ in OPS:
+        rc, data, o, out = glued[op]
+        nd, el = rows(o, "*NODE"), rows(o, "*ELEMENT_SOLID")
+        check("N-7 모든 키워드에 `-` %s — rc 0 · 절점 198 줄 · 솔리드 100 줄" % op, rc == 0 and len(nd) == 198 and len(el) == 100,
+              "rc %d 절점 %d 솔리드 %d %s" % (rc, len(nd), len(el), out[-300:]))
+        check("N-7 모든 키워드에 `-` %s — 띄어 쓴 꼴의 산출과 키워드 줄 철자만 다르다" % op, data is not None and blank[op][1] is not None
+              and data == blank[op][1].replace(b" -\n", b"-\n"), "rc %d · 공백 꼴 rc %d" % (rc, blank[op][0]))
+
+    # 셸 블록 — squeeze · tetremesh 는 그 블록을 키워드 줄째 옮긴다. 산출은 그 한 줄만 빼고 맨 키워드 덱의 산출과 같아야 한다
+    std = s.replace("*END", shell_block("*ELEMENT_SHELL", range(1001, 1006)) + "*END", 1)
+    plain, glued = outputs("n7_sh_plain", std), outputs("n7_sh_glued", suffixed(std, "-"))
+    for op in ("squeeze", "tetremesh"):
+        rc, data, o, out = glued[op]
+        check("N-7 셸 든 표준 덱 %s — rc 0 · 셸 블록이 `*ELEMENT_SHELL-` 줄째" % op, rc == 0 and kwlines(o, "*ELEMENT_SHELL") == ["*ELEMENT_SHELL-"],
+              "rc %d %r %s" % (rc, kwlines(o, "*ELEMENT_SHELL"), out[-300:]))
+        same_rows("N-7 셸 든 표준 덱 %s" % op, os.path.join(root, "n7_sh_glued", "box.k"), o, "*ELEMENT_SHELL", 5)
+        check("N-7 셸 든 표준 덱 %s — 그 키워드 한 줄만 빼면 맨 키워드 덱의 산출과 같다" % op, data is not None and plain[op][1] is not None
+              and data.replace(b"*ELEMENT_SHELL-\n", b"*ELEMENT_SHELL\n") == plain[op][1], "rc %d · 맨 키워드 rc %d" % (rc, plain[op][0]))
+
+    # `LONG=Y` 덱 안의 표준 폭 블록 — 선언은 20칸인데 `-` 블록만 8 · 16 칸이다(Vol_I 19342-19348). 메시만 남긴다(다른 카드는 폭이 바뀐다).
+    # 번호를 8자리로, 좌표를 음수로 밀어 **칸이 붙게** 한다 — 공백으로 끊어 읽으면 못 읽고, 20칸으로 잘라도 못 읽는다(표준 폭이어야 읽힌다)
+    SH = 10000000
+
+    def glued_mesh(text):
+        out, kw = ["*KEYWORD LONG=Y"], ""
+        for l in text.splitlines():
+            if l.startswith("*"):
+                kw = l.split()[0].upper()
+                if kw in ("*NODE", "*ELEMENT_SOLID"):
+                    out.append(kw)
+            elif l.startswith("$") or not l.strip():
+                continue
+            elif kw == "*NODE":
+                f = l.split()
+                out.append("%8d" % (int(f[0]) + SH) + "".join("%16.9e" % (float(x) - 100.0) for x in f[1:4]))
+            elif kw == "*ELEMENT_SOLID":
+                f = [int(x) for x in l.split()]
+                out.append("%8d%8d" % (f[0] + SH, f[1]) + "".join("%8d" % (x + SH) for x in f[2:]))
+        return "\n".join(out) + "\n*END\n"
+
+    mesh = glued_mesh(s)
+    check("N-7 LONG=Y 준비 — 표준 폭 절점 줄 56자 · 솔리드 줄 80자가 칸째 붙어 있다", {len(r) for r in mesh.splitlines()[2:200]} == {56}
+          and all(len(r.split()) < 4 for r in mesh.splitlines()[2:200]), mesh.splitlines()[2:3])
+    lblank = outputs("n7_long_blank", suffixed(mesh, " -"))
+    lglued = outputs("n7_long_glued", suffixed(mesh, "-"))
+    src = os.path.join(root, "n7_long_glued", "box.k")
+    for op, _, _ in OPS:
+        rc, data, o, out = lglued[op]
+        nd, el = rows(o, "*NODE"), rows(o, "*ELEMENT_SOLID")
+        name = "N-7 LONG=Y 덱 %s" % op
+        check(name + " — rc 0 · 선언이 *KEYWORD LONG=Y 하나", rc == 0 and kwlines(o, "*KEYWORD") == ["*KEYWORD LONG=Y"],
+              "rc %d %r %s" % (rc, kwlines(o, "*KEYWORD"), out[-300:]))
+        check(name + " — 절점 줄 80자 · 번호 %d~%d · 솔리드 100 줄 200자" % (SH + 1, SH + 198), bool(nd) and {len(r) for r in nd} == {80}
+              and sorted(ids(nd, 20)) == list(range(SH + 1, SH + 199)) and len(el) == 100 and {len(r) for r in el} == {200},
+              "절점 %d 줄 %r 솔리드 %d 줄" % (len(nd), nd[:1], len(el)))
+        check(name + " — 산출이 `*NODE -`(공백) 덱의 산출과 바이트 같다", data is not None and data == lblank[op][1],
+              "rc %d · 공백 꼴 rc %d" % (rc, lblank[op][0]))
+        if op == "map":   # 굽은 기준 = 평판 — 좌표가 그대로여야 한다(표준 폭 블록을 20칸으로 자르면 여기서 어긋난다)
+            a = {int(r[:8]): [float(r[8 + 16 * i:24 + 16 * i]) for i in range(3)] for r in rows(src, "*NODE")}
+            try:
+                bad = [r[:20] for r in nd if max(abs(float(r[20 + 20 * i:40 + 20 * i]) - a[int(r[:20])][i]) for i in range(3)) > 1e-6]
+            except (ValueError, KeyError) as e:
+                bad = ["칸을 못 읽는다 — %s" % e]
+            check(name + " — 좌표가 원본과 같다", bool(nd) and not bad, bad[:3])
 
     print("[M-1] map — 평판의 두께 셸")
     d, s = case_dir(root, "m1", binary)

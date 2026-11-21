@@ -357,7 +357,7 @@ TEST(gridReaderReadsKeyword_는_KFileReader_분기와_같다) {
 }
 
 TEST(gridReaderKeywordName_은_리더와_쓰기가_같이_쓰는_블록_이름이다) {
-    // 리더(`KFileReader`)와 쓰기(`KFileWriter`)가 이 함수 하나로 블록을 가른다 — 폭 접미사(`%` · `+`)와 뒤 글은 이름에 들지 않는다.
+    // 리더(`KFileReader`)와 쓰기(`KFileWriter`)가 이 함수 하나로 블록을 가른다 — 폭 접미사(`%` · `+` · `-`)와 뒤 글은 이름에 들지 않는다.
     // 예전 쓰기는 제 눈(`*NODE` + 빈칸)으로 갈라, 리더가 읽은 `*NODE%` 블록을 원본에서 한 번 더 옮겼다(2026-11-21).
     ASSERT_EQ(gridReaderKeywordName("*NODE"), std::string("NODE"));
     ASSERT_EQ(gridReaderKeywordName("*NODE%"), std::string("NODE"));
@@ -365,9 +365,20 @@ TEST(gridReaderKeywordName_은_리더와_쓰기가_같이_쓰는_블록_이름�
     ASSERT_EQ(gridReaderKeywordName("*element_solid%"), std::string("ELEMENT_SOLID"));
     ASSERT_EQ(gridReaderKeywordName("*ELEMENT_SOLID_TITLE  $ 뒤 글"), std::string("ELEMENT_SOLID_TITLE"));
     ASSERT_EQ(gridReaderKeywordName("*NODE_SCALAR"), std::string("NODE_SCALAR"));
-    // `-` 는 이름 글자다 — 빈칸 없이 붙은 `*NODE-` 는 리더가 `*NODE` 로 읽지 않는다(쓰기도 같은 답을 낸다)
-    ASSERT_EQ(gridReaderKeywordName("*NODE-"), std::string("NODE-"));
+    // 이름 끝의 `-` 는 표준 폭 접미사다 — 붙여 쓴 `*NODE-` 도 띄어 쓴 `*NODE -` 처럼 `NODE` 로 읽는다(예전엔 `NODE-` 로 남아 리더가
+    // 그 블록을 건너뛰었다). 가운데 `-` 는 이름 글자로 남는다
+    ASSERT_EQ(gridReaderKeywordName("*NODE-"), std::string("NODE"));
     ASSERT_EQ(gridReaderKeywordName("*NODE -"), std::string("NODE"));
+    ASSERT_EQ(gridReaderKeywordName("*element_solid-"), std::string("ELEMENT_SOLID"));
+    ASSERT_EQ(gridReaderKeywordName("*MAT_BLATZ-KO_RUBBER"), std::string("MAT_BLATZ-KO_RUBBER"));
+    ASSERT_EQ(gridReaderKeywordName("*MAT_BLATZ-KO_RUBBER-"), std::string("MAT_BLATZ-KO_RUBBER"));
+    ASSERT_TRUE(gridReaderReadsKeyword("*ELEMENT_SOLID-"));
+    ASSERT_TRUE(gridReaderReadsKeyword("*ELEMENT_SHELL-"));
+    ASSERT_FALSE(gridReaderReadsKeyword("*ELEMENT_SHELL_COMPOSITE-"));
+    // 그 블록의 폭은 덱 선언이 무엇이든 표준(8) — 이름과 폭이 같은 줄에서 같은 답을 낸다
+    ASSERT_EQ(keywordFieldWidth("*NODE-", 20), 8);
+    ASSERT_EQ(keywordFieldWidth("*NODE -", 20), 8);
+    ASSERT_EQ(keywordFieldWidth("*NODE-", 10), 8);
     // 키워드 줄이 아닌 것 — 0열이 `*` 가 아니거나 다음 글자가 글자가 아니다
     ASSERT_EQ(gridReaderKeywordName("  *NODE"), std::string(""));
     ASSERT_EQ(gridReaderKeywordName("$ *NODE"), std::string(""));

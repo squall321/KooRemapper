@@ -243,7 +243,7 @@ bool auxOptNodesPlaceable(const AuxElementCard& a, int cardLine, const std::stri
 std::vector<int> auxPidsOf(const AuxElementCard& a, const AuxCardReadings& r);
 
 // 격자 리더(`KFileReader`)가 키워드 줄에서 뽑는 이름 — 0열이 `*` 이고 그다음이 글자인 줄만, `*` 뒤 영숫자 · `_` · `-` 를 대문자로 모은다
-// (폭 접미사 `%` · `+` 와 공백에서 멈춘다). 키워드 줄이 아니면 빈 글이다. 리더의 분기(`KFileReader::extractKeyword`) ·
+// (폭 접미사 `%` · `+` 와 공백에서 멈추고, 이름 끝에 붙은 `-` — 표준 폭 접미사 — 는 뗀다). 키워드 줄이 아니면 빈 글이다. 리더의 분기(`KFileReader::extractKeyword`) ·
 // `gridReaderReadsKeyword` · 원본을 따라 쓰는 쓰기(`KFileWriter`)가 이 하나를 쓴다 — 쓰기가 제 토큰(공백까지)으로 블록을 가르던 때는
 // `*NODE%` 블록을 리더는 읽고 쓰기는 못 알아봐, 그대로 베낀 블록 뒤에 메시에서 한 번 더 썼다(절점 · 솔리드가 두 번 · 2026-11-21)
 std::string gridReaderKeywordName(const std::string& keywordLine);
