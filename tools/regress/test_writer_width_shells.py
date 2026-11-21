@@ -92,6 +92,13 @@ def blocks(path):
     return out
 
 
+def body_bytes(path):
+    """산출 바이트(없으면 None) — 머리말의 `$ Date` 줄은 뺀다. 초까지 찍혀서 따로 돌린 두 산출은 초가 바뀌면 그 줄만 다르다."""
+    if not os.path.exists(path):
+        return None
+    return re.sub(rb"(?m)^\$ Date:[^\n]*\n", b"", open(path, "rb").read())
+
+
 def rows(path, name):
     """이름이 name 인 블록들의 데이터 줄 — 폭 접미사(`%` `+` `-`)는 붙었든 띄었든 같은 이름으로 본다."""
     return [r for kw, data in blocks(path) if kw.split()[0].upper().rstrip("%+-") == name for r in data]
@@ -413,7 +420,7 @@ def body(binary, root):
         for op, args, outn in OPS:
             rc, out = run(binary, d, *args)
             o = os.path.join(d, outn)
-            res[op] = (rc, open(o, "rb").read() if os.path.exists(o) else None, o, out)
+            res[op] = (rc, body_bytes(o), o, out)
         return res
 
     _, s = case_dir(root, "n7_src", binary)
