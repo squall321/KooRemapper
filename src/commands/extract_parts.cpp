@@ -144,6 +144,9 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
+    // 맨 앞의 UTF-8 BOM 은 건너뛴다 — 인클루드 닫힘(`include_closure`) · 주 덱 리더와 같다. 안 떼면 첫 줄이 키워드 줄로 안 읽혀
+    // BOM 으로 시작하는 인클루드의 첫 블록이 빠졌다(첫 줄이 `*ELEMENT_SOLID` 면 rc 0 으로 요소가 빠진 덱 · 2026-11-21)
+    KooRemapper::yamlSkipBOM(in);
     size_t lineNo = 0;
     std::string line, kw;
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
@@ -291,6 +294,7 @@ void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std:
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(indexDeck 과 같다)
     std::string line, kw;
     int fw = idx.fieldWidth;
     size_t lineNo = 0;
@@ -370,6 +374,7 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
     visited.insert(path);
     std::ifstream in(path);
     if (!in.is_open()) return;
+    KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(indexDeck 과 같다)
     std::string line, kw;
     int fw = idx.fieldWidth;
     KooRemapper::ElementKeywordInfo info;
@@ -1159,6 +1164,7 @@ struct Writer {
         visited.insert(path);
         std::ifstream in(path);
         if (!in.is_open()) { missingIncludes.push_back(path); return; }
+        KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(indexDeck 과 같다) — 산출에 싣지 않는다
         if (depth > 0) ++st.includesInlined;
         // 블록 상태는 파일 경계에서 닫는다 — 인클루드 안의 키워드가 바깥 블록을 잇지 않는다.
         const std::string savedKw = kw, savedKwLine = kwLine;

@@ -26,6 +26,10 @@
       (LS-DYNA 는 그 카드를 주 덱 폭으로 읽는다). 이제 고쳐 쓰는 op 의 `flatten_includes` 와 같은 규칙으로 거절한다 — 어느 파일에든
       `*INCLUDE +` · `-` 가 있거나, 인클루드가 제 `*KEYWORD` 를 갖고 그 폭이 주 덱과 다르다. rc 1 · 까닭 글 · 산출 없음.
       폭이 같은 꼴(머리 없는 인클루드 · 같은 폭의 제 `*KEYWORD` · 키워드 접미사 `%`)은 그대로 rc 0 이다. 읽지 않는 줄(`*END` 뒤)은 안 본다
+  B   ★파일 맨 앞의 UTF-8 BOM(2026-11-21) — 윈도우 편집기가 붙이는 세 바이트다. 인클루드 닫힘 · 주 덱 리더는 떼는데 extract-parts 의
+      제 걸음(색인 · 요소 훑기 · 쓰기 · 되읽기)은 안 뗐다 — 첫 줄이 키워드 줄로 안 읽혀, BOM 으로 시작하는 인클루드의 첫 줄이
+      `*ELEMENT_SOLID` 면 **rc 0 으로 고른 요소 하나가 빠진 덱**을 썼고, `*NODE` · `*PART` 면 rc 1, `LONG=Y` 주 덱이면 폭을 못 읽어
+      rc 1 이었다. 이제 BOM 이 있는 덱의 보고 · 산출이 BOM 없는 쌍둥이와 **바이트까지 같다**(산출에 BOM 은 싣지 않는다)
 
 usage: test_extract_parts_long.py <KooRemapper 바이너리>
 """
@@ -39,6 +43,7 @@ import tempfile
 sys.dont_write_bytecode = True
 
 FAILS = []
+BOM = b"\xef\xbb\xbf"
 ZERO = {"undefined_nodes": 0, "undefined_parts": 0, "undefined_sections": 0, "undefined_materials": 0,
         "malformed_comma_lines": 0}
 
@@ -181,13 +186,14 @@ def i10_pair(main_head, main_w, inc_head, inc_w, suffix=""):
     return main, inc
 
 
-def extract_tree(binary, d, tag, files, parts):
-    """폴더 하나에 파일들을 쓰고(`main.k` 가 주 덱) extract-parts 를 돌린다 — (rc, 콘솔, 보고, 산출 글 또는 None)."""
+def extract_tree(binary, d, tag, files, parts, bom=()):
+    """폴더 하나에 파일들을 쓰고(`main.k` 가 주 덱) extract-parts 를 돌린다 — (rc, 콘솔, 보고, 산출 글 또는 None).
+    `bom` 에 든 이름의 파일은 UTF-8 BOM 으로 시작한다."""
     sub = os.path.join(d, tag)
     os.makedirs(sub)
     for name, lines in files.items():
-        with open(os.path.join(sub, name), "w") as f:
-            f.write("\n".join(lines) + "\n")
+        with open(os.path.join(sub, name), "wb") as f:
+            f.write((BOM if name in bom else b"") + ("\n".join(lines) + "\n").encode("ascii"))
     with open(os.path.join(sub, "x.yaml"), "w") as f:
         f.write("model: main.k\noutput: out.k\nparts: %s\nreport: rep.json\n" % parts)
     rc, out = run(binary, sub, "extract-parts", "x.yaml")
@@ -231,6 +237,31 @@ def width_mix_cases():
         ("Wo", "long + long · 인클루드 `*END` 뒤 표준 `*KEYWORD` · `*INCLUDE -`",
          tree(lh, lm + ["*END", std_kw, "*INCLUDE -", "none.k"], lt), "[1, 2, 7]", "same"),
         ("Wp", "long + long · 주 덱 `*END` 뒤 `*INCLUDE -`", tree(lh, lm, lt + ["*INCLUDE -", "none.k"]), "[1, 2, 7]", "same"),
+    )
+
+
+def bom_cases():
+    """(이름표, 무엇, 파일들, BOM 을 붙일 파일[, 고를 파트]) — 고를 파트가 없으면 1 · 2 · 7 이고 산출을 표준 기준과도 견준다."""
+    sh, sm, st = split3(model(False))
+    lh, lm, lt = split3(model(True))
+    e = sh.index("*ELEMENT_SOLID")
+    nodes, elems = sh[1:e], sh[e:]            # `*NODE` 블록 · 요소 블록 둘
+    inc = ["*INCLUDE", "inc.k"]
+    return (
+        ("Ba", "★인클루드 첫 줄이 `*ELEMENT_SOLID`", {"main.k": sh[:e] + inc + sm + st, "inc.k": elems}, ("inc.k",)),
+        ("Bb", "★인클루드 첫 줄이 `*NODE`", {"main.k": sh[:1] + inc + elems + sm + st, "inc.k": nodes}, ("inc.k",)),
+        ("Bc", "인클루드 첫 줄이 `$` 주석", {"main.k": sh[:1] + inc + elems + sm + st, "inc.k": ["$ nodes"] + nodes}, ("inc.k",)),
+        ("Bd", "인클루드 첫 줄이 `*KEYWORD`", {"main.k": sh[:1] + inc + elems + sm + st, "inc.k": ["*KEYWORD"] + nodes},
+         ("inc.k",)),
+        ("Be", "★인클루드 첫 줄이 `*PART`", {"main.k": sh + inc + st, "inc.k": sm}, ("inc.k",)),
+        ("Bf", "★주 덱(표준 · 인클루드 없음)", {"main.k": sh + sm + st}, ("main.k",)),
+        ("Bg", "★주 덱(`LONG=Y` · 인클루드 없음)", {"main.k": lh + lm + lt}, ("main.k",)),
+        ("Bh", "★주 덱과 인클루드 둘 다", {"main.k": sh + inc + st, "inc.k": sm}, ("main.k", "inc.k")),
+        # 파트 1 의 요소가 두 파일에 나뉜다 — 주 덱에 요소 1, 맨 앞에서 부르는 인클루드에 요소 2(PID 를 1 로 · 첫 줄 `*ELEMENT_SOLID`)와
+        # 절점. 예전엔 rc 0 · 되읽기 0 으로 인클루드 쪽 요소가 빠진 덱을 썼다(조용히 빠짐 — 2026-11-21 고치기 전 판으로 쟀다)
+        ("Bi", "★★고른 파트의 요소가 주 덱과 인클루드에 나뉜다",
+         {"main.k": sh[:1] + inc + elems[:3] + elems[5:] + sm + st, "inc.k": [elems[0], ints(8, 2, 1), elems[4]] + nodes},
+         ("inc.k",), "[1]"),
     )
 
 
@@ -331,6 +362,36 @@ def main():
                       rc == 1 and t is None and r.get("output_written") is False and ref[0].get("kind") == "include" and
                       "칸 폭이 주 덱과 섞인다" in ref[0].get("message", "") and want in ref[0].get("message", "") and
                       want in out, (rc, t is None, ref, out[-300:]))
+
+        # ── B: 파일 맨 앞의 UTF-8 BOM ────────────────────────────────────────
+        def out_bytes(tag):
+            path = os.path.join(d, tag, "out.k")
+            return open(path, "rb").read() if os.path.exists(path) else None
+
+        def facts(r):
+            return {k: r.get(k) for k in ("picked", "needed", "verify", "refusals")}
+
+        for tag, what, files, bom, *rest in bom_cases():
+            parts = rest[0] if rest else "[1, 2, 7]"
+            rc0, out0, r0, t0 = extract_tree(binary, d, tag + "0", files, parts)
+            rc, out, r, t = extract_tree(binary, d, tag, files, parts, bom=bom)
+            b0, b = out_bytes(tag + "0"), out_bytes(tag)
+            if rest:
+                got = [rows[i][0] for k, rows in cards(t0 or "") if k == "*ELEMENT_SOLID" for i in range(0, len(rows), 2)]
+                check("%s-0 %s — BOM 없는 쌍둥이는 rc 0 · 되읽기 0 · 파트 1 의 요소 1 · 2 를 다 싣는다" % (tag, what),
+                      rc0 == 0 and r0.get("verify") == ZERO and sorted(got) == ["1", "2"] and
+                      (r0.get("picked") or {}).get("element_cards") == 2, (rc0, r0.get("verify"), got, r0.get("picked")))
+            else:
+                check("%s-0 %s — BOM 없는 쌍둥이는 rc 0 · 되읽기 0 · 산출이 표준 기준과 낱말 단위로 같다" % (tag, what),
+                      rc0 == 0 and r0.get("verify") == ZERO and t0 is not None and cards(t0) == cs and
+                      r0.get("picked") == rs.get("picked"), (rc0, r0.get("verify"), r0.get("picked"), out0[-300:]))
+            check("%s-1 %s — BOM 이 있어도 rc 0 · 되읽기 0" % (tag, what), rc == 0 and r.get("verify") == ZERO,
+                  (rc, r.get("verify"), r.get("refusals"), out[-300:]))
+            check("%s-2 %s — 보고의 고른 수 · 딸린 것 · 되읽기가 쌍둥이와 같다" % (tag, what), facts(r) == facts(r0),
+                  diff(facts(r), facts(r0)))
+            check("%s-3 %s — 산출이 쌍둥이와 바이트까지 같다(BOM 을 싣지 않는다)" % (tag, what),
+                  b is not None and b == b0 and BOM not in b,
+                  (None if b is None else (len(b), b[:12]), None if b0 is None else (len(b0), b0[:12])))
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

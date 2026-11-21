@@ -172,3 +172,32 @@
   닿는 실물이 없다는 뜻이기도 하다.
 - **못 잰 것** — LS-DYNA 가 붙여 쓴 꼴을 받는지(라이선스 만료 · Vol_I 의 예는 띄어 쓴 꼴). 메시 밖 카드(`*PART-` …)를 `LONG=Y` 덱 안에서
   표준 폭으로 읽는지는 재지 않았다 — 띄어 쓴 꼴과 같은 길을 탄다는 것까지만 쟀다(표준 덱).
+
+## 2026-11-21 · N-5 — extract-parts 의 BOM(H-2)
+- **지은 것** — extract-parts 가 제 손으로 입력 파일을 걷는 네 자리(`indexDeck` · `scanElements` · `Writer::processFile` ·
+  `definedNodesAmong`)가 맨 앞 UTF-8 BOM 을 건너뛴다(있던 도우미 `yamlSkipBOM`). 쓰기도 건너뛰므로 산출에 BOM 이 실리지 않는다.
+  되읽기(`verifyOutput`)에는 넣지 않았다 — 제가 방금 쓴 산출만 읽는데 쓰기가 BOM 을 싣지 않으니 올 수 없다(처음엔 넣었다가 변이가 살아남아
+  뺐다).
+- **고치기 전(실측 — N-7 까지 든 판)** — 고른 파트의 요소가 주 덱과 BOM 인클루드(첫 줄 `*ELEMENT_SOLID`)에 나뉜 꼴은 rc 0 · 되읽기 0 인데 요소 2
+  장 가운데 1 장만 실렸다(조용히 빠짐 — 승인받은 문장의 그 꼴). 요소가 다 그 인클루드에 있으면 rc 1 「고른 파트에 요소가 없다」, 첫 줄이 `*NODE`
+  면 rc 1(되읽기 미정의 절점 40), 첫 줄이 `*PART` 인 인클루드 · `LONG=Y` 주 덱 · 주 덱과 인클루드 둘 다면 rc 1 「No *PART」, 표준 주 덱은 rc 0
+  이지만 산출이 BOM 으로 시작했고, `$` 주석 · `*KEYWORD` 로 시작하는 인클루드는 rc 0 이지만 BOM 바이트가 산출 한가운데 실렸다.
+- **시험** — `test_extract_parts_long.py` B 는 아홉 꼴 × 네 항이다(BOM 없는 쌍둥이 rc 0 · BOM 판 rc 0 · 보고가 쌍둥이와 같다 · 산출이 바이트까지
+  같고 BOM 이 없다). 고치기 전 판은 20 항이 빨갛고 뒤는 73 항이 다 초록이다. 다른 읽기의 절점을 찾는 걸음은 `test_seatbelt_card_layout.py` F-3.1
+  이 잰다(전 빨강 · 뒤 143 항 초록). 단위 시험 245 그대로.
+- **변이 넷** — 자리마다 건너뛰기를 뺐다. `indexDeck`(B 10 줄) · `scanElements`(B 7 줄) · `Writer::processFile`(B 18 줄 · F-3.1) ·
+  `definedNodesAmong`(F-3.1) 모두 빨갛다. 처음 다섯 자리 가운데 둘이 살아남았다 — 하나(`definedNodesAmong`)는 시험이 없어 더했고
+  하나(`verifyOutput`)는 올 수 없는 경우라 뺐다. 나뉜 요소 꼴도 처음엔 인클루드를 덱 가운데 불러 rc 1 로 끝나는 배치였다 — 처음 잰 배치(맨
+  앞에서 부르고 요소 블록 뒤에 절점 블록)로 바꾼 뒤 rc 0 조용히 빠짐을 못 박는다.
+- **재다 나온 것(승인 문장 밖 — 사용자에게 선택지로 낸다)** — ① extract-parts · cleanup-nodes 의 **설정 YAML** 이 BOM 을 안 뗀다. rc 1 「'model'
+  is required in YAML config」 이고 64 op 가운데 이 둘뿐이다(첫 키가 model 이 아닌 17 op 은 제 첫 키로 쟀다). 매뉴얼 §3.1(e)는 「예외는
+  없습니다」 라고 적고 있고 `test_yaml_common_rules.py` 의 op 목록에 두 op 이 없다. ② cleanup-nodes 가 제 손으로 덱을 걷는 자리도 BOM 을 안
+  뗀다. BOM 인클루드의 첫 줄이 `*PART` 면 **rc 0 · verify 0 인데 20절점 육면체가 쓰는 절점 111 · 112 를 지운다**(`used_by_elements` 32 → 30 ·
+  `deleted` 1 → 3 — `mode: safe`). 첫 줄이 `*NODE` 면 rc 1 「No *NODE definitions found」 이고, 첫 줄이 `*ELEMENT_SOLID` · `$` 주석 · `*KEYWORD`
+  인 인클루드와 한 파일 BOM 주 덱은 쌍둥이와 같다.
+- **안 잰 것** — 제 손으로 덱을 여는 다른 op 이 BOM 덱에서 어떻게 되는지. 소스로는 `std::ifstream` 이 BOM 처리 흔적보다 많은 파일이
+  여럿이다(`ModelAssembler` · `meshfix` · `modelmeta` · `matswap` · `strip` · `rebind` · `CarryoverApply` · `KFileWriter` · `Validator` …) —
+  읽기만 했고 돌려 보지 않았다. op 마다 설정이 달라 CLI 로 한 번에 훑는 도구가 없다.
+- 추세 — 목록 밖 기존 결함은 열에서 열셋이 된다(설정 YAML BOM 둘 · cleanup-nodes 덱 BOM). 닫은 것은 N-1 ~ N-8 · h · i 열이고 새 셋은 정해지지
+  않았다. 뿌리는 그대로 넷째가 아니다 — 「파일을 제 손으로 다시 걷는 op 이 공용 리더가 하는 일을 따로 해야 한다」 는 폭 · 인클루드 때와 같은
+  뿌리다.

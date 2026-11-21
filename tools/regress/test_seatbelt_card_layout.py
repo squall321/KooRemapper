@@ -362,6 +362,20 @@ def main():
         check("F-3 ★extract-parts — 두 읽기의 절점(103 · 104)을 다 싣는다 · 줄 그대로 · 되읽기 미정의 0",
               rc == 0 and kept == [101, 102, 103, 104] and section_lines(os.path.join(d, "f3_out.k"), "*ELEMENT_SEATBELT") == [w8] and
               (rep.get("verify") or {}).get("undefined_nodes") == 0, (rc, kept, rep.get("verify"), out[-300:]))
+        # 같은 덱의 절점 블록을 BOM 으로 시작하는 인클루드(첫 줄 `*NODE`)로 옮긴 꼴 — 다른 읽기의 절점이 덱에 있는지 다시 훑는 걸음도
+        # 맨 앞 BOM 을 건너뛴다(2026-11-21 · 안 건너뛰면 그 `*NODE` 블록을 못 봐 104 를 싣지 않는다)
+        f1 = belt_deck(8, w8).split("\n")
+        e = f1.index("*ELEMENT_SEATBELT")
+        write(os.path.join(d, "f3b.k"), "\n".join(f1[:1] + ["*INCLUDE", "f3b_nodes.k"] + f1[e:]))
+        write(os.path.join(d, "f3b_nodes.k"), "\ufeff" + "\n".join(f1[1:e]) + "\n")
+        write(os.path.join(d, "f3b.yaml"), "model: f3b.k\noutput: f3b_out.k\nparts: [9]\nreport: f3b.json\n")
+        rc, out = run(binary, d, "extract-parts", "f3b.yaml")
+        rep = json.load(open(os.path.join(d, "f3b.json"), encoding="utf-8")) if rc == 0 else {}
+        kept = sorted(node_ids(os.path.join(d, "f3b_out.k"), 8).values()) if rc == 0 else []
+        check("F-3.1 ★extract-parts — 절점이 BOM 으로 시작하는 인클루드에 있어도 두 읽기의 절점(103 · 104)을 다 싣는다 · 되읽기 미정의 0",
+              rc == 0 and kept == [101, 102, 103, 104] and (rep.get("verify") or {}).get("undefined_nodes") == 0 and
+              open(os.path.join(d, "f3b_out.k"), "rb").read() == open(os.path.join(d, "f3_out.k"), "rb").read(),
+              (rc, kept, rep.get("verify"), out[-300:]))
         for tag, deckname, bline in (("F-4", "F1.k", belt_deck(8, w8).split("\n").index(w8) + 1),
                                      ("F-5", "F2.k", belt_deck(10, g2, nodes=f2nodes).split("\n").index(g2) + 1)):
             y = tag.replace("-", "") + "r.yaml"
