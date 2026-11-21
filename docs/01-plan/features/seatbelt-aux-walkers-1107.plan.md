@@ -101,6 +101,9 @@
   → **다섯 다 닫았다** — unfold 는 11-20 거절 관문(`7edc1d9`), extract-parts 는 11-20(`6285f42`), tetremesh 의 8절점 셸 · 두께 카드 · 칸 폭과
   id_floor 상한은 11-21(2차 D — `deferred-defects-round2-1120.plan.md`). 「같은 EID 의 솔리드를 셸로 덮어 잃는다」 는 DF-14(11-17 요소 번호 겹침
   거절)가 이미 막고 있었다.
+  → 11-21 2차 E — unfold · map 의 격자 색인과 요소의 절점 순서를 맞닿은 면으로 읽는다. 11-20 에 거절하던 접힌 덱이 그대로 펼쳐지고, 재다
+  나온 기존 결함(rc 0 인데 요소의 절점을 바꿔 끼운다 — `examples/teardrop/teardrop_bent.k` 250 요소 가운데 15)도 같이 닫았다
+  (`deferred-defects-round2-1120.context-notes.md` E 절).
 - (11-21 2차 D 를 재다 나온 기존 결함 — 사용자 결정 대기) 키워드에 공백 없이 붙인 `-` 접미사(`*NODE-` · `*ELEMENT_SOLID-`)를 리더가 그 블록으로
   읽지 않는다 — unfold · map 은 rc 1 로 멈추지만 squeeze 는 rc 0 으로 아무것도 누르지 않고 tetremesh 는 rc 0 으로 절점 · 솔리드가 빠진 덱을
   쓴다 · tetremesh 가 리더가 안 읽는 셸 변형(`*ELEMENT_SHELL_COMPOSITE` …)을 경고 없이 산출에서 뺀다(rc 0 — 매뉴얼은 「싣지 않는다」 고

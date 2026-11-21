@@ -30,6 +30,8 @@
 #include "test_Utf8.cpp"
 // 재질 번호 공용 훑기(쌓인 재질 묶음 · 열 재질 · 덧붙임 카드) — 2026-11-08
 #include "test_MaterialIds.cpp"
+// 구조 격자 색인 · 절점 순서를 면 위상으로(접힌 블록 · 닫히지 않는 격자) — 2026-11-21
+#include "test_GridIndexer.cpp"
 
 int main(int argc, char* argv[]) {
     (void)argc;

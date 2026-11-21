@@ -61,7 +61,11 @@ bool FlatMeshGenerator::analyzeBentMesh(const Mesh& bentMesh) {
     // Reorder element nodes to match LS-DYNA standard ordering
     // This is critical for getNodeAt() to work correctly
     // Note: This modifies analyzedMesh_, but we preserve originalMesh_ for element connectivity
-    indexer_.reorderElementNodes(analyzedMesh_);
+    if (!indexer_.reorderElementNodes(analyzedMesh_)) {
+        errorMessage_ = "Failed to order element nodes: " +
+                       indexer_.getErrorMessage();
+        return false;
+    }
 
     // Build index lookup
     indexer_.buildIndexLookup(analyzedMesh_);

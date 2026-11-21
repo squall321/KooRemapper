@@ -230,8 +230,12 @@ bool MeshRemapper::step1_AnalyzeBentMesh(Mesh& tempMesh) {
         return false;
     }
 
-    // Reorder element nodes based on geometry for consistent LS-DYNA ordering
-    indexer_.reorderElementNodes(tempMesh);
+    // Reorder element nodes along the grid for consistent LS-DYNA ordering
+    if (!indexer_.reorderElementNodes(tempMesh)) {
+        errorMessage_ = "Failed to order element nodes: " +
+                       indexer_.getErrorMessage();
+        return false;
+    }
 
     // 색인 조회표(`indexer_.buildIndexLookup`)는 만들지 않는다 — MeshRemapper 에서는 아무도
     // `getElementAt` 을 부르지 않고, 그 표는 이 사본(tempMesh)의 요소를 가리킨 채 사본이 죽은 뒤에도

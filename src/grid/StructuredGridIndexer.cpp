@@ -5,6 +5,7 @@
 #include <set>
 #include <cmath>
 #include <unordered_map>
+#include <vector>
 
 // Knowledge graph (lat.md):
 //   @lat: [[modules/grid]]
@@ -86,8 +87,8 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
         return false;
     }
 
-    // Propagate indices via BFS using geometry-based axis detection
-    if (!propagateIndicesGeometry(mesh, startElem, connectivity)) {
+    // Propagate indices via BFS, carrying the axis frame across shared faces
+    if (!propagateIndicesTopology(mesh, startElem, connectivity)) {
         return false;
     }
 
@@ -113,12 +114,12 @@ bool StructuredGridIndexer::assignIndices(Mesh& mesh,
         }
     }
 
-    // A grid slot holds exactly one element. Propagation picks each
-    // neighbour's slot from the centroid direction alone and never checks
-    // whether that slot is already taken; when two elements land on the same
-    // (i,j,k), everything that walks the grid slot by slot keeps one and
+    // A grid slot holds exactly one element. When two elements land on the
+    // same (i,j,k), everything that walks the grid slot by slot keeps one and
     // drops the other without a word (unfold wrote 53 of 100 elements with
-    // rc 0). Refuse here instead.
+    // rc 0 when propagation guessed axes from centroids). The topology walk
+    // checks every face step against the slots already given, so this should
+    // not fire any more; it stays as the back door.
     {
         std::set<std::tuple<int, int, int>> slots;
         for (const auto& [id, elem] : mesh.elements) {
@@ -317,17 +318,6 @@ void StructuredGridIndexer::reorderAxes(Mesh& mesh) {
         elem.k = oldIdx[perm[2]];
     }
 
-    // REQ-003: also permute axisDirections_ so reorderElementNodes()'s
-    // global-axis fallback (e.g. when an element has no neighbor in some
-    // direction) reads the direction that matches the *new* i/j/k labels.
-    // Without this, axisDirections_[0] still pointed at the pre-reorder
-    // axis-0 vector and arc30 corner elements got node ordering rotated,
-    // breaking the boundary corner-node detection downstream.
-    std::array<Vector3D, 3> oldDirs = axisDirections_;
-    for (int i = 0; i < 3; ++i) {
-        axisDirections_[i] = oldDirs[perm[i]];
-    }
-
     // Update dimensions
     dimI_ = dims[0].first;
     dimJ_ = dims[1].first;
@@ -421,12 +411,12 @@ bool StructuredGridIndexer::determineInitialDirectionsGeometry(const Mesh& mesh,
     axisDirections_[1] = directions[pair2];
     axisDirections_[2] = directions[third];
 
-    // REQ-003: Enforce a right-handed triad on axisDirections_. The cross-product
-    // fallback in propagateIndicesGeometry assumes I × J = K; if the original
-    // neighbor directions happened to form a left-handed set, the cross would
-    // give the opposite sign of the global fallback for missing-axis elements,
-    // causing inconsistent BFS labelling (arc30 dim_K split 1 → 2). Flipping K
-    // when needed restores the agreement.
+    // REQ-003: Enforce a right-handed triad on axisDirections_. The centroid
+    // walk needed it for its I × J = K fallback (arc30 dim_K split 1 → 2). The
+    // topology walk that replaced it has no such fallback, but the flip stays:
+    // it decides the sign the start corner gives axis 2, hence which end of
+    // that axis the corner sits on -- dropping it would change indices of
+    // meshes that were indexed correctly.
     Vector3D ij = axisDirections_[0].cross(axisDirections_[1]);
     if (ij.dot(axisDirections_[2]) < 0.0) {
         axisDirections_[2] = axisDirections_[2] * -1.0;
@@ -463,155 +453,168 @@ int StructuredGridIndexer::determineDirectionSign(const Vector3D& direction, int
     return (dot >= 0) ? 1 : -1;
 }
 
-bool StructuredGridIndexer::propagateIndicesGeometry(Mesh& mesh, int startElem,
+bool StructuredGridIndexer::propagateIndicesTopology(Mesh& mesh, int startElem,
                                                       const ConnectivityAnalyzer& connectivity) {
-    // BFS queue: element ID (i,j,k is stored in element itself)
-    std::queue<int> queue;
+    // Every element carries a frame: for each of its six local faces, the grid
+    // axis that face looks along and the sign. Crossing face f of A into face g
+    // of B moves one slot along A's (axis, sign) for f. B's frame follows from
+    // the shared face alone: g looks back (same axis, opposite sign), the face
+    // opposite g looks on, and each of B's other four faces continues the face
+    // of A that meets it along an edge of the shared face.
+    //
+    // Nothing geometric is consulted after the start corner. The walk this
+    // replaced picked each neighbour's axis from the direction between element
+    // centroids; on a fold, a tight wave or a thin layer the nearest axis is
+    // the wrong one, and two elements landed on one slot (47 of 100 on a
+    // folded 10x5x2 plate, 786 of 2000 on a teardrop) or the grid spread until
+    // the fill-rate gate refused it. There is no fallback to that walk: a mesh
+    // whose faces do not close as one block is refused, not guessed at.
+    struct Frame {
+        std::array<signed char, Element::NUM_FACES> axis;
+        std::array<signed char, Element::NUM_FACES> sign;
+    };
+    struct Slot { Element* elem; Frame frame; };
+    std::unordered_map<int, Slot> slots;
+    slots.reserve(mesh.elements.size());
+    for (auto& [id, elem] : mesh.elements) {
+        slots.emplace(id, Slot{&elem, Frame{}});
+    }
 
-    // Start at origin
-    Element* startElement = mesh.getElement(startElem);
-    if (!startElement) {
+    auto startIt = slots.find(startElem);
+    if (startIt == slots.end()) {
         errorMessage_ = "Start element not found";
         return false;
     }
 
-    startElement->setGridIndex(0, 0, 0);
+    // Start frame: the reading the centroid walk made at the corner, kept so
+    // that meshes it indexed correctly get the same (i,j,k) as before -- each
+    // of the three neighbours takes the axis of axisDirections_ its direction
+    // matches best, with the sign of that dot product.
+    Frame& startFrame = startIt->second.frame;
+    startFrame.axis.fill(-1);
+    const Vector3D startCentroid = calculateElementCentroid(mesh, startElem);
+    for (const auto& neighbor : connectivity.getNeighbors(startElem)) {
+        Vector3D direction = calculateElementCentroid(mesh, neighbor.neighborElementId) - startCentroid;
+        direction = direction.normalized();
+
+        int bestAxis = 0;
+        int bestSign = 1;
+        double bestAbsDot = -1.0;
+        for (int axis = 0; axis < 3; ++axis) {
+            double dot = direction.dot(axisDirections_[axis]);
+            double absDot = std::abs(dot);
+            if (absDot > bestAbsDot) {
+                bestAbsDot = absDot;
+                bestAxis = axis;
+                bestSign = (dot >= 0) ? 1 : -1;
+            }
+        }
+
+        // Faces pair up as (i-,i+) (j-,j+) (k-,k+): f ^ 1 is the opposite face.
+        const int face = neighbor.throughFace;
+        startFrame.axis[face] = startFrame.axis[face ^ 1] = static_cast<signed char>(bestAxis);
+        startFrame.sign[face] = static_cast<signed char>(bestSign);
+        startFrame.sign[face ^ 1] = static_cast<signed char>(-bestSign);
+    }
+    {
+        std::array<bool, 3> axisTaken = {false, false, false};
+        for (int pair = 0; pair < 3; ++pair) {
+            int axis = startFrame.axis[pair * 2];
+            if (axis < 0 || axisTaken[axis]) {
+                errorMessage_ = "Grid indexing failed: the three neighbours of start corner element " +
+                    std::to_string(startElem) + " do not lie on three different axes";
+                return false;
+            }
+            axisTaken[axis] = true;
+        }
+    }
+
+    startIt->second.elem->setGridIndex(0, 0, 0);
+    std::queue<int> queue;
     queue.push(startElem);
 
-    // For the start element, we need to assign initial axes based on neighbors
-    // We'll use the axisDirections_ computed in determineInitialDirectionsGeometry
-    // as the reference directions for the first neighbors
-
-    // Element and centroid per element ID, computed once. The walk below only
-    // writes i/j/k, so these are the values calculateElementCentroid would
-    // return at any point (it used to be called for every visit of an element).
-    struct ElemInfo { Element* elem; Vector3D centroid; };
-    std::unordered_map<int, ElemInfo> elemInfo;
-    elemInfo.reserve(mesh.elements.size());
-    for (auto& [id, elem] : mesh.elements) {
-        elemInfo.emplace(id, ElemInfo{&elem, calculateElementCentroid(mesh, id)});
-    }
-    auto findInfo = [&elemInfo](int id) -> const ElemInfo* {
-        auto it = elemInfo.find(id);
-        return (it != elemInfo.end()) ? &it->second : nullptr;
-    };
-
-    int processedCount = 0;
+    const auto& faces = topo::facesOf(ElementType::HEX8);
 
     while (!queue.empty()) {
         int elemId = queue.front();
         queue.pop();
 
-        const ElemInfo* current = findInfo(elemId);
-        if (!current) continue;
-        Element* currentElem = current->elem;
+        const Slot& current = slots.find(elemId)->second;
+        const Element& a = *current.elem;
+        const Frame& fa = current.frame;
 
-        int i = currentElem->i;
-        int j = currentElem->j;
-        int k = currentElem->k;
+        for (const auto& neighbor : connectivity.getNeighbors(elemId)) {
+            auto it = slots.find(neighbor.neighborElementId);
+            if (it == slots.end()) continue;
+            Element& b = *it->second.elem;
+            const int f = neighbor.throughFace;
+            const int g = neighbor.neighborFace;
 
-        Vector3D currentCentroid = current->centroid;
-        const auto& neighbors = connectivity.getNeighbors(elemId);
+            std::array<int, 3> want = {a.i, a.j, a.k};
+            want[fa.axis[f]] += fa.sign[f];
 
-        // Build local axes from ALREADY INDEXED neighbors
-        // For each indexed neighbor, we know what index change it represents
-        std::array<Vector3D, 3> localAxes = {{Vector3D(0,0,0), Vector3D(0,0,0), Vector3D(0,0,0)}};
-        std::array<bool, 3> axisFound = {false, false, false};
-
-        for (const auto& neighbor : neighbors) {
-            const ElemInfo* info = findInfo(neighbor.neighborElementId);
-            if (!info || !info->elem->indexAssigned) continue;
-            Element* neighborElem = info->elem;
-
-            // Calculate direction to this neighbor
-            Vector3D neighborCentroid = info->centroid;
-            Vector3D direction = neighborCentroid - currentCentroid;
-            direction = direction.normalized();
-
-            // Determine which axis this neighbor represents based on index difference
-            int di = neighborElem->i - i;
-            int dj = neighborElem->j - j;
-            int dk = neighborElem->k - k;
-
-            if (di != 0 && !axisFound[0]) {
-                localAxes[0] = direction * static_cast<double>(di > 0 ? 1 : -1);
-                axisFound[0] = true;
-            } else if (dj != 0 && !axisFound[1]) {
-                localAxes[1] = direction * static_cast<double>(dj > 0 ? 1 : -1);
-                axisFound[1] = true;
-            } else if (dk != 0 && !axisFound[2]) {
-                localAxes[2] = direction * static_cast<double>(dk > 0 ? 1 : -1);
-                axisFound[2] = true;
-            }
-        }
-
-        // REQ-003: Fill missing axes with global defaults first, then refine
-        // via cross products of the *locally-derived* axes.
-        //
-        // Global fallbacks go stale on curved meshes — e.g. at ~90° along the
-        // arc from the seed corner, the seed's thickness direction has near-zero
-        // dot with the actual local thickness direction, so determineAxis above
-        // picks essentially at random. I × J = K (and permutations) recovers the
-        // correct local axis when two of three are found locally.
-        //
-        // Important: only refine when BOTH operands of the cross are locally
-        // found. Crossing a local axis with a stale global fallback yields
-        // another stale direction (and broke arc30 regression by spreading
-        // a 20×10×1 slab over k∈{0,1}).
-        for (int ax = 0; ax < 3; ++ax) {
-            if (!axisFound[ax]) localAxes[ax] = axisDirections_[ax];
-        }
-        if (!axisFound[2] && (axisFound[0] || axisFound[1])) {
-            Vector3D cross = localAxes[0].cross(localAxes[1]);
-            if (cross.magnitude() > 1e-10) localAxes[2] = cross.normalized();
-        }
-        if (!axisFound[1] && (axisFound[0] || axisFound[2])) {
-            Vector3D cross = localAxes[2].cross(localAxes[0]);
-            if (cross.magnitude() > 1e-10) localAxes[1] = cross.normalized();
-        }
-        if (!axisFound[0] && (axisFound[1] || axisFound[2])) {
-            Vector3D cross = localAxes[1].cross(localAxes[2]);
-            if (cross.magnitude() > 1e-10) localAxes[0] = cross.normalized();
-        }
-
-        // Now process unindexed neighbors
-        for (const auto& neighbor : neighbors) {
-            const ElemInfo* info = findInfo(neighbor.neighborElementId);
-            if (!info || info->elem->indexAssigned) {
+            if (b.indexAssigned) {
+                // Reached before by another path: both paths must agree.
+                if (b.i != want[0] || b.j != want[1] || b.k != want[2]) {
+                    errorMessage_ = "Grid indexing failed: element " + std::to_string(b.id) +
+                        " sits at (" + std::to_string(b.i) + "," + std::to_string(b.j) + "," +
+                        std::to_string(b.k) + ") but its neighbour " + std::to_string(a.id) +
+                        " places it at (" + std::to_string(want[0]) + "," + std::to_string(want[1]) + "," +
+                        std::to_string(want[2]) + ") -- the faces do not close as one structured block";
+                    return false;
+                }
                 continue;
             }
-            Element* neighborElem = info->elem;
 
-            // Calculate direction from current element to neighbor
-            Vector3D neighborCentroid = info->centroid;
-            Vector3D direction = neighborCentroid - currentCentroid;
-            direction = direction.normalized();
+            Frame& fb = it->second.frame;
+            fb.axis[g] = fb.axis[g ^ 1] = fa.axis[f];
+            fb.sign[g] = static_cast<signed char>(-fa.sign[f]);
+            fb.sign[g ^ 1] = fa.sign[f];
+            for (int h = 0; h < Element::NUM_FACES; ++h) {
+                if (h == g || h == (g ^ 1)) continue;
 
-            // Determine which axis this direction corresponds to using local axes
-            int bestAxis = 0;
-            int bestSign = 1;
-            double bestAbsDot = -1.0;  // Start with -1 so any valid dot product wins
-
-            for (int axis = 0; axis < 3; ++axis) {
-                double dot = direction.dot(localAxes[axis]);
-                double absDot = std::abs(dot);
-                if (absDot > bestAbsDot) {
-                    bestAbsDot = absDot;
-                    bestAxis = axis;
-                    bestSign = (dot >= 0) ? 1 : -1;
+                // The edge (two nodes) face h of B has on the shared face.
+                std::array<int, 2> edge = {0, 0};
+                int shared = 0;
+                for (int x = 0; x < Element::NODES_PER_FACE; ++x) {
+                    int node = b.nodeIds[faces[h].v[x]];
+                    for (int y = 0; y < Element::NODES_PER_FACE; ++y) {
+                        if (node == b.nodeIds[faces[g].v[y]]) {
+                            if (shared < 2) edge[shared] = node;
+                            ++shared;
+                        }
+                    }
                 }
+                if (shared != 2) {
+                    errorMessage_ = "Grid indexing failed: element " + std::to_string(b.id) +
+                        " is not a plain hexahedron (two of its neighbouring faces share " +
+                        std::to_string(shared) + " nodes instead of 2)";
+                    return false;
+                }
+
+                // The face of A, other than f, that holds that edge.
+                int through = -1;
+                for (int c = 0; c < Element::NUM_FACES && through < 0; ++c) {
+                    if (c == f) continue;
+                    bool has0 = false, has1 = false;
+                    for (int q = 0; q < Element::NODES_PER_FACE; ++q) {
+                        int node = a.nodeIds[faces[c].v[q]];
+                        has0 = has0 || node == edge[0];
+                        has1 = has1 || node == edge[1];
+                    }
+                    if (has0 && has1) through = c;
+                }
+                if (through < 0) {
+                    errorMessage_ = "Grid indexing failed: elements " + std::to_string(a.id) + " and " +
+                        std::to_string(b.id) + " do not meet edge to edge on their shared face";
+                    return false;
+                }
+                fb.axis[h] = fa.axis[through];
+                fb.sign[h] = fa.sign[through];
             }
 
-            int ni = i, nj = j, nk = k;
-            switch (bestAxis) {
-                case 0: ni += bestSign; break;
-                case 1: nj += bestSign; break;
-                case 2: nk += bestSign; break;
-            }
-
-            neighborElem->setGridIndex(ni, nj, nk);
+            b.setGridIndex(want[0], want[1], want[2]);
             queue.push(neighbor.neighborElementId);
-            processedCount++;
         }
     }
 
@@ -660,214 +663,198 @@ void StructuredGridIndexer::swapAxes(Mesh& mesh, int axis1, int axis2) {
     }
 }
 
-void StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
-    // Reorder nodes within each element based on geometry so that:
-    // - k-axis is the smallest dimension (thickness direction)
+bool StructuredGridIndexer::reorderElementNodes(Mesh& mesh) {
+    // Reorder nodes within each element so that the local order follows the grid:
     // - Nodes 0-3 are on the k- face (bottom), nodes 4-7 are on the k+ face (top)
-    // - On each face, nodes are ordered CCW when viewed from outside
     //   Bottom (k-): n0 at (i-,j-), n1 at (i+,j-), n2 at (i+,j+), n3 at (i-,j+)
     //   Top (k+):    n4 at (i-,j-), n5 at (i+,j-), n6 at (i+,j+), n7 at (i-,j+)
+    //
+    // The order is read off the topology: the face an element shares with its
+    // grid neighbour at i+1 is its i+ face, and so on for the six sides (a side
+    // with no neighbour is the face opposite the one that has; with none on
+    // either side, the element beside it settles which is which); a corner is
+    // the one node the three faces meeting there have in common.
+    //
+    // This used to be a geometric estimate -- local axes from the neighbours'
+    // centroids, each node put in the octant its offset from the element
+    // centroid pointed to. On a tight fold two nodes fall in one octant and the
+    // wrong one took the corner: unfold then wrote elements with a node set the
+    // input never had (15 of 250 on a teardrop, rc 0). map was spared only
+    // because it reads the reference through the node grid the boundary
+    // extractor builds from shared nodes, not through this order. There is no
+    // fallback to that estimate: indices that do not agree with the faces are
+    // refused.
+    errorMessage_.clear();
 
-    // Build element lookup by (i,j,k) for neighbor queries. Each cell also
-    // caches its element's centroid: computed once here, and again right after
-    // that element's nodes are reordered below. A lookup therefore returns what
-    // calculateElementCentroid gives at that moment -- the sum runs in node
-    // order, so the reorder can change its last bits.
-    struct Cell { const Element* elem; Vector3D centroid; };
-    std::unordered_map<std::tuple<int,int,int>, Cell, GridIndexHash> elemLookup;
+    std::unordered_map<std::tuple<int,int,int>, const Element*, GridIndexHash> elemLookup;
     elemLookup.reserve(mesh.elements.size());
     for (const auto& [id, elem] : mesh.elements) {
         if (elem.indexAssigned) {
-            elemLookup[{elem.i, elem.j, elem.k}].elem = &elem;
+            elemLookup[{elem.i, elem.j, elem.k}] = &elem;
         }
     }
-    for (auto& [ijk, cell] : elemLookup) {
-        cell.centroid = calculateElementCentroid(mesh, cell.elem->id);
+
+    const auto& faces = topo::facesOf(ElementType::HEX8);
+    // LS-DYNA position -> side of the corner along (i,j,k): 0 = minus, 1 = plus
+    static constexpr int CORNER_SIDES[8][3] = {
+        {0,0,0}, {1,0,0}, {1,1,0}, {0,1,0},
+        {0,0,1}, {1,0,1}, {1,1,1}, {0,1,1}
+    };
+    static constexpr char AXIS_NAMES[3] = {'i', 'j', 'k'};
+
+    // How many nodes local face fa of a has in common with local face fb of b.
+    auto commonNodes = [&faces](const Element& a, int fa, const Element& b, int fb) {
+        int common = 0;
+        for (int x = 0; x < Element::NODES_PER_FACE; ++x) {
+            for (int y = 0; y < Element::NODES_PER_FACE; ++y) {
+                if (a.nodeIds[faces[fa].v[x]] == b.nodeIds[faces[fb].v[y]]) { ++common; break; }
+            }
+        }
+        return common;
+    };
+    auto neighborAt = [&elemLookup](const Element& elem, int axis, int side) -> const Element* {
+        std::array<int, 3> at = {elem.i, elem.j, elem.k};
+        at[axis] += side ? 1 : -1;
+        auto it = elemLookup.find({at[0], at[1], at[2]});
+        return it == elemLookup.end() ? nullptr : it->second;
+    };
+
+    // face[axis][side]: the local face of the element looking along that side
+    // of the grid. Node ids stay untouched until every element has its faces --
+    // the faces are local numbers in the order the element came in with.
+    struct Sides { int face[3][2]; };
+    std::unordered_map<int, Sides> sidesOf;
+    sidesOf.reserve(mesh.elements.size());
+    // An element with no grid neighbour on either side of an axis (the one
+    // above a hole in a two-layer block): the pair of faces is known, which of
+    // the two looks along minus is not yet.
+    struct Open { int id; int axis; int pair; };
+    std::vector<Open> open;
+
+    for (const auto& [id, elem] : mesh.elements) {
+        if (!elem.indexAssigned) continue;
+
+        Sides sides = {{{-1, -1}, {-1, -1}, {-1, -1}}};
+        for (int axis = 0; axis < 3; ++axis) {
+            for (int side = 0; side < 2; ++side) {
+                const Element* neighbor = neighborAt(elem, axis, side);
+                if (!neighbor) continue;
+
+                // A neighbour is read by its node set only.
+                for (int f = 0; f < Element::NUM_FACES && sides.face[axis][side] < 0; ++f) {
+                    int common = 0;
+                    for (int x = 0; x < Element::NODES_PER_FACE; ++x) {
+                        int node = elem.nodeIds[faces[f].v[x]];
+                        for (int y = 0; y < 8; ++y) {
+                            if (neighbor->nodeIds[y] == node) { ++common; break; }
+                        }
+                    }
+                    if (common == Element::NODES_PER_FACE) sides.face[axis][side] = f;
+                }
+                if (sides.face[axis][side] < 0) {
+                    errorMessage_ = "elements " + std::to_string(id) + " and " + std::to_string(neighbor->id) +
+                        " are neighbours along " + AXIS_NAMES[axis] + " in the grid but share no face";
+                    return false;
+                }
+            }
+        }
+
+        std::array<bool, 3> pairTaken = {false, false, false};
+        int openAxis = -1;
+        for (int axis = 0; axis < 3; ++axis) {
+            int& minus = sides.face[axis][0];
+            int& plus = sides.face[axis][1];
+            if (minus < 0 && plus < 0) {
+                if (openAxis >= 0) {
+                    errorMessage_ = "element " + std::to_string(id) + " has no grid neighbour along " +
+                        AXIS_NAMES[openAxis] + " nor along " + AXIS_NAMES[axis];
+                    return false;
+                }
+                openAxis = axis;
+                continue;
+            }
+            // Faces pair up as (0,1) (2,3) (4,5): f ^ 1 is the opposite face.
+            if (minus < 0) minus = plus ^ 1;
+            if (plus < 0) plus = minus ^ 1;
+            if (plus != (minus ^ 1) || pairTaken[minus / 2]) {
+                errorMessage_ = "the grid neighbours of element " + std::to_string(id) +
+                    " do not sit on three pairs of opposite faces";
+                return false;
+            }
+            pairTaken[minus / 2] = true;
+        }
+        if (openAxis >= 0) {
+            open.push_back({id, openAxis, !pairTaken[0] ? 0 : !pairTaken[1] ? 1 : 2});
+        }
+        sidesOf.emplace(id, sides);
+    }
+
+    // The open side is settled from beside: across a face the two elements
+    // share, the minus face of one continues the minus face of the other along
+    // an edge of that shared face (the rule the index walk carries its frame
+    // by). A neighbour that is open itself waits for its own turn.
+    for (bool progress = true; progress && !open.empty(); ) {
+        progress = false;
+        for (size_t n = 0; n < open.size(); ) {
+            const Open o = open[n];
+            const Element& elem = mesh.elements.at(o.id);
+            int minusFace = -1;
+            for (int axis = 0; axis < 3; ++axis) {
+                if (axis == o.axis) continue;
+                for (int side = 0; side < 2; ++side) {
+                    const Element* neighbor = neighborAt(elem, axis, side);
+                    if (!neighbor) continue;
+                    const int theirs = sidesOf.at(neighbor->id).face[o.axis][0];
+                    if (theirs < 0) continue;
+                    for (int mine = o.pair * 2; mine < o.pair * 2 + 2; ++mine) {
+                        if (commonNodes(elem, mine, *neighbor, theirs) != 2) continue;
+                        if (minusFace >= 0 && minusFace != mine) {
+                            errorMessage_ = "the grid neighbours of element " + std::to_string(o.id) +
+                                " disagree on which of its faces looks along -" + AXIS_NAMES[o.axis];
+                            return false;
+                        }
+                        minusFace = mine;
+                    }
+                }
+            }
+            if (minusFace < 0) { ++n; continue; }
+            Sides& sides = sidesOf.at(o.id);
+            sides.face[o.axis][0] = minusFace;
+            sides.face[o.axis][1] = minusFace ^ 1;
+            open[n] = open.back();
+            open.pop_back();
+            progress = true;
+        }
+    }
+    if (!open.empty()) {
+        errorMessage_ = "element " + std::to_string(open.front().id) + " has no grid neighbour along " +
+            AXIS_NAMES[open.front().axis] + ", and none beside it settles that side";
+        return false;
     }
 
     for (auto& [id, elem] : mesh.elements) {
         if (!elem.indexAssigned) continue;
+        const Sides& sides = sidesOf.at(id);
+        const std::array<int, 8> nodeIds = elem.nodeIds;
 
-        // Get all 8 node positions
-        std::array<Vector3D, 8> nodePos;
-        std::array<int, 8> nodeIds = elem.nodeIds;
-        bool valid = true;
-
-        for (int n = 0; n < 8; ++n) {
-            const Node* node = mesh.getNode(nodeIds[n]);
-            if (!node) {
-                valid = false;
-                break;
-            }
-            nodePos[n] = node->position;
-        }
-
-        if (!valid) continue;
-
-        // Calculate element centroid
-        Vector3D centroid(0, 0, 0);
-        for (int n = 0; n < 8; ++n) {
-            centroid += nodePos[n];
-        }
-        centroid /= 8.0;
-
-        // Determine LOCAL axis directions from neighboring elements' centroids
-        // This handles curved meshes where global axis directions don't apply
-        Vector3D iAxis(0, 0, 0), jAxis(0, 0, 0), kAxis(0, 0, 0);
-
-        // Check neighbors in +/- i direction
-        auto iPlus = elemLookup.find({elem.i + 1, elem.j, elem.k});
-        auto iMinus = elemLookup.find({elem.i - 1, elem.j, elem.k});
-        if (iPlus != elemLookup.end()) {
-            iAxis += iPlus->second.centroid - centroid;
-        }
-        if (iMinus != elemLookup.end()) {
-            iAxis += centroid - iMinus->second.centroid;
-        }
-        if (iAxis.magnitude() > 1e-10) {
-            iAxis = iAxis.normalized();
-        } else {
-            iAxis = axisDirections_[0];  // Fallback to global
-        }
-
-        // Check neighbors in +/- j direction
-        auto jPlus = elemLookup.find({elem.i, elem.j + 1, elem.k});
-        auto jMinus = elemLookup.find({elem.i, elem.j - 1, elem.k});
-        if (jPlus != elemLookup.end()) {
-            jAxis += jPlus->second.centroid - centroid;
-        }
-        if (jMinus != elemLookup.end()) {
-            jAxis += centroid - jMinus->second.centroid;
-        }
-        if (jAxis.magnitude() > 1e-10) {
-            jAxis = jAxis.normalized();
-        } else {
-            jAxis = axisDirections_[1];  // Fallback to global
-        }
-
-        // Check neighbors in +/- k direction
-        auto kPlus = elemLookup.find({elem.i, elem.j, elem.k + 1});
-        auto kMinus = elemLookup.find({elem.i, elem.j, elem.k - 1});
-        if (kPlus != elemLookup.end()) {
-            kAxis += kPlus->second.centroid - centroid;
-        }
-        if (kMinus != elemLookup.end()) {
-            kAxis += centroid - kMinus->second.centroid;
-        }
-        if (kAxis.magnitude() > 1e-10) {
-            kAxis = kAxis.normalized();
-        } else {
-            kAxis = axisDirections_[2];  // Fallback to global
-        }
-
-        // For each of the 8 nodes, determine which corner it belongs to
-        // Corner index: (iSign > 0 ? 1 : 0) + (jSign > 0 ? 2 : 0) + (kSign > 0 ? 4 : 0)
-        // This gives: 0=(---), 1=(+--), 2=(-+-), 3=(++-), 4=(--+), 5=(+-+), 6=(-++), 7=(+++)
-
-        // LS-DYNA standard ordering maps to:
-        // n0: (i-,j-,k-) -> corner 0
-        // n1: (i+,j-,k-) -> corner 1
-        // n2: (i+,j+,k-) -> corner 3
-        // n3: (i-,j+,k-) -> corner 2
-        // n4: (i-,j-,k+) -> corner 4
-        // n5: (i+,j-,k+) -> corner 5
-        // n6: (i+,j+,k+) -> corner 7
-        // n7: (i-,j+,k+) -> corner 6
-
-        std::array<int, 8> cornerToLSDyna = {0, 1, 3, 2, 4, 5, 7, 6};
-
-        // For each node, find which corner it's closest to
-        std::array<int, 8> nodeToCorner;
-        std::array<double, 8> nodeScores;
-        nodeScores.fill(-1e30);
-
-        for (int n = 0; n < 8; ++n) {
-            Vector3D relPos = nodePos[n] - centroid;
-
-            double iDot = relPos.dot(iAxis);
-            double jDot = relPos.dot(jAxis);
-            double kDot = relPos.dot(kAxis);
-
-            int corner = (iDot > 0 ? 1 : 0) + (jDot > 0 ? 2 : 0) + (kDot > 0 ? 4 : 0);
-            double score = std::abs(iDot) + std::abs(jDot) + std::abs(kDot);
-
-            nodeToCorner[n] = corner;
-            nodeScores[n] = score;
-        }
-
-        // Build new node order: for each LS-DYNA position, find the node at that corner
-        std::array<int, 8> newNodeIds;
-        std::array<int, 8> newLocal;  // local index (into nodeIds/nodePos) of newNodeIds[lsPos]
-        std::array<bool, 8> nodeUsed;
-        nodeUsed.fill(false);
-
+        // Three faces from three different pairs meet in exactly one corner.
         for (int lsPos = 0; lsPos < 8; ++lsPos) {
-            int targetCorner = cornerToLSDyna[lsPos];
-
-            // Find best node for this corner (not yet used)
-            int bestNode = -1;
-            double bestScore = -1e30;
-
-            for (int n = 0; n < 8; ++n) {
-                if (nodeUsed[n]) continue;
-                if (nodeToCorner[n] == targetCorner) {
-                    if (nodeScores[n] > bestScore) {
-                        bestScore = nodeScores[n];
-                        bestNode = n;
-                    }
+            const auto& fi = faces[sides.face[0][CORNER_SIDES[lsPos][0]]];
+            const auto& fj = faces[sides.face[1][CORNER_SIDES[lsPos][1]]];
+            const auto& fk = faces[sides.face[2][CORNER_SIDES[lsPos][2]]];
+            for (int x = 0; x < Element::NODES_PER_FACE; ++x) {
+                const int local = fi.v[x];
+                bool onJ = false, onK = false;
+                for (int y = 0; y < Element::NODES_PER_FACE; ++y) {
+                    onJ = onJ || fj.v[y] == local;
+                    onK = onK || fk.v[y] == local;
                 }
+                if (onJ && onK) elem.nodeIds[lsPos] = nodeIds[local];
             }
-
-            // If no exact match, find closest node
-            if (bestNode < 0) {
-                for (int n = 0; n < 8; ++n) {
-                    if (nodeUsed[n]) continue;
-                    // Calculate how well this node matches the target corner
-                    Vector3D relPos = nodePos[n] - centroid;
-                    double iDot = relPos.dot(iAxis);
-                    double jDot = relPos.dot(jAxis);
-                    double kDot = relPos.dot(kAxis);
-
-                    // Target corner signs
-                    int iTarget = (targetCorner & 1) ? 1 : -1;
-                    int jTarget = (targetCorner & 2) ? 1 : -1;
-                    int kTarget = (targetCorner & 4) ? 1 : -1;
-
-                    double score = iDot * iTarget + jDot * jTarget + kDot * kTarget;
-                    if (score > bestScore) {
-                        bestScore = score;
-                        bestNode = n;
-                    }
-                }
-            }
-
-            if (bestNode >= 0) {
-                newNodeIds[lsPos] = nodeIds[bestNode];
-                newLocal[lsPos] = bestNode;
-                nodeUsed[bestNode] = true;
-            } else {
-                // Fallback - should not happen
-                newNodeIds[lsPos] = nodeIds[lsPos];
-                newLocal[lsPos] = lsPos;
-            }
-        }
-
-        // Update element with reordered nodes
-        elem.nodeIds = newNodeIds;
-
-        // Refresh the cached centroid for the elements still to come (unless
-        // another element with the same index holds the cell): the sum that
-        // calculateElementCentroid now makes over the new order of 8 nodes.
-        Cell& self = elemLookup[{elem.i, elem.j, elem.k}];
-        if (self.elem == &elem) {
-            Vector3D reordered(0, 0, 0);
-            for (int n = 0; n < 8; ++n) {
-                reordered += nodePos[newLocal[n]];
-            }
-            reordered /= 8.0;
-            self.centroid = reordered;
         }
     }
+
+    return true;
 }
 
 } // namespace KooRemapper

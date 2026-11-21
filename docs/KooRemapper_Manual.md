@@ -983,10 +983,18 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 주의사항
 - 입력 메시는 반드시 **규칙적 HEX8 구조화 메시**여야 합니다
 - 비구조화 메시에는 사용할 수 없습니다
-- 구조화 메시라도 격자 색인이 겹치면(두 요소가 같은 (i,j,k) 칸에 놓이면) 거절한다 — 「Grid indexing failed: N of M elements share an
-  (i,j,k) slot …」 · rc 1 · 산출 없음. 2026-11-20 전엔 겹친 만큼 요소를 빼고 rc 0 으로 썼다(100 요소 덱이 53 요소로). 심하게 감긴 덱에서
-  나고 `generate` 가 지은 덱도 그렇다(helix 20×5×3 · wave 10×10×2). `map` 의 굽은 기준으로 넣어도 같은 글로 거절한다.
-  회귀 `test_unfold_element_loss.py`
+- 격자 번호 (i,j,k) 와 요소의 절점 순서는 **맞닿은 면**만으로 정한다(2026-11-21) — 심하게 감기거나 바짝 접힌 덱도 요소 · 절점을
+  그대로 펼친다. 면이 한 블록으로 닫히지 않는 메시는 어림하지 않고 거절한다 — 「Grid indexing failed: element B sits at (…) but
+  its neighbour A places it at (…) -- the faces do not close as one structured block」 · 떨어진 덩어리가 있으면 「Element N was
+  not indexed」 · rc 1 · 산출 없음. `map` 의 굽은 기준으로 넣어도 같은 글로 거절한다.
+  - 전에는 이웃 요소의 중심 방향으로 어림했다. 2026-11-20 전엔 접힌 자리에서 두 요소가 같은 칸에 놓여 겹친 만큼 요소를 빼고 rc 0
+    으로 썼고(100 요소 덱이 53 요소로), 11-20 에는 그런 덱을 거절했다(「… elements share an (i,j,k) slot」 — 이 검사는 뒤를 받치는
+    관문으로 남아 있다). `generate` 가 지은 덱도 그랬다(helix 20×5×3 · wave 10×10×2) — 이제 펼쳐진다.
+  - **2026-11-21 전에 펼친 덱은 다시 펼쳐야 할 수 있다** — 색인이 멀쩡해도 바짝 접힌 자리에서 요소의 절점 순서를 잘못 어림해,
+    rc 0 인데 원본에 없던 절점 묶음을 가진 요소가 나갔다(`examples/teardrop/teardrop_bent.k` 250 요소 가운데 15 · 새 절점 5 ·
+    `generate` teardrop 기본 크기 13 · scurve 20×5×3 80). 요소 수는 맞아서 눈에 띄지 않는다. 독립된 평판 덱으로 돌린 `map` 산출은
+    바뀌지 않는다(굽은 기준을 절점 격자로 읽는다) — 바뀌는 것은 `unfold` 산출과 그것을 평판으로 쓴 `map` 이다.
+  - 회귀 `test_unfold_element_loss.py` · 단위 시험 `GridIndexer_*`
 
 ---
 

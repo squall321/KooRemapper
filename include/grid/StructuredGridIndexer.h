@@ -69,11 +69,12 @@ public:
 
     /**
      * Reorder nodes within each element to match LS-DYNA standard ordering
-     * based on geometry (element centroid and node positions).
+     * along the grid, read off the faces shared with the grid neighbours.
      * Standard order: bottom face CCW (n0,n1,n2,n3), top face CCW (n4,n5,n6,n7)
      * where k-axis goes from bottom to top.
+     * @return false (see getErrorMessage) when the indices do not agree with the faces
      */
-    void reorderElementNodes(Mesh& mesh);
+    bool reorderElementNodes(Mesh& mesh);
 
     /**
      * Get error message
@@ -122,10 +123,11 @@ private:
                          const ConnectivityAnalyzer& connectivity);
 
     /**
-     * Propagate indices using BFS with geometry-based axis detection
+     * Propagate indices using BFS, carrying each element's axis frame across
+     * the shared face (topology only; the start corner's frame is geometric).
      * This method does NOT depend on LS-DYNA standard node ordering
      */
-    bool propagateIndicesGeometry(Mesh& mesh, int startElem,
+    bool propagateIndicesTopology(Mesh& mesh, int startElem,
                                   const ConnectivityAnalyzer& connectivity);
 
     /**
