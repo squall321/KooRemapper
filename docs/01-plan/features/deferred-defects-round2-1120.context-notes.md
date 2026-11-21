@@ -394,3 +394,7 @@
   앞의 다섯에 실었고, 고치지 않은 matswap 번들 BOM 은 앞의 넷에, 「BOM 없이 저장」 은 다섯 모두에 적었다. 보내기 전에 잰 것 — `build/linux/bin`
   은 `f20d5d5b` · 스테이징과 헤드 `/opt` SIF 안은 `248ec9bc` · SP main 끝은 우리 고정 `3196156` 과 같다(앞선 커밋 0 · 키트 2026-11-06). SIF
   굽기는 그쪽과 사용자 판단이라 청하지 않았다.
+- **헤드 SIF v140 실측(11-21 19:45 UTC)** — pykoocae-53 이 v140 을 굽고 헤드 `/opt/apptainers/SmartTwinPreprocessor.sif` 를 바꿨다고 알려 와
+  직접 쟀다. 파일 sha256 `b7fa1227…6b14`(1,616,728,064 B · 그쪽이 적은 값과 같다) · 안의 `/opt/kooremapper/bin/KooRemapper` 는 `f20d5d5b` · 판정
+  꾸러미를 apptainer 를 명령으로 돌려 「새 판 7 · 옛 판 0 · 어느 쪽도 아님 0」 (rc 0). 계산 노드 이미지 사본과 Drive 사본의 sha 가 같다는 것은
+  그쪽 말이고 재지 않았다. 다음 고친 판(v141)에도 같은 꼴의 꾸러미를 청해 왔다.

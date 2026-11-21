@@ -26,9 +26,11 @@
 - [x] D-1 커밋 · main · 살아 있는 잡 확인 뒤 dev 재기동 · 스모크 · pytest
 - [x] D-2 Drive 게시 · cae00 점검 문서 · 포털 알림 — dist-20261117-212938Z · §1-6 · hwaxportal-71 · 87 · pykoocae-53 · smarttwinmcp-c8 ·
       stepforge-d4 · kooremapper-fd(11-17 21:3x UTC)
-- [ ] D-3 요청 쪽 답신(사용자가 전한다)
+- [x] D-3 요청 쪽 답신 — `docs/requests/df-request-reply-2026-11-21.md` 를 썼다(11-21 「답신 문서를 쓴다」). 전달은 사용자가 한다
 
 ## E. 2차 설계서
-- [ ] E-1 나머지 13건 설계서와 이름표 — 확인받기(설계안 `df-request-1117.design.md` 를 썼다 · 사용자 확인 대기)
-  - ① 단계(DF-01 캠페인 적재)는 11-20 에 갈래 `corelink-int` 에 지었다 — `df-campaign-intake-1120.plan.md`. main 합치기 · dev DB · 게시는 확인
-    뒤.
+- [x] E-1 나머지 13건 설계서와 이름표 — 11-21 사용자 확인(이름표 「표 그대로 승인」 · 건강 문턱 「요청서 값을 기본으로」 · footprint 「생성기에
+  청하고 기다린다」 — 설계안 6절)
+  - ① 단계(DF-01 캠페인 적재)는 11-20 에 짓고 11-21 에 올렸다 — `df-campaign-intake-1120.plan.md` · Drive `dist-20261121-120311Z`.
+- [ ] E-2 ② 단계(DF-02 출처 · DF-03 유효성 · 동시 올리기 고침)의 계획 · 체크리스트 · 맥락 — 미룬 결함
+  3차(`deferred-defects-round3-1121.plan.md`)의 판들이 올라간 뒤에 쓴다(11-21 「열린 줄 스물 전부」 — 「DF ② ~ ⑥ 은 그동안 멈춥니다」)
