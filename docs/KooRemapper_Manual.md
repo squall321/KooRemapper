@@ -4423,7 +4423,7 @@ KooRemapper battery <config.yaml>
 |---|---|
 | `output` | 출력 접두사/경로 |
 | `model_type` | `stacked` 또는 `wound` |
-| `tier` / `phase` / `mode` | 티어·페이즈 지정, `mode: swell` |
+| `tier` / `phase` / `mode` | 티어·페이즈 지정, `mode` 는 `dent`(기본) · `side` · `bare` · `swell` — 다른 값이면 아무 덱도 쓰지 않고 종료 코드 1(2026-11-22 · 못 압입자는 `mode: side` 에 `indenter.type: nail` 이다. 전엔 적층은 압입자 없이 없는 세트를 묶고 권취는 움직이지 않는 압입자를 지어 종료 코드 0) |
 | `solid_electrode` / `solid_elform` | 전극층 solid 화, (wound) 1=reduced/2=full |
 | `geometry.cell_width` / `.cell_height` / `.n_unit_cells` | 셀 치수·(stacked) 단위셀 수 |
 | `layer_thickness.*` | al_cc·cathode·separator·anode·cu_cc·pouch·electrolyte_buffer 두께 [mm] |
@@ -4433,6 +4433,13 @@ KooRemapper battery <config.yaml>
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
 | `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0) |
 
+> **덱이 가리키는 정의(2026-11-22)**: 지은 덱의 PART · 경계 카드는 그 덱에 있는 재질 · 섹션 · 세트만 가리킵니다(`info --strict` 로
+> 잽니다 — 적층 · 권취 × 선택 열두 가지 × `mode` 넷, 96 덱이 종료 코드 0). 전엔 적층 기본 설정의 전해질 PART 가 공기주머니에서만 쓰는
+> 재질(MID 8)을, 적층 `side` 의 SPC 가 짓지 않은 바닥판 세트 3 을, `no_impactor: true` 의 SPC · 처방 운동이 없는 세트 2 · 3 을, 권취
+> `core_fill: true` 의 전해질 PART 가 `solid_electrode` 일 때만 적는 섹션 33 을 가리켜 LS-DYNA 가 키워드 단계에서 멈췄습니다(battery 는
+> 종료 코드 0). 적층 `side` 는 이제 권취처럼 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는
+> 경계는 쓰는 쪽 몫입니다.
+>
 > **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
 > `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.

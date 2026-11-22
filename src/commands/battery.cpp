@@ -389,6 +389,14 @@ static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, c
         }
     }
 
+    // ★mode 는 dent · side · bare · swell 넷뿐이다(카탈로그의 enum · 3차 5판 L-07) — 모르는 값(`nail` 등)이면 적층은 압입자 · 바닥판을
+    //   짓지 않은 채 그 세트를 묶었고(rc 0 · 없는 세트), 권취는 옆 압입자를 짓고도 움직이지 않는 덱을 냈다. phase_modes 의 값도 여기서 잰다
+    if (cfg.mode != "dent" && cfg.mode != "side" && cfg.mode != "bare" && cfg.mode != "swell") {
+        console.error("[battery] 모르는 mode: " + cfg.mode + " (dent · side · bare · swell 가운데 하나) — 못 압입자는 mode: side 에 "
+                      "indenter: type: nail 이다");
+        return false;
+    }
+
     // Compute mesh dimensions
     double meshSize = batteryMeshSize(cfg.tier);
     int nx = (int)std::round(cfg.geo.cellWidth  / meshSize);

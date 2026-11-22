@@ -147,6 +147,10 @@ void writeBoundaryCards(std::ostream& out, const BatteryConfig& cfg) {
         return;
     }
 
+    // ★압입자 · 바닥판을 짓지 않았으면(no_impactor) 그 세트를 묶지 않는다(3차 5판 L-07) — 예전엔 없는 세트 2 · 3 을 SPC · 처방
+    //   운동으로 묶어 LS-DYNA 가 키워드 단계에서 멈췄다(assemble 안에서는 호스트의 같은 번호 세트를 묶을 수도 있었다)
+    if (cfg.noImpactor) return;
+
     // Impact modes (dent / side / swelling)
     // SPC for indenter: constrain X,Y, rotations; free Z
     // DOF: 1=X, 2=Y, 3=Z, 4=RX, 5=RY, 6=RZ  (1=constrained, 0=free)

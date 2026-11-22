@@ -1205,7 +1205,11 @@ public:
                     createNailImpactor(cellTopZ);
                 else
                     createSideImpactor(cellTopZ);
-                psetImpactor = {PID_INDENTER};
+                // 바닥판도 짓는다(권취와 같다) — 경계 카드는 충격 꼴마다 바닥판 세트(SID_NODE_GROUND)를 고정한다. 예전엔 side 꼴에서
+                // 바닥판을 빠뜨려 `*BOUNDARY_SPC_SET` 이 없는 세트 3 을 가리켰다(3차 5판 L-07 — LS-DYNA 는 키워드 단계에서 멈춘다)
+                createGroundPlate();
+                psetImpactor    = {PID_INDENTER};
+                psetGroundPlate = {PID_GROUND};
             }
         }
 
@@ -1232,7 +1236,8 @@ public:
             // solidElectrode=false → ELEMENT_TSHELL → use SECTION_TSHELL (SID_SOLID_ELEC)
             writePart(out,"Electrolyte", PID_ELECTROLYTE,
                 cfg.solidElectrode ? SID_SOLID_ELEC_STACK : SID_SOLID_ELEC,
-                MID_ELYTE, HGID_SOLID);
+                MID_ELYTE_SOLID, HGID_SOLID);   // 공기주머니가 아닌 채움은 Electrolyte_Solid(MAT_ELASTIC · 권취와 같다) — 예전엔
+                                                // 공기주머니일 때만 쓰는 MID 8 을 가리켜 없는 재질이었다(3차 5판 L-07)
         writePart(out,"Tab_Pos",     PID_TAB_POS,     SID_SHELL_AL,   MID_AL,   HGID_SHELL, ph2?TMID_AL:0);
         writePart(out,"Tab_Neg",     PID_TAB_NEG,     SID_SHELL_CU,   MID_CU,   HGID_SHELL, ph2?TMID_CU:0);
         if (!cfg.noPcm) {

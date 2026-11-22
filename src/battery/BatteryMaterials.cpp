@@ -56,10 +56,12 @@ void writeSections_Wound(std::ostream& out, const BatteryConfig& cfg) {
     writeSectionShell(out, SID_SHELL_CU,   2,  t.cuCC,     5, 0.8333);
     writeSectionShell(out, SID_SHELL_POUCH,2,  t.pouch,    5, 0.8333);
 
-    if (cfg.solidElectrode) {
+    // ★core_fill 의 Wound_Electrolyte(솔리드)도 이 섹션을 쓴다(3차 5판 L-07) — 예전엔 solid_electrode 일 때만 적어 core_fill 덱의
+    //   PART 가 없는 섹션 33 을 가리켰다(LS-DYNA 는 키워드 단계에서 멈춘다)
+    if (cfg.solidElectrode || cfg.coreFill)
         // solid_elform: 1=reduced integration (stable, high AR), 2=fully integrated (accurate)
         writeSectionSolid(out, SID_W_SOLID_ELEC, cfg.solidElform);
-    } else {
+    if (!cfg.solidElectrode) {
         // Wound electrode TSHELL — single-sided coating
         writeSectionTshell(out, SID_W_TSHELL_CAT, 1, 3);   // NMC cathode
         writeSectionTshell(out, SID_W_TSHELL_ANO, 1, 3);   // Graphite anode
