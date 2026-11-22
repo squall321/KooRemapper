@@ -4,7 +4,7 @@
 //
 //   op 마다 「output == model」 을 문자열로 견주거나 아예 견주지 않았다 — `update` 의 output 이 모델의 인클루드면 rc 0 으로 그
 //   인클루드가 주 덱으로 바뀌었다. 판정을 한 곳(`output_guard`)에 모았으니 그 판정이 철자 · 심볼릭 링크 · 하드 링크 · 인클루드 ·
-//   설정을 다 보는지, 그리고 **다른 폴더의 같은 이름 · 상관없는 기존 파일은 거절하지 않는지**를 여기서 직접 본다.
+//   설정을 다 보는지, 그리고 **다른 폴더의 같은 이름(덱의 인클루드 이름이 아니면) · 상관없는 기존 파일은 거절하지 않는지**를 여기서 직접 본다.
 #include "TestFramework.h"
 
 #include "parser/OutputGuard.h"
@@ -94,7 +94,10 @@ TEST(OutputGuard_findClash_는_모델_인클루드_철자_링크를_잡고_두_�
     // 거절하지 않는 것 — 다른 폴더의 같은 이름 · 상관없는 기존 파일 · 아직 없는 새 이름 · 빈 경로
     s.put("other/main.k", "*KEYWORD\n*END\n");
     ASSERT_FALSE(output_guard::findClash({s.at("other/main.k")}, reads, why));
-    ASSERT_FALSE(output_guard::findClash({s.at("other/inc.k")}, reads, why));
+    // ★다른 폴더라도 덱이 끌어오는 인클루드 이름 자리면 거절이다(2026-11-22 · 3차 4판 L-06) — 산출 덱의 `*INCLUDE inc.k` 가 제 폴더의
+    //   자기 자신을 끌어온다(이 단언은 예전엔 「거절하지 않음」 이었다)
+    ASSERT_TRUE(output_guard::findClash({s.at("other/inc.k")}, reads, why));
+    ASSERT_TRUE(why.find("인클루드 이름") != std::string::npos);
     const std::string unrelated = s.put("d/old_result.k", "*KEYWORD\n*END\n");
     ASSERT_FALSE(output_guard::findClash({unrelated, s.at("d/new.k"), std::string()}, reads, why));
 }
