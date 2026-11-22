@@ -101,3 +101,36 @@
 - JSON 입력(계획 · 대응표)의 BOM · 카탈로그 예시 밖의 설정 꼴 — 잰 적이 없다. 1판에서 재서 표에 올리고, 고칠지는 그 결과로 정한다.
 - `strain` · `squeeze` 명령줄 꼴이 인클루드를 읽게 하는 것 — 새 기능이다.
 - DF ② ~ ⑥ — 이 판들이 올라간 뒤에 연다(`df-request-1117.checklist.md` E-2).
+
+## 5. 6판 — 남긴 것 가운데 사용자가 고른 넷(2026-11-22 저녁)
+- **물음과 답**(고른 선택지의 설명 문장이 규격이다) — 5판의 「목록 밖」 줄을 넷으로 물었다.
+  - phase_modes — 「문서대로 고친다」 · 「phase_modes 가 bare · swell 인 판도 단독 mode 처럼 고정구를 뺀다. 고정구를 빼면 phase 2 가 읽는 phase
+    1 dynain 의 번호가 어긋날 수 있어, 먼저 재고 어긋나면 사슬 쪽도 같이 고친다(덱 바이트가 바뀐다).」 잰 뒤(적층은 고정구를 빼면 셀 번호가
+    밀린다) 다시 물은 답 — 「압입자 · 바닥판만 빼고 탭 · PCM 은 둔다」 · 「phase_modes 의 swell · bare 판은 적층 · 권취 모두 압입자 · 바닥판을
+    짓지 않고 탭 · PCM 은 둔다(사슬의 셀 번호 그대로 — 적층은 지금과 같고 권취는 떠다니던 압입자 · 바닥판이 빠진다). 단독 mode: swell · bare 는
+    지금처럼 다 뺀다. 문서를 그렇게 고친다.」
+  - contact — 「depth 만 덱에 쓰이게」 · 「contact.depth 를 모든 자동 접촉 Card A 의 DEPTH 로 쓴다(기본 5 그대로라 안 준 덱은 같다). soft 는
+    접촉마다 달라 키 하나로 못 정하니 읽기만 두고 주면 [WARN].」
+  - 열 해석 덱의 없는 TMID — 「지금 그대로 · 검증런에서 재기」. 고치지 않고 cae00 검증런 안내의 잴 것에 남긴다.
+  - 다듬은 줄의 `*` — 「다음 판에서 여섯 다 쓸기」 · 「공용 1열 규칙(deckscan::isKeywordLine)으로 맞추고 op 마다 들여 쓴 * 제목 사례 시험 · 변이
+    · 회귀 · 올리기까지 한다.」 여섯은 contact_helpers · cclip · matswap · merge · optimize · modelmeta.
+- **잰 것**(dev 판 — 5판 설치본 `066e21a3` 과 같은 코드)
+  - 적층 — phase_modes [swell, dent] 의 phase 1 은 지금도 압입자 · 바닥판을 짓지 않는다(no_impactor 를 켠 덱과 바이트가 같다). phase 1 의 절점 ·
+    요소 번호가 phase 2 에 같은 자리로 다 있다.
+  - 권취 — 지금 phase 1(swell)은 옆 압입자 · 바닥판을 경계 없이 싣는다. phase 2(dent)와 견주면 phase 1 절점 960 의 번호가 없고 236 이 자리가
+    다르다. 압입자 · 바닥판만 빼면 셀은 같지만 탭 · PCM(절점 58 · 요소 17)의 번호가 phase 2 의 dent 압입자 번호와 겹친다 — 권취는 압입자 ·
+    바닥판을 탭 · PCM 앞에 짓는다.
+  - 기본 mode 가 swell 인데 phase_modes 에 dent 가 있으면 그 판도 고정구 없이 쓴다(설정을 읽을 때 정한 no_fixture 를 물려받는다) — 적층 phase 2
+    dent 덱에 압입자 · 처방 운동이 없다(rc 0). 같은 뿌리라 이 판에 들인다.
+- **설계**
+  - 설정을 읽을 때 사용자가 적은 no_fixture · no_pcm · no_impactor 를 따로 둔다. phase_modes 가 정한 판은 그 판의 mode 와 사용자가 적은 값에서
+    다시 셈한다 — swell · bare 면 no_impactor, no_fixture 면 셋 다. phase_modes 가 닿지 않는 판과 단독 mode 는 지금 그대로다.
+  - 권취는 탭 · PCM 을 압입자 · 바닥판보다 먼저 짓는다(첫 답의 「어긋나면 사슬 쪽도 같이 고친다」 — 적층의 차례와 같다). 고정구가 있는 권취
+    덱(단독 dent · side · phase 2)은 압입자 · 바닥판 · 탭 · PCM 의 절점 · 요소 번호가 바뀐다 — 형상과 카드는 같다.
+  - contact.depth — 정수 0 이상만 받는다. 음수는 Vol_I 에서 하중 곡선 번호라 덱에 없는 곡선을 가리키고, 정수가 아닌 값은 지금 0 으로 읽힌다 — 둘
+    다 덱을 쓰지 않고 rc 1. 적층 둘 · 권취 둘의 Card A DEPTH 칸에 쓴다. soft 를 적으면 [WARN].
+  - `*` 꼴 — 여섯 op 의 키워드 판정을 `deckscan::isKeywordLine`(1열 `*`)으로. ale · implicit 의 같은 꼴도 재서 같으면 같이 쓴다.
+- **시험** — 실패하는 시험을 먼저 쓴다 · 변이 · 전체 회귀 · 단위 · 백엔드 · MCP 계약. 사슬은 phase 1 의 셀 · 탭 · PCM 번호가 phase 2 에 같은
+  자리로 있는지 잰다.
+- **올리기의 두 멈춤** — pykoocae-53 이 SmartTwinPreprocessor v141 굽기 끝(SIF sha256 · 안 KooRemapper sha)을 알리기 전엔 바이너리를 설치하지
+  않는다. hwaxportal-87 이 cae00 수신을 알리기 전엔 main push · Drive 게시를 하지 않는다. 짓기 · 시험 · `corelink-int` 가지 push 는 한다.
