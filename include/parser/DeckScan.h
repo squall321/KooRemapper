@@ -80,13 +80,18 @@ inline size_t firstEndLine(const std::vector<std::string>& lines) {
 }
 
 // 블록(여러 줄 글자)을 첫 `*END` 앞에 한 번 넣는다 — `*END` 가 없으면 끝에 붙인다
-inline void insertBeforeFirstEnd(std::vector<std::string>& lines, const std::vector<std::string>& blocks) {
+inline void insertBeforeFirstEnd(std::vector<std::string>& lines, const std::vector<std::string>& blocks, bool widen = true) {
     std::vector<std::string> add;
     for (const auto& block : blocks) {
         std::istringstream bs(block);
         std::string bl;
         while (std::getline(bs, bl)) add.push_back(bl);
     }
+    // ★덱이 LONG(20 칸)이면 표준 폭으로 지은 새 카드를 20 칸으로 넓혀 넣는다(2026-11-22 · 3차 2판 — 예전엔 10 칸 카드가 rc 0 으로
+    //   섞여 LS-DYNA 가 칸을 잘못 읽는 덱이 나갔다 · load · boundary · contact · relax · stabilize · database …). 덱 폭으로 지은
+    //   절점 · 요소 줄과 제목 · 곡선 점 · 인클루드 이름은 그대로다(`widenGeneratedCards`)
+    //   덱에서 베낀 줄(이미 20 칸)을 섞어 넣는 쪽은 `widen` 을 끄고 제가 지은 줄만 넓혀 넘긴다(ale 의 섹션 사본)
+    if (widen) widenGeneratedCards(add, deckFieldWidth(lines));
     lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(firstEndLine(lines)), add.begin(), add.end());
 }
 

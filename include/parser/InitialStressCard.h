@@ -1,4 +1,4 @@
-// *INITIAL_STRESS_SOLID 카드 1 — 매뉴얼 그대로 I10×8 을 한 곳에서 쓴다(덱 내장·.dynain·cclip 공용)
+// *INITIAL_STRESS_SOLID · _SHELL 카드 1 — 매뉴얼 그대로 I10×8 을 한 곳에서 쓴다(덱 내장·.dynain·cclip 공용)
 #pragma once
 
 #include <cstdio>
@@ -20,6 +20,20 @@ inline const char* card1Comment() {
 inline std::string card1(long long eid) {
     char buf[96];
     std::snprintf(buf, sizeof(buf), "%10lld%10d%10d%10d%10d%10d%10d%10d", eid, 1, 0, 0, 0, 0, 0, 0);
+    return buf;
+}
+
+// *INITIAL_STRESS_SHELL 카드 1 도 같다 (2026-11-22). 덱 내장 · .dynain · cclip 셋이 `I10 + I8×7` 로 써서 여섯째 값(LARGE)이
+// 다섯째 10칸 창(NTENSR)에 들어가 그 칸이 「0       0」 이었다. 매뉴얼은 EID NPLANE NTHICK NHISV NTENSR LARGE NTHINT NTHHSV 의
+// **I10×8** 이다(Vol_I `*INITIAL_STRESS_SHELL` Card 1). 값은 그대로다.
+inline const char* shellCard1Comment() {
+    return "$#     eid    nplane    nthick     nhisv    ntensr     large    nthint    nthhsv";
+}
+
+// 면내 적분점 하나(NPLANE=1) · 두께 적분점 둘(NTHICK=2 — 위 · 아래) · 나머지 0.
+inline std::string shellCard1(long long eid) {
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "%10lld%10d%10d%10d%10d%10d%10d%10d", eid, 1, 2, 0, 0, 0, 0, 0);
     return buf;
 }
 

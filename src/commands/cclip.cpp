@@ -1,7 +1,7 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
 #include "cclip.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
-#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
+#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID · _SHELL 카드 1 정본(I10×8)
 #include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
 #include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
@@ -645,6 +645,10 @@ double cc_solvePressScale(const CcProfile& pr, double EI, double Fwork, double h
 // Raw K-file line splicing (matswap patterns, localized as cc_*)
 // ---------------------------------------------------------------------------
 
+// 모델 덱(과 그 인클루드)의 10 칸 카드 폭 — LONG(20 칸)이면 20. runCclip 이 주 덱에서 한 번 정한다(2026-11-22 · 예전엔 늘 10 이라
+// 「*PART line for pid 2 not found」 로 멈췄다)
+static int cc_cw = 10;
+
 int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefix) {
     int maxId = 0;
     bool active = false, hasTitle = false, titleDone = false;
@@ -662,7 +666,7 @@ int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefi
         }
         if (!active || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
-        auto toks = kw_tok10(ln);
+        auto toks = kw_tok10(ln, cc_cw);
         if (!toks.empty()) { try { int id = std::stoi(toks[0]); if (id > maxId) maxId = id; } catch(...){} }
         active = false;
     }
@@ -705,7 +709,7 @@ int cc_scanMaxPartId(const std::vector<std::string>& lines) {
         if (tr[0]=='*') { inPart = (kw_upper(tr).rfind("*PART",0)==0); titleDone = false; continue; }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
-        auto toks = kw_tok10(ln);
+        auto toks = kw_tok10(ln, cc_cw);
         if (!toks.empty()) { try { maxId = std::max(maxId, std::stoi(toks[0])); } catch(...){} }
         titleDone = false;
     }
@@ -727,7 +731,7 @@ CcPartLine cc_findPartLine(const std::vector<std::string>& lines, int targetPid)
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
-        auto toks = kw_tok10(lines[i]);
+        auto toks = kw_tok10(lines[i], cc_cw);
         if (toks.size() >= 3) {
             try {
                 if (std::stoi(toks[0]) == targetPid) {
@@ -756,7 +760,7 @@ bool cc_idShared(const std::vector<std::string>& lines, int fieldIdx, int target
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
-        auto toks = kw_tok10(ln);
+        auto toks = kw_tok10(ln, cc_cw);
         if ((int)toks.size() > fieldIdx) {
             try {
                 int pid = std::stoi(toks[0]);
@@ -783,7 +787,7 @@ std::vector<std::string> cc_removeBlockById(const std::vector<std::string>& line
             if (jt.empty() || jt[0]=='$') continue;
             if (jt[0]=='*') break;
             if (titlesLeft-- > 0) continue;
-            auto toks = kw_tok10(lines[j]);
+            auto toks = kw_tok10(lines[j], cc_cw);
             if (!toks.empty()) { try { id = std::stoi(toks[0]); } catch(...){} }
             break;
         }
@@ -863,8 +867,8 @@ int cc_removeSolidElements(std::vector<std::string>& lines, const std::set<int>&
 
 std::string cc_updatePartLine(const std::string& ln, int newSecid, int newMid) {
     std::string r = ln;
-    r = kw_setField(r, 10, 10, std::to_string(newSecid));
-    r = kw_setField(r, 20, 10, std::to_string(newMid));
+    r = kw_setField(r, cc_cw, cc_cw, std::to_string(newSecid));       // 카드 폭으로(LONG 이면 20)
+    r = kw_setField(r, 2 * cc_cw, cc_cw, std::to_string(newMid));
     return r;
 }
 
@@ -880,11 +884,8 @@ void cc_writeInitialStressShell(std::ostream& out,
     out << std::scientific << std::setprecision(3);
     bool first = true;
     for (const auto& [eid, sr] : rows) {
-        if (first) out << "$#    eid  nplane  nthick   nhisv  ntensr   large  nthint  nthhsv\n";
-        out << std::setw(10) << eid
-            << std::setw(8) << 1 << std::setw(8) << 2
-            << std::setw(8) << 0 << std::setw(8) << 0
-            << std::setw(8) << 0 << std::setw(8) << 0 << std::setw(8) << 0 << "\n";
+        if (first) out << KooRemapper::initial_stress::shellCard1Comment() << "\n";
+        out << KooRemapper::initial_stress::shellCard1(eid) << "\n";   // I10×8 — InitialStressCard.h
         if (first) { out << "$#     T     sigxx     sigyy     sigzz     sigxy     sigyz     sigzx       eps\n"; first = false; }
         out << std::setw(10) << -1.0;
         for (int k = 0; k < 6; ++k) out << std::setw(10) << sr->bot[k];
@@ -1135,6 +1136,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     // 가 된다(i10 폭 훑기 실측). 우리 `info` 는 공백 토큰을 먼저 보는 관대한 리더라 그것을 못 잡았다.
     // 독립 압축 덱(`dk`)은 자기 `*KEYWORD`(표준)를 달므로 8 그대로다.
     const int ccFw = KooRemapper::deckFieldWidth(lines);
+    cc_cw = ccFw >= 20 ? 20 : 10;   // 10 칸 카드의 칸 폭
     // 이 op 은 인클루드를 **실제로 읽는다**(닫힘 전부 — 중첩 포함). 세트·파트·섹션·재질은 위 코퍼스로,
     // 노드·요소는 같은 닫힘을 주 덱과 같은 리더로 센다(2026-10-16 — 예전에는 노드·요소만 이 덱 안이었다).
     const auto inclReaderMax = KooRemapper::include_closure::readerMax(lines, modelPath, inclClosure);
@@ -1736,10 +1738,11 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             // 본 덱과 같은 개행을 쓴다 — dynain 은 *INCLUDE 로 함께 풀리므로 갈리면 안 된다.
             KooRemapper::DeckWriter df_w(dynainPath, KooRemapper::deck_newline::detect(modelOrig));
             if (!df_w.ok()) { console.error("[cclip] cannot write: " + dynainPath); return 1; }
-            std::ostream& df = df_w.stream();
-            df << "*KEYWORD\n";
-            emit(df);
-            df << "*END\n";
+            std::ostringstream dfs;   // 표준 폭으로 지어 본 덱이 LONG 이면 LONG=Y 로 넓힌다
+            dfs << "*KEYWORD\n";
+            emit(dfs);
+            dfs << "*END\n";
+            df_w.stream() << KooRemapper::widenGeneratedDeck(dfs.str(), ccFw);
             df_w.close();
             ins << "*INCLUDE\n" << dynainName << "\n";
             console.info("[cclip] Initial stress → " + dynainPath);

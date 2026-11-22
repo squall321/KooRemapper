@@ -164,6 +164,62 @@ int keywordFieldWidth(const std::string& keywordLine, int deckFw) {
 
 int realFieldWidth(int intFw) { return intFw >= 20 ? 20 : 16; }
 
+void widenGeneratedCards(std::vector<std::string>& lines, int deckFw) {
+    if (deckFw < 20) return;
+    auto trim = [](const std::string& x) {
+        const size_t a = x.find_first_not_of(" \t\r"), b = x.find_last_not_of(" \t\r");
+        return a == std::string::npos ? std::string() : x.substr(a, b - a + 1);
+    };
+    std::string kw;
+    int nline = 0;
+    for (auto& l : lines) {
+        if (deckscan::isKeywordLine(l)) { kw = deckscan::kwBare(deckscan::keywordToken(l)); nline = 0; continue; }
+        const std::string tr = trim(l);
+        if (tr.empty() || tr[0] == '$') continue;
+        ++nline;
+        const bool titleKw = kw.find("_TITLE") != std::string::npos;
+        if (kw == "*TITLE" || (titleKw && nline == 1) || (kw.rfind("*PART", 0) == 0 && nline % 2 == 1)) continue;
+        if (kw.rfind("*NODE", 0) == 0 || kw.rfind("*ELEMENT_", 0) == 0) continue;
+        if (kw.rfind("*INCLUDE", 0) == 0) continue;            // 파일 이름 줄은 칸이 아니다
+        if (kw.rfind("*DEFINE_CURVE", 0) == 0 && nline > (titleKw ? 2 : 1)) continue;
+        if (kw.rfind("*CONTACT_", 0) == 0 && kw.size() > 3 && kw.compare(kw.size() - 3, 3, "_ID") == 0 && nline == 1) {
+            const std::string cid = trim(l.substr(0, std::min<size_t>(10, l.size())));
+            const std::string head = l.size() > 10 ? l.substr(10) : std::string();   // 제목 칸은 글 그대로(앞 공백 포함)
+            l = std::string(20 - std::min<size_t>(20, cid.size()), ' ') + cid + head;
+            continue;
+        }
+        std::string out;
+        for (size_t c = 0; c < l.size(); c += 10) {
+            const std::string f = trim(l.substr(c, 10));
+            out += std::string(20 - std::min<size_t>(20, f.size()), ' ') + f;
+        }
+        while (!out.empty() && out.back() == ' ') out.pop_back();
+        l = out;
+    }
+}
+
+std::string widenGeneratedDeck(const std::string& text, int deckFw) {
+    if (deckFw < 20) return text;
+    std::vector<std::string> lines;
+    size_t a = 0;
+    while (a < text.size()) {
+        const size_t b = text.find('\n', a);
+        lines.push_back(text.substr(a, b == std::string::npos ? std::string::npos : b - a));
+        if (b == std::string::npos) break;
+        a = b + 1;
+    }
+    for (auto& l : lines) {
+        if (!deckscan::isKeywordLine(l)) continue;
+        if (deckscan::keywordToken(l) == "*KEYWORD" && l.find_first_not_of(" \t\r", l.find_first_of("Kk") + 7) == std::string::npos)
+            l = "*KEYWORD LONG=Y";
+        break;
+    }
+    widenGeneratedCards(lines, deckFw);
+    std::string out;
+    for (size_t i = 0; i < lines.size(); ++i) out += lines[i] + (i + 1 < lines.size() || (!text.empty() && text.back() == '\n') ? "\n" : "");
+    return out;
+}
+
 std::string formatRealField(double value, int width, int precision) {
     std::string s;
     for (int p = std::max(precision, 0); p >= 0; --p) {

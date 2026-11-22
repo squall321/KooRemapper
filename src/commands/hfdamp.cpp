@@ -509,6 +509,7 @@ int hfdamp_apply(std::vector<std::string>& lines,
     insert.push_back(std::string(buf));
 
     // 주 덱의 **첫** *END 앞에 — 예전엔 마지막 *END 앞이라 *END 가 둘인 덱에서 LS-DYNA 가 이 감쇠 카드를 읽지 않았다(셋째 묶음)
+    KooRemapper::widenGeneratedCards(insert, KooRemapper::deckFieldWidth(lines));   // LONG 덱이면 새 카드도 20 칸으로(2026-11-22)
     const size_t endAt = KooRemapper::deckscan::firstEndLine(lines);
     const int endIdx = endAt < lines.size() ? static_cast<int>(endAt) : -1;
 

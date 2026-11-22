@@ -90,6 +90,7 @@ private:
     mutable std::string intOverflow_;  // 정수 상한을 넘는 정수의 첫 자리(「N째 줄의 정수 …」) — 있으면 읽기 끝에 거절한다
     // 지금 섹션의 정수 칸 폭. 키워드 접미사가 덱 기본값을 덮어쓴다(19342-19360).
     int sectionFieldWidth() const;
+    int cardFieldWidth() const;   // 10 칸 카드의 칸 폭 — LONG 이면 20
     // PID → 그 파트 요소의 절점 수(고차 정식일 때만 채운다). *PART 의 SECID 를 풀어
     // *SECTION_SOLID 의 ELFORM 23-29 를 본다(Vol_I 228671-228677). 요소 줄만 보고는
     // 카드가 몇 줄인지 알 수 없어서, 요소를 읽기 전에 미리 훑어 둔다.

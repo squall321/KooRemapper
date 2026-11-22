@@ -438,7 +438,7 @@ private:
 
     // IGA helpers
     int findPartMid(int pid) const;
-    std::string extractMaterialBlock(int origMid, int newMid) const;
+    std::string extractMaterialBlock(int origMid, int newMid, int fileFw) const;
     std::string generateIGAContent(int newId, int newMid, int fepid,
         double xmin, double xmax, double ymin, double ymax, double zmin, double zmax,
         double rr, double rs, double rt,
@@ -446,7 +446,7 @@ private:
         int ir, int styp, double tollg,
         int pr, int ps, int pt,
         int nisr, int niss, int nist,
-        const std::string& matBlock) const;
+        const std::string& matBlock, int fw) const;
 
     // Warpage helpers
     bool validateWarpageOperation(const WarpageOperation& op, const std::string& configDir);

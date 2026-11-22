@@ -1379,6 +1379,7 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
             std::string bl;
             while (std::getline(bs, bl)) combined.push_back(bl);
         }
+        KooRemapper::widenGeneratedCards(combined, KooRemapper::deckFieldWidth(lines));   // LONG 덱이면 새 카드도 20 칸으로(2026-11-22)
         lines.insert(lines.begin() + endPos, combined.begin(), combined.end());
     }
 

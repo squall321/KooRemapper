@@ -1,6 +1,6 @@
 #include "assembly/ModelAssembler.h"
 #include "parser/NodeRefs.h"   // 지운 절점을 가리키는 칸의 정본 표(oneFieldCards · definitionNodeCards · listCardOf)
-#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID 카드 1 정본(I10×8)
+#include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID · _SHELL 카드 1 정본(I10×8)
 #include "parser/IncludeScan.h"
 #include "commands/cnrb2solid.h"
 #include "commands/hfdamp.h"
@@ -1726,6 +1726,16 @@ std::set<int> matCollectUsedMids(const std::vector<std::string>& rawLines) {
     return used;
 }
 
+// 아래 rs 훑기들이 읽고 쓰는 카드 칸 폭 — 표준 · I10 은 10, LONG=Y 덱은 20(Vol_I 「Long Format Input」). 죽은 참조 옮기기 · 훑기가
+// 들머리에서 덱 폭으로 정하고(`RsCardWidth`) 나갈 때 되돌린다. 예전엔 늘 10 이라 LONG 덱의 죽은 PID 참조를 하나도 못 보고 rc 0 으로
+// 그대로 두었다(merge 의 `*MAT_ADD_THERMAL_EXPANSION` PID · 2026-11-22).
+size_t g_rsCw = 10;
+struct RsCardWidth {
+    size_t prev;
+    explicit RsCardWidth(int deckFw) : prev(g_rsCw) { g_rsCw = deckFw >= 20 ? 20 : 10; }
+    ~RsCardWidth() { g_rsCw = prev; }
+};
+
 // 덱 한 줄을 공백·콤마로 나눈 칸들('$' 뒤는 주석)
 std::vector<std::string> rsTokens(const std::string& line) {
     std::vector<std::string> out;
@@ -1745,7 +1755,8 @@ std::vector<std::string> rsTokens(const std::string& line) {
 // SSTYP 를 MSID 자리에서 읽어 STYP 를 통째로 한 칸씩 밀어 보고, 그 접촉은 탐지에서 빠졌다.
 // 콤마가 있으면 자유 형식이므로 콤마로 나누고(빈 칸을 남긴다), 아니면 10칸 고정폭으로 나눈다.
 // 고정폭으로 잘랐는데 칸 안에 공백이 남으면 정렬이 어긋난 덱이므로 예전 방식으로 되돌린다.
-std::vector<std::string> rsCardFields(const std::string& line) {
+std::vector<std::string> rsCardFields(const std::string& line, size_t w = 0) {   // w — 카드 칸 폭(0 이면 g_rsCw)
+    if (w == 0) w = g_rsCw;
     std::string body = line;
     size_t cm = body.find('$');
     if (cm != std::string::npos) body = body.substr(0, cm);
@@ -1770,8 +1781,8 @@ std::vector<std::string> rsCardFields(const std::string& line) {
     }
 
     bool aligned = true;
-    for (size_t i = 0; i < body.size(); i += 10) {
-        std::string f = trim(body.substr(i, 10));
+    for (size_t i = 0; i < body.size(); i += w) {
+        std::string f = trim(body.substr(i, w));
         if (f.find(' ') != std::string::npos || f.find('\t') != std::string::npos) aligned = false;
         out.push_back(f);
     }
@@ -1787,8 +1798,8 @@ bool rsCardFixed10(const std::string& line) {
     if (cm != std::string::npos) body = body.substr(0, cm);
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
     if (body.find(',') != std::string::npos) return false;
-    for (size_t i = 0; i < body.size(); i += 10) {
-        std::string f = body.substr(i, 10);
+    for (size_t i = 0; i < body.size(); i += g_rsCw) {   // 이름은 옛 그대로 — 칸 폭은 g_rsCw(LONG 이면 20)
+        std::string f = body.substr(i, g_rsCw);
         size_t a = f.find_first_not_of(" \t");
         if (a == std::string::npos) continue;
         size_t b = f.find_last_not_of(" \t");
@@ -2355,11 +2366,12 @@ double computeAutoVC(const std::string& matCard, double dropHeight_mm, double la
 
 // 구성원 PID 목록을 *SET_PART_LIST 데이터 줄로 되돌린다 — 한 줄 8개, 10칸 고정폭.
 // 층이 늘어 구성원이 8개를 넘으면 줄을 더 쓴다(한 줄에 몰아 쓰면 LS-DYNA 가 9번째부터 못 읽는다).
-std::vector<std::string> rsFormatSetMembers(const std::vector<int>& members) {
+std::vector<std::string> rsFormatSetMembers(const std::vector<int>& members, size_t w = 0) {   // w 0 이면 g_rsCw(덱 줄을 고쳐 쓴다)
+    if (w == 0) w = g_rsCw;
     std::vector<std::string> out;
     for (size_t i = 0; i < members.size(); i += 8) {
         std::ostringstream ln;
-        for (size_t j = i; j < members.size() && j < i + 8; ++j) ln << std::setw(10) << members[j];
+        for (size_t j = i; j < members.size() && j < i + 8; ++j) ln << std::setw(static_cast<int>(w)) << members[j];
         out.push_back(ln.str());
     }
     return out;
@@ -2372,7 +2384,7 @@ std::string rsMakePartSetBlock(int sid, const std::string& title, const std::vec
     b << "$#     sid\n";
     b << std::setw(10) << sid << "\n";
     b << "$#    pid1      pid2      pid3      pid4      pid5      pid6      pid7      pid8\n";
-    for (const auto& ln : rsFormatSetMembers(members)) b << ln << "\n";
+    for (const auto& ln : rsFormatSetMembers(members, 10)) b << ln << "\n";   // 새 블록은 표준 폭 — 쓸 때 덱 폭으로 넓힌다
     return b.str();
 }
 
@@ -2393,6 +2405,8 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                                            const PidRefMigrateCtx& ctx,
                                            std::set<size_t>& handled,
                                            std::vector<PidRefFinding>& moved) {
+    const RsCardWidth rsw(deckFieldWidth(rawLines_));   // LONG 덱이면 칸 20
+    const int cw = static_cast<int>(g_rsCw);
     if (deadPids.empty() || ctx.newPids.empty()) return;
 
     const auto blocks = rsCollectBlocks(rawLines_);
@@ -2622,7 +2636,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
             }
             std::string line = cardEdit.count(contacts[ci].cardLine)
                              ? cardEdit[contacts[ci].cardLine] : rawLines_[contacts[ci].cardLine];
-            cardEdit[contacts[ci].cardLine] = md_setField(line, side * 10, 10, dit->second);
+            cardEdit[contacts[ci].cardLine] = md_setField(line, side * cw, cw, dit->second);
             record("moved", contacts[ci].kw, contacts[ci].cardLine,
                    std::string(sideName[side]) + " part set " + std::to_string(sid) +
                    " → 층 " + std::to_string(layer + 1) + "(PID " + std::to_string(ctx.newPids[layer]) +
@@ -2655,7 +2669,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
             }
             auto edit = [&](int startCol, int value) {
                 std::string line = cardEdit.count(c.cardLine) ? cardEdit[c.cardLine] : rawLines_[c.cardLine];
-                cardEdit[c.cardLine] = md_setField(line, startCol, 10, value);
+                cardEdit[c.cardLine] = md_setField(line, startCol, cw, value);
             };
             if (ctx.isMerge) {
                 if (c.tied) {
@@ -2663,7 +2677,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                            how + " — merge 로 파트가 하나가 되어 원 파트의 면을 특정할 수 없습니다"
                                  " (세그먼트 세트로 바꾸세요)");
                 } else {
-                    edit(side * 10, ctx.newPids.front());
+                    edit(side * cw, ctx.newPids.front());
                     record("moved", c.kw, c.cardLine,
                            how + " → 합친 PID " + std::to_string(ctx.newPids.front()) + " 로 바꿨습니다");
                 }
@@ -2684,7 +2698,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                     record("left", c.kw, c.cardLine, how + " — " + w);
                     continue;
                 }
-                edit(side * 10, ctx.newPids[layer]);
+                edit(side * cw, ctx.newPids[layer]);
                 record("moved", c.kw, c.cardLine,
                        how + " → 층 " + std::to_string(layer + 1) + "(PID " +
                        std::to_string(ctx.newPids[layer]) +
@@ -2694,8 +2708,8 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                 newSetBlocks.push_back(rsMakePartSetBlock(
                     nsid, "KooRemapper restack layers (from part " + std::to_string(c.id[side]) + ")",
                     ctx.newPids));
-                edit(side * 10, nsid);
-                edit((2 + side) * 10, 2);              // STYP 3(파트) → 2(파트 집합)
+                edit(side * cw, nsid);
+                edit((2 + side) * cw, 2);              // STYP 3(파트) → 2(파트 집합)
                 record("moved", c.kw, c.cardLine,
                        how + " → 층 PID " + std::to_string(ctx.newPids.size()) +
                        "개를 담은 새 세트 " + std::to_string(nsid) + " (STYP 3→2) 로 바꿨습니다");
@@ -2733,9 +2747,9 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                     break;
                 }
                 for (int q = 0; q < 2 && sk.fields[q] >= 0; ++q) {
-                    int col = sk.fields[q] * 10;
+                    int col = sk.fields[q] * cw;
                     if (!deadPid(rsIntField(f, static_cast<size_t>(sk.fields[q])))) continue;
-                    line = md_setField(line, col, 10, mergedPid);
+                    line = md_setField(line, col, cw, mergedPid);
                     changed = true;
                 }
                 if (changed) {
@@ -2766,7 +2780,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                     if (!deadPid(v)) { if (v > 0) seen.insert(v); continue; }
                     int put = mergedPid;
                     if (histPart && seen.count(mergedPid)) put = 0;   // 이미 있으면 빈 칸으로
-                    line = md_setField(line, static_cast<int>(q) * 10, 10, put);
+                    line = md_setField(line, static_cast<int>(q) * cw, cw, put);
                     if (put > 0) seen.insert(put);
                     changed = true;
                 }
@@ -2983,6 +2997,8 @@ void ModelAssembler::applyPidRefRewrites() {
 void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
                                          std::set<size_t>& handled,
                                          std::vector<PidRefFinding>& moved) {
+    const RsCardWidth rsw(deckFieldWidth(rawLines_));   // LONG 덱이면 칸 20
+    const int cw = static_cast<int>(g_rsCw);
     if (subst.empty()) return;
     const auto blocks = rsCollectBlocks(rawLines_);
     for (const auto& b : blocks) {
@@ -3005,7 +3021,7 @@ void ModelAssembler::migrateDeadNodeSets(const std::map<int, int>& subst,
                 if (q >= f.size()) break;
                 auto it = subst.find(rsIntField(f, q));
                 if (it == subst.end()) continue;
-                out = md_setField(out, static_cast<int>(q) * 10, 10, it->second);
+                out = md_setField(out, static_cast<int>(q) * cw, cw, it->second);
                 ++changed;
             }
             if (changed == 0) continue;
@@ -3059,6 +3075,8 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                                          const std::map<int, int>& subst,
                                          std::set<size_t>& handled,
                                          std::vector<PidRefFinding>& moved) {
+    const RsCardWidth rsw(deckFieldWidth(rawLines_));   // LONG 덱이면 칸 20
+    const int cw = static_cast<int>(g_rsCw);
     if (deadNodes.empty()) return;
     auto dead = [&](int v) { return v > 0 && deadNodes.count(v) > 0; };
 
@@ -3218,7 +3236,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                     std::string opt = f[0];
                     for (auto& c : opt) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                     if (opt != "NODE" && opt != "DNODE") continue;
-                    if (trySubst(kw, li, F, 10)) continue;
+                    if (trySubst(kw, li, F, cw)) continue;
                     bool any = false;
                     for (int q : F) if (dead(rsIntField(f, (size_t)q))) any = true;
                     if (!any) continue;
@@ -3228,7 +3246,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                     }
                     std::string out = eff;
                     for (int q : F)
-                        if (dead(rsIntField(f, (size_t)q))) { out = md_setField(out, q * 10, 10, 0); ++removedValues; }
+                        if (dead(rsIntField(f, (size_t)q))) { out = md_setField(out, q * cw, cw, 0); ++removedValues; }
                     pidRefRewrites_[li] = { out };
                     record("moved", kw, li,
                            "세트 " + std::to_string(sid) + ": 지운 노드 칸을 0 으로 비웠습니다(OPTION=" + opt + ")");
@@ -3240,7 +3258,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 for (size_t m = first; m < b.data.size(); ++m) {
                     size_t li = b.data[m];
                     if (!dead(rsIntField(rsCardFields(effLine(li)), (size_t)F[0]))) continue;
-                    if (trySubst(kw, li, F, 10)) continue;
+                    if (trySubst(kw, li, F, cw)) continue;
                     ++removedValues;
                     dropLine("moved", kw, li,
                              "세트 " + std::to_string(sid) + ": 지운 노드 줄을 뺐습니다");
@@ -3296,7 +3314,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 bool any = false;
                 for (int q : F) if ((size_t)q < f.size() && dead(rsIntField(f, (size_t)q))) any = true;
                 if (!any) continue;
-                if (trySubst(kw, li, F, 10)) continue;
+                if (trySubst(kw, li, F, cw)) continue;
                 ++removedValues;
                 dropLine("warn", kw, li, "세그먼트 집합 " + std::to_string(sid) +
                                  ": 지운 노드를 쓰는 세그먼트 줄을 통째로 뺐습니다"
@@ -3372,7 +3390,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
             // Card 1a 는 칸 1-8 이 전부 노드 ID 인 목록이다 — 남은 것만 다시 채워 쓴다.
             const std::vector<int>& F = noderefs::listCardFields(noderefs::ListCard::HistoryNode);
             for (size_t m = 0; m < b.data.size(); ++m)
-                trySubst(kw, b.data[m], F, 10);
+                trySubst(kw, b.data[m], F, cw);
             std::vector<int> keep;
             size_t nDead = 0;
             for (size_t m = 0; m < b.data.size(); ++m) {
@@ -3417,7 +3435,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                 bool anyDead = false;
                 for (int field : dc.fields) if (dead(rsIntField(f, (size_t)field))) anyDead = true;
                 if (!anyDead) continue;
-                if (trySubst(kw, b.data[k], dc.fields, 10)) continue;   // 옮길 수 있으면 옮긴다
+                if (trySubst(kw, b.data[k], dc.fields, cw)) continue;   // 옮길 수 있으면 옮긴다
                 record("manual", kw, b.data[k], why);
             }
         }
@@ -3444,7 +3462,7 @@ void ModelAssembler::cleanupDeadNodeRefs(const std::set<int>& deadNodes,
                     if (!any) continue;
                     std::vector<int> flds;
                     for (int q = 0; q <= jk.lastField; ++q) flds.push_back(q);
-                    if (trySubst(kw, li, flds, 10)) continue;
+                    if (trySubst(kw, li, flds, cw)) continue;
                     record("manual", kw, li, jk.why);
                 }
             }
@@ -3529,6 +3547,7 @@ void ModelAssembler::scanDeadReferences(const std::string& opName,
                                         const std::vector<int>& newPids,
                                         const std::set<size_t>& skip,
                                         std::vector<PidRefFinding> moved) {
+    const RsCardWidth rsw(deckFieldWidth(rawLines_));   // LONG 덱이면 칸 20
     // 이관이 이미 적어 둔 것(moved/left)과 같은 목록에 담아 한 번에 보고한다
     std::vector<PidRefFinding> found = std::move(moved);
     if (deadPids.empty() && deadEids.empty() && deadNodes.empty()) {
@@ -5750,10 +5769,12 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             // Handle *CONTROL_TERMINATION replacement for DR
             if (dynamicRelaxation_ && hasTermination &&
                 upper.substr(0, 20) == "*CONTROL_TERMINATION") {
-                // Replace with DR-compatible termination (endtim=0 for DR-only)
-                output << "*CONTROL_TERMINATION\n";
-                output << "$#  endtim    endcyc     dtmin    endeng    endmas     nosol\n";
-                output << "       0.0         0       0.0       0.0   1.0E+20         0\n";
+                // Replace with DR-compatible termination (endtim=0 for DR-only) — 접미사 없는 키워드라 덱 폭으로 쓴다
+                std::vector<std::string> term = {"*CONTROL_TERMINATION",
+                    "$#  endtim    endcyc     dtmin    endeng    endmas     nosol",
+                    "       0.0         0       0.0       0.0   1.0E+20         0"};
+                widenGeneratedCards(term, deckFw);
+                for (const auto& x : term) output << x << "\n";
                 skippingReplacedSection = true;
                 currentSection = Section::NONE;
                 continue;
@@ -5870,7 +5891,17 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 }
 
                 // Insert keyword blocks (MAT/SECTION/PART from restack)
-                for (const auto& block : addedKeywordBlocks_) {
+                for (const auto& block0 : addedKeywordBlocks_) {
+                    // LONG(20 칸) 덱이면 표준 폭으로 지은 새 카드를 넓힌다 — insertBeforeFirstEnd 와 같은 규칙(2026-11-22)
+                    std::string block = block0;
+                    if (deckFw >= 20) {
+                        std::vector<std::string> bl;
+                        std::istringstream bs(block0);
+                        for (std::string x; std::getline(bs, x);) bl.push_back(x);
+                        widenGeneratedCards(bl, deckFw);
+                        block.clear();
+                        for (const auto& x : bl) block += x + "\n";
+                    }
                     output << block;
                     // 블록은 줄 단위로 끝나야 한다 — YAML 블록에서 온 재질 카드는 끝 줄바꿈이 없어
                     // 뒤 키워드가 같은 줄에 붙었다('0.25*END' → *END 없음, '30.0*PART')
@@ -5880,6 +5911,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 // Insert dynain before *END
                 if (!accumulatedResults_.empty()) {
                     if (dynainEmbed_) {
+                        std::ostringstream emb;   // 표준 폭으로 지어 LONG 덱이면 넓힌다
                         // Separate solid and shell results
                         std::vector<const ElementResult*> solidResults, shellResults;
                         for (const auto& er : accumulatedResults_) {
@@ -5890,17 +5922,17 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
                         // Embed *INITIAL_STRESS_SOLID for solid elements
                         if (!solidResults.empty()) {
-                            output << "*INITIAL_STRESS_SOLID\n";
+                            emb << "*INITIAL_STRESS_SOLID\n";
                             bool firstElem = true;
-                            output << std::scientific << std::setprecision(3);
+                            emb << std::scientific << std::setprecision(3);
                             for (const auto* er : solidResults) {
-                                if (firstElem) output << initial_stress::card1Comment() << "\n";
-                                output << initial_stress::card1(er->elementId) << "\n";   // I10×8 — InitialStressCard.h
+                                if (firstElem) emb << initial_stress::card1Comment() << "\n";
+                                emb << initial_stress::card1(er->elementId) << "\n";   // I10×8 — InitialStressCard.h
                                 if (firstElem) {
-                                    output << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n";
+                                    emb << "$#  sigxx     sigyy     sigzz     sigxy     sigyz     sigxz       eps\n";
                                     firstElem = false;
                                 }
-                                output << std::setw(10) << er->stress.xx
+                                emb << std::setw(10) << er->stress.xx
                                        << std::setw(10) << er->stress.yy
                                        << std::setw(10) << er->stress.zz
                                        << std::setw(10) << er->stress.xy
@@ -5912,29 +5944,20 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
                         // Embed *INITIAL_STRESS_SHELL for shell elements
                         if (!shellResults.empty()) {
-                            output << "*INITIAL_STRESS_SHELL\n";
+                            emb << "*INITIAL_STRESS_SHELL\n";
                             bool firstElem = true;
-                            output << std::scientific << std::setprecision(3);
+                            emb << std::scientific << std::setprecision(3);
                             for (const auto* er : shellResults) {
                                 if (firstElem) {
-                                    output << "$#    eid  nplane  nthick   nhisv  ntensr   large  nthint  nthhsv\n";
+                                    emb << initial_stress::shellCard1Comment() << "\n";
                                 }
-                                // Card 1: EID(10) NPLANE(8) NTHICK(8) NHISV(8) NTENSR(8) LARGE(8) NTHINT(8) NTHHSV(8)
-                                output << std::setw(10) << er->elementId
-                                       << std::setw(8) << 1   // NPLANE
-                                       << std::setw(8) << 2   // NTHICK (top + bottom)
-                                       << std::setw(8) << 0   // NHISV
-                                       << std::setw(8) << 0   // NTENSR
-                                       << std::setw(8) << 0   // LARGE
-                                       << std::setw(8) << 0   // NTHINT
-                                       << std::setw(8) << 0   // NTHHSV
-                                       << "\n";
+                                emb << initial_stress::shellCard1(er->elementId) << "\n";   // I10×8 — InitialStressCard.h
                                 if (firstElem) {
-                                    output << "$#     T     sigxx     sigyy     sigzz     sigxy     sigyz     sigzx       eps\n";
+                                    emb << "$#     T     sigxx     sigyy     sigzz     sigxy     sigyz     sigzx       eps\n";
                                     firstElem = false;
                                 }
                                 // Card 2 (bottom, T=-1.0)
-                                output << std::setw(10) << -1.0
+                                emb << std::setw(10) << -1.0
                                        << std::setw(10) << er->stressBottom.xx
                                        << std::setw(10) << er->stressBottom.yy
                                        << std::setw(10) << er->stressBottom.zz
@@ -5943,7 +5966,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                                        << std::setw(10) << er->stressBottom.xz
                                        << std::setw(10) << er->epsBottom << "\n";
                                 // Card 3 (top, T=+1.0)
-                                output << std::setw(10) << 1.0
+                                emb << std::setw(10) << 1.0
                                        << std::setw(10) << er->stressTop.xx
                                        << std::setw(10) << er->stressTop.yy
                                        << std::setw(10) << er->stressTop.zz
@@ -5953,6 +5976,11 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                                        << std::setw(10) << er->epsTop << "\n";
                             }
                         }
+                        std::vector<std::string> el;
+                        for (std::istringstream es(emb.str()); std::getline(es, el.emplace_back());) {}
+                        el.pop_back();
+                        widenGeneratedCards(el, deckFw);
+                        for (const auto& x : el) output << x << "\n";
                     } else {
                         // Separate file with *INCLUDE
                         output << "*INCLUDE\n";
@@ -5968,16 +5996,19 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
                 // Insert DR keywords before *END if requested
                 if (dynamicRelaxation_) {
+                    std::vector<std::string> dr;   // 표준 폭으로 지어 LONG 덱이면 넓힌다
                     if (!hasDR) {
-                        output << "*CONTROL_DYNAMIC_RELAXATION\n";
-                        output << "$#  nrcyck    drtol   drfctr   drterm   tssfdr   irelal    edttl    idrflg\n";
-                        output << "       250 0.001000       0.0       0.0       0.0         0       0.0         0\n";
+                        dr.push_back("*CONTROL_DYNAMIC_RELAXATION");
+                        dr.push_back("$#  nrcyck    drtol   drfctr   drterm   tssfdr   irelal    edttl    idrflg");
+                        dr.push_back("       250 0.001000       0.0       0.0       0.0         0       0.0         0");
                     }
                     if (!hasTermination) {
-                        output << "*CONTROL_TERMINATION\n";
-                        output << "$#  endtim    endcyc     dtmin    endeng    endmas     nosol\n";
-                        output << "       0.0         0       0.0       0.0   1.0E+20         0\n";
+                        dr.push_back("*CONTROL_TERMINATION");
+                        dr.push_back("$#  endtim    endcyc     dtmin    endeng    endmas     nosol");
+                        dr.push_back("       0.0         0       0.0       0.0   1.0E+20         0");
                     }
+                    widenGeneratedCards(dr, deckFw);
+                    for (const auto& x : dr) output << x << "\n";
                 }
 
                 output << line << "\n";
@@ -6207,7 +6238,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 sectionSolidDataLine++;
                 if (sectionSolidDataLine == 1) {
                     try {
-                        int secId = std::stoi(line.substr(0, 10));
+                        // 10 칸 카드 — LONG(키워드 폭 20)이면 20 칸이다(2026-11-22 · 예전엔 10 칸 자리에 써 LONG 덱의 ELFORM 이 그대로였다)
+                        const int cw = curSecFw >= 20 ? 20 : 10;
+                        int secId = std::stoi(line.substr(0, cw));
                         // Peridynamics: skip this section (SECTION_SOLID_PERI added via addedKeywordBlocks_)
                         if (periSectionIds_.count(secId)) {
                             skipSectionSolidPeri = true;
@@ -6216,10 +6249,10 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                         auto sit = solidSectionElforms_.find(secId);
                         if (sit != solidSectionElforms_.end()) {
                             std::string modified = line;
-                            if (modified.size() < 20) modified.resize(20, ' ');
+                            if ((int)modified.size() < 2 * cw) modified.resize(2 * cw, ' ');
                             std::ostringstream ef;
-                            ef << std::setw(10) << sit->second;
-                            modified.replace(10, 10, ef.str());
+                            ef << std::setw(cw) << sit->second;
+                            modified.replace(cw, cw, ef.str());
                             output << modified << "\n";
                             continue;
                         }
@@ -6233,14 +6266,15 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 sectionShellDataLine++;
                 if (sectionShellDataLine == 1) {
                     try {
-                        int secId = std::stoi(line.substr(0, 10));
+                        const int cw = curSecFw >= 20 ? 20 : 10;   // LONG 이면 20 칸
+                        int secId = std::stoi(line.substr(0, cw));
                         auto sit = shellSectionElforms_.find(secId);
                         if (sit != shellSectionElforms_.end()) {
                             std::string modified = line;
-                            if (modified.size() < 20) modified.resize(20, ' ');
+                            if ((int)modified.size() < 2 * cw) modified.resize(2 * cw, ' ');
                             std::ostringstream ef;
-                            ef << std::setw(10) << sit->second;
-                            modified.replace(10, 10, ef.str());
+                            ef << std::setw(cw) << sit->second;
+                            modified.replace(cw, cw, ef.str());
                             output << modified << "\n";
                             continue;
                         }
@@ -6565,13 +6599,9 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             for (const auto& er : accumulatedResults_) {
                 if (!er.isValid || !er.isShell) continue;
                 if (firstShell) {
-                    dynBuf << "$#    eid  nplane  nthick   nhisv  ntensr   large  nthint  nthhsv\n";
+                    dynBuf << initial_stress::shellCard1Comment() << "\n";
                 }
-                dynBuf << std::setw(10) << er.elementId
-                       << std::setw(8) << 1 << std::setw(8) << 2
-                       << std::setw(8) << 0 << std::setw(8) << 0
-                       << std::setw(8) << 0 << std::setw(8) << 0
-                       << std::setw(8) << 0 << "\n";
+                dynBuf << initial_stress::shellCard1(er.elementId) << "\n";   // I10×8 — InitialStressCard.h
                 if (firstShell) {
                     dynBuf << "$#     T     sigxx     sigyy     sigzz     sigxy     sigyz     sigzx       eps\n";
                     firstShell = false;
@@ -6604,7 +6634,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                 return false;
             }
             // 덱과 같은 개행으로 낸다 — dynain 은 덱이 `*INCLUDE` 로 물고 가므로 갈리면 안 된다.
-            dynFile << deck_newline::apply(dynBuf.str(), deckNewline_);
+            dynFile << deck_newline::apply(widenGeneratedDeck(dynBuf.str(), deckFieldWidth(rawLines_)), deckNewline_);   // LONG 덱이면 LONG=Y
             std::string why;
             if (!finishDeckFile(dynFile, dynainFile, why)) {
                 errorMessage_ = "dynain 을 쓰다 멈췄다: " + why + " / write error in dynain";
@@ -6619,6 +6649,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
 
             DynainWriter dynainWriter;
             dynainWriter.setNewline(deckNewline_);   // refFile 이 비어 있어 자동 판정이 안 된다
+            dynainWriter.setFieldWidth(deckFieldWidth(rawLines_));   // LONG 덱이면 dynain 도 LONG=Y
             if (!dynainWriter.writeFile(dynainFile, finalResult, StrainType::ENGINEERING,
                                          "", "assemble")) {
                 errorMessage_ = "Failed to write dynain: " + dynainWriter.getErrorMessage();
@@ -8931,13 +8962,25 @@ int ModelAssembler::findPartMid(int pid) const {
     return -1;  // Not found
 }
 
-std::string ModelAssembler::extractMaterialBlock(int origMid, int newMid) const {
+std::string ModelAssembler::extractMaterialBlock(int origMid, int newMid, int fileFw) const {
     // 그 MID 의 **구조 재질** 정의를 newMid 로 베낀다 — 공용 재질 훑기(`matids::copyDefinition` · 11-08 (c)). 같은 번호 TMID 의 열 재질과
     // `*MAT_ADD_*` 는 고르지 않고, `_TITLE` 재질은 제목 줄을 건너 MID 를 읽고, MID 칸은 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 **첫**
     // `*MAT` 블록을 베껴 열 카드 · 덧붙임 카드가 앞이면 그것을 IGA 재질로 냈고, `_TITLE` 재질은 제목을 MID 로 읽어 못 찾아 빈 재질(0 물성)을
     // 냈고, 자리가 늘어난 MID(9 → 10)는 칸을 한 글자 밀어 RO 칸을 깨뜨렸다. 주 덱에 없으면 인클루드 파일에서 찾는다.
+    // IGA 파일은 주 덱 폭(fileFw)으로 쓴다 — 베낀 블록의 칸 폭이 그 파일에서 읽힐 폭과 다르면(표준 인클루드의 재질을 LONG=Y 파일로 ·
+    // `+` 키워드를 표준 파일로) 키워드 끝에 `+` · `-` 를 달아 그 블록만 제 폭으로 읽게 한다(Vol_I Getting Started 「Long Format Input」).
+    const std::vector<std::string>* src = &rawLines_;
     std::string out = matids::copyDefinition(rawLines_, origMid, newMid);
-    for (size_t k = 0; out.empty() && k < incl_.files.size(); ++k) out = matids::copyDefinition(incl_.files[k].lines, origMid, newMid);
+    for (size_t k = 0; out.empty() && k < incl_.files.size(); ++k) {
+        src = &incl_.files[k].lines;
+        out = matids::copyDefinition(*src, origMid, newMid);
+    }
+    if (out.empty()) return out;
+    const size_t nl = out.find('\n');
+    const std::string kwLine = out.substr(0, nl);
+    const bool srcLong = keywordFieldWidth(kwLine, deckFieldWidth(*src)) >= 20;
+    if ((keywordFieldWidth(kwLine, fileFw) >= 20) != srcLong)
+        out = deckscan::kwBare(deckscan::keywordToken(kwLine)) + (srcLong ? "+" : "-") + out.substr(nl);
     return out;
 }
 
@@ -8949,10 +8992,13 @@ std::string ModelAssembler::generateIGAContent(
     int ir, int styp, double tollg,
     int pr, int ps, int pt,
     int nisr, int niss, int nist,
-    const std::string& matBlock) const
+    const std::string& matBlock, int fw) const
 {
+    // 주 덱이 LONG=Y 면 이 인클루드도 LONG=Y 로 쓴다 — 표준에서 20 자 이하인 칸은 모두 20 자(Vol_I 「Long Format Input」), 20 자 칸은 그대로.
+    // 맨 `*KEYWORD` 인클루드는 LS-DYNA 가 주 덱 폭으로 읽을 수 있어(못 쟀다) 파일이 제 폭을 밝힌다. 표준 덱의 출력은 예전 그대로다.
+    const int w9 = fw >= 20 ? 20 : 9, w10 = fw >= 20 ? 20 : 10;
     std::ostringstream o;
-    o << "*KEYWORD\n";
+    o << (fw >= 20 ? "*KEYWORD LONG=Y\n" : "*KEYWORD\n");
     o << "$ IGA solid wrapper for FE part " << fepid << "\n";
     o << "$ Generated by KooRemapper\n";
     o << "$---+----1----+----2----+----3----+----4----+----5----+----6----+----7----+----8\n";
@@ -8963,16 +9009,16 @@ std::string ModelAssembler::generateIGAContent(
     // Format: type+name (left, up to 8 chars), value (right-justified, 10 chars)
     auto pI = [&](const char* name, int val) {
         std::ostringstream pn; pn << "I" << name;
-        o << std::left << std::setw(10) << pn.str()
-          << std::right << std::setw(10) << val << "\n";
+        o << std::left << std::setw(w10) << pn.str()
+          << std::right << std::setw(w10) << val << "\n";
     };
     auto pR = [&](const char* name, double val) {
         std::ostringstream pn; pn << "R" << name;
-        o << std::left << std::setw(10) << pn.str();
+        o << std::left << std::setw(w10) << pn.str();
         // Use %g-style formatting (significant digits, no trailing zeros)
         std::ostringstream vs;
         vs << std::setprecision(7) << val;
-        o << std::right << std::setw(10) << vs.str() << "\n";
+        o << std::right << std::setw(w10) << vs.str() << "\n";
     };
     pI("id",     newId);
     pI("mid",    newMid);
@@ -9007,49 +9053,49 @@ std::string ModelAssembler::generateIGAContent(
         o << "$ WARNING: Source material not found - fill in manually\n";
         o << "*MAT_ELASTIC\n";
         o << "$#     mid        ro         e        pr        da        db  not used\n";
-        o << std::setw(10) << newMid
-          << std::setw(10) << "0.0"
-          << std::setw(10) << "0.0"
-          << std::setw(10) << "0.0" << "\n";
+        o << std::setw(w10) << newMid
+          << std::setw(w10) << "0.0"
+          << std::setw(w10) << "0.0"
+          << std::setw(w10) << "0.0" << "\n";
     }
 
     // IGA_DEV_STABILIZATION
     // Card: SID(F1) STYP(F2) A1-A3(F3-F5 blank) TOLLG(F6) — 10-char fixed fields
     o << "*IGA_DEV_STABILIZATION\n";
     o << "$#      sid      styp                                   tollg\n";
-    o << std::setw(10) << "&id" << std::setw(10) << "&styp"
-      << "                              "   // fields 3-5 (30 chars blank)
-      << std::setw(10) << "&tollg" << "\n";
+    o << std::setw(w10) << "&id" << std::setw(w10) << "&styp"
+      << std::string(3 * w10, ' ')   // fields 3-5 blank
+      << std::setw(w10) << "&tollg" << "\n";
 
     // PART
     o << "*PART\n";
     o << "$#\n";
     o << "IGA_Part_" << fepid << "\n";
     o << "$#     pid     secid       mid     eosid      hgid      grav    adpopt      tmid\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "&id" << std::setw(9) << "&mid" << "\n";
+    o << std::setw(w9) << "&id" << std::setw(w9) << "&id" << std::setw(w9) << "&mid" << "\n";
 
     // SECTION_IGA_SOLID
     o << "*SECTION_IGA_SOLID\n";
     o << "$#   secid    elform        ir\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "0" << std::setw(9) << "&ir" << "\n";
+    o << std::setw(w9) << "&id" << std::setw(w9) << "0" << std::setw(w9) << "&ir" << "\n";
 
     // IGA_DEV_VOLUME_XYZ
     o << "*IGA_DEV_VOLUME_XYZ\n";
     o << "$#     vid   patchid       pid      esid      fsid    TETMSH      MYTP\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "&id"
-      << std::setw(9) << "" << std::setw(9) << "" << std::setw(9) << ""
-      << std::setw(9) << "-1" << "\n";
+    o << std::setw(w9) << "&id" << std::setw(w9) << "&id"
+      << std::setw(w9) << "" << std::setw(w9) << "" << std::setw(w9) << ""
+      << std::setw(w9) << "-1" << "\n";
     o << "$#     PID of existing FEA solid with tetmesh\n";
-    o << std::setw(9) << "&fepid" << "\n";
+    o << std::setw(w9) << "&fepid" << "\n";
     o << "$#   brid1     brid2     brid3     brid4     brid5     brid6     brid7     brid8\n";
     o << "\n";
 
     // IGA_SOLID
     o << "*IGA_SOLID\n";
     o << "$#     sid       pid      nisr      niss      nist       rid\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "&id"
-      << std::setw(9) << nisr << std::setw(9) << niss << std::setw(9) << nist
-      << std::setw(9) << "&id" << "\n";
+    o << std::setw(w9) << "&id" << std::setw(w9) << "&id"
+      << std::setw(w9) << nisr << std::setw(w9) << niss << std::setw(w9) << nist
+      << std::setw(w9) << "&id" << "\n";
 
     // IGA_3D_NURBS_XYZ
     // Minimum control points per direction: max(2, pr+1) — B-spline of degree pr needs pr+1 pts
@@ -9072,11 +9118,11 @@ std::string ModelAssembler::generateIGAContent(
 
     o << "*IGA_3D_NURBS_XYZ\n";
     o << "$# patchid        nr        ns        nt        pr        ps        pt\n";
-    o << std::setw(9) << "&id"
-      << std::setw(9) << nr << std::setw(9) << ns << std::setw(9) << nt
-      << std::setw(9) << pr << std::setw(9) << ps << std::setw(9) << pt << "\n";
+    o << std::setw(w9) << "&id"
+      << std::setw(w9) << nr << std::setw(w9) << ns << std::setw(w9) << nt
+      << std::setw(w9) << pr << std::setw(w9) << ps << std::setw(w9) << pt << "\n";
     o << "$#    unir      unis      unit\n";
-    o << std::setw(9) << "1" << std::setw(9) << "1" << std::setw(9) << "1" << "\n";
+    o << std::setw(w9) << "1" << std::setw(w9) << "1" << std::setw(w9) << "1" << "\n";
     o << "$#            rfirst               rlast\n";
     o << std::setw(20) << rxminn << std::setw(20) << rxmaxx << "\n";
     o << "$#            sfirst               slast\n";
@@ -9094,11 +9140,11 @@ std::string ModelAssembler::generateIGAContent(
     // IGA_REFINE_SOLID
     o << "*IGA_REFINE_SOLID\n";
     o << "$      rid      rtyp\n";
-    o << std::setw(9) << "&id" << std::setw(9) << "2" << "\n";
+    o << std::setw(w9) << "&id" << std::setw(w9) << "2" << "\n";
     o << "$    hrtyp        rr        rs        rt\n";
-    o << std::setw(9) << "2" << std::setw(9) << "&rr" << std::setw(9) << "&rs" << std::setw(9) << "&rt" << "\n";
+    o << std::setw(w9) << "2" << std::setw(w9) << "&rr" << std::setw(w9) << "&rs" << std::setw(w9) << "&rt" << "\n";
     o << "$      itr       its       itt\n";
-    o << std::setw(9) << "2" << std::setw(9) << "2" << std::setw(9) << "2" << "\n";
+    o << std::setw(w9) << "2" << std::setw(w9) << "2" << std::setw(w9) << "2" << "\n";
 
     o << "*END\n";
     return o.str();
@@ -9459,7 +9505,7 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
         int newMid = bumpId(maxMaterialId_, "재질 번호");
         std::string matBlock;
         if (origMid > 0) {
-            matBlock = extractMaterialBlock(origMid, newMid);
+            matBlock = extractMaterialBlock(origMid, newMid, deckFieldWidth(rawLines_));
         }
 
         // 5. Generate IGA file content
@@ -9471,7 +9517,7 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
             tgt.ir, tgt.styp, tgt.tollg,
             tgt.pr, tgt.ps, tgt.pt,
             tgt.nisr, tgt.niss, tgt.nist,
-            matBlock);
+            matBlock, deckFieldWidth(rawLines_));
 
         // 6. Build file paths
         std::string igaBasename = basename + "_iga_p" + std::to_string(pid) + ".k";
@@ -12252,11 +12298,17 @@ static std::string mw_trim(const std::string& s) {
     while (b > a && std::isspace((unsigned char)s[b-1])) --b;
     return s.substr(a, b - a);
 }
-static std::vector<std::string> mw_tok10(const std::string& line) {
+// 10 칸 카드를 칸으로 — LONG(20 칸) 덱의 카드는 `w` 20 으로 준다(2026-11-22 · 예전엔 늘 10 으로 읽어 「PID 1 not found」 로 멈췄다)
+static std::vector<std::string> mw_tok10(const std::string& line, int w = 10) {
     std::vector<std::string> v;
-    for (size_t i = 0; i < line.size(); i += 10)
-        v.push_back(mw_trim(line.substr(i, std::min((size_t)10, line.size()-i))));
+    for (size_t i = 0; i < line.size(); i += (size_t)w)
+        v.push_back(mw_trim(line.substr(i, std::min((size_t)w, line.size()-i))));
     return v;
+}
+// 모델 덱 줄의 10 칸 카드 폭 — 첫 `*KEYWORD` 카드가 LONG 이면 20. 인클루드 파일(머리 없음)은 주 덱의 폭을 넘겨받는다
+static int mw_cardW(const std::vector<std::string>& lines, int given) {
+    if (given > 0) return given;
+    return deckFieldWidth(lines) >= 20 ? 20 : 10;
 }
 static std::string mw_upper(std::string s) {
     for (auto& c : s) c = (char)std::toupper((unsigned char)c);
@@ -12350,7 +12402,8 @@ static MwBundle mw_parseBundle(const std::string& path) {
     return bnd;
 }
 
-static int mw_scanMaxId(const std::vector<std::string>& lines, const std::string& prefix) {
+static int mw_scanMaxId(const std::vector<std::string>& lines, const std::string& prefix, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     int maxId=0;
     bool active=false; bool hasTitle=false; bool titleDone=false;
     for (const auto& ln : lines) {
@@ -12367,14 +12420,15 @@ static int mw_scanMaxId(const std::vector<std::string>& lines, const std::string
         }
         if (!active||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = mw_tok10(ln);
+        auto toks = mw_tok10(ln, cw);
         if (!toks.empty()) { try{int id=std::stoi(toks[0]);if(id>maxId)maxId=id;}catch(...){} }
         active=false;
     }
     return maxId;
 }
 
-static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targetPid) {
+static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targetPid, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     MwPartInfo info;
     bool inPart=false; bool titleDone=false;
     for (int i=0; i<(int)lines.size(); ++i) {
@@ -12386,7 +12440,7 @@ static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targ
         }
         if (!inPart||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = mw_tok10(lines[i]);
+        auto toks = mw_tok10(lines[i], cw);
         // PID SECID MID 3필드만 쓴 PART 도 허용 (generate box 출력 등). EOSID·HGID 생략 = 0
         if (toks.size()>=3) {
             try {
@@ -12407,7 +12461,8 @@ static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targ
 // Check if an ID is used by any PART whose PID is NOT in excludeSet
 static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
                                     int fieldIdx, int targetId,
-                                    const std::set<int>& excludeSet) {
+                                    const std::set<int>& excludeSet, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     bool inPart=false; bool titleDone=false;
     for (const auto& ln : lines) {
         std::string tr = mw_trim(ln);
@@ -12418,7 +12473,7 @@ static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
         }
         if (!inPart||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = mw_tok10(ln);
+        auto toks = mw_tok10(ln, cw);
         if ((int)toks.size()>fieldIdx) {
             try {
                 int pid=std::stoi(toks[0]);
@@ -12431,7 +12486,8 @@ static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
 }
 
 static std::vector<std::string> mw_removeBlock(const std::vector<std::string>& lines,
-                                                 const std::string& prefix, int targetId) {
+                                                 const std::string& prefix, int targetId, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::vector<bool> rm(lines.size(), false);
     for (int i=0; i<(int)lines.size(); ) {
         std::string tr = mw_trim(lines[i]);
@@ -12445,7 +12501,7 @@ static std::vector<std::string> mw_removeBlock(const std::vector<std::string>& l
             if (jt.empty()||jt[0]=='$') continue;
             if (jt[0]=='*') break;
             if (titlesLeft-->0) continue;
-            auto toks=mw_tok10(lines[j]);
+            auto toks=mw_tok10(lines[j], cw);
             if (!toks.empty()) { try{id=std::stoi(toks[0]);}catch(...){} }
             break;
         }
@@ -12481,19 +12537,21 @@ static std::string mw_resolveLine(const std::string& line,
     return r;
 }
 
-static std::string mw_updatePartLine(const std::string& ln, int newSecid, int newMid, int newHgid) {
+static std::string mw_updatePartLine(const std::string& ln, int newSecid, int newMid, int newHgid, int cw = 10) {
+    // 칸 자리는 카드 폭으로 — LONG 덱은 20 칸(SECID 20 · MID 40 · HGID 80)
     std::string r = ln;
-    while ((int)r.size()<50) r+=' ';
+    while ((int)r.size()<5*cw) r+=' ';
     auto setF = [&](int start, int w, int v) {
         std::string vs=std::to_string(v);
         if ((int)vs.size()>w) vs=vs.substr(vs.size()-w);
         r.replace(start, w, std::string(w-(int)vs.size(),' ')+vs);
     };
-    setF(10,10,newSecid); setF(20,10,newMid); setF(40,10,newHgid);
+    setF(cw,cw,newSecid); setF(2*cw,cw,newMid); setF(4*cw,cw,newHgid);
     return r;
 }
 
-static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines) {
+static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::vector<int> pids;
     bool inPart=false; bool titleDone=false;
     for (const auto& ln : lines) {
@@ -12505,7 +12563,7 @@ static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines)
         }
         if (!inPart||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = mw_tok10(ln);
+        auto toks = mw_tok10(ln, cw);
         if (!toks.empty()) { try{ pids.push_back(std::stoi(toks[0])); }catch(...){} }
         titleDone=false; // ready for next title+data pair in same *PART block
     }
@@ -12514,7 +12572,8 @@ static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines)
 
 // Find all PIDs whose MID field (toks[2]) is in targetMids
 static std::vector<int> mw_getPidsByMid(const std::vector<std::string>& lines,
-                                          const std::set<int>& targetMids) {
+                                          const std::set<int>& targetMids, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::vector<int> pids;
     bool inPart=false; bool titleDone=false;
     for (const auto& ln : lines) {
@@ -12526,7 +12585,7 @@ static std::vector<int> mw_getPidsByMid(const std::vector<std::string>& lines,
         }
         if (!inPart||tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = mw_tok10(ln);
+        auto toks = mw_tok10(ln, cw);
         if (toks.size()>=3) {
             try {
                 int pid=std::stoi(toks[0]);
@@ -12616,7 +12675,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     // 6. Scan model for max IDs — 인클루드 파일도 같은 스캐너로 센다(이미 있는 번호를 다시 내지 않게)
     auto scanMax = [&](const char* prefix) {
         return std::max(mw_scanMaxId(rawLines_, prefix),
-                        inclMax([prefix](const std::vector<std::string>& L) { return mw_scanMaxId(L, prefix); }));
+                        inclMax([prefix, this](const std::vector<std::string>& L) { return mw_scanMaxId(L, prefix, mw_cardW(rawLines_, 0)); }));
     };
     int maxHGID  = scanMax("*HOURGLASS");
     int maxLCID  = scanMax("*DEFINE_CURVE");
@@ -12724,7 +12783,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
             int appliedMid   = (newMid  >=0) ? newMid   : info2.mid;
             int appliedHgid  = (newHgid >=0) ? newHgid  : info2.hgid;
             rawLines_[info2.dataLine] = mw_updatePartLine(
-                rawLines_[info2.dataLine], appliedSecid, appliedMid, appliedHgid);
+                rawLines_[info2.dataLine], appliedSecid, appliedMid, appliedHgid, mw_cardW(rawLines_, 0));
             infoMessages.push_back("[matswap] Updated PID " + std::to_string(pid) +
                                    " -> SECID=" + std::to_string(appliedSecid) +
                                    " MID=" + std::to_string(appliedMid) +
@@ -12744,6 +12803,8 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         }
         resolvedCards = std::move(filtered);
     }
+    // 번들 카드는 표준 폭이다 — LONG(20 칸) 덱이면 넓혀 넣는다(2026-11-22 · 예전엔 10 칸 *HOURGLASS · *MAT 카드가 rc 0 으로 섞였다)
+    widenGeneratedCards(resolvedCards, deckFieldWidth(rawLines_));
     // 첫 *END 앞(없으면 끝) — 공용 첫 *END 찾기(1열 규칙 · 들여쓴 「  *END」 는 끝이 아니다 · 2026-11-08)
     rawLines_.insert(rawLines_.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(rawLines_)),
                      resolvedCards.begin(), resolvedCards.end());
@@ -12938,7 +12999,8 @@ struct MdMatBlock {
     int endLine = 0;
 };
 
-static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& lines) {
+static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& lines, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::vector<MdMatBlock> blocks;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = mw_trim(lines[i]);
@@ -12967,7 +13029,7 @@ static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& 
                 continue;
             }
             // first data line → extract MID
-            auto toks = mw_tok10(lines[j]);
+            auto toks = mw_tok10(lines[j], cw);
             if (!toks.empty()) {
                 try { blk.mid = std::stoi(toks[0]); } catch (...) {}
             }
@@ -13172,7 +13234,8 @@ static int md_readIntField(const std::string& line, int startCol, int width) {
 // `*PART`(· `_TITLE`) 카드의 (PID, MID, TMID — 첫째 · 셋째 · 여덟째 칸) 가운데 TMID 가 있는 것 — matdb 가 열 카드를 지워도 되는지(11-08 (e)) ·
 // 그 열 카드를 다른 MID 의 파트가 가리키는지(S5) 본다
 struct MdPartThermalRef { int pid = 0, mid = 0, tmid = 0; };
-static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::string>& lines) {
+static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::string>& lines, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::vector<MdPartThermalRef> out;
     bool inPart = false, titleDone = false;
     for (const auto& ln : lines) {
@@ -13186,7 +13249,7 @@ static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::s
         }
         if (!inPart || tr[0] == '$') continue;
         if (!titleDone) { titleDone = true; continue; }
-        const auto toks = mw_tok10(ln);
+        const auto toks = mw_tok10(ln, cw);
         if (toks.size() > 7) {
             try {
                 const int t = std::stoi(toks[7]);
@@ -13206,7 +13269,8 @@ static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::s
 
 // 열 재질 카드(`*MAT_THERMAL_*` · 번호 이름 `*MAT_T01`~`T18`)가 정의하는 TMID(첫 데이터 줄 첫 칸 · `_TITLE` 이면 제목 다음) — 새 열 카드에
 // 빈 TMID 를 고른다(11-08 S5)
-static std::set<int> md_thermalTmids(const std::vector<std::string>& lines) {
+static std::set<int> md_thermalTmids(const std::vector<std::string>& lines, int cw = 0) {
+    cw = mw_cardW(lines, cw);
     std::set<int> out;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string t = mw_trim(lines[i]);
@@ -13217,7 +13281,7 @@ static std::set<int> md_thermalTmids(const std::vector<std::string>& lines) {
             if (lt.empty() || lt[0] == '$') continue;
             if (lt[0] == '*') break;
             if (title) { title = false; continue; }
-            const auto toks = mw_tok10(lines[j]);
+            const auto toks = mw_tok10(lines[j], cw);
             try {
                 const int id = toks.empty() ? 0 : std::stoi(toks[0]);
                 if (id > 0) out.insert(id);
@@ -13323,8 +13387,8 @@ static std::vector<std::string> md_substituteCardPid(const std::string& cardText
     return lines;
 }
 
-static std::string md_updatePartTmid(const std::string& partDataLine, int tmid) {
-    return md_setField(partDataLine, 70, 10, tmid);
+static std::string md_updatePartTmid(const std::string& partDataLine, int tmid, int cw = 10) {
+    return md_setField(partDataLine, 7 * cw, cw, tmid);   // TMID 는 여덟째 칸 — LONG 이면 칸 폭 20
 }
 
 static std::vector<std::string> md_substituteDampingCard(const std::string& cardText,
@@ -13768,8 +13832,11 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                 if (dbMid <= 0) continue;
 
                 // Always assign fresh MID so other parts sharing old MID are unaffected
-                int newMid = ++maxMid;
-                rawLines_[j] = md_setField(rawLines_[j], 20, 10, newMid);
+                int newMid = bumpId(maxMid, "재질 번호");
+                {
+                    const int cw = mw_cardW(rawLines_, 0);   // PART 카드 칸 폭(LONG 이면 20) — MID 는 셋째 칸
+                    rawLines_[j] = md_setField(rawLines_[j], 2 * cw, cw, newMid);
+                }
 
                 // Remove this title from old matBlock to prevent duplicate matching in step 4
                 if (partMid > 0) {
@@ -13943,9 +14010,9 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     std::vector<MdPartThermalRef> inclRefs;
     std::set<int> inclThermal;   // 인클루드 파일이 정의한 열 카드 TMID — matdb 는 인클루드를 고치지 않는다
     for (const auto& f : incl_.files) {
-        const auto r = md_partThermalRefs(f.lines);
+        const auto r = md_partThermalRefs(f.lines, mw_cardW(rawLines_, 0));   // 인클루드는 주 덱의 폭
         inclRefs.insert(inclRefs.end(), r.begin(), r.end());
-        const auto t = md_thermalTmids(f.lines);
+        const auto t = md_thermalTmids(f.lines, mw_cardW(rawLines_, 0));
         inclThermal.insert(t.begin(), t.end());
     }
     std::set<int> partTmids;
@@ -13998,7 +14065,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             if (lt.empty() || lt[0] == '$') { ++j; continue; }
             if (lt[0] == '*') break;
             if (hasT && !st) { st = true; ++j; continue; }
-            auto toks = mw_tok10(rawLines_[j]);
+            auto toks = mw_tok10(rawLines_[j], mw_cardW(rawLines_, 0));
             if (!toks.empty()) {
                 int id = 0;
                 try { id = std::stoi(toks[0]); } catch (...) {}
@@ -14018,7 +14085,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                         // expansion: id is PID, find its MID
                         auto info = mw_getPartInfo(rawLines_, id);
                         if (info.dataLine >= 0) {
-                            auto ptoks = mw_tok10(rawLines_[info.dataLine]);
+                            auto ptoks = mw_tok10(rawLines_[info.dataLine], mw_cardW(rawLines_, 0));
                             if (ptoks.size() > 2) {
                                 int pmid = 0;
                                 try { pmid = std::stoi(ptoks[2]); } catch (...) {}
@@ -14080,7 +14147,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             for (int pid : pids) {
                 auto info = mw_getPartInfo(rawLines_, pid);
                 if (info.dataLine >= 0)
-                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], newTmidOf[mi.modelMid]);
+                    rawLines_[info.dataLine] = md_updatePartTmid(rawLines_[info.dataLine], newTmidOf[mi.modelMid], mw_cardW(rawLines_, 0));
             }
         }
 
@@ -14143,6 +14210,8 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     rawLines_ = std::move(cleanLines);
 
     // 9. Insert new cards before the first *END(없으면 끝) — 공용 첫 *END 찾기(1열 규칙 · 2026-11-08)
+    //    재질 DB 카드는 표준 폭이다 — LONG(20 칸) 덱이면 넓혀 넣는다(2026-11-22)
+    widenGeneratedCards(insertCards, deckFieldWidth(rawLines_));
     rawLines_.insert(rawLines_.begin() + static_cast<std::ptrdiff_t>(deckscan::firstEndLine(rawLines_)),
                      insertCards.begin(), insertCards.end());
 
@@ -19589,11 +19658,14 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
     // 카드 세트의 **길이는 키워드+옵션마다 다르고** 우리에겐 그 표가 없다. 그래서 정의 수집은
     // **넘치게** 한다 — 데이터 줄 첫 칸의 양수를 전부 정의로 본다. 넘치면 **놓칠 뿐** 없는 것을
     // 있다고 말하지 않는다. 오탐과 누락 중 오탐이 훨씬 비싸다(한 번 나면 보고를 아무도 안 믿는다).
-    auto collectFirstFields = [&lines](const RsBlock& b, std::set<int>& into) {
+    // 블록마다 선언된 칸 폭으로 자른다 — LONG=Y 덱의 첫 칸(20)을 10 칸으로 자르면 빈 칸이라 섹션 · 재질이 다 「미정의」 였다(2026-11-22)
+    const int deckFwRef = deckFieldWidth(lines);
+    auto collectFirstFields = [&lines, deckFwRef](const RsBlock& b, std::set<int>& into) {
+        const size_t bw = keywordFieldWidth(lines[b.kwLine], deckFwRef) >= 20 ? 20 : 10;
         for (size_t m = 0; m < b.data.size(); ++m) {
             const std::string& ln = lines[b.data[m]];
             if (ln.find('&') != std::string::npos) continue;      // &name — 값이 기호다
-            int id = rsIntField(rsCardFields(ln), 0);
+            int id = rsIntField(rsCardFields(ln, bw), 0);
             if (id > 0) into.insert(id);
         }
     };

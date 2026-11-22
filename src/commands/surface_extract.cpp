@@ -103,41 +103,47 @@ struct NodeHash2D {
 // Write a uniform `.k` file (used by both modes).
 // `nodes` is iterated in map order; `shells` are emitted as *ELEMENT_SHELL
 // with consecutive EIDs starting from 1.
+// fw — 솔리드 덱의 칸 폭(8 · 10 · 20). 이 파일은 그 덱에 `*INCLUDE` 로 물리므로 같은 폭으로 쓰고 머리에 밝힌다 — 예전엔 늘 표준 폭
+// 맨 `*KEYWORD` 여서, LONG=Y · I10=Y 덱이 물면 LS-DYNA 가 주 덱 폭으로 읽을 수 있었다(Vol_I 「Long Format Input」 — 2026-11-22).
 void writeShellKFile(std::ostream& out,
                      const std::string& sourceTag,
                      const ExtractSurfaceOptions& opts,
                      const std::map<int, Vector3D>& nodes,
-                     const std::vector<FaceKey>& shells) {
+                     const std::vector<FaceKey>& shells,
+                     int fw) {
+    const int iw = fw >= 20 ? 20 : (fw == 10 ? 10 : 8);   // 절점 · 요소 줄의 정수 칸
+    const int rw = fw >= 20 ? 20 : 16;                     // 좌표 칸
+    const int cw = fw >= 20 ? 20 : 10;                     // 10 칸 카드(*PART)
     out << "$# KooRemapper extract-surface\n";
     out << "$# source: " << sourceTag << "\n";
     out << "$# filter: pid=" << opts.filterPid
         << " face=" << opts.face
         << " output_pid=" << opts.outputPid
         << " mid_surface=" << (opts.midSurface ? "yes" : "no") << "\n";
-    out << "*KEYWORD\n";
+    out << (fw >= 20 ? "*KEYWORD LONG=Y\n" : fw == 10 ? "*KEYWORD I10=Y\n" : "*KEYWORD\n");
 
     out << "*PART\n";
     out << "Extracted surface (PID " << opts.outputPid << ")\n";
     out << "$#     pid     secid       mid     eosid       hgid      grav    adpopt      tmid\n";
-    out << std::setw(10) << opts.outputPid
-        << std::setw(10) << opts.outputPid
-        << std::setw(10) << 1
-        << std::setw(10) << 0
-        << std::setw(10) << 0
-        << std::setw(10) << 0
-        << std::setw(10) << 0
-        << std::setw(10) << 0 << "\n";
+    out << std::setw(cw) << opts.outputPid
+        << std::setw(cw) << opts.outputPid
+        << std::setw(cw) << 1
+        << std::setw(cw) << 0
+        << std::setw(cw) << 0
+        << std::setw(cw) << 0
+        << std::setw(cw) << 0
+        << std::setw(cw) << 0 << "\n";
 
     out << "*NODE\n";
     out << "$#   nid               x               y               z      tc      rc\n";
     out << std::scientific << std::setprecision(7);
     for (const auto& [nid, p] : nodes) {
-        out << std::setw(8) << nid
-            << std::setw(16) << p.x
-            << std::setw(16) << p.y
-            << std::setw(16) << p.z
-            << std::setw(8) << 0
-            << std::setw(8) << 0 << "\n";
+        out << std::setw(iw) << nid
+            << std::setw(rw) << p.x
+            << std::setw(rw) << p.y
+            << std::setw(rw) << p.z
+            << std::setw(iw) << 0
+            << std::setw(iw) << 0 << "\n";
     }
     out.unsetf(std::ios_base::floatfield);
 
@@ -147,12 +153,12 @@ void writeShellKFile(std::ostream& out,
     for (const auto& f : shells) {
         int n1 = f[0], n2 = f[1], n3 = f[2], n4 = f[3];
         if (isTriangle(f)) n4 = n3;
-        out << std::setw(8) << eid++
-            << std::setw(8) << opts.outputPid
-            << std::setw(8) << n1
-            << std::setw(8) << n2
-            << std::setw(8) << n3
-            << std::setw(8) << n4 << "\n";
+        out << std::setw(iw) << eid++
+            << std::setw(iw) << opts.outputPid
+            << std::setw(iw) << n1
+            << std::setw(iw) << n2
+            << std::setw(iw) << n3
+            << std::setw(iw) << n4 << "\n";
     }
     out << "*END\n";
 }
@@ -334,7 +340,7 @@ int runExtractSurface(const std::string& solidFile,
             return 1;
         }
         std::ostream& out = out_w.stream();
-        writeShellKFile(out, solidFile, opts, midPositions, midShells);
+        writeShellKFile(out, solidFile, opts, midPositions, midShells, reader.deckFieldWidth());
         out_w.close();
 
         console.info("Mid-surface: " + std::to_string(midShells.size()) + " shells, "
@@ -381,7 +387,7 @@ int runExtractSurface(const std::string& solidFile,
         return 1;
     }
     std::ostream& out = out_w.stream();
-    writeShellKFile(out, solidFile, opts, usedNodes, outFaces);
+    writeShellKFile(out, solidFile, opts, usedNodes, outFaces, reader.deckFieldWidth());
     out_w.close();
 
     // Stats

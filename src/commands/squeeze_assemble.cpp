@@ -318,6 +318,7 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
 
         console.info("Writing dynain: " + dynainFile);
         DynainWriter dynainWriter;
+        dynainWriter.setFieldWidth(reader.deckFieldWidth());   // LONG 메시면 dynain 도 LONG=Y
         if (!dynainWriter.writeFile(dynainFile, results, StrainType::ENGINEERING,
                                     meshFile, "squeeze: " + configFile)) {
             console.error("Failed to write dynain: " + dynainWriter.getErrorMessage());

@@ -43,6 +43,9 @@ static std::vector<int> ale_parsePidList(const std::string& val) {
     return pids;
 }
 
+// 모델 덱의 10 칸 카드 폭 — LONG(20 칸) 덱이면 20(runAle 이 주 덱에서 한 번 정한다 · 인클루드도 이 폭이다 · 2026-11-22)
+static int ale_cw = 10;
+
 static std::map<int, AlePartInfo> ale_buildPartMap(
     const std::vector<std::string>& lines) {
     std::map<int, AlePartInfo> pm;
@@ -55,7 +58,7 @@ static std::map<int, AlePartInfo> ale_buildPartMap(
         if (j < (int)lines.size()) ++j; // skip title line
         while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
         if (j >= (int)lines.size()) continue;
-        auto toks = kw_tok10(lines[j]);
+        auto toks = kw_tok10(lines[j], ale_cw);
         if (toks.size() < 3) continue;
         AlePartInfo info{};
         try {
@@ -87,7 +90,7 @@ static void ale_findMaxIds(const std::vector<std::string>& lines,
             while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
         }
         if (j >= (int)lines.size()) continue;
-        auto toks = kw_tok10(lines[j]);
+        auto toks = kw_tok10(lines[j], ale_cw);
         if (toks.empty()) continue;
         try {
             int id = std::stoi(toks[0]);
@@ -123,13 +126,13 @@ static int ale_modifySectionElform(std::vector<std::string>& lines,
             while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
         }
         if (j >= (int)lines.size()) continue;
-        auto toks = kw_tok10(lines[j]);
+        auto toks = kw_tok10(lines[j], ale_cw);
         if (toks.size() < 2) continue;
         try {
             int sid = std::stoi(toks[0]);
             if (sid != secid) continue;
             int oldElform = std::stoi(toks[1]);
-            lines[j] = kw_setField(lines[j], 10, 10, std::to_string(newElform));
+            lines[j] = kw_setField(lines[j], ale_cw, ale_cw, std::to_string(newElform));
             return oldElform;
         } catch (...) {}
     }
@@ -149,7 +152,7 @@ static std::string ale_duplicateSection(const std::vector<std::string>& lines,
             while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
         }
         if (j >= (int)lines.size()) continue;
-        auto toks = kw_tok10(lines[j]);
+        auto toks = kw_tok10(lines[j], ale_cw);
         if (toks.size() < 2) continue;
         try {
             int sid = std::stoi(toks[0]);
@@ -157,8 +160,8 @@ static std::string ale_duplicateSection(const std::vector<std::string>& lines,
             std::string result = "*SECTION_SOLID\n";
             result += "$    SECID    ELFORM       AET\n";
             std::string dataLine = lines[j];
-            dataLine = kw_setField(dataLine, 0, 10, std::to_string(newSecid));
-            dataLine = kw_setField(dataLine, 10, 10, std::to_string(newElform));
+            dataLine = kw_setField(dataLine, 0, ale_cw, std::to_string(newSecid));   // 덱에서 베낀 줄 — 그 덱의 칸 폭
+            dataLine = kw_setField(dataLine, ale_cw, ale_cw, std::to_string(newElform));
             result += dataLine + "\n";
             return result;
         } catch (...) {}
@@ -177,12 +180,12 @@ static bool ale_updatePartField(std::vector<std::string>& lines,
         if (j < (int)lines.size()) ++j; // skip title line
         while (j < (int)lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
         if (j >= (int)lines.size()) continue;
-        auto toks = kw_tok10(lines[j]);
+        auto toks = kw_tok10(lines[j], ale_cw);
         if (toks.empty()) continue;
         try {
             int p = std::stoi(toks[0]);
             if (p != pid) continue;
-            lines[j] = kw_setField(lines[j], fieldPos, 10, std::to_string(newValue));
+            lines[j] = kw_setField(lines[j], fieldPos / 10 * ale_cw, ale_cw, std::to_string(newValue));   // fieldPos 는 표준 자리
             return true;
         } catch (...) {}
     }
@@ -601,6 +604,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
+    ale_cw = KooRemapper::deckFieldWidth(lines) >= 20 ? 20 : 10;   // 모델 덱의 10 칸 카드 폭(LONG 이면 20)
     auto partMap = ale_buildPartMap(lines);
 
     std::vector<int> alePids;
@@ -700,6 +704,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     int aleHgid = nextHgid++;
 
     std::string insertCards;
+    std::string copiedCards;   // 덱에서 베낀 카드(섹션 사본) — 이미 덱 폭이라 넓히지 않는다
     bool hasHe = false;
 
     for (const auto& entry : aleEntries) {
@@ -710,7 +715,7 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             int newSecid = nextSecid++;
             std::string secCard = ale_duplicateSection(lines, info.secid, newSecid, elform);
             if (!secCard.empty()) {
-                insertCards += secCard;
+                copiedCards += secCard;
                 ale_updatePartField(lines, entry.pid, 10, newSecid);
                 console.println("[ale] NewSec   : SECID=" + std::to_string(newSecid) +
                     " (copied from " + std::to_string(info.secid) +
@@ -821,7 +826,16 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         console.println("[WARNING]  HE preset used but no 'detonation:' section in YAML");
     }
 
-    kw_insertBeforeEnd(lines, insertCards);
+    // 지은 카드는 LONG 덱이면 20 칸으로 넓히고, 베낀 섹션은 그대로 — 둘을 넓히지 않는 길로 넣는다(베낀 줄을 다시 넓히면 깨진다)
+    {
+        std::vector<std::string> gen;
+        std::istringstream gs(insertCards);
+        for (std::string x; std::getline(gs, x);) gen.push_back(x);
+        KooRemapper::widenGeneratedCards(gen, KooRemapper::deckFieldWidth(lines));
+        std::string all = copiedCards;
+        for (const auto& x : gen) all += x + "\n";
+        kw_insertBeforeEnd(lines, all, false);
+    }
 
     // 원본 덱의 개행을 따른다
     KooRemapper::DeckWriter outf_w(outPath, KooRemapper::deck_newline::detect(modelOrig));

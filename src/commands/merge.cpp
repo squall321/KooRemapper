@@ -1286,45 +1286,54 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
     if (!pidRefBlock.empty()) { outf << pidRefBlock; pidRefBlock.clear(); }   // *KEYWORD 가 없는 덱
 
     // Append new material, section, part, and elements for each group
+    // 표준 폭(10 칸)으로 지어 LONG=Y 덱이면 20 칸으로 넓힌다 — 예전엔 LONG 덱에 10 칸 카드를 끼웠다(2026-11-22)
+    std::ostringstream gen;
     for (auto& gr : results) {
-        outf << "$\n";
-        outf << "$ === Merged: " << gr.name << " ===\n";
-        outf << "$\n";
+        gen << "$\n";
+        gen << "$ === Merged: " << gr.name << " ===\n";
+        gen << "$\n";
 
         // MAT_ELASTIC
-        outf << "*MAT_ELASTIC_TITLE\n";
-        outf << gr.name << "\n";
+        gen << "*MAT_ELASTIC_TITLE\n";
+        gen << gr.name << "\n";
         char buf[256];
         // LS-DYNA 10-char fixed fields: MID, RO, E, PR
         snprintf(buf, sizeof(buf), "%10d%10.3E%10.1f%10.4f       0.0       0.0       0.0",
                  gr.mid, gr.matProps.rho, gr.matProps.E, gr.matProps.nu);
-        outf << "$#     mid        ro         e        pr        da        db  not used\n";
-        outf << buf << "\n";
+        gen << "$#     mid        ro         e        pr        da        db  not used\n";
+        gen << buf << "\n";
 
         // CTE if present
         if (gr.matProps.hasCte) {
-            outf << "*MAT_ADD_THERMAL_EXPANSION_TITLE\n";
-            outf << gr.name << "_CTE\n";
+            gen << "*MAT_ADD_THERMAL_EXPANSION_TITLE\n";
+            gen << gr.name << "_CTE\n";
             snprintf(buf, sizeof(buf), "%10d%10d%10.3E",
                      gr.mid, 0, 1.0);
-            outf << "$#     pid      lcid      mult\n";
-            outf << buf << "\n";
+            gen << "$#     pid      lcid      mult\n";
+            gen << buf << "\n";
             snprintf(buf, sizeof(buf), "%10.3E", gr.matProps.cte);
-            outf << "$#                                   alpha\n";
-            outf << buf << "\n";
+            gen << "$#                                   alpha\n";
+            gen << buf << "\n";
         }
 
         // SECTION_SOLID
-        outf << "*SECTION_SOLID\n";
+        gen << "*SECTION_SOLID\n";
         snprintf(buf, sizeof(buf), "%10d%10d", gr.secid, 1);
-        outf << "$#   secid    elform\n";
-        outf << buf << "\n";
+        gen << "$#   secid    elform\n";
+        gen << buf << "\n";
 
         // PART
-        outf << "*PART\n";
-        outf << gr.name << "\n";
+        gen << "*PART\n";
+        gen << gr.name << "\n";
         snprintf(buf, sizeof(buf), "%10d%10d%10d", gr.pid, gr.secid, gr.mid);
-        outf << buf << "\n";
+        gen << buf << "\n";
+    }
+    {
+        std::vector<std::string> gl;
+        for (std::istringstream gs(gen.str()); std::getline(gs, gl.emplace_back());) {}
+        gl.pop_back();
+        KooRemapper::widenGeneratedCards(gl, cpDeckFw);
+        for (const auto& x : gl) outf << x << "\n";
     }
 
     // New elements
@@ -1346,7 +1355,15 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
         }
     }
 
-    for (const auto& blk : pidRefAddedBlocks) outf << blk;
+    {
+        std::vector<std::string> bl;   // 죽은 참조 옮기기가 지은 새 세트(표준 폭) — LONG 덱이면 넓힌다
+        for (const auto& blk : pidRefAddedBlocks) {
+            for (std::istringstream bs(blk); std::getline(bs, bl.emplace_back());) {}
+            bl.pop_back();
+        }
+        KooRemapper::widenGeneratedCards(bl, cpDeckFw);
+        for (const auto& x : bl) outf << x << "\n";
+    }
 
     outf << "*END\n";
     outf_w.close();

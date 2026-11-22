@@ -507,6 +507,12 @@ int KFileReader::sectionFieldWidth() const {
     return keywordFieldWidth(currentKeywordLine_, deckFw_);
 }
 
+// 지금 키워드의 10 칸 카드(*PART · *SECTION · *MAT …) 칸 폭 — 표준 · I10 은 10, LONG(덱 `LONG=Y` · 접미사 `+`)은 20(Vol_I 19315-19316).
+// 예전엔 늘 10 이라 LONG 덱의 재질 E 를 못 읽어 stackwrap · neutralaxis 가 「E 를 못 읽었다」 로 멈췄다(2026-11-22)
+int KFileReader::cardFieldWidth() const {
+    return sectionFieldWidth() >= 20 ? 20 : 10;
+}
+
 namespace {
 
 // 토큰 하나가 숫자 **여러 개**를 품고 있나 — 고정형식 칸이 부호로 붙어 버린 흔적이다.
@@ -1146,8 +1152,9 @@ bool KFileReader::parseSectionShellSection(std::ifstream& file) {
         if (line.empty() || isCommentLine(line)) continue;
         if (isKeywordLine(line)) { file.seekg(lastPos); currentLine_--; linesProcessed_--; return true; }
         try {
-            if (line.length() >= 10) {
-                secId = parseInt(line.substr(0, 10));
+            const int cw = cardFieldWidth();   // LONG 이면 20
+            if ((int)line.length() >= cw) {
+                secId = parseInt(line.substr(0, cw));
             } else {
                 auto tokens = tokenize(line);
                 if (!tokens.empty()) secId = parseInt(tokens[0]);
@@ -1167,8 +1174,9 @@ bool KFileReader::parseSectionShellSection(std::ifstream& file) {
         if (line.empty() || isCommentLine(line)) continue;
         if (isKeywordLine(line)) { file.seekg(lastPos); currentLine_--; linesProcessed_--; break; }
         try {
-            if (line.length() >= 10) {
-                thickness = parseDouble(line.substr(0, 10));
+            const int cw = cardFieldWidth();
+            if ((int)line.length() >= cw) {
+                thickness = parseDouble(line.substr(0, cw));
             } else {
                 auto tokens = tokenize(line);
                 if (!tokens.empty()) thickness = parseDouble(tokens[0]);
@@ -1248,9 +1256,10 @@ bool KFileReader::parsePartSection(std::ifstream& file) {
                 // `$---+--PID----+SECID----+--MID----` 로 10자 단위다(Vol_I, 각 그룹 정확히 10자).
                 // 예전에는 여기서 8칸으로 읽었다 — 칸을 꽉 채운 10칸 덱(공백이 없어 자유형식
                 // 분해가 실패해 이 폴백으로 오는 덱)에서 PID/SECID/MID 를 어긋나게 읽는다.
-                pid = parseInt(line.substr(0, 10));
-                secid = parseInt(line.substr(10, 10));
-                mid = parseInt(line.substr(20, 10));
+                const int cw = cardFieldWidth();   // LONG 이면 20(이 갈래는 칸이 꽉 차 낱말로 못 가른 줄)
+                pid = parseInt(line.substr(0, cw));
+                secid = parseInt(line.substr(cw, cw));
+                mid = parseInt(line.substr(2 * cw, cw));
             }
             else if (line.length() >= 24) {
                 // 8칸으로 쓴 덱을 위한 2차 폴백 — 이 리포가 쓰는 "고정폭 우선 → 폴백" 규율이다.
@@ -1339,7 +1348,7 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
         if (dataLineCount == 0) {
             try {
                 // LS-DYNA default: fixed format (10-character fields)
-                auto tokens = tokenizeFixed(line, 10);
+                auto tokens = tokenizeFixed(line, cardFieldWidth());
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
@@ -1424,7 +1433,7 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
         if (dataLineCount == 0) {
             try {
                 // LS-DYNA default: fixed format (10-character fields)
-                auto tokens = tokenizeFixed(line, 10);
+                auto tokens = tokenizeFixed(line, cardFieldWidth());
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
@@ -1515,7 +1524,7 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
         if (dataLineCount == 0) {
             try {
                 // LS-DYNA default: fixed format (10-character fields)
-                auto tokens = tokenizeFixed(line, 10);
+                auto tokens = tokenizeFixed(line, cardFieldWidth());
                 if (tokens.size() >= 4) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
@@ -1603,7 +1612,7 @@ bool KFileReader::parseMatViscoelasticSection(std::ifstream& file) {
         if (dataLineCount == 0) {
             try {
                 // LS-DYNA default: fixed format (10-character fields)
-                auto tokens = tokenizeFixed(line, 10);
+                auto tokens = tokenizeFixed(line, cardFieldWidth());
                 if (tokens.size() >= 5) {
                     mid = parseInt(tokens[0]);
                     density = parseDouble(tokens[1]);
@@ -1878,8 +1887,8 @@ bool KFileReader::parseMatMooneyRivlinSection(std::ifstream& file) {
         }
 
         if (!foundData) {
-            // Parse first data line using fixed-width format (10 chars per field)
-            auto tokens = tokenizeFixed(line);
+            // Parse first data line using fixed-width format (10 chars per field — LONG 이면 20)
+            auto tokens = tokenizeFixed(line, cardFieldWidth());
 
             // Minimum required: MID, RHO, PR, A (B and REF are optional)
             if (tokens.size() >= 4) {

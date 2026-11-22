@@ -84,6 +84,19 @@ int realFieldWidth(int intFw);
 // 지수(`-1.5e-120`)는 9 자리면 17 자라 16 칸을 넘었다(2026-11-22 · 3차 2판 — map · tetremesh 의 절점 줄 57 자).
 std::string formatRealField(double value, int width, int precision = 9);
 
+// op 이 표준 폭(10 칸 카드)으로 지은 **새 카드 줄**을 LONG(20 칸 · Vol_I 19315-19316) 덱에 맞게 넓힌다(2026-11-22 · 3차 2판).
+//   그대로 두는 줄 — 키워드 · 주석 · 빈 줄 · 제목(`*TITLE` 의 줄 · `_TITLE` 키워드의 첫 줄 · `*PART` 의 홀수째 줄) ·
+//   `*NODE` · `*ELEMENT_*` 줄(부르는 쪽이 덱 폭으로 짓는다) · `*DEFINE_CURVE` 의 점 줄(표준에서도 20 칸 둘) · `*INCLUDE` 의 이름 줄.
+//   `*CONTACT_…_ID` 의 첫 줄은 (I20,A160)(Vol_I 19321-19322), 그 밖의 줄은 10 칸씩 잘라 20 칸에 오른쪽 맞춤.
+//   덱에서 베낀 줄(이미 20 칸)을 섞어 넘기면 다시 넓혀 깨진다 — 표준 폭으로 지은 줄만 넘긴다(붙어 쓴 표준 칸과 20 칸 값 하나는 글자로
+//   가를 수 없다). `deckFw` 가 20 이 아니면 손대지 않는다.
+void widenGeneratedCards(std::vector<std::string>& lines, int deckFw);
+
+// op 이 표준 폭으로 지은 **곁 파일 한 벌**(`*KEYWORD` 로 시작하는 dynain 따위)을 주 덱 폭에 맞춘다 — `deckFw` 가 20 이면 맨 `*KEYWORD` 를
+//   `*KEYWORD LONG=Y` 로 바꾸고 카드 줄을 `widenGeneratedCards` 로 넓힌다. 맨 `*KEYWORD` 인클루드는 LS-DYNA 가 주 덱 폭으로 읽을 수
+//   있어(Vol_I 「Long Format Input」 — 못 쟀다) 파일이 제 폭을 밝힌다(battery 덱을 주 덱 폭으로 쓰는 11-22 결정과 같은 꼴).
+std::string widenGeneratedDeck(const std::string& text, int deckFw);
+
 // ── 보·질량·이산 족 — **격자 요소가 아닌** `*ELEMENT_*` ──────────────────────
 //
 // 왜 `ElemFamily` 를 넓히지 않고 **별도 축**인가 (2026-10-11).

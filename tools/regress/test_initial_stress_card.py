@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# *INITIAL_STRESS_SOLID 카드 1 이 네 쓰기 자리 모두에서 매뉴얼 꼴(I10×8)인지 보는 회귀 시험
+# *INITIAL_STRESS_SOLID · _SHELL 카드 1 이 쓰기 자리 모두에서 매뉴얼 꼴(I10×8)인지 보는 회귀 시험
 """`*INITIAL_STRESS_SOLID` 카드 1 이 매뉴얼 그대로 **I10×8** 인가 — 쓰는 자리 넷 모두.
 
 왜 이 시험이 있나 (2026-10-16).
@@ -14,6 +14,13 @@
   · 80칸 · 10칸 고정폭으로 읽어 [EID, 1, 0, 0, 0, 0, 0, 0] · 칸마다 숫자가 10칸 경계에서 끝난다
   · 머리 주석이 매뉴얼 이름(`iveflg`·`ialegp`·`nthint`·`nthhsv`)이다
   · 카드 2(응력 6 + eps)는 그대로 10칸 일곱이다
+
+`*INITIAL_STRESS_SHELL` 도 같다 (2026-11-22 · 미룬 결함 3차 2판).
+
+  쓰는 자리 셋(assemble 의 덱 내장 · `.dynain` · `cclip`)이 카드 1 을 `I10 + I8×7` 로 썼다. 매뉴얼은
+  EID NPLANE NTHICK NHISV NTENSR LARGE NTHINT NTHHSV 의 **I10×8** 이다. 여섯째 값(LARGE)이 다섯째 10칸 창(NTENSR)에
+  들어가 그 칸이 「0       0」 으로 읽혔다 — 값이 모두 0 이라 뜻은 같았지만, LONG=Y 덱에서 20칸으로 넓힐 때 그 칸이 그대로
+  옮겨졌다. 셸 자리마다 카드 1 이 I10×8 [EID 1 2 0 0 0 0 0] · 카드 2(T · 응력 6 · eps)가 10칸 여덟인지 본다.
 
 usage: test_initial_stress_card.py <KooRemapper 바이너리>
 """
@@ -46,13 +53,13 @@ def run(binary, d, *args):
     return p.returncode, p.stdout + p.stderr
 
 
-def cards(path):
-    """*INITIAL_STRESS_SOLID 블록마다 (머리 주석들, 카드 1 줄들, 카드 2 줄들)."""
+def cards(path, kw="*INITIAL_STRESS_SOLID", per=1):
+    """kw 블록마다 (머리 주석들, 카드 1 줄들, 카드 2 줄들) — 요소 하나가 카드 1 한 줄 + 카드 2 per 줄."""
     L = open(path, encoding="utf-8", errors="replace").read().splitlines()
     out, cur = [], None
     for l in L:
         if l.startswith("*"):
-            cur = {"comments": [], "c1": [], "c2": []} if l.strip().upper() == "*INITIAL_STRESS_SOLID" else None
+            cur = {"comments": [], "c1": [], "c2": []} if l.strip().upper() == kw else None
             if cur is not None:
                 out.append(cur)
             continue
@@ -61,7 +68,7 @@ def cards(path):
         if l.lstrip().startswith("$"):
             cur["comments"].append(l)
             continue
-        (cur["c1"] if (len(cur["c1"]) == len(cur["c2"])) else cur["c2"]).append(l)
+        (cur["c1"] if (len(cur["c1"]) * per == len(cur["c2"])) else cur["c2"]).append(l)
     return out
 
 
@@ -85,6 +92,33 @@ def judge(label, path):
           not any(" ics " in h + " " or "ncomp" in h for h in heads), heads[:2])
     bad2 = [l for l in c2 if len(l.rstrip()) != 70]
     check("%s — 카드 2 는 10칸 일곱 그대로" % label, c2 and not bad2, bad2[:2])
+
+
+def judge_shell(label, path):
+    blocks = cards(path, "*INITIAL_STRESS_SHELL", 2)
+    if not check("%s — *INITIAL_STRESS_SHELL 가 있다" % label, bool(blocks) and any(b["c1"] for b in blocks), path):
+        return
+    c1 = [l for b in blocks for l in b["c1"]]
+    c2 = [l for b in blocks for l in b["c2"]]
+    bad = []
+    for l in c1:
+        f = [l[i:i + 10] for i in range(0, 80, 10)]
+        ok = len(l) == 80 and all(re.fullmatch(r" *-?\d+", x) for x in f)
+        vals = [int(x) for x in f] if ok else []
+        if not ok or vals[1:] != [1, 2, 0, 0, 0, 0, 0] or vals[0] <= 0:
+            bad.append(l)
+    check("%s — 셸 카드 1 이 I10×8 [EID 1 2 0 0 0 0 0](%d줄)" % (label, len(c1)), not bad, bad[:2])
+    bad2 = []
+    for l in c2:
+        f = [l[i:i + 10].strip() for i in range(0, 80, 10)]
+        try:
+            ok = len(l.rstrip()) == 80 and float(f[0]) in (-1.0, 1.0) and all(x for x in f)
+            [float(x) for x in f]
+        except ValueError:
+            ok = False
+        if not ok:
+            bad2.append(l)
+    check("%s — 셸 카드 2 는 10칸 여덟(T · 응력 6 · eps)" % label, len(c2) == 2 * len(c1) and not bad2, bad2[:2])
 
 
 def main():
@@ -128,6 +162,25 @@ def main():
         if check("cclip rc 0 · 초기응력을 쓴 산출이 있다", rc == 0 and hit, (out[-300:], outs)):
             for p in hit:
                 judge("cclip " + os.path.basename(p), p)
+
+        print("[assemble 셸(formstrain) — .dynain · 덱 내장]")
+        shutil.copy2(os.path.join(REPO, "examples", "formstrain", "bent_shell.k"), d)
+        for name, extra, out_name in (("fs_dyn.yaml", "", "bent_fs.dynain"), ("fs_emb.yaml", "dynain_embed: true\n", "bent_fse.k")):
+            open(os.path.join(d, name), "w").write("base_model: bent_shell.k\noutput: %s\n%soperations:\n  - type: formstrain\n"
+                                                    % (out_name.rsplit(".", 1)[0], extra))
+            rc, out = run(binary, d, "assemble", name)
+            if check("assemble 셸 %s rc 0" % out_name, rc == 0 and os.path.exists(os.path.join(d, out_name)), out[-300:]):
+                judge_shell("assemble 셸 " + out_name, os.path.join(d, out_name))
+
+        print("[cclip 셸 — stress_output: embed]")
+        y = open(os.path.join(REPO, "examples", "cclip", "cclip.yaml"), encoding="utf-8").read()
+        open(os.path.join(d, "ccs.yaml"), "w").write(y.replace("output: clip_board_cclip", "output: clip_shell_cclip", 1))
+        rc, out = run(binary, d, "cclip", "ccs.yaml")
+        outs = [os.path.join(d, f) for f in os.listdir(d) if f.startswith("clip_shell_cclip") and f.endswith((".k", ".dynain"))]
+        hit = [p for p in outs if cards(p, "*INITIAL_STRESS_SHELL", 2)]
+        if check("cclip 셸 rc 0 · 셸 초기응력을 쓴 산출이 있다", rc == 0 and hit, (out[-300:], outs)):
+            for p in hit:
+                judge_shell("cclip 셸 " + os.path.basename(p), p)
     finally:
         shutil.rmtree(d, ignore_errors=True)
 

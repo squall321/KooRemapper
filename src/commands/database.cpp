@@ -412,6 +412,15 @@ int runDatabase(const std::string& yamlFile, ConsoleOutput& console) {
 
     // ★블록은 주 덱의 **첫** *END 앞에 한 번 — LS-DYNA 는 첫 *END 에서 멈춘다. 예전엔 *END 마다 넣어 *END 가 둘인 덱에 같은
     //   *DATABASE_* 카드가 두 벌 나갔다(셋째 묶음)
+    // LONG(20 칸) 덱이면 새 카드도 20 칸으로 — 예전엔 10 칸 *DATABASE_* 카드가 rc 0 으로 섞였다(2026-11-22)
+    if (KooRemapper::deckFieldWidth(rawLines) >= 20) {
+        std::vector<std::string> bl;
+        std::istringstream bs(insertBlock);
+        for (std::string x; std::getline(bs, x);) bl.push_back(x);
+        KooRemapper::widenGeneratedCards(bl, 20);
+        insertBlock.clear();
+        for (const auto& x : bl) insertBlock += x + "\n";
+    }
     const size_t endAt = KooRemapper::deckscan::firstEndLine(rawLines);
     const bool endFound = endAt < rawLines.size();
     for (size_t i = 0; i < rawLines.size(); ++i) {

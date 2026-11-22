@@ -74,7 +74,11 @@ static std::string cg_fieldN(const std::string& line, int idx, int w) {
     int len = std::min(w, (int)line.size() - pos);
     return cg_trim(line.substr(pos, len));
 }
-static std::string cg_field10(const std::string& line, int idx) { return cg_fieldN(line, idx, 10); }
+// 덱이 선언한 정수 칸 폭(8 · I10 이면 10 · LONG 이면 20) — `cnrb2spring_apply` 가 한 번 정한다. 정본은 `deckFieldWidth` 하나다.
+static int cg_fieldWidth = 8;
+// 10 칸 카드(*PART · *SET_NODE_LIST · *CONSTRAINED_NODAL_RIGID_BODY …)의 칸 — LONG 덱이면 20(Vol_I 19315-19316 · 예전엔 늘 10 으로
+// 읽어 「CNRB 가 없다」 로 멈췄다 · 2026-11-22)
+static std::string cg_field10(const std::string& line, int idx) { return cg_fieldN(line, idx, cg_fieldWidth >= 20 ? 20 : 10); }
 static std::string cg_field8(const std::string& line, int idx)  { return cg_fieldN(line, idx, 8); }
 
 static int cg_toInt(const std::string& s) {
@@ -616,9 +620,8 @@ static void cg_emitPart(std::vector<std::string>& out, const std::string& title,
     out.push_back(cg_fmt("%10d%10d%10d", pid, secid, mid));
 }
 
-// 덱이 선언한 정수 칸 폭(`*KEYWORD I10=Y` 면 10, 없으면 8). 정본은 `deckFieldWidth` 하나다.
-// ⚠ `*PART`·`*SET_NODE_LIST` 는 **표준이 10칸**이라 이 값과 무관하다(이미 `%10d` 다).
-static int cg_fieldWidth = 8;
+// ⚠ `*PART`·`*SET_NODE_LIST` 는 **표준이 10칸**이라 이 값(`cg_fieldWidth` — 위에서 선언)과 무관하다(이미 `%10d` 다). LONG 덱은
+//   `widenGeneratedCards` 가 새 블록을 20 칸으로 넓힌다.
 
 static long long cg_idCap() {
     long long cap = 1;
@@ -629,8 +632,12 @@ static long long cg_idCap() {
 // *NODE — 덱 폭 + 3×F16 (cnrb2solid 와 같은 형식)
 static std::string cg_nodeLine(int nid, const CgVec3& p) {
     // id 와 TC/RC 만 폭을 따른다 — 좌표는 그대로다(`KFileWriter.cpp:296-303` 과 같은 규칙).
-    return cg_fmt("%*d%16.8e%16.8e%16.8e%*d%*d",
-                  cg_fieldWidth, nid, p.x, p.y, p.z, cg_fieldWidth, 0, cg_fieldWidth, 0);
+    // 실수 칸도 덱 폭을 따른다 — LONG 은 20(Vol_I 19345) · 그 밖은 16
+    const int rw = KooRemapper::realFieldWidth(cg_fieldWidth);
+    const int prec = rw >= 20 ? 12 : 8;
+    return cg_fmt("%*d%s%s%s%*d%*d", cg_fieldWidth, nid, KooRemapper::formatRealField(p.x, rw, prec).c_str(),
+                  KooRemapper::formatRealField(p.y, rw, prec).c_str(), KooRemapper::formatRealField(p.z, rw, prec).c_str(),
+                  cg_fieldWidth, 0, cg_fieldWidth, 0);
 }
 
 // *SET_NODE_LIST_TITLE — 10칸 (ModelAssembler 의 bc_generateSetNode 와 같은 형식)
@@ -1209,6 +1216,8 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
         while (std::getline(bs, bl)) if (!cg_trim(bl).empty()) pre.push_back(bl);
     }
 
+    KooRemapper::widenGeneratedCards(pre, cg_fieldWidth);   // LONG 덱이면 새 카드도 20 칸으로
+    KooRemapper::widenGeneratedCards(ins, cg_fieldWidth);
     std::vector<std::string> out;
     out.reserve(work.size() + head.size() + pre.size() + ins.size() + 2);
     bool headDone = head.empty(), endDone = false;

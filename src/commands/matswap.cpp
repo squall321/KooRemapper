@@ -48,6 +48,10 @@ struct MswBundle {
 
 struct MswPartInfo { int pid=0,secid=0,mid=0,hgid=0,dataLine=-1; };
 
+// 모델 덱의 10 칸 카드 폭 — LONG(20 칸)이면 20. runMatswap 이 모델을 읽은 뒤 한 번 정한다. 번들(머리 없음)은 늘 10 이다(2026-11-22)
+static int msw_cw = 10;
+
+
 static int msw_resolveInt(const std::string& tok, const std::vector<MswParam>& params) {
     if (!tok.empty() && tok[0]=='&') {
         std::string nm = kw_upper(tok.substr(1));
@@ -139,7 +143,7 @@ static int msw_scanMaxId(const std::vector<std::string>& lines,
         }
         if (!active || tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = kw_tok10(ln);
+        auto toks = kw_tok10(ln, msw_cw);
         if (!toks.empty()) { try { int id=std::stoi(toks[0]); if(id>maxId) maxId=id; } catch(...){} }
         active=false;
     }
@@ -158,7 +162,7 @@ static MswPartInfo msw_getPartInfo(const std::vector<std::string>& lines, int ta
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = kw_tok10(lines[i]);
+        auto toks = kw_tok10(lines[i], msw_cw);
         // PID SECID MID 3필드만 쓴 PART 도 허용 (generate box 출력 등). EOSID·HGID 생략 = 0
         if (toks.size()>=3) {
             try {
@@ -188,7 +192,7 @@ static bool msw_isShared(const std::vector<std::string>& lines,
         }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone=true; continue; }
-        auto toks = kw_tok10(ln);
+        auto toks = kw_tok10(ln, msw_cw);
         if ((int)toks.size()>fieldIdx) {
             try {
                 int pid=std::stoi(toks[0]);
@@ -220,7 +224,7 @@ static std::vector<std::string> msw_removeBlock(
             if (jt.empty()||jt[0]=='$') continue;
             if (jt[0]=='*') break;
             if (titlesLeft-->0) continue;
-            auto toks=kw_tok10(lines[j]);
+            auto toks=kw_tok10(lines[j], msw_cw);
             if (!toks.empty()) { try{id=std::stoi(toks[0]);}catch(...){} }
             break;
         }
@@ -262,13 +266,13 @@ static std::string msw_resolveLine(const std::string& line,
 static std::string msw_updatePartLine(const std::string& ln,
                                        int newSecid, int newMid, int newHgid) {
     std::string r = ln;
-    while ((int)r.size()<50) r+=' ';
+    while ((int)r.size()<5*msw_cw) r+=' ';
     auto setF = [&](int start, int w, int v) {
         std::string vs=std::to_string(v);
         if ((int)vs.size()>w) vs=vs.substr(vs.size()-w);
         r.replace(start, w, std::string(w-(int)vs.size(),' ')+vs);
     };
-    setF(10,10,newSecid); setF(20,10,newMid); setF(40,10,newHgid);
+    setF(msw_cw,msw_cw,newSecid); setF(2*msw_cw,msw_cw,newMid); setF(4*msw_cw,msw_cw,newHgid);   // 칸 폭으로(LONG 이면 20)
     return r;
 }
 
@@ -298,6 +302,7 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         KooRemapper::yamlSkipBOM(f);   // 맨 앞 BOM 은 건너뛴다(주 덱 리더와 같다) — 산출에 싣지 않는다
         std::string ln; while (std::getline(f,ln)) modelLines.push_back(ln);
     }
+    msw_cw = KooRemapper::deckFieldWidth(modelLines) >= 20 ? 20 : 10;   // 모델 덱의 10 칸 카드 폭
 
     // 인클루드 닫힘을 읽어 그 안의 번호까지 센다(2026-10-16) — 못 본 자리만 말한다.
     const auto inclClosure = KooRemapper::include_closure::read(modelFile, modelLines);
@@ -440,6 +445,7 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
     }
 
     // 10. Insert resolved bundle cards just before the first *END — 공용 첫 *END 찾기(1열 규칙 · 들여쓴 「  *END」 는 끝이 아니다)
+    KooRemapper::widenGeneratedCards(resolvedCards, KooRemapper::deckFieldWidth(modelLines));   // 번들 카드는 표준 폭 — LONG 덱이면 20 칸으로
     std::vector<std::string> output = modelLines;
     output.insert(output.begin() + static_cast<std::ptrdiff_t>(KooRemapper::deckscan::firstEndLine(output)),
                   resolvedCards.begin(), resolvedCards.end());

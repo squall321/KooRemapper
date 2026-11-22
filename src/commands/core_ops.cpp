@@ -1147,6 +1147,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
         console.error("Failed to load reference mesh: " + std::string(e.what()));
         return 1;
     }
+    const int refDeckFw = reader.deckFieldWidth();   // dynain 은 기준 메시 덱의 폭으로(LONG 이면 LONG=Y)
     console.success("Loaded " + std::to_string(refMesh.getNodeCount()) + " nodes, " +
                    std::to_string(refMesh.getElementCount()) + " elements");
     
@@ -1334,6 +1335,7 @@ int runPrestress(const std::string& refFile, const std::string& defFile,
     // Write output
     DynainWriter writer;
     writer.setLargeDeformation(strainType == StrainType::GREEN_LAGRANGE);
+    writer.setFieldWidth(refDeckFw);
 
     if (hasMaterial) {
         // 이름 규칙은 `prestressOutputs` 하나다(쓰기 관문이 같은 이름으로 견줬다)

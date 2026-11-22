@@ -62,12 +62,18 @@ static double cs_parseDouble(const std::string& s) {
     try { return std::stod(cs_trim(s)); } catch (...) { return 0.0; }
 }
 
-// Fixed-width 10-char field token
-static std::string cs_field10(const std::string& line, int idx) {
-    int pos = idx * 10;
+// Fixed-width 10-char field token — LONG(20 칸) 카드는 `w` 로 준다(2026-11-22)
+static std::string cs_field10(const std::string& line, int idx, int w = 10) {
+    int pos = idx * w;
     if (pos >= (int)line.size()) return "";
-    int len = std::min(10, (int)line.size() - pos);
+    int len = std::min(w, (int)line.size() - pos);
     return cs_trim(line.substr(pos, len));
+}
+
+// 덱 폭(`cs_fieldWidth` — 아래에서 정한다)과 키워드 접미사로 정한 10 칸 카드의 칸 폭 — LONG 이면 20(Vol_I 19315-19316)
+static int cs_fieldWidth = 8;
+static int cs_cardW(const std::string& keywordLine) {
+    return KooRemapper::keywordFieldWidth(keywordLine, cs_fieldWidth) >= 20 ? 20 : 10;
 }
 
 // ============================================================
@@ -216,7 +222,7 @@ static std::map<int, std::vector<int>> cs_parseNodeSets(const std::vector<std::s
     std::map<int, std::vector<int>> sets;
     bool inSet = false;
     bool hasTitle = false, titleDone = false, headerDone = false;
-    int curSid = 0;
+    int curSid = 0, curW = 10;
     for (const auto& ln : lines) {
         std::string tr = cs_trim(ln);
         if (tr.empty()) continue;
@@ -224,6 +230,7 @@ static std::map<int, std::vector<int>> cs_parseNodeSets(const std::vector<std::s
             std::string up = cs_upper(tr);
             inSet = (up.rfind("*SET_NODE_LIST", 0) == 0);
             if (inSet) {
+                curW = cs_cardW(ln);
                 hasTitle   = (up.find("_TITLE") != std::string::npos);
                 titleDone  = false;
                 headerDone = false;
@@ -235,14 +242,14 @@ static std::map<int, std::vector<int>> cs_parseNodeSets(const std::vector<std::s
         if (hasTitle && !titleDone) { titleDone = true; continue; }
         if (!headerDone) {
             // First data line: SID DA1 DA2 DA3 DA4 ...
-            curSid = cs_parseInt(cs_field10(ln, 0));
+            curSid = cs_parseInt(cs_field10(ln, 0, curW));
             headerDone = true;
             sets[curSid]; // create entry
             continue;
         }
-        // Node ID lines: 8 per line, 10-char fields
+        // Node ID lines: 8 per line, 10-char fields(LONG 은 20)
         for (int i = 0; i < 8; ++i) {
-            std::string tok = cs_field10(ln, i);
+            std::string tok = cs_field10(ln, i, curW);
             if (tok.empty()) break;
             int nid = cs_parseInt(tok);
             if (nid > 0) sets[curSid].push_back(nid);
@@ -278,11 +285,12 @@ static std::vector<CnrbDef> cs_parseCnrbs(const std::vector<std::string>& lines)
         while (j < lines.size() && !cs_trim(lines[j]).empty() && cs_trim(lines[j])[0] == '$') ++j;
 
         if (j < lines.size()) {
-            // Data line: PID CID NSID PNODE ...  (10-char fields)
-            def.pid   = cs_parseInt(cs_field10(lines[j], 0));
+            // Data line: PID CID NSID PNODE ...  (10-char fields — LONG 은 20 · 예전엔 늘 10 으로 읽어 NSID 0 · 솔리드 0 개를 rc 0 으로 냈다)
+            const int w = cs_cardW(lines[i]);
+            def.pid   = cs_parseInt(cs_field10(lines[j], 0, w));
             // field 1 = CID (unused)
-            def.nsid  = cs_parseInt(cs_field10(lines[j], 2));
-            def.pnode = cs_parseInt(cs_field10(lines[j], 3));
+            def.nsid  = cs_parseInt(cs_field10(lines[j], 2, w));
+            def.pnode = cs_parseInt(cs_field10(lines[j], 3, w));
             ++j;
         }
 
@@ -371,8 +379,6 @@ static double cs_roundZ(double z, double tol) {
 // 덱이 선언한 정수 칸 폭(`*KEYWORD I10=Y` 면 10, 없으면 8). 정본은 `deckFieldWidth` 하나다 —
 // 리더와 쓰기가 다른 폭을 쓰면 새 층이 통째로 사라진다(ElementCardLayout.h:54 의 그 사고).
 // ⚠ `*PART`·`*SET_NODE_LIST` 는 **표준이 10칸**이라 이 값과 무관하다(이미 `%10d` 다).
-static int cs_fieldWidth = 8;
-
 static std::string cs_widthOverflow;   // 사람이 읽을 요약(앞 몇 건만)
 static int cs_widthOverflowCount = 0;  // 전체 건수
 static int cs_widthOverflowMax = 0;    // 가장 큰 값
@@ -410,8 +416,12 @@ static std::string cs_fmtNode(int nid, double x, double y, double z) {
     cs_noteWidth(nid, "노드");
     char buf[128];
     // id 와 TC/RC 만 폭을 따른다 — 좌표는 그대로다(`KFileWriter.cpp:296-303` 과 같은 규칙).
-    snprintf(buf, sizeof(buf), "%*d%16.8e%16.8e%16.8e%*d%*d",
-             cs_fieldWidth, nid, x, y, z, cs_fieldWidth, 0, cs_fieldWidth, 0);
+    // 실수 칸도 덱 폭을 따른다 — LONG 은 20(Vol_I 19345 — (I20,3F20,2I20)) · 그 밖은 16
+    const int rw = KooRemapper::realFieldWidth(cs_fieldWidth);
+    const int prec = rw >= 20 ? 12 : 8;
+    snprintf(buf, sizeof(buf), "%*d%s%s%s%*d%*d", cs_fieldWidth, nid,
+             KooRemapper::formatRealField(x, rw, prec).c_str(), KooRemapper::formatRealField(y, rw, prec).c_str(),
+             KooRemapper::formatRealField(z, rw, prec).c_str(), cs_fieldWidth, 0, cs_fieldWidth, 0);
     return std::string(buf);
 }
 
@@ -927,6 +937,8 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
         for (auto& l : res.nodeLines)    insertLines.push_back(l);
         insertLines.push_back("*ELEMENT_SOLID");
         for (auto& l : res.elemLines)    insertLines.push_back(l);
+        for (auto* v : {&res.partLines, &res.sectionLines, &res.matLines, &res.setLines, &res.contactLines})
+            KooRemapper::widenGeneratedCards(*v, cs_fieldWidth);   // LONG 덱이면 새 카드도 20 칸으로
         for (auto& l : res.partLines)    insertLines.push_back(l);
         for (auto& l : res.sectionLines) insertLines.push_back(l);
         for (auto& l : res.matLines)     insertLines.push_back(l);
@@ -1093,6 +1105,8 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     int maxNodeId = 0, maxElemId = 0, maxSecId = 0, maxMatId = 0, maxSetId = 0, maxPartId = 0;
+    // 닫힘의 칸 폭은 주 덱이 정한다 — LONG 이면 10 칸 카드도 20 칸이다(예전엔 늘 10 으로 읽어 섹션 · 세트 최대값이 0 이었다)
+    const int scanDeckFw = KooRemapper::deckFieldWidth(lines);
 
     // 주 덱과 인클루드 파일마다 **같은 훑기**로 센다 — 쪼갠 덱 = 쪼개지 않은 덱. 블록마다 올리기만 한다.
     auto scanMaxIds = [&](const std::vector<std::string>& lines) {
@@ -1154,6 +1168,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
             enum class Ns { None, Sec, Set };
             Ns ns = Ns::None;
             bool titleSkipped = true;
+            int w = 10;
             for (const auto& ln : lines) {
                 const std::string tr = cs_trim(ln);
                 if (tr.empty()) continue;
@@ -1164,11 +1179,12 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
                     else                                                     ns = Ns::None;
                     // `_TITLE` 은 데이터 카드 앞에 제목 줄이 한 줄 더 있다.
                     titleSkipped = (up.find("_TITLE") == std::string::npos);
+                    w = KooRemapper::keywordFieldWidth(ln, scanDeckFw) >= 20 ? 20 : 10;
                     continue;
                 }
                 if (ns == Ns::None || tr[0] == '$') continue;
                 if (!titleSkipped) { titleSkipped = true; continue; }
-                const int id = cs_parseInt(cs_field10(ln, 0));
+                const int id = cs_parseInt(cs_field10(ln, 0, w));
                 if (id <= 0) continue;
                 switch (ns) {
                     case Ns::Sec:  maxSecId  = std::max(maxSecId,  id); break;

@@ -56,6 +56,11 @@ public:
      */
     void setNewline(DeckNewline nl) { newline_ = nl; }
 
+    /**
+     * 이 dynain 을 물 덱의 칸 폭(`KFileReader::deckFieldWidth` — 8 · 10 · 20). 20 이면 `*KEYWORD LONG=Y` 와 20 칸 카드로 쓴다(2026-11-22).
+     */
+    void setFieldWidth(int fw) { fieldWidth_ = fw; }
+
     bool writeStrainCSV(
         const std::string& filename,
         const MeshAnalysisResult& results
@@ -74,6 +79,7 @@ public:
 private:
     // 원본 덱의 개행. 이것이 없어서 .dynain 이 늘 LF 로 나갔다(원본이 CRLF 여도).
     DeckNewline newline_ = DeckNewline::LF;
+    int fieldWidth_ = 8;
     std::string errorMessage_;
     bool largeDeformation_;
 

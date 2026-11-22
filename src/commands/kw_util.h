@@ -45,7 +45,8 @@ inline bool kw_isKeyword(const std::string& line) { return KooRemapper::deckscan
 // Split a line into 10-character fixed-width tokens (trimmed)
 // ⚠ LS-DYNA 규칙 — 줄에 쉼표가 있으면 **자유 형식**이다(칸 폭이 아니라 쉼표로 가른다). 예전엔 10칸으로만 잘라
 //   접촉 Card 1 `1,3,3,3`(PID 1 대 PID 3)을 「SET_SEGMENT 1 · SSTYP 0」 으로, Card 2 `0.3,0.2` 의 FD 를 0 으로 읽었다(10-23 실측).
-inline std::vector<std::string> kw_tok10(const std::string& s) {
+// `w` — 칸 폭. LONG(20 칸) 덱의 카드는 20 으로 준다(2026-11-22). 쉼표 줄은 폭과 상관없이 자유형식이다.
+inline std::vector<std::string> kw_tok10(const std::string& s, int w = 10) {
     std::vector<std::string> toks;
     if (s.find(',') != std::string::npos) {
         std::string cur;
@@ -56,8 +57,8 @@ inline std::vector<std::string> kw_tok10(const std::string& s) {
         toks.push_back(kw_trim(cur));
         return toks;
     }
-    for (int i = 0; i < (int)s.size(); i += 10)
-        toks.push_back(kw_trim(s.substr(i, std::min(10, (int)s.size()-i))));
+    for (int i = 0; i < (int)s.size(); i += w)
+        toks.push_back(kw_trim(s.substr(i, std::min(w, (int)s.size()-i))));
     return toks;
 }
 
@@ -190,8 +191,8 @@ inline int kw_removeDrCurves(std::vector<std::string>& lines) {
 // Insert content lines before the first *END (or append if *END not found) — 공용 첫 *END 찾기(1열 규칙 · `deckscan::firstEndLine`).
 // 예전엔 들여쓴 「  *END」(`*COMMENT` 글 속)도 끝으로 보아 그 앞에 넣었다 — 그 줄이 넣은 블록의 데이터가 됐다(2026-11-08)
 inline void kw_insertBeforeEnd(std::vector<std::string>& lines,
-                                const std::string& content) {
-    KooRemapper::deckscan::insertBeforeFirstEnd(lines, {content});
+                                const std::string& content, bool widen = true) {
+    KooRemapper::deckscan::insertBeforeFirstEnd(lines, {content}, widen);
 }
 
 // ---------------------------------------------------------------------------
