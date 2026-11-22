@@ -64,7 +64,8 @@ DECLARED = {
                                            "finishDeckFile 의 매개변수 1곳(새 쓰기가 아니다 — 여섯째 검토 S2)"),
     "src/parser/DynainWriter.cpp": (2, "덱(보존) — refFile 에서 deck_newline::detect 한 값을 쓴다"),
     # ── 계층 자신 ───────────────────────────────────────────────────────────
-    "include/parser/DeckWriter.h": (1, "계층 자신 — 모든 덱 쓰기의 단일 진입점"),
+    "include/parser/DeckWriter.h": (2, "계층 자신 — 모든 덱 쓰기의 단일 진입점 + 닫으며 실패를 보는 "
+                                       "deck_write::finish 의 매개변수 1곳(새 쓰기가 아니다 — 3차 4판 L-18)"),
 }
 
 FAILS = []
