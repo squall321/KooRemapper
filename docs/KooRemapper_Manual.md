@@ -4440,6 +4440,15 @@ KooRemapper battery <config.yaml>
 > 종료 코드 0). 적층 `side` 는 이제 권취처럼 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는
 > 경계는 쓰는 쪽 몫입니다.
 >
+> **`batch.phase_modes` 판의 고정구(2026-11-22 · 사용자 결정)**: 단독 `mode: swell` · `bare` 는 고정구 넷(압입자 · 바닥판 · PCM · 탭)을
+> 다 뺍니다(그대로). `batch.phase_modes` 가 mode 를 정한 판은 그 판의 mode 와 설정에 **적은** `no_fixture` · `no_pcm` · `no_impactor` 로
+> 고정구를 다시 셉니다 — `swell` · `bare` 판은 압입자 · 바닥판만 빼고 탭 · PCM 은 둡니다. 그래서 `phase_modes: [swell, dent]` 의 phase 1
+> 셀 · 탭 · PCM 절점 · 요소 번호가 phase 2 에 같은 번호 · 같은 자리로 있습니다(dynain 사슬). `dent` · `side` 판은 맨 위 `mode` 가
+> `swell` 이어도 고정구를 짓습니다. 전엔 판마다 맨 위 `mode` 로 정한 고정구를 물려받아 권취 `swell` 판이 경계 없는 옆 압입자 · 바닥판을
+> 싣고, 맨 위 `mode: swell` 이면 `dent` 판이 압입자 · 처방 운동 없이 나왔습니다(종료 코드 0). 권취 덱은 이제 탭 · PCM 을 압입자 ·
+> 바닥판보다 먼저 짓습니다(적층과 같은 차례) — 고정구가 있는 권취 덱(`dent` · `side`)은 그 넷의 절점 · 요소 번호가 바뀝니다(형상과
+> 카드는 같습니다).
+>
 > **경로 규칙**(2026-09-18 실행 확인): `output` 의 상대 경로는 [§3.1(a)](#31-yaml-공통-규칙-모든-op) 대로
 > **그 YAML 파일이 있는 폴더** 기준입니다 — `KooRemapper battery cfg/b.yaml` 의 `output: bat_out` 은
 > `cfg/bat_out_tier0_phase1.k` 로 나갑니다(예전에는 작업 폴더에 떨어졌습니다). `output` 이 가리키는 폴더는 미리 있어야 합니다.
@@ -4486,7 +4495,8 @@ KooRemapper battery <config.yaml>
 > - 해석 제어 — `*CONTROL_TERMINATION` · `_TIMESTEP` · `_ENERGY` · `_HOURGLASS` · `_BULK_VISCOSITY` · `_SHELL` · `_SOLID` · `_CONTACT` ·
 >   `_SOLUTION`, DR 모드(`swell` · `bare`)면 `_DYNAMIC_RELAXATION`, phase 2 면 `_THERMAL_SOLVER` · `_THERMAL_TIMESTEP`
 > - 출력 — `*DATABASE_BINARY_D3PLOT` · `_EXTENT_BINARY` · `_GLSTAT` · `_MATSUM` · `_RCFORC`
-> - 고정구 — 압입자 · 바닥판 · PCM · 탭(`mode` · `no_fixture` · `no_pcm` · `no_impactor` 에 따라 — `swell` · `bare` 는 `no_fixture`)
+> - 고정구 — 압입자 · 바닥판 · PCM · 탭(`mode` · `no_fixture` · `no_pcm` · `no_impactor` 에 따라 — 단독 `swell` · `bare` 는
+>   `no_fixture`, `batch.phase_modes` 의 `swell` · `bare` 판은 압입자 · 바닥판만 뺀다)
 > - 경계조건 · 하중 — `*BOUNDARY_SPC_NODE` · `_SPC_SET` · `*BOUNDARY_PRESCRIBED_MOTION_SET` · `*LOAD_SEGMENT_SET` ·
 >   `*LOAD_THERMAL_VARIABLE` · `*AIRBAG_LINEAR_FLUID`, 초기 응력 · 변형률(`*INITIAL_STRESS_SHELL` · `*INITIAL_STRAIN_SOLID`), 접촉 · 곡선
 >

@@ -243,6 +243,7 @@ struct BatteryBatch {
     std::vector<int>    phases;      // 1, 2
     // Per-phase mode overrides (parallel to phases list)
     // e.g. phase_modes: [swell, dent]  →  phase 1 uses "swell", phase 2 uses "dent"
+    // 그 판의 고정구는 그 판의 mode 와 사용자가 적은 값에서 다시 셈한다(generateBatch · 3차 6판) — swell · bare 판은 압입자 · 바닥판만 뺀다
     std::vector<std::string> phaseModes;
 };
 
@@ -305,6 +306,11 @@ struct BatteryConfig {
     bool  coreFill       = false;  // fill inner core void with electrolyte solid
     bool  noThermal      = false;  // force TMID=0 (pure mechanical)
     bool  noFixture      = false;  // skip PCM + impactor + ground + tabs
+    // 설정에 사용자가 적은 no_fixture · no_pcm · no_impactor — mode 에서 셈한 값을 더하기 전(3차 6판). batch.phase_modes 가 정한 판은
+    // 이것과 그 판의 mode 에서 고정구를 다시 셈한다
+    bool  userNoFixture  = false;
+    bool  userNoPcm      = false;
+    bool  userNoImpactor = false;
 
     // ── Pouch pre-tension ────────────────────────────────────
     double pouchExpandRatio = 0.0; // biaxial strain → INITIAL_STRESS_SHELL

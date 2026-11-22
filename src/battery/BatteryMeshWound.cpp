@@ -652,6 +652,14 @@ void WoundMeshGen::buildFlatCell() {
     buildPouch(h_outer, cx, half_L, flatRatio, n_str_out, n_arc_out, ny, dy);
     trackPos_ = false;
 
+    // Tabs + PCM — ★압입자 · 바닥판보다 먼저 짓는다(2026-11-22 · 3차 6판). phase_modes 의 swell · bare 판은 압입자 · 바닥판을 짓지
+    //   않아, 예전 차례(압입자 먼저)면 phase 1 의 탭 · PCM 번호가 phase 2 의 압입자 번호와 겹쳤다(dynain 사슬). 적층의 차례와 같다
+    if (!cfg_.noPcm) {
+        double meshSize = batteryMeshSize(cfg_.tier);
+        buildTabs(ny, dy, meshSize);
+        buildPcm(meshSize);
+    }
+
     // Fixture
     if (!cfg_.noImpactor) {
         if (cfg_.mode == "dent")
@@ -659,13 +667,6 @@ void WoundMeshGen::buildFlatCell() {
         else
             buildSideImpactor();
         buildGroundPlate();
-    }
-
-    // Tabs + PCM
-    if (!cfg_.noPcm) {
-        double meshSize = batteryMeshSize(cfg_.tier);
-        buildTabs(ny, dy, meshSize);
-        buildPcm(meshSize);
     }
 }
 
@@ -1405,15 +1406,15 @@ void WoundMeshGen::buildSpiralCell() {
     buildPouch(h_pouch, cx, half_L, flatRatio, n_str_out, n_arc_out, ny, dy);
     trackPos_ = false;
 
+    if (!cfg_.noPcm) {   // 탭 · PCM 먼저(위 판과 같은 까닭 — 3차 6판)
+        buildTabs(ny, dy, meshSize);
+        buildPcm(meshSize);
+    }
+
     if (!cfg_.noImpactor) {
         if (cfg_.mode == "dent") buildDentImpactor();
         else                     buildSideImpactor();
         buildGroundPlate();
-    }
-
-    if (!cfg_.noPcm) {
-        buildTabs(ny, dy, meshSize);
-        buildPcm(meshSize);
     }
 }
 

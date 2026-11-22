@@ -296,6 +296,11 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
         cfg.swelling.enabled = true;
     }
 
+    // 사용자가 적은 값 — batch.phase_modes 판은 이것에서 고정구를 다시 셈한다(generateBatch · 3차 6판)
+    cfg.userNoFixture  = cfg.noFixture;
+    cfg.userNoPcm      = cfg.noPcm;
+    cfg.userNoImpactor = cfg.noImpactor;
+
     // bare/swell mode: fixture-free DR equilibration mesh
     if (cfg.mode == "bare" || cfg.mode == "swell") {
         cfg.noFixture = true;
@@ -633,8 +638,15 @@ static int generateBatch(const BatteryConfig& baseCfg,
                 cur.nameWithModelType = typeInName;
 
                 // Per-phase mode override (phase_modes: [swell, dent])
+                // ★phase_modes 가 정한 판은 고정구를 그 판의 mode 와 사용자가 적은 값에서 다시 셈한다(2026-11-22 · 3차 6판 · 사용자 결정).
+                //   swell · bare 판은 압입자 · 바닥판만 빼고 탭 · PCM 은 둔다 — phase 1 의 셀 · 탭 · PCM 번호가 phase 2 와 같다(사슬).
+                //   단독 mode: swell · bare 는 설정을 읽을 때 셋 다 뺀다(그대로). 예전엔 기본 mode 로 정한 값을 물려받아 권취 swell 판이
+                //   경계 없는 압입자 · 바닥판을 싣고, 기본 mode 가 swell 이면 dent 판도 압입자 · 처방 운동 없이 썼다(rc 0)
                 if (pi < batch.phaseModes.size()) {
-                    cur.mode = batch.phaseModes[pi];
+                    cur.mode       = batch.phaseModes[pi];
+                    cur.noFixture  = baseCfg.userNoFixture;
+                    cur.noPcm      = baseCfg.userNoPcm || cur.noFixture;
+                    cur.noImpactor = baseCfg.userNoImpactor || cur.noFixture || cur.mode == "bare" || cur.mode == "swell";
                 }
 
                 // Enable swelling for phase 2 or swell mode
