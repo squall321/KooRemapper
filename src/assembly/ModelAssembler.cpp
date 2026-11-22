@@ -2578,7 +2578,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                 auto f = rsCardFields(rawLines_[li]);
                 if (f.empty() || !deadPids.count(rsIntField(f, 0))) continue;
                 std::vector<std::string> rep;
-                for (int np : ctx.newPids) rep.push_back(md_setField(rawLines_[li], 0, 10, np));
+                for (int np : ctx.newPids) rep.push_back(md_setField(rawLines_[li], 0, cw, np));
                 pidRefRewrites_[li] = rep;
                 record("moved", s.kw, li,
                        "세트 " + std::to_string(sid) + ": 죽은 PID 줄을 새 PID " +

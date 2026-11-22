@@ -13,6 +13,8 @@
   A. 모든 사례 — rc 가 무엇이든 산출(덱 · 보고 · JSON)에 상한을 넘거나 넘쳐 음수가 된 번호가 없다
   B. 위 여덟 — rc 1 · 까닭에 「2147483647」 · 산출 덱이 없다(보고 · 곁파일도)
   C. 바닥 — 같은 덱의 상한 번호를 2000000000 으로 낮추면 위 여덟이 상한 까닭으로 멈추지 않고 산출에 넘친 번호가 없다
+  D. 공용 발행자(`ids::IdAllocator` — contact 의 CID · 세트) — 접촉 CID 가 2147483647 인 덱에 contact create 는 rc 1 · 까닭에 상한 ·
+     산출 없음, 2000000000 이면 rc 0 · 넘친 번호 없음(사례 덱에는 접촉이 없어 A 가 이 길을 못 탔다 — 변이가 살아남았다)
 
 usage: test_id_cursor_limit.py <KooRemapper 바이너리>
 """
@@ -20,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -187,6 +190,31 @@ def main():
             check(f"C {spec['name']} — 상한 까닭 없음 · 넘친 번호 없음", "2147483647" not in text and not hits and bool(outs),
                   (rc, hits[:3], text[-300:]))
             shutil.rmtree(root, ignore_errors=True)
+        print("[D — 공용 발행자 · 접촉 CID 가 상한인 덱]")
+        cspec = {o["name"]: o for o in T.OPS}["contact"]
+        for cid, want in ((2147483647, 1), (2000000000, 0)):
+            d = os.path.join(top, "contact_cid_%d" % cid)
+            os.makedirs(d)
+            for fn, content in cspec["files"].items():
+                with open(os.path.join(d, fn), "w", encoding="utf-8") as f:
+                    f.write(content)
+            subprocess.run([T_BINARY, "generate", "box", "box.yaml"], cwd=d, capture_output=True, timeout=300)
+            with open(os.path.join(d, "box.k"), encoding="utf-8") as f:
+                t = i10(f.read())
+            card = ("*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n%10d%s\n%10d%10d%10d%10d\n%10.1f\n%10.1f\n"
+                    % (cid, "atlimit", 1, 0, 3, 0, 0.0, 1.0))
+            with open(os.path.join(d, "box.k"), "w", encoding="utf-8") as f:
+                f.write(t.replace("*END", card + "*END", 1))
+            p = subprocess.run([T_BINARY, "contact", "contact.yaml"], cwd=d, capture_output=True, timeout=300)
+            text = (p.stdout + p.stderr).decode("utf-8", "replace")
+            out = os.path.join(d, "box_contact.k")
+            if want == 1:
+                check("D CID %d — contact create rc 1 · 까닭에 상한 · 산출 없음" % cid,
+                      p.returncode == 1 and "2147483647" in text and not os.path.exists(out), (p.returncode, text[-300:]))
+            else:
+                data = open(out, "rb").read() if os.path.exists(out) else b""
+                check("D CID %d — rc 0 · 넘친 번호 없음" % cid, p.returncode == 0 and data and not overflowed(data),
+                      (p.returncode, overflowed(data)[:3], text[-300:]))
     finally:
         shutil.rmtree(top, ignore_errors=True)
     print()

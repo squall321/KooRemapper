@@ -16,7 +16,10 @@
   C. info --strict — LONG 사례 rc 0
   D. 나머지 사례 전부 — 설계된 거절 아홉(REFUSE)은 LONG 사례 rc 가 0 이 아니다. 그 밖은 A 와 같다 — 새로 쓰는 카드 · 곁 파일(dynain ·
      IGA 인클루드)도 덱 폭으로 쓴다(11-22 · 2판 탐침이 찾은 표준 폭 카드 열다섯 op). 산출 가운데 덱 꼴(`.k` · `.dynain` · `*KEYWORD` 로
-     시작하는 파일)을 다 견준다. 머리 없는 산출은 LS-DYNA 처럼 주 덱 폭을 물려받는 것으로 읽는다.
+     시작하는 파일)을 다 견준다. 머리 없는 산출은 LS-DYNA 처럼 주 덱 폭을 물려받는 것으로 읽는다. IGA 인클루드는 낱말(`&이름`)로 견주므로
+     LONG 쪽 칸이 20 칸 자리에 섰는지(왼쪽 · 오른쪽 맞춤)를 따로 본다.
+  E. 사례에 없는 꼴(변이가 살아남은 자리) — assemble 의 덱 내장 초기응력(`dynain_embed`) + DR 카드 · cclip 의 `stress_output: include`
+     dynain · 재질이 표준 폭 인클루드에 있는 IGA(베낀 블록의 키워드에 `-`) · merge 의 세트(목록 · 열 꼴) 옮기기 · matswap 옛 자리 인자 꼴
 
 usage: test_long_readers.py <KooRemapper 바이너리>
 """
@@ -29,6 +32,7 @@ import tempfile
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, HERE)
 import test_deck_bom as T  # noqa: E402 — 도움말 사례를 차리는 판(Case)
 
@@ -209,6 +213,26 @@ def deck_like(rel, data):
     return rel.endswith((".k", ".dynain")) or data.lstrip()[:8].upper() == b"*KEYWORD"
 
 
+def misaligned20(text):
+    """LONG 산출의 `*IGA_*` · `*PARAMETER*` · `*PART` · `*SECTION_IGA*` 데이터 줄에서 20 칸 자리에 서지 않은 낱말이 있는 줄 — 낱말은 20 의
+    배수 자리에서 시작하거나(왼쪽 맞춤) 20 의 배수 자리에서 끝난다(오른쪽 맞춤)."""
+    bad, kw, nline = [], "", 0
+    for line in text.split("\n"):
+        if line.startswith("*"):
+            kw, nline = line.split()[0].upper(), 0
+            continue
+        if not line.strip() or line.startswith("$"):
+            continue
+        nline += 1
+        if not kw.startswith(("*IGA_", "*PARAMETER", "*PART", "*SECTION_IGA")) or is_title_row(kw, nline):
+            continue
+        for m in re.finditer(r"\S+", line.rstrip()):
+            if m.start() % 20 and m.end() % 20:
+                bad.append(line)
+                break
+    return bad
+
+
 def compare(sec, name, rs, os_, rl, tl, ol):
     check(f"{sec} {name} — LONG rc 0 · 산출 이름이 같다", rs == 0 and rl == 0 and sorted(ol) == sorted(os_),
           (rs, rl, sorted(ol), sorted(os_), tl[-400:]))
@@ -220,6 +244,9 @@ def compare(sec, name, rs, os_, rl, tl, ol):
         check(f"{sec} {name} — {rel} 값이 표준과 같다", why is None, why)
         if any(l[:8].upper() == "*KEYWORD" for l in b.split("\n")):
             check(f"{sec} {name} — {rel} 가 LONG=Y 를 싣는다", deck_width(b) == 20, b[:200])
+        if "*IGA_" in b.upper():
+            bad = misaligned20(b)
+            check(f"{sec} {name} — {rel} 의 IGA 칸이 20 칸 자리에 선다", not bad, bad[:2])
 
 
 def stage(binary, top, name, mode):
@@ -235,6 +262,107 @@ def stage(binary, top, name, mode):
             with open(p, "w", encoding="utf-8", newline="") as f:
                 f.write(to_long(text))
     return case
+
+
+def pair(binary, top, name, prepare, cmd, longify):
+    """표준 · LONG 두 폴더를 같은 준비로 차려(prepare(d)) longify 의 덱만 LONG 으로 다시 쓰고 cmd 를 돌린다 → 둘의 (rc, 화면, 새 파일)."""
+    res = []
+    for mode in ("std", "long"):
+        d = os.path.join(top, "E_%s_%s" % (name, mode))
+        os.makedirs(d)
+        prepare(d)
+        if mode == "long":
+            for rel in longify:
+                p = os.path.join(d, rel)
+                with open(p, encoding="utf-8") as f:
+                    t = f.read()
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(to_long(t))
+        before = set(os.listdir(d))
+        p = subprocess.run([binary] + cmd, cwd=d, capture_output=True, timeout=900)
+        outs = {}
+        for fn in sorted(set(os.listdir(d)) - before):
+            with open(os.path.join(d, fn), "rb") as f:
+                outs[fn] = f.read()
+        res.append((p.returncode, (p.stdout + p.stderr).decode("utf-8", "replace"), outs))
+    return res
+
+
+def extra_cases(binary, top):
+    spec = {o["name"]: o for o in T.OPS}
+
+    def gen(d, yaml_name, yaml_text):
+        with open(os.path.join(d, yaml_name), "w", encoding="utf-8") as f:
+            f.write(yaml_text)
+        subprocess.run([binary, "generate", "box", yaml_name], cwd=d, capture_output=True, timeout=300)
+
+    # E-1 assemble 의 덱 내장 초기응력 + DR 카드(formstrain — 셸 결과)
+    def p1(d):
+        shutil.copy2(os.path.join(REPO, "examples", "formstrain", "bent_shell.k"), d)
+        with open(os.path.join(d, "a.yaml"), "w", encoding="utf-8") as f:
+            f.write("base_model: bent_shell.k\noutput: fse\ndynain_embed: true\ndynamic_relaxation: true\noperations:\n"
+                    "  - type: formstrain\n")
+    (rs, ts, os_), (rl, tl, ol) = pair(binary, top, "embed_dr", p1, ["assemble", "a.yaml"], ["bent_shell.k"])
+    compare("E", "assemble dynain_embed · DR", rs, os_, rl, tl, ol)
+    check("E assemble dynain_embed · DR — 산출에 *INITIAL_STRESS_SHELL · *CONTROL_DYNAMIC_RELAXATION 이 있다",
+          b"*INITIAL_STRESS_SHELL" in ol.get("fse.k", b"") and b"*CONTROL_DYNAMIC_RELAXATION" in ol.get("fse.k", b""), sorted(ol))
+
+    # E-2 cclip 의 stress_output: include — 곁 dynain
+    cc = spec["cclip"]["files"]
+    def p2(d):
+        gen(d, "board.yaml", cc["board.yaml"])
+        with open(os.path.join(d, "cclip.yaml"), "w", encoding="utf-8") as f:
+            f.write(cc["cclip.yaml"].replace("stress_output: embed", "stress_output: include"))
+    (rs, ts, os_), (rl, tl, ol) = pair(binary, top, "cclip_inc", p2, ["cclip", "cclip.yaml"], ["clip_board.k"])
+    compare("E", "cclip stress_output: include", rs, os_, rl, tl, ol)
+    check("E cclip stress_output: include — 곁 dynain 이 있다", any(k.endswith(".dynain") for k in ol), sorted(ol))
+
+    # E-3 재질이 표준 폭 인클루드에 있는 IGA — 베낀 재질 블록이 그 폭으로 읽힌다(키워드에 `-`)
+    ig = spec["iga"]["files"]
+    def p3(d):
+        gen(d, "box.yaml", ig["box.yaml"])
+        p = os.path.join(d, "box.k")
+        with open(p, encoding="utf-8") as f:
+            t = f.read()
+        a, b = t.index("*MAT_ELASTIC"), t.index("*SECTION_SOLID")
+        with open(os.path.join(d, "mat.k"), "w", encoding="utf-8") as f:
+            f.write("*KEYWORD\n" + t[a:b] + "*END\n")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(t[:a] + t[b:].replace("*END", "*INCLUDE\nmat.k\n*END"))
+        with open(os.path.join(d, "iga.yaml"), "w", encoding="utf-8") as f:
+            f.write(ig["iga.yaml"])
+    (rs, ts, os_), (rl, tl, ol) = pair(binary, top, "iga_inc", p3, ["iga", "iga.yaml"], ["box.k"])
+    compare("E", "iga 재질이 표준 인클루드에", rs, os_, rl, tl, ol)
+    igaf = [k for k in ol if "_iga_p" in k]
+    check("E iga 재질이 표준 인클루드에 — IGA 파일의 베낀 재질 키워드가 `-` 로 끝난다",
+          igaf and any(l.strip().upper().startswith("*MAT_") and l.strip().endswith("-")
+                       for l in ol[igaf[0]].decode("utf-8", "replace").split("\n")), igaf)
+
+    # E-4b merge 의 죽은 PID 옮기기 — 세트(목록 · 열 꼴)가 합친 파트를 가리킨다
+    def p4b(d):
+        shutil.copytree(os.path.join(REPO, "examples", "merge"), os.path.join(d, "examples", "merge"))
+        with open(os.path.join(d, "merge.yaml"), "w", encoding="utf-8") as f:
+            f.write(spec["merge"]["files"]["merge.yaml"])
+        p = os.path.join(d, "examples", "merge", "three_layer.k")
+        with open(p, encoding="utf-8") as f:
+            t = f.read()
+        sets = ("*SET_PART_LIST\n%10d\n%10d%10d%10d\n" % (701, 1, 2, 3) +
+                "*SET_PART_LIST_COLUMN\n%10d\n%10d%10.1f\n%10d%10.1f\n" % (702, 1, 1.0, 3, 2.0))
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(t.replace("*END", sets + "*END", 1))
+    (rs, ts, os_), (rl, tl, ol) = pair(binary, top, "merge_sets", p4b, ["merge", "merge.yaml"],
+                                       [os.path.join("examples", "merge", "three_layer.k")])
+    compare("E", "merge 세트 옮기기", rs, os_, rl, tl, ol)
+    check("E merge 세트 옮기기 — 표준 쪽이 세트를 옮겼다(시험이 그 길을 탄다)", "SET_PART_LIST_COLUMN" in ts and "moved" in ts,
+          ts[-400:])
+
+    # E-4 matswap 옛 자리 인자 꼴
+    def p4(d):
+        shutil.copytree(os.path.join(REPO, "examples", "matswap"), os.path.join(d, "examples", "matswap"))
+    (rs, ts, os_), (rl, tl, ol) = pair(binary, top, "matswap_old", p4,
+                                       ["matswap", "examples/matswap/two_cubes.k", "examples/matswap/rubber.k", "1", "out.k"],
+                                       [os.path.join("examples", "matswap", "two_cubes.k")])
+    compare("E", "matswap 옛 자리 인자 꼴", rs, os_, rl, tl, ol)
 
 
 def main():
@@ -279,6 +407,8 @@ def main():
                 compare("D", name, rs, os_, rl, tl, ol)
             shutil.rmtree(std.base, ignore_errors=True)
             shutil.rmtree(lng.base, ignore_errors=True)
+        print("[E — 사례에 없는 꼴]")
+        extra_cases(binary, top)
     finally:
         shutil.rmtree(top, ignore_errors=True)
     print()

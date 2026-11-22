@@ -139,7 +139,7 @@ def main():
                     if not check(name + " — rc 0", rc == 0, out[-400:]):
                         continue
                     main_a, main_b = read(os.path.join(base, "ba.k")), read(os.path.join(d, "ba.k"))
-                    why = L.same_values(L.values(main_a), L.values(main_b, strict=(fw == 20)))
+                    why = L.same_values(L.values(main_a), L.values(main_b, strict=True))   # 칸이 어긋나면 낱말로 되돌리지 않는다
                     check(name + " — 주 덱 값이 기준과 같다", why is None, why)
                     if inc:
                         pa, pb = battery_deck(base, main_a), battery_deck(d, main_b)
@@ -147,7 +147,7 @@ def main():
                             continue
                         bat_a, bat_b = read(pa), read(pb)
                         check(name + " — battery 덱이 주 덱 폭을 밝힌다", L.deck_width(bat_b) == fw, bat_b[:300])
-                        why = L.same_values(L.values(bat_a), L.values(bat_b, strict=(fw == 20), inherit=fw))
+                        why = L.same_values(L.values(bat_a), L.values(bat_b, strict=True, inherit=fw))
                         check(name + " — battery 덱 값이 기준과 같다", why is None, why)
                     else:
                         check(name + " — 주 덱에 *INCLUDE 없음(펼쳤다)", "*INCLUDE" not in main_b.upper(), "")
