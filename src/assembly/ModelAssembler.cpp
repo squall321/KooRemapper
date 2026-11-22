@@ -13115,50 +13115,23 @@ struct MdMatBlock {
     int endLine = 0;
 };
 
-static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& lines, int cw = 0) {
-    cw = mw_cardW(lines, cw);
+// 재질 **묶음마다** 하나(공용 재질 훑기 `matids::scan` — 쌓인 재질까지 · 열 재질 · `*MAT_ADD_*` 는 뺀다). 2026-11-22(3차 3판 L-11) 전엔
+// 키워드 블록마다 첫 묶음의 MID 하나만 냈다 — 한 키워드 아래 쌓인 둘째 재질은 `mid:` 규칙 · 제목 맞추기로 고를 수 없었다(「No DB match」
+// 도 없이 그대로 남았다). `_TITLE` 이면 묶음마다 제 제목 줄이다. 길이를 모르는 꼴은 첫 묶음만(그 뒤는 행 수를 몰라 가를 수 없다)
+static std::vector<MdMatBlock> md_scanMatBlocks(const std::vector<std::string>& lines) {
     std::vector<MdMatBlock> blocks;
-    for (int i = 0; i < (int)lines.size(); ++i) {
-        std::string t = mw_trim(lines[i]);
-        if (t.empty() || t[0] != '*') continue;
-        std::string u = mw_upper(t);
-        if (u.substr(0, 5) != "*MAT_") continue;
-        // 열 재질(*MAT_THERMAL_* · 번호 이름 *MAT_T01~T18 — TMID 는 다른 번호 공간)과 *MAT_ADD_* 는 재질 블록이 아니다(11-08 #3 — 번호 이름은
-        // 빠져 있어 *MAT_T01 의 TMID 를 그 MID 의 재질로 바꿔 쓰고 MID 커서를 올렸다)
-        if (cards::isThermalMaterialKeyword(u) || u.find("*MAT_ADD_") == 0) continue;
-
-        bool hasTitle = (u.find("_TITLE") != std::string::npos);
-        MdMatBlock blk;
-        blk.keyword = u;
-        blk.startLine = i;
-
-        int j = i + 1;
-        bool gotTitle = false;
-        while (j < (int)lines.size()) {
-            std::string lt = mw_trim(lines[j]);
-            if (lt.empty() || lt[0] == '$') { ++j; continue; }
-            if (lt[0] == '*') break;
-            if (hasTitle && !gotTitle) {
-                blk.titleText = lt;
-                gotTitle = true;
-                ++j;
-                continue;
-            }
-            // first data line → extract MID
-            auto toks = mw_tok10(lines[j], cw);
-            if (!toks.empty()) {
-                try { blk.mid = std::stoi(toks[0]); } catch (...) {}
-            }
-            // find end of block
-            int end = j + 1;
-            while (end < (int)lines.size()) {
-                std::string et = mw_trim(lines[end]);
-                if (!et.empty() && et[0] == '*') break;
-                ++end;
-            }
-            blk.endLine = end;
+    const auto sc = matids::scan(lines);
+    for (const auto& b : sc.blocks) {
+        const std::string kw = mw_upper(mw_trim(lines[b.keyword]));
+        const bool hasTitle = kw.find("_TITLE") != std::string::npos;
+        for (const auto& st : b.sets) {
+            MdMatBlock blk;
+            blk.mid = st.mid;
+            blk.keyword = kw;
+            if (hasTitle && st.first < st.card1) blk.titleText = mw_trim(lines[st.first]);
+            blk.startLine = static_cast<int>(st.first);
+            blk.endLine = static_cast<int>(st.last) + 1;
             blocks.push_back(blk);
-            break;
         }
     }
     return blocks;
@@ -13995,6 +13968,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     };
     std::vector<MatchInfo> matches;
     std::set<int> matchedMids;
+    std::set<int> orphanMids;   // 모든 파트가 새 MID 로 옮겨 지우기만 하는 재질(DB 카드로 바꿔 넣지 않는다)
 
     for (int bi = 0; bi < (int)matBlocks.size(); ++bi) {
         auto& blk = matBlocks[bi];
@@ -14021,6 +13995,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             if (blk.partTitles.empty() && blk.startLine >= 0) {
                 // Mark orphan MAT block for deletion
                 matchedMids.insert(blk.mid);
+                orphanMids.insert(blk.mid);
             } else {
                 infoMessages.push_back("[matdb] WARNING: No DB match for MID=" +
                     std::to_string(blk.mid) + " (" + blk.titleText + ")");
@@ -14057,6 +14032,18 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     if (matches.empty()) {
         infoMessages.push_back("[matdb] WARNING: No materials matched");
         return true;
+    }
+
+    // 5b. 지우기만 하는 고아 재질의 MID 꼴 덧붙임(EROSION · GISSMO … — 첫 칸이 MID)도 지운다(3차 3판 L-11 · matswap 과 같다). 바꿔 넣는
+    //     MID 는 그 번호가 남아 덧붙임이 새 DB 재질에 붙는다(예전 그대로). 예전엔 고아 재질만 지워 덧붙임이 없는 재질을 가리켰다(rc 0)
+    for (int mid : orphanMids) {
+        bool replaced = false;
+        for (const auto& mi : matches) if (mi.modelMid == mid) replaced = true;
+        if (replaced) continue;
+        const int n = matids::removeMidAddOns(rawLines_, mid);
+        if (n > 0)
+            infoMessages.push_back("[matdb] Removed " + std::to_string(n) + " *MAT_ADD_* card(s) of orphan MID=" + std::to_string(mid) +
+                                   " (재질이 덱에서 사라졌다)");
     }
 
     // 6. Remove old MAT blocks (mark with sentinel, reverse order)
