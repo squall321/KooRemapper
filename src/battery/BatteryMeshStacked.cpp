@@ -79,6 +79,7 @@ public:
     struct TipRow { double z; std::vector<int> nids; };
     std::vector<TipRow> posTipRows, negTipRows;
     std::vector<std::pair<double,double>> tabXRanges;
+    bool tabWarned[2] = {false, false};   // [음극, 양극] — 셀 끝을 넘는 탭 경고를 한 번만
 
     std::vector<int> nsetFixBottomEdge;
     std::vector<int> nsetStackTop;
@@ -438,6 +439,19 @@ public:
         ixStart = std::max(0, std::min(ixStart, nx - 1));
         ixEnd   = std::max(ixStart+1, std::min(ixEnd, nx));
         int nCols = ixEnd - ixStart;
+        // ★셀 끝(0 · cell_width)을 넘는 탭은 셀 안 격자 열로 좁혀 짓는다 — 알린다(3차 5판 L-14 · 예전엔 말없이 좁히고, 끝 너머로 많이
+        //   나간 탭은 요청 범위 밖 열에 지었다). 층마다 부르므로 탭마다 한 번
+        if ((xLo < 0.0 || xHi > cfg.geo.cellWidth) && !tabWarned[isPositive ? 1 : 0]) {
+            tabWarned[isPositive ? 1 : 0] = true;
+            char buf[768];
+            snprintf(buf, sizeof(buf),
+                     "[battery] %s 탭(tabs.%s %g · width %g → x %g~%g)이 셀 끝(x 0~%g)을 넘는다 — 셀 안 격자 열 x %.2f~%.2f 로 좁혀 "
+                     "지었다(폭 %.2f). 탭을 셀 안에 두려면 tabs.%s 를 옮기라",
+                     isPositive ? "양극" : "음극", isPositive ? "pos_x_center" : "neg_x_center", xCenter, tabs.width,
+                     xLo, xHi, cfg.geo.cellWidth, ixStart * dx, ixEnd * dx, nCols * dx,
+                     isPositive ? "pos_x_center" : "neg_x_center");
+            stats.warnings.push_back(buf);
+        }
 
         int nRows = std::max(2, (int)std::round(tabs.height/meshSize));
         double dyTab = tabs.height / nRows;

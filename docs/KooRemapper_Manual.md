@@ -4431,7 +4431,7 @@ KooRemapper battery <config.yaml>
 | `wound.flat` / `.flat_ratio` / `.n_winds` | (wound) 편평·비율·권취 수 |
 | `swelling.soc` / `.nmc_cte` / `.graphite_cte` | SOC·양극/음극 팽창률 |
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
-| `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0) |
+| `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0). 셀 끝을 넘으면 셀 안 격자 열로 좁혀 짓고 `[WARN]` 이 지은 범위를 댄다(2026-11-22 — 전엔 말없이 좁혔다) |
 
 > **덱이 가리키는 정의(2026-11-22)**: 지은 덱의 PART · 경계 카드는 그 덱에 있는 재질 · 섹션 · 세트만 가리킵니다(`info --strict` 로
 > 잽니다 — 적층 · 권취 × 선택 열두 가지 × `mode` 넷, 96 덱이 종료 코드 0). 전엔 적층 기본 설정의 전해질 PART 가 공기주머니에서만 쓰는
@@ -4599,6 +4599,10 @@ KooRemapper cnrb2solid <config.yaml>
 ★주 덱의 **첫** `*END` 앞만 읽는다(CNRB · 절점 · 절점 세트) — LS-DYNA 는 거기서 읽기를 멈춘다. 그 뒤의 CNRB 는 바꾸지 않고 그 자리에
 둔다(2026-11-08 전엔 덱 전체를 읽어 첫 `*END` 뒤의 읽히지 않던 CNRB 를 산 솔리드 · 접촉으로 바꿔 첫 `*END` 앞에 넣고 그 PNODE 를
 `*NODE` 에서 지웠다 · 회귀 `test_end_insert_once.py` cnrb2solid-dead · live_dead). 새 카드는 첫 `*END` 앞에 한 번 넣는다(§3.1(k)).
+
+★키워드는 **1열의 `*`** 만입니다(리더 · LS-DYNA 와 같다) — 들여 쓴 `*` 줄(제목 `  *Bolt_NodeSet` 등)은 앞 블록의 데이터입니다. 2026-11-22
+전엔 앞 공백을 지운 줄로 보아 그 제목에서 세트 블록을 닫고 멤버를 못 읽어 「NSID=1 not found or empty」 로 CNRB 를 건너뛴 채 종료 코드
+0 이었습니다(회귀 `test_cnrb2solid_indented_star.py`).
 
 ---
 
@@ -5661,6 +5665,9 @@ KooRemapper cleanup-nodes <config.yaml>
 
 - 요소가 참조하는 절점이 전부 정의되어 있는가 (`undefined_by_elements`)
 - `*SET_NODE` 멤버가 전부 정의되어 있는가 (`undefined_set_members`, LS-DYNA `Error 10233`)
+- 그 밖의 까닭으로 지킨 절점 — keep 키워드 · 모르는 키워드 · 못 읽는 세트 변종 · 칸으로 못 읽은 보 족 줄의 정수 — 가운데 **입력에 있던
+  절점**이 산출에도 있는가 (`undefined_kept` · 2026-11-22 — 전엔 요소 · 세트 멤버만 되읽었다. `force` 는 모르는 키워드를 일부러 존중하지
+  않으므로 그 몫은 세지 않는다)
 
 하나라도 0 이 아니면 **rc≠0** 이다. `prune_sets: false` 로 일부러 깨면 그 자리에서 잡힌다 —
 회귀 B-11·B-12 가 그것을 못 박는다(검증이 늘 0 을 내는 장식이 아니라는 증거다).
@@ -5691,7 +5698,7 @@ KooRemapper cleanup-nodes <config.yaml>
   "bbox_before": { "min": [...], "max": [...], "size": [...] },
   "bbox_after":  { "min": [...], "max": [...], "size": [...] },
   "sets_pruned": [ { "sid": 9000, "removed": 118529, "kept": 13248404 } ],
-  "verify": { "undefined_by_elements": 0, "undefined_set_members": 0 }
+  "verify": { "undefined_by_elements": 0, "undefined_set_members": 0, "undefined_kept": 0 }
 }
 ```
 
@@ -6146,6 +6153,13 @@ rc 1). restack 의 지운 절점 보고는 WARPAGE · ELBOW 블록의 정수를 
 번호와 같아 거짓으로 적던 것). 새 절점 번호의 바닥(assemble · `id_floor`)도 스칼라 절점 번호 위다(회귀 `test_aux_card_walkers.py` E 절 ·
 `test_dead_node_list_cards.py` C 절 · `test_id_floor.py` G 절). 이월 적용(§52)도 같은 걸음이 SN 을 읽어 WARPAGE 블록을 다른 보처럼
 다룬다(나눠 쓴 절점에 SN 까지 · 조각의 절점 바닥은 스칼라 절점 번호 위 · 11-07 밤).
+
+★옵션 카드(SN · MN)의 절점도 Card 1 처럼 **읽기를 가릅니다**(2026-11-22) — 8칸 표로 자른 칸(LS-DYNA 가 읽는 칸)이 하나로 읽은
+절점이고, 칸이 어긋난 줄의 공백 토큰 차례 · 절점 칸을 칸으로 못 읽은 줄(칸 안에 빈칸)의 정수 전부가 다른 읽기입니다. cleanup-nodes 는
+둘 다 지키고(못 읽은 줄은 `[WARN]` 으로 댄다) · extract-parts 는 칸 읽기를 싣고 다른 읽기만 말하는 절점은 덱(`*NODE` · 스칼라 절점)에
+있으면 싣습니다 · 되읽기는 그 가운데 입력에 있던 것만 잽니다. 전엔 칸이 어긋난 줄을 공백 토큰 차례로만 읽어, 칸 0 에 `1 2` 가 끼면
+칸 1 의 SN2 를 놓쳐 extract-parts 가 그 스칼라 절점을 싣지 않았고(종료 코드 1 · 되읽기가 없는 1 · 2 를 잡았다), MN 칸에 `1 2 3  104` 가
+있으면 cleanup-nodes 가 104 를 지웠습니다(회귀 `test_option_card_readings.py`).
 
 ★절점 칸 **개수**까지 적는 이유 — '칸 2부터 끝까지' 로 뭉개면 보의 `RT1`·`RR1`·`LOCAL` 과
 안전벨트의 `SBRID`·`SLEN` 이 절점이 된다. 세기만 하면 과포함(안전한 방향)이지만, **번호를

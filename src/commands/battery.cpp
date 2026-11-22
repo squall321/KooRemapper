@@ -500,6 +500,7 @@ static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, c
 
     // 3. Mesh (nodes + elements + parts + sets)
     bat::MeshStats stats = bat::writeMeshStacked(out, cfg);
+    for (const auto& w : stats.warnings) console.warning(w);
 
     // 4. Contacts
     std::vector<int> cellPids;   // populated inside writeContacts via SID_PART_CELL

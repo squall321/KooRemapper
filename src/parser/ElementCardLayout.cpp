@@ -819,18 +819,44 @@ bool auxOptNodesPlaceable(const AuxElementCard& a, int cardLine, const std::stri
     return true;
 }
 
-std::vector<int> auxOptNodesOf(const AuxElementCard& a, int cardLine, const std::string& line, int fw) {
-    std::vector<int> out;
+AuxOptNodeReadings auxOptNodeReadings(const AuxElementCard& a, int cardLine, const std::string& line, int fw) {
+    AuxOptNodeReadings r;
     const std::vector<int>* fields = auxOptNodeFields(a, cardLine);
-    if (!fields) return out;
+    if (!fields) return r;
     std::string body = line;
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
     const size_t cmt = body.find('$');
     if (cmt != std::string::npos) body.erase(cmt);
-    const auto f = deckscan::cardFields(body, auxOptTableWidth(fw));
+    const int w = auxOptTableWidth(fw);
+    const bool comma = body.find(',') != std::string::npos;
+    const auto fx = comma ? deckscan::cardFields(body, w) : cards::fieldsFixed(body, w);
     for (int q : *fields) {
-        const int v = deckscan::fieldInt(f, static_cast<size_t>(q));
-        if (v > 0) out.push_back(v);
+        const size_t k = static_cast<size_t>(q);
+        if (k >= fx.size() || fx[k].empty()) continue;
+        int v = 0;
+        if (!comma && (fx[k].find_first_of(" \t") != std::string::npos || !cards::toInt(fx[k], v))) { r.unreadable = true; continue; }
+        if (comma && !cards::toInt(fx[k], v)) continue;
+        if (v > 0) r.sure.push_back(v);
     }
+    deckscan::sortUnique(r.sure);
+    if (comma) return r;
+    std::vector<int> alt;
+    const auto tk = deckscan::cardFields(body, w);   // 칸이 어긋난 줄이면 공백 토큰 — 예전 읽기
+    for (int q : *fields) {
+        const int v = deckscan::fieldInt(tk, static_cast<size_t>(q));
+        if (v > 0) alt.push_back(v);
+    }
+    if (r.unreadable) deckscan::harvestInts(body, alt);
+    deckscan::sortUnique(alt);
+    std::set_difference(alt.begin(), alt.end(), r.sure.begin(), r.sure.end(), std::back_inserter(r.alt));
+    return r;
+}
+
+std::vector<int> auxOptNodesOf(const AuxElementCard& a, int cardLine, const std::string& line, int fw) {
+    const AuxOptNodeReadings r = auxOptNodeReadings(a, cardLine, line, fw);
+    std::vector<int> out = r.sure;
+    out.insert(out.end(), r.alt.begin(), r.alt.end());
+    deckscan::sortUnique(out);
     return out;
 }
 

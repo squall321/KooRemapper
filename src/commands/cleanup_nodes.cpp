@@ -316,7 +316,12 @@ void scanRefsStream(std::istream& in, const std::string& path, bool isMain, cons
                     // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2 · `_ELBOW` 의 가운데 절점 MN(예전엔 Card 1 만 읽어 safe 가 MN 을
                     // 지웠다 · 재검토 D2 · SN 은 아무도 안 읽었다 — 셋째 묶음). SN 이 `*NODE` 번호면 그 절점을 지키고, 스칼라 절점이면
                     // 되읽기가 `*NODE_SCALAR` 에서 찾는다
-                    for (int v : KooRemapper::auxOptNodesOf(aux, auxLineIdx, line, fw)) sc.byElement.push_back(v);
+                    // 칸 읽기(LS-DYNA 가 읽는 칸)는 byElement, 다른 읽기(공백 토큰 · 칸을 못 읽은 줄의 정수)는 byElementAlt — Card 1 과
+                    // 같다. 칸으로 못 읽은 줄은 [WARN] 으로 댄다(3차 5판 L-14 · 예전엔 공백 토큰 차례로만 읽었다)
+                    const auto orr = KooRemapper::auxOptNodeReadings(aux, auxLineIdx, line, fw);
+                    for (int v : orr.sure) sc.byElement.push_back(v);
+                    for (int v : orr.alt) sc.byElementAlt.push_back(v);
+                    if (orr.unreadable) sc.unreadableAuxLines.push_back(path + ":" + std::to_string(lineNo) + " " + kw);
                 }
                 ++auxLineIdx;
                 if (--auxRemaining <= 0) auxRemaining = 0;
@@ -727,7 +732,9 @@ bool rewriteDeck(const Opts& o, const Scan& sc, const std::vector<int>& del,
 struct VerifyResult {
     long long undefByElement = 0;
     long long undefSetMembers = 0;
+    long long undefKept = 0;   // 요소 · 세트 밖의 까닭으로 지킨 절점(keep · 모르는 키워드 · 못 읽는 세트 변종 · 못 읽은 보 족 줄) 가운데 없어진 것
     int firstUndefined = 0;
+    bool clean() const { return undefByElement == 0 && undefSetMembers == 0 && undefKept == 0; }
 };
 
 // `inputDefined` — 입력 덱(닫힘)이 정의한 절점(정렬). 보 족 줄의 **다른 읽기**만 말하는 절점은 입력에 있던 것만 본다 —
@@ -766,6 +773,20 @@ VerifyResult verifyDeck(const std::string& path, const Opts& o, const std::vecto
                 ++vr.undefSetMembers;
                 if (!vr.firstUndefined) vr.firstUndefined = v;
             }
+    // ★요소 · 세트 밖의 까닭으로 지킨 절점도 되읽는다(3차 5판 L-14) — keep 키워드 · 모르는 키워드 · 못 읽는 세트 변종 · 칸으로 못 읽은
+    //   보 족 줄의 정수 가운데 입력에 있던 절점이 산출에 없으면 이 op 이 지운 것이다. 예전엔 요소 · 세트 멤버만 되읽어 이 넷은 빠졌다.
+    //   넘치게 센 정수(곡선 번호 등)도 입력 절점이면 resolve 가 지켰으니 산출에 있다. force 는 모르는 키워드를 일부러 존중하지 않는다
+    std::vector<int> kept = sc.opaqueSetInts;
+    kept.insert(kept.end(), sc.unreadableAuxInts.begin(), sc.unreadableAuxInts.end());
+    for (const auto& kv : sc.keepInts) kept.insert(kept.end(), kv.second.begin(), kv.second.end());
+    if (o.mode != "force")
+        for (const auto& kv : sc.unknownInts) kept.insert(kept.end(), kv.second.begin(), kv.second.end());
+    sortUnique(kept);
+    for (int v : kept)
+        if (inSorted(inputDefined, v) && !inSorted(defined, v) && !inSorted(sc.byElement, v) && !inSorted(sc.byElementAlt, v)) {
+            ++vr.undefKept;
+            if (!vr.firstUndefined) vr.firstUndefined = v;
+        }
     return vr;
 }
 
@@ -1048,11 +1069,12 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
                             " 개다 — 그 세트를 가리키는 카드가 있으면 LS-DYNA 가 거기서 죽는다");
         if (o.verify) {
             vr = verifyDeck(o.output, o, sc.definedAll);
-            if (vr.undefByElement == 0 && vr.undefSetMembers == 0)
-                console.success("verify: 산출 덱에 '참조하는데 없는 절점' 0 (요소·세트 멤버 전수)");
+            if (vr.clean())
+                console.success("verify: 산출 덱에 '참조하는데 없는 절점' 0 (요소·세트 멤버·그 밖에 지킨 절점 전수)");
             else
                 console.error("verify: 요소 참조 미정의 " + std::to_string(vr.undefByElement) +
                               " · 세트 멤버 미정의 " + std::to_string(vr.undefSetMembers) +
+                              " · 그 밖에 지킨 절점 미정의 " + std::to_string(vr.undefKept) +
                               " (첫 건 NID " + std::to_string(vr.firstUndefined) + ")");
         }
     }
@@ -1127,7 +1149,8 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         jf << "  \"verify\": "
            << (wrote && o.verify
                    ? "{\"undefined_by_elements\": " + std::to_string(vr.undefByElement) +
-                     ", \"undefined_set_members\": " + std::to_string(vr.undefSetMembers) + "}"
+                     ", \"undefined_set_members\": " + std::to_string(vr.undefSetMembers) +
+                     ", \"undefined_kept\": " + std::to_string(vr.undefKept) + "}"
                    : "null")
            << ",\n";
         jf << "  \"warnings\": [";
@@ -1141,6 +1164,6 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         console.info("report: " + o.reportPath);
     }
 
-    if (wrote && o.verify && (vr.undefByElement > 0 || vr.undefSetMembers > 0)) return 1;
+    if (wrote && o.verify && !vr.clean()) return 1;
     return 0;
 }

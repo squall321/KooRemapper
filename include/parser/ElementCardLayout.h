@@ -261,8 +261,18 @@ std::vector<int> auxNodesUnsure(const AuxElementCard& a, const AuxCardReadings& 
 bool auxManualNodesPlaceable(const AuxElementCard& a, const AuxCardReadings& r);
 // 카드 안 `cardLine` 째 줄(0 = Card 1)이 옵션 카드의 절점 줄이면 그 절점 칸(차례 — 8칸 표), 아니면 nullptr
 const std::vector<int>* auxOptNodeFields(const AuxElementCard& a, int cardLine);
-// 옵션 카드 줄의 절점 — 8칸 표(칸 폭 10 · long 20)로 자른 그 줄의 절점 칸의 양수(콤마 줄은 콤마 차례). 절점 줄이 아니면 비었다
 int auxOptTableWidth(int fw);
+// 옵션 카드 줄의 절점 읽기 — Card 1(`auxCardReadings`)과 같은 갈래(3차 5판 L-14 · 예전엔 칸이 어긋난 줄을 공백 토큰 차례로만 읽었다).
+//   sure — 8칸 표(칸 폭 10 · long 20)로 자른 절점 칸의 양수(LS-DYNA 가 읽는 칸 · 콤마 줄은 콤마 차례)
+//   alt  — 다른 읽기만 말하는 절점: 공백 토큰 차례(`deckscan::cardFields` — 칸이 어긋난 줄)의 값, 절점 칸을 칸으로 못 읽으면(칸 안에
+//          빈칸 · 정수가 아닌 글자) 그 줄의 정수 전부(넘치게 센다 — 지키는 쪽만). sure 에 든 것은 뺀다
+//   unreadable — 절점 칸 하나라도 칸으로 못 읽었다(콤마 줄은 아니다)
+struct AuxOptNodeReadings {
+    std::vector<int> sure, alt;
+    bool unreadable = false;
+};
+AuxOptNodeReadings auxOptNodeReadings(const AuxElementCard& a, int cardLine, const std::string& line, int fw);
+// 옵션 카드 줄의 절점 — sure ∪ alt(정렬 · 유일). 절점 줄이 아니면 비었다
 std::vector<int> auxOptNodesOf(const AuxElementCard& a, int cardLine, const std::string& line, int fw);
 // 옵션 카드 줄의 절점(보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN)을 제자리에 바꿔 쓸 수 있나 — 콤마 줄이 아니고, 번호가 있는 칸마다 칸
 // 글자가 정수 하나이며, `$` 주석이 그 칸 안에서 시작하지 않는다(칸에 새 번호를 쓰면 주석 머리 `$` 를 덮어 뒤 글자가 다음 칸의 값이

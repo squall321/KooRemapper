@@ -315,6 +315,13 @@ void definedNodesAmong(const std::string& path, const DeckIndex& idx, const std:
             if (!next.empty()) definedNodesAmong(next, idx, want, found, visited, im);
             continue;
         }
+        // 스칼라 절점(`*NODE_SCALAR` · `_VALUE` — 칸 0 이 NID)도 정의다 — 보 `_WARPAGE` 옵션 카드의 SN 이 다른 읽기로만 나오면 그 줄을
+        // 싣는다(3차 5판 L-14 · 예전엔 `*NODE` 만 보아 다른 읽기의 SN 을 「덱에 없다」 고 버렸다)
+        if (KooRemapper::isScalarNodeKeyword(kw)) {
+            const int nid = fieldInt(cardFields(line, fw), 0);
+            if (nid > 0 && inSorted(want, nid)) found.push_back(nid);
+            continue;
+        }
         if (kw != "*NODE") continue;
         int nid = 0;
         double xyz[3];
@@ -495,7 +502,11 @@ void scanElements(const std::string& path, const std::vector<int>& sel, const De
                 // 옵션 카드의 절점 — 보 `_WARPAGE` 의 SN1 · SN2(스칼라 절점 — `*NODE_SCALAR` 줄을 싣는다) · `_ELBOW` 의 가운데 절점
                 // MN(8칸 표). 콤마 줄 · 칸 안에 빈칸 · 번호 칸 안에서 시작하는 `$` 주석이면 번호를 제자리에 못 바꾼다(재검토 D2 — 주석이
                 // 겹친 MN 에 새 번호를 쓰면 `$` 를 덮어 주석 글자가 칸 2 의 값이 됐다). 예전엔 SN 을 아무도 안 읽었다(셋째 묶음)
-                for (int v : KooRemapper::auxOptNodesOf(aux, auxLineIdx, line, fw)) pk.nodes.push_back(v);
+                // 칸 읽기는 싣고, 다른 읽기(공백 토큰 · 칸을 못 읽은 줄의 정수)만 말하는 절점은 덱에 있으면 싣는다 — Card 1 과 같다
+                // (3차 5판 L-14 · 예전엔 공백 토큰 차례로만 읽었다)
+                const auto orr = KooRemapper::auxOptNodeReadings(aux, auxLineIdx, line, fw);
+                for (int v : orr.sure) pk.nodes.push_back(v);
+                for (int v : orr.alt) pk.altNodes.push_back(v);
                 if (!KooRemapper::auxOptNodesPlaceable(aux, auxLineIdx, line, fw))
                     pk.renumberRisk.push_back({path + ":" + std::to_string(lineNo) + " " + kw, {}, false});
             }
@@ -1308,7 +1319,10 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
                 for (int x : KooRemapper::auxNodesUnsure(vaux, rd))
                     if (inSorted(altExisting, x)) elemNodes.push_back(x);
             } else {
-                for (int x : KooRemapper::auxOptNodesOf(vaux, vAuxLineIdx, line, fw)) elemNodes.push_back(x);   // 보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN
+                const auto orr = KooRemapper::auxOptNodeReadings(vaux, vAuxLineIdx, line, fw);   // 보 `_WARPAGE` 의 SN · `_ELBOW` 의 MN
+                for (int x : orr.sure) elemNodes.push_back(x);
+                for (int x : orr.alt)
+                    if (inSorted(altExisting, x)) elemNodes.push_back(x);
             }
             ++vAuxLineIdx;
             if (--vAuxRemaining <= 0) vAuxRemaining = 0;

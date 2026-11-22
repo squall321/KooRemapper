@@ -30,6 +30,7 @@
 
 #include "BatteryConfig.h"
 #include <ostream>
+#include <string>
 #include <vector>
 
 // Knowledge graph (lat.md):
@@ -42,6 +43,7 @@ struct MeshStats {
     int nShells   = 0;
     int nSolids   = 0;
     double totalZ = 0.0;   // mm, total cell thickness
+    std::vector<std::string> warnings;   // 지으며 요청과 다르게 지은 것(셀 끝을 넘는 탭 등) — 부르는 쪽이 [WARN] 으로 찍는다
 };
 
 // Generate complete stacked mesh into 'out'.

@@ -199,7 +199,7 @@ static std::map<int, NodeXYZ> cs_parseNodes(const std::vector<std::string>& line
     for (const auto& ln : lines) {
         std::string tr = cs_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여쓴 `*` 줄은 데이터 · 3차 5판 L-14)
             inNode = (cs_upper(tr).rfind("*NODE", 0) == 0 &&
                       cs_upper(tr).find("SET") == std::string::npos);
             continue;
@@ -226,7 +226,7 @@ static std::map<int, std::vector<int>> cs_parseNodeSets(const std::vector<std::s
     for (const auto& ln : lines) {
         std::string tr = cs_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙
             std::string up = cs_upper(tr);
             inSet = (up.rfind("*SET_NODE_LIST", 0) == 0);
             if (inSet) {
@@ -262,7 +262,7 @@ static std::vector<CnrbDef> cs_parseCnrbs(const std::vector<std::string>& lines)
     std::vector<CnrbDef> cnrbs;
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string tr = cs_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') continue;
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙
         std::string up = cs_upper(tr);
         if (up.rfind("*CONSTRAINED_NODAL_RIGID_BODY", 0) != 0) continue;
 
@@ -297,7 +297,7 @@ static std::vector<CnrbDef> cs_parseCnrbs(const std::vector<std::string>& lines)
         // Block ends at next keyword line
         while (j < lines.size()) {
             std::string jt = cs_trim(lines[j]);
-            if (!jt.empty() && jt[0] == '*') break;
+            if (KooRemapper::deckscan::isKeywordLine(lines[j])) break;   // 1열 규칙
             ++j;
         }
         def.lineEnd = j;
@@ -960,7 +960,7 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
         if (rm[i]) continue;
         std::string tr = cs_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(lines[i])) {   // 1열 규칙
             inNodeSection = (cs_upper(tr).rfind("*NODE", 0) == 0 &&
                              cs_upper(tr).find("SET") == std::string::npos);
             continue;
@@ -1087,7 +1087,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
             const size_t end = KooRemapper::deckscan::firstEndLine(L);   // 첫 *END 뒤는 읽히지 않는다(죽은 CNRB 는 세지 않는다)
             for (size_t i = 0; i < end; ++i) {
                 const std::string t = cs_trim(L[i]);
-                if (t.size() > 1 && t[0] == '*') {
+                if (KooRemapper::deckscan::isKeywordLine(L[i])) {   // 1열 규칙
                     std::string up = t;
                     for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
                     if (up.rfind("*CONSTRAINED_NODAL_RIGID_BODY", 0) == 0) return true;
@@ -1115,7 +1115,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
         for (const auto& ln : lines) {
             std::string tr = cs_trim(ln);
             if (tr.empty()) continue;
-            if (tr[0] == '*') {
+            if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙
                 std::string up = cs_upper(tr);
                 inElem = (up.rfind("*ELEMENT_SOLID", 0) == 0 || up.rfind("*ELEMENT_SHELL", 0) == 0);
                 continue;
@@ -1139,7 +1139,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
             for (const auto& ln : lines) {
                 std::string tr = cs_trim(ln);
                 if (tr.empty()) continue;
-                if (tr[0] == '*') {
+                if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙
                     inN = (cs_upper(tr).rfind("*NODE", 0) == 0 && cs_upper(tr).find("SET") == std::string::npos);
                     continue;
                 }
@@ -1172,7 +1172,7 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
             for (const auto& ln : lines) {
                 const std::string tr = cs_trim(ln);
                 if (tr.empty()) continue;
-                if (tr[0] == '*') {
+                if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙
                     const std::string up = cs_upper(tr);
                     if (up.rfind("*SECTION_", 0) == 0)                      ns = Ns::Sec;
                     else if (up.rfind("*SET_", 0) == 0)                      ns = Ns::Set;
