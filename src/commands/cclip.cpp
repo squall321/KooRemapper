@@ -1765,6 +1765,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     if (cfg.report) {
         std::string repPath = outPrefixPath + "_cclip_report.json";
         std::ofstream rf(repPath);
+        if (!rf.is_open()) {   // 예전엔 못 열면 조용히 건너뛰어 rc 0 이었다(3차 4판 L-19 — 보고 자리가 폴더)
+            console.error("[cclip] 보고를 쓸 수 없다: " + repPath);
+            return 1;
+        }
         if (rf.is_open()) {
             rf << std::scientific << std::setprecision(6);
             rf << "{\n  \"mode\": \"" << cfg.mode << "\",\n  \"stress_output\": \"" << cfg.stressOutput << "\",\n  \"clips\": [\n";

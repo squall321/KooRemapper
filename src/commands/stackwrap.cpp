@@ -106,6 +106,12 @@ int runStackWrap(const std::string& yamlFile, ConsoleOutput& console) {
         std::vector<std::string> writes{c.output + ".k"};
         if (c.shift) writes.push_back(c.output + "_neutral.k");
         if (KooRemapper::output_guard::refuse("stackwrap", writes, reads, console)) return 1;
+        // `_neutral.k` 는 쓴 뒤 매핑의 입력으로 되읽는다 — 그 자리가 장치 · FIFO 면 끝나지 않는다(3차 4판 L-19 · `/dev/zero` 실측)
+        if (c.shift)
+            if (const std::string k = KooRemapper::output_guard::nonRegularWhy(c.output + "_neutral.k"); !k.empty()) {
+                console.error("[stackwrap] 중간 산출 자리 " + c.output + "_neutral.k 가 " + k + "다 — 쓴 뒤 매핑의 입력으로 되읽으므로 보통 파일이어야 한다(아무 파일도 쓰지 않았다)");
+                return 1;
+            }
     }
 
     const char* axisName = c.axis == 0 ? "x" : (c.axis == 1 ? "y" : "z");

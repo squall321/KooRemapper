@@ -106,6 +106,19 @@ bool findClash(const std::vector<std::string>& writes, const std::vector<Input>&
     return true;
 }
 
+std::string nonRegularWhy(const std::string& path) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto st = fs::status(path, ec);   // 링크를 따라간 끝
+    if (ec || !fs::exists(st) || fs::is_regular_file(st)) return std::string();
+    if (fs::is_character_file(st)) return "문자 장치";
+    if (fs::is_block_file(st)) return "블록 장치";
+    if (fs::is_fifo(st)) return "FIFO";
+    if (fs::is_directory(st)) return "폴더";
+    if (fs::is_socket(st)) return "소켓";
+    return "보통 파일이 아닌 것";
+}
+
 bool refuse(const std::string& op, const std::vector<std::string>& writes, const std::vector<Input>& reads,
             const ConsoleOutput& console) {
     std::string why;

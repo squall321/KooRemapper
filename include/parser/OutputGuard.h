@@ -64,6 +64,11 @@ std::vector<Input> configAndModel(const std::string& configPath, const std::stri
 // 않는다(map + prestress 고리 — 덱이 끌어오는 dynain 을 이번 실행이 쓴다).
 bool findClash(const std::vector<std::string>& writes, const std::vector<Input>& reads, std::string& why);
 
+// ★쓴 뒤 **되읽는** 자리(squeeze 의 산출 · stackwrap 의 `_neutral.k`)가 보통 파일이 아니면(링크를 따라간 끝이 문자 · 블록 장치 · FIFO ·
+// 폴더) 그 꼴(사람이 읽는 말 — 「문자 장치」 …), 보통 파일이거나 아직 없으면 빈 글자(2026-11-22 · 3차 4판 L-19 — `/dev/zero` 를 되읽어
+// 끝나지 않았다). 되읽지 않는 산출은 장치여도 된다(`/dev/null` 마른 실행 — staged_write 계약)
+std::string nonRegularWhy(const std::string& path);
+
 // `findClash` 를 묻고 걸리면 `[<op>] …` 을 [ERROR] 로 찍고 true — 부르는 쪽은 아무것도 열지 않고 rc 1 로 끝낸다.
 bool refuse(const std::string& op, const std::vector<std::string>& writes, const std::vector<Input>& reads,
             const ConsoleOutput& console);

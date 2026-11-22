@@ -51,6 +51,11 @@ int runSqueeze(const std::string& meshFile, const std::string& configFile,
     if (KooRemapper::output_guard::refuse("squeeze", {outputPrefix + ".k", outputPrefix + ".dynain"},
                                         KooRemapper::output_guard::configAndModel(configFile, meshFile), console))
         return 1;
+    // squeeze 는 쓴 산출 덱을 되읽어 고쳐 쓴다 — 그 자리가 장치 · FIFO 면 끝나지 않는다(3차 4판 L-19 · `/dev/zero` 실측)
+    if (const std::string k = KooRemapper::output_guard::nonRegularWhy(outputPrefix + ".k"); !k.empty()) {
+        console.error("[squeeze] 산출 자리 " + outputPrefix + ".k 가 " + k + "다 — squeeze 는 쓴 덱을 되읽어 고쳐 쓰므로 보통 파일이어야 한다(아무 파일도 쓰지 않았다)");
+        return 1;
+    }
 
     // Load mesh
     console.info("Loading mesh: " + meshFile);
