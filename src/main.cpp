@@ -3204,7 +3204,7 @@ int main(int argc, char* argv[]) {
     if (rc == 0 && !KooRemapper::deck_write::failures().empty()) {
         ConsoleOutput console;
         for (const auto& f : KooRemapper::deck_write::failures())
-            console.error("덱을 쓰다 멈췄다 — " + f + " — 그 파일은 잘렸을 수 있다(rc 1)");
+            console.error("파일을 쓰다 멈췄다 — " + f + " — 그 파일은 잘렸을 수 있다(rc 1)");   // 덱 · 곁 파일 · CSV · JSON …(L-18)
         rc = 1;
     }
     return rc;

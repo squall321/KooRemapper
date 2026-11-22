@@ -5693,20 +5693,7 @@ static bool ma_resultsHaveNonFinite(const std::vector<ElementResult>& results) {
 // 덱 파일을 다 썼나 — 쓰기 · 비우기 · 닫기 어디서든 실패하면(디스크 참 · 파일 크기 상한 · EIO) 「경로 (strerror)」 를 돌려주고 공용
 // 기록에 남긴다(여섯째 검토 S2 — `outFile << …; close()` 를 보지 않아 잘린 덱을 rc 0 으로 냈다)
 static bool finishDeckFile(std::ofstream& f, const std::string& path, std::string& why) {
-    f.flush();
-    bool bad = f.fail();
-    int err = bad ? errno : 0;
-    errno = 0;
-    f.close();
-    if (f.fail()) {
-        bad = true;
-        if (!err) err = errno;
-    }
-    if (bad) {
-        why = deck_write::describe(path, err);
-        deck_write::note(why);
-    }
-    return !bad;
+    return deck_write::finish(f, path, &why);   // 공용 자리로 옮겼다(3차 4판 L-18 — 덱 아닌 쓰기도 같이 쓴다)
 }
 
 bool ModelAssembler::writeOutput(const std::string& outputPrefix) {

@@ -1,5 +1,6 @@
 // 접힌 덱에서 군별 강체변환(힌지 축·각·피벗)을 역산하는 op — 피벗 산포를 반드시 함께 보고한다.
 #include "linkage_fit.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
@@ -425,7 +426,10 @@ int runLinkageFit(const std::string& yamlFile, ConsoleOutput& console) {
         }
         std::snprintf(buf, sizeof(buf), "    rms_residual: %.6g\n", A.rmsResidual);  out << buf;
     }
-    out.close();
+    if (std::string why; !KooRemapper::deck_write::finish(out, outPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("YAML 쓰기가 멈췄다: " + why);
+        return 1;
+    }
     console.success("Wrote: " + outPath);
     return 0;
 }

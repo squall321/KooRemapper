@@ -12,6 +12,7 @@
 //     (닫힌 표면 왕복 상쇄). 부피 = 면-중심 피라미드 분해(와인딩 무관 |dot| 합).
 //   - 쉘 파트: 요소면 단면 기준(단측), 정사영 /2 없음, 부피 0.
 #include "parser/IncludeClosure.h"   // 인클루드 닫힘 — 정본
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "modelmeta.h"
 #include "contact_helpers.h"
@@ -1205,7 +1206,10 @@ int runModelmeta(const std::string& yamlFile, ConsoleOutput& console) {
     rf << "    \"edges_truncated\": " << (edgesTruncated ? "true" : "false") << "\n";
     rf << "  }\n";
     rf << "}\n";
-    rf.close();
+    if (std::string why; !KooRemapper::deck_write::finish(rf, outPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("[modelmeta] JSON 쓰기가 멈췄다: " + why);
+        return 1;
+    }
 
     // ── 콘솔 요약 ──
     console.info("[modelmeta] Parts: " + std::to_string(parts.size()) +

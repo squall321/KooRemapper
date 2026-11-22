@@ -176,7 +176,11 @@ bool DynainWriter::writeStrainCSV(
     }
 
     file << buffer.str();
-    file.close();
+    std::string why;
+    if (!deck_write::finish(file, filename, &why)) {   // 디스크가 차면 잘린 CSV 를 rc 0 으로 냈다(3차 4판 L-18)
+        errorMessage_ = "CSV 쓰기가 멈췄다: " + why;
+        return false;
+    }
     return true;
 }
 

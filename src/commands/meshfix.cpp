@@ -785,6 +785,7 @@ static bool extractSTL(const Mesh& mesh, int pid,
         f << "  endfacet\n";
     }
     f << "endsolid part_" << pid << "\n";
+    if (std::string why; !KooRemapper::deck_write::finish(f, stlPath, &why)) { err = "STL 을 쓰다 멈췄다: " + why; return false; }   // L-18
     return true;
 }
 
@@ -937,6 +938,7 @@ static bool smoothSTLFile(const std::string& path, int steps, std::string& err) 
         o<<"  endfacet\n";
     }
     o<<"endsolid part\n";
+    if (std::string why; !KooRemapper::deck_write::finish(o, path, &why)) { err = "STL 을 쓰다 멈췄다: " + why; return false; }   // L-18
     return true;
 }
 
@@ -1083,6 +1085,7 @@ static bool subdivideSTLFile(const std::string& path, int levels, std::string& e
         o<<"  endfacet\n";
     }
     o<<"endsolid part\n";
+    if (std::string why; !KooRemapper::deck_write::finish(o, path, &why)) { err = "STL 을 쓰다 멈췄다: " + why; return false; }   // L-18
     return true;
 }
 
@@ -1241,6 +1244,7 @@ static bool writeGeoScript(const std::string& geoPath,
         for (int i = 0; i < cfg.optimizePasses; ++i)
             f << "OptimizeMesh \"Netgen\";\n";
     f << "Save \"" << fwdSlash(mshPath) << "\";\n";
+    if (std::string why; !KooRemapper::deck_write::finish(f, geoPath, &why)) { err = "geo 쓰기가 멈췄다: " + why; return false; }   // L-18
     return true;
 }
 
@@ -2073,6 +2077,8 @@ static bool polishMesh(
             auto cleanup=[&](){ for (auto& p:{pStl,pGeo,pMsh,pLog}) { std::error_code ec; fs::remove(p,ec); } };
 
             // Write patch STL (no Mesh 2 → STL vertices remain boundary nodes)
+            KooRemapper::deck_write::Tolerated tolPatch;   // 패치 쓰기 실패는 건너뜀으로 다룬다(L-18)
+            bool patchOk = true;
             {
                 std::ofstream stl(pStl);
                 stl<<std::scientific<<"solid patch\n";
@@ -2090,6 +2096,7 @@ static bool polishMesh(
                        <<"    endloop\n  endfacet\n";
                 }
                 stl<<"endsolid patch\n";
+                patchOk = KooRemapper::deck_write::finish(stl, pStl) && patchOk;   // 잘린 패치를 gmsh 에 넘기지 않는다(L-18)
             }
 
             // Write patch geo: serial Delaunay, finer lc, no size field
@@ -2116,6 +2123,10 @@ static bool polishMesh(
                 geo<<"Mesh 3;\n";
                 for (int p=0;p<cfg.optimizePasses;++p) geo<<"OptimizeMesh \"Netgen\";\n";
                 geo<<"Save \""<<fwdSlash(pMsh)<<"\";\n";
+                patchOk = KooRemapper::deck_write::finish(geo, pGeo) && patchOk;
+            }
+            if (!patchOk) {   // 패치 하나를 못 쓴 것은 gmsh 실패와 같이 건너뛴다 — 기록은 견딘다(`tolPatch`)
+                cleanup(); continue;
             }
 
             // Run Gmsh

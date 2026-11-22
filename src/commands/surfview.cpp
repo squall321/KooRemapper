@@ -11,6 +11,7 @@
 // 그 표로 자유면을 세면 TET 덱의 표면이 틀린다 — `extract-surface` 가 실제로 그렇다(TET4 하나에서
 // 자유면 5개를 내고 그중 3개가 가짜다). 그래서 여기서는 종류별 표를 쓴다.
 #include "surfview.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
@@ -380,7 +381,10 @@ int runSurfView(const std::string& yamlFile, ConsoleOutput& console) {
         M, fy);
     g << b;
     g << "</g>\n</svg>\n";
-    g.close();
+    if (std::string why; !KooRemapper::deck_write::finish(g, svgPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("SVG 쓰기가 멈췄다: " + why);
+        return 1;
+    }
 
     // ★크기를 재서 말한다. **솎지 않는다** — 음영 뷰에서 삼각형을 빼면 그림에 구멍이 뚫려
     //   거짓이 된다. 대신 큰 것을 큰 것이라고 말하고 어디서 걸리는지 알려 준다.

@@ -558,6 +558,14 @@ dynain · IGA) · `DynainWriter` · 메시 쓰기(`KFileWriter`) · 펼친 덱(`
 돌리세요. 예전엔 결과를 보지 않아 잘린 덱(`*NODE` 가운데서 끊긴 덱 · 마지막 섹션을 잃은 덱)을 rc 0 · ok 보고로 냈습니다(여섯째 검토
 S2 · 회귀 `tools/regress/test_staged_write.py` W).
 
+**덱 · 보고가 아닌 쓰기도(2026-11-22 · 미룬 결함 3차 4판 L-18).** strain CSV · modelmeta · section · id_floor JSON · surfview · section ·
+stackdiagram SVG · cclip 보고와 압축 덱 · generate 의 덱 · cleanup-nodes 보고 · 이월 조각 대응표 · foldsurface CSV · linkage-fit YAML · meshfix
+의 STL · geo 도 같은 계층(`deck_write::finish` — 비우기 · 닫기까지 보고 공용 기록에 적는다)으로 닫는다. 실패하면 「… 쓰기가 멈췄다: <경로>
+(<까닭>)」 이고 rc 1 이다(op 이 rc 0 을 돌려도 `main` 이 「파일을 쓰다 멈췄다 …」 를 찍고 rc 1). 예전엔 카탈로그 사례의 산출 자리를
+/dev/full(디스크 참)로 바꾸면 75 자리 가운데 12 자리가 rc 0 으로 빈 파일을 냈다(회귀 `tools/regress/test_write_errors.py`). 읽어 대조하려고 쓰는
+임시 파일(인클루드를 펼친 덱 · 조각 블록 · meshfix polish 패치)은 실패를 견디고 그 길로 물러선다 — 펼친 덱은 주 덱만 읽었다고 말하고, 조각은
+넣지 않고 rc 1, 패치는 gmsh 실패처럼 건너뛴다.
+
 #### (m) 쓰다 지우는 임시 파일의 이름에는 `.kr_tmp_` 가 든다 (2026-11-08)
 
 바이너리가 쓰다가 끝에 지우는 파일은 모두 이름에 `.kr_tmp_` 를 지닙니다 — 바꿔 넣기 전의 산출 · 보고와 그 잠금 파일(`extract-parts` ·

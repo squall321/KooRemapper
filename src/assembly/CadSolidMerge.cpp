@@ -1,5 +1,6 @@
 // StepForge 조각을 기존 덱에 넣는다 — 계약(BOUNDARY-DYNAFORGE §3-3) 그대로 검증하고 덱 번호 위로 옮겨 `*END` 앞에 둔다
 #include "assembly/ModelAssembler.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 
 #include "core/Mesh.h"
 #include "parser/CardFields.h"   // 열 재질 판정(isThermalMaterialKeyword)
@@ -278,9 +279,18 @@ bool ModelAssembler::applyCadSolidMerge(const CadSolidMergeOperation& op) {
         std::error_code ec;
         const fs::path tmp = fs::temp_directory_path(ec) /
                              ("koorm_merge_" + std::to_string(std::hash<std::string>{}(op.fragment + block.substr(0, 256))) + ".k");
+        bool tmpOk = true;
         {
             std::ofstream t(tmp, std::ios::binary);
             t << (fw == 10 ? "*KEYWORD I10=Y\n" : "*KEYWORD\n") << block << "*END\n";
+            std::string why;
+            tmpOk = deck_write::finish(t, tmp.string(), &why);   // 잘린 블록을 다시 읽어 대조하지 않는다(3차 4판 L-18)
+            if (!tmpOk) deck_write::failures().pop_back();         // 산출이 아니다 — 아래에서 까닭과 함께 거절한다
+            if (!tmpOk) errorMessage_ = tag + "넣을 블록을 임시 파일에 다 쓰지 못했다: " + why + " — 넣지 않았다";
+        }
+        if (!tmpOk) {
+            fs::remove(tmp, ec);
+            return false;
         }
         std::vector<std::string> again;
         try {

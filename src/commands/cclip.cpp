@@ -1581,7 +1581,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
             bat::writeSetPartList(dk, 3, "CCLIP_PART", {1});
             dk << "*INTERFACE_SPRINGBACK_LSDYNA\n$#    psid\n         3\n";
             dk << "*END\n";
-            dk.close();
+            if (std::string why; !KooRemapper::deck_write::finish(dk, deckPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+                console.error("[cclip] 압축 덱 쓰기가 멈췄다: " + why);
+                return 1;
+            }
             b.deckFile = deckPath;
             console.info("[cclip] pid " + std::to_string(pid) + ": compression deck → " + deckPath);
         }
@@ -1801,7 +1804,10 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                    << "\n    }" << (i + 1 < builds.size() ? "," : "") << "\n";
             }
             rf << "  ],\n  \"limitations\": \"v1: linear(secant) stiffness match; elastic bending prestress only; shell contact gap ~t/2 not compensated\"\n}\n";
-            rf.close();
+            if (std::string why; !KooRemapper::deck_write::finish(rf, repPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+                console.error("[cclip] 보고 쓰기가 멈췄다: " + why);
+                return 1;
+            }
             console.info("[cclip] Report → " + repPath);
         }
     }

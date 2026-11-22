@@ -1,4 +1,5 @@
 #include "analysis/StrainCalculator.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include <cmath>
 #include <fstream>
 #include <algorithm>
@@ -452,7 +453,7 @@ bool StrainCalculator::exportToCSV(const std::string& filename) const {
              << data.jacobian << "\n";
     }
 
-    return true;
+    return deck_write::finish(file, filename);   // 디스크가 차면 잘린 CSV 를 성공으로 냈다(3차 4판 L-18)
 }
 
 } // namespace KooRemapper

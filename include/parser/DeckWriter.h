@@ -25,6 +25,26 @@ inline void note(const std::string& what) { failures().push_back(what); }
 inline std::string describe(const std::string& path, int err) {
     return path + " (" + (err ? std::string(std::strerror(err)) : std::string("쓰기 실패")) + ")";
 }
+// 다 썼나 — 쓰기 · 비우기 · 닫기 어디서든 실패하면(디스크 참 · 파일 크기 상한 · EIO) 「경로 (strerror)」 를 공용 기록에 남기고 false(`why` 를
+// 주면 그 글도). 덱(여섯째 검토 S2)뿐 아니라 덱 · 보고가 아닌 쓰기(CSV · JSON · SVG · YAML · 곁 파일 · 임시 파일)도 이것으로 닫는다(2026-11-22 ·
+// 3차 4판 L-18 — `out << …; close()` 를 보지 않아 디스크가 차면 잘린 파일을 rc 0 으로 냈다). op 이 rc 0 을 돌려주면 main 이 기록을 찍고 rc 1
+inline bool finish(std::ofstream& f, const std::string& path, std::string* why = nullptr) {
+    f.flush();
+    bool bad = f.fail();
+    int err = bad ? errno : 0;
+    errno = 0;
+    f.close();
+    if (f.fail()) {
+        bad = true;
+        if (!err) err = errno;
+    }
+    if (bad) {
+        const std::string w = describe(path, err);
+        note(w);
+        if (why) *why = w;
+    }
+    return !bad;
+}
 // 이 블록 동안의 쓰기 실패는 op 이 알고 견딘다(제 말로 [WARN] 을 내고 산출은 멀쩡하다) — 끝날 때 이 블록이 적은 것을 공용 기록에서
 // 뺀다. 블록 밖의 실패는 그대로다(마지막 검토 — map 이 앞처리 평판 임시 파일 쓰기 실패를 [WARN] 으로 넘기는데 main 이 그 기록으로 rc 1 ·
 // 「그 파일은 잘렸을 수 있다」 를 냈다 — 산출 m.k 는 멀쩡했다)

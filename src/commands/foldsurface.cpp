@@ -1,5 +1,6 @@
 // 접힘 곡면(평면 elastica)의 중심선을 푸는 op — 정점 곡률을 고정하고 B 를 연속법+이분법으로 찾는다.
 #include "foldsurface.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 
 #include "cli/ConsoleOutput.h"
 #include "parser/OutputGuard.h"   // `<output>_curve.csv` 가 설정 YAML(링크 · 철자가 달라도)을 덮지 않게
@@ -270,7 +271,10 @@ int runFoldSurface(const std::string& yamlFile, ConsoleOutput& console) {
         const size_t idx = (size_t)((double)i / (halfPts - 1) * nsteps);
         emit(L2 + (double)i / (halfPts - 1) * L2, tr[idx], 0);
     }
-    out.close();
+    if (std::string why; !KooRemapper::deck_write::finish(out, csvPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("CSV 쓰기가 멈췄다: " + why);
+        return 1;
+    }
     console.success("Wrote: " + csvPath + " (" + std::to_string(2 * halfPts - 1) + " points)");
     return 0;
 }

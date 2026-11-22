@@ -1,4 +1,5 @@
 #include "parser/KFileReader.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/ElementCardLayout.h"
 #include "parser/IncludeClosure.h"   // readFileWithIncludes — 닫힘을 펼치는 정본
 #include <cstdint>
@@ -178,6 +179,13 @@ Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string*
                 seenKeyword = true;
             }
             o << l << "\n";
+        }
+        if (!deck_write::finish(o, tmp.string())) {   // 잘린 임시 덱을 읽지 않는다(3차 4판 L-18) — 주 덱만
+            deck_write::failures().pop_back();          // 산출이 아니다 — 견딘다(주 덱만 읽었다고 말한다)
+            fs::remove(tmp, ec);
+            if (note) *note = "펼친 덱을 임시 파일에 다 쓰지 못해(디스크 · 파일 크기 상한) 주 덱만 읽었다";
+            if (complete) *complete = false;
+            return readFile(filename);
         }
     }
     Mesh m;

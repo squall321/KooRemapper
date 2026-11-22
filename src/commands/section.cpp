@@ -8,6 +8,7 @@
 //   모서리 기반은 그것을 피해 가지만, **육면체 12 모서리 표를 그대로 쓰면 안 된다** — 그 표를
 //   TET4 저장에 적용하면 모서리 `(n0,n2)` 가 빠진다(실측). 그래서 종류별 모서리 표를 둔다.
 #include "section.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
@@ -752,7 +753,10 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         o << "\n  }";
     }
     o << "\n}\n";
-    o.close();
+    if (std::string why; !KooRemapper::deck_write::finish(o, outPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("JSON 쓰기가 멈췄다: " + why);
+        return 1;
+    }
     console.success("Wrote: " + outPath);
 
     // ── 그림(SVG). 구현을 **한 자리**에 둔다 — 프런트와 MCP 가 각각 그리면 둘이 갈린다.
@@ -998,7 +1002,10 @@ int runSection(const std::string& yamlFile, ConsoleOutput& console) {
         g << b;
     }
     g << "</g>\n</svg>\n";
-    g.close();
+    if (std::string why; !KooRemapper::deck_write::finish(g, svgPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("SVG 쓰기가 멈췄다: " + why);
+        return 1;
+    }
 
     if (anyTooThin)
         console.warning("최소 피처가 1.5 px 미만이다 — 이 그림에서 그 층은 보이지 않는다. "

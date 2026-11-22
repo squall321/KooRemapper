@@ -8,6 +8,7 @@
 //     세 파트가 z 범위가 전부 `0 ~ 1.0` 으로 **세 쌍 모두 겹친다.** 그 경우 그림을 내지 않고
 //     `section` 을 쓰라고 말한다. 포개진 AABB 를 층처럼 그리면 그것이 가장 나쁜 거짓이다.
 #include "stackdiagram.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 
 #include "cli/ConsoleOutput.h"
@@ -476,7 +477,10 @@ int runStackDiagram(const std::string& yamlFile, ConsoleOutput& console) {
         M, fy);
     g << b;
     g << "</g>\n</svg>\n";
-    g.close();
+    if (std::string why; !KooRemapper::deck_write::finish(g, svgPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("SVG 쓰기가 멈췄다: " + why);
+        return 1;
+    }
 
     if (floored > 0)
         console.warning("층 " + std::to_string(floored) + "개는 " + num("%.0f", c.minBarPx) +

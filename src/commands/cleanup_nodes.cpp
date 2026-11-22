@@ -1134,7 +1134,10 @@ int runCleanupNodes(const std::string& yamlFile, ConsoleOutput& console) {
         for (size_t i = 0; i < warnings.size(); ++i)
             jf << (i ? ", " : "") << jsonStr(warnings[i]);
         jf << "]\n}\n";
-        jf.close();
+        if (std::string why; !KooRemapper::deck_write::finish(jf, o.reportPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+            console.error("report 쓰기가 멈췄다: " + why);
+            return 1;
+        }
         console.info("report: " + o.reportPath);
     }
 

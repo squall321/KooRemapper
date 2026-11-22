@@ -998,7 +998,8 @@ int runStrain(const std::string& refFile, const std::string& defFile,
     // Export to CSV
     console.info("Exporting results: " + outputFile);
     if (!calc.exportToCSV(outputFile)) {
-        console.error("Failed to export results");
+        const auto& wf = KooRemapper::deck_write::failures();   // 쓰다 멈췄으면 그 까닭(3차 4판 L-18)
+        console.error("Failed to export results" + (wf.empty() ? std::string() : " — CSV 쓰기가 멈췄다: " + wf.back()));
         return 1;
     }
     console.success("Results exported successfully");
@@ -2027,7 +2028,10 @@ int runGenerateBox(const std::string& yamlFile, ConsoleOutput& console) {
     }
 
     out << "*END\n";
-    out.close();
+    if (std::string why; !KooRemapper::deck_write::finish(out, outputPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+        console.error("[box] 덱 쓰기가 멈췄다: " + why);
+        return 1;
+    }
 
     console.success("[box] " + std::to_string(nodeCount) + " nodes, "
                     + std::to_string(elemCount) + " elements → " + outputPath);

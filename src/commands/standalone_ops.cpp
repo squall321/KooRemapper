@@ -1,4 +1,5 @@
 #include "standalone_ops.h"
+#include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "util/YamlComment.h"
 #include "assembly/ModelAssembler.h"
 #include "assembly/AssemblyConfig.h"
@@ -1636,6 +1637,10 @@ int runIdFloor(const std::string& yamlFile, ConsoleOutput& console) {
              "pid_start 는 PID·SECID·MID 셋의 최대값 위(조각은 셋을 같은 번호로 쓴다)\",\n"
           << "  \"node_start\": " << nodeStart << ",\n  \"elem_start\": " << elemStart << ",\n"
           << "  \"pid_start\": " << pidStart << ",\n  \"sid_start\": " << sidStart << checkJson << "\n}\n";
+        if (std::string why; !KooRemapper::deck_write::finish(o, outPath, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+            console.error("JSON 쓰기가 멈췄다: " + why);
+            return 1;
+        }
     }
     console.println(std::string("[") + tag + "] -> " + outPath);
     if (below) {
@@ -1794,6 +1799,10 @@ int runCadSolidMerge(const std::string& yamlFile, ConsoleOutput& console) {
         std::ofstream mo(mapOut, std::ios::binary);
         if (!mo.is_open()) { console.error(std::string("[") + tag + "] 옮긴 대응표를 쓰지 못했다: " + mapOut); return 1; }
         mo << KooRemapper::fragment::toJson(assembler.mergedMaps().front()) << "\n";
+        if (std::string why; !KooRemapper::deck_write::finish(mo, mapOut, &why)) {   // 디스크가 차면 잘린 파일을 rc 0 으로 냈다(L-18)
+            console.error("대응표 쓰기가 멈췄다: " + why);
+            return 1;
+        }
     }
     console.println(std::string("[") + tag + "] Done -> " + outputPrefix + ".k · " + mapOut);
     return 0;
