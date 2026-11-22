@@ -10,6 +10,7 @@
 
 무엇을 보나.
   ★예제 bolt_simple.k 의 세트 제목 · CNRB 제목을 들여 쓴 `*` 로 — rc 0 · CNRB 1 개를 바꾼다 · 건너뛴다는 경고 없음
+  ★세트 제목이 「  *NODES_bolt」 — rc 0 · 1 개 · 산출 *NODE 가 대조와 같다(예전엔 절점 블록을 열어 멤버 줄을 좌표로 읽었다)
   대조 — 예제 그대로 rc 0 · 1 개
 
 usage: test_cnrb2solid_indented_star.py <KooRemapper 바이너리>
@@ -32,6 +33,20 @@ def check(name, cond, detail=""):
     return cond
 
 
+def node_block(path):
+    """산출 덱의 *NODE 자료 줄(주석 뺀) — 대조와 같은지 본다."""
+    out, on = [], False
+    if not os.path.exists(path):
+        return out
+    for l in open(path, encoding="utf-8", errors="replace").read().splitlines():
+        if l.startswith("*"):
+            on = l.split()[0].upper() == "*NODE"
+            continue
+        if on and l.strip() and not l.startswith("$"):
+            out.append(l)
+    return out
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip().splitlines()[-1])
@@ -44,7 +59,9 @@ def main():
         cases = (("plain", src, "대조 — 예제 그대로 → rc 0 · CNRB 1 개를 바꾼다"),
                  ("star", src.replace("\nBolt_NodeSet\n", "\n  *Bolt_NodeSet\n")
                              .replace(" " * 69 + "Bolt_M6\n", " " * 67 + "*Bolt_M6\n"),
-                  "★세트 · CNRB 제목이 들여 쓴 `*` → rc 0 · CNRB 1 개를 바꾼다(예전엔 세트를 못 읽어 0 개 · rc 0)"))
+                  "★세트 · CNRB 제목이 들여 쓴 `*` → rc 0 · CNRB 1 개를 바꾼다(예전엔 세트를 못 읽어 0 개 · rc 0)"),
+                 ("nodes", src.replace("\nBolt_NodeSet\n", "\n  *NODES_bolt\n"),
+                  "★세트 제목이 「  *NODES_bolt」 → rc 0 · CNRB 1 개 · 산출 *NODE 가 대조와 같다(예전엔 그 제목에서 절점 블록을 열어 세트 멤버 줄을 좌표로 읽었다)"))
         for tag, text, name in cases:
             d = os.path.join(root, tag)
             os.makedirs(d)
@@ -54,8 +71,11 @@ def main():
             p = subprocess.run([binary, "cnrb2solid", "basic.yaml"], cwd=d, capture_output=True, text=True, timeout=900,
                                encoding="utf-8", errors="replace")
             out = p.stdout + p.stderr
-            check(name, p.returncode == 0 and "Converted 1 CNRB(s)" in out and "not found or empty" not in out,
-                  (p.returncode, out[-400:]))
+            ok = p.returncode == 0 and "Converted 1 CNRB(s)" in out and "not found or empty" not in out
+            if tag == "nodes" and ok:
+                same = node_block(os.path.join(d, "bolt_simple_solid.k")) == node_block(os.path.join(root, "plain", "bolt_simple_solid.k"))
+                ok = same and bool(node_block(os.path.join(d, "bolt_simple_solid.k")))
+            check(name, ok, (p.returncode, out[-400:]))
     finally:
         shutil.rmtree(root, ignore_errors=True)
     print()
