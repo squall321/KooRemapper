@@ -44,7 +44,8 @@ logger = logging.getLogger("koorm.reports")
 _BLOCK_BUILD_LOCK = asyncio.Lock()
 
 # 리포트 받기는 한 번에 하나 — 풀린 데이터가 파일의 약 8 배라, 동시에 온 올리기가 그만큼 곱해지지 않게 줄을 세운다.
-# 잠금 차례는 이 줄 → 캠페인 런 행 잠금 → `_BLOCK_BUILD_LOCK` 이다. 기다리는 올리기는 제 파일 바이트와 DB 연결을 쥔 채 선다.
+# 잠금 차례는 이 줄 → 캠페인 런 행 잠금 → `_BLOCK_BUILD_LOCK` 이다. 기다리는 올리기는 제 파일 바이트만 쥔 채 선다 — 줄 앞에서
+# 커밋해 DB 연결을 풀에 돌려준다(2026-11-22 · 예전엔 연결을 쥔 채 서서 동시 40 건에 풀이 말라 500 이 23 건). 워커 길은 쥔다.
 _PARSE_LOCK = asyncio.Lock()
 
 async def _store_report_html(session: Session, filename: str, raw: bytes) -> SessionFile:
@@ -209,8 +210,15 @@ async def _store_scenario(
     return row, summary
 
 
-async def ingest_report(db: AsyncSession, session: Session, **kw) -> ImpactReport:
-    """리포트 받기는 한 번에 하나 — 인자와 동작은 `_ingest_report` 그대로다."""
+async def ingest_report(db: AsyncSession, session: Session, *, keep_transaction: bool = False, **kw) -> ImpactReport:
+    """리포트 받기는 한 번에 하나 — 인자와 동작은 `_ingest_report` 그대로다.
+
+    줄에 서기 전에 커밋해 연결을 놓는다(`expire_on_commit=False` 라 객체는 그대로 쓴다 · 롤백은 객체를 만료시켜 쓰지 않는다).
+    두 라우트는 여기 오기 전에 만든 세션 · K 파일을 이미 커밋했다. `keep_transaction=True` — 워커의 후처리 반입은 잡 원장을
+    고친 채 부르고 리포트와 한 커밋으로 굳힌다(트랜잭션이 갈리지 않게 커밋하지 않는다 · 그 프로세스 안에서만 줄이 선다).
+    """
+    if not keep_transaction:
+        await db.commit()
     async with _PARSE_LOCK:
         return await _ingest_report(db, session, **kw)
 
@@ -394,6 +402,7 @@ async def attach_media(
     ★선언됐는데 번들에 없는 그림은 `missing_in_bundle` 로 **센다.** 조용히 빼면 받는 쪽이
     "그 위치는 그림이 없다" 로 읽는다(사실은 안 올라온 것이다).
     """
+    await db.commit()          # 줄 앞에서 연결을 놓는다(받기와 같은 까닭) — 받기 뒤 과제 잇기가 연 트랜잭션이 있을 수 있다
     async with _PARSE_LOCK:    # 여기서도 리포트를 통째로 푼다 — 받기와 같은 줄에 선다
         try:
             data = parser.extract_embedded_data(html.decode("utf-8", "replace"))

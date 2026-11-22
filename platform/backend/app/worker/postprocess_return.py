@@ -454,6 +454,7 @@ async def _fetch_and_ingest(db, job: Job, ref: dict, client: KooSlurmClient, ver
             # 소속은 예약 때 검증해 얼린 값이다 — 반입 때는 요청(헤더)이 없다.
             shared_affiliation=str(ref.get("affiliation") or ""),
             reservation=reservation,
+            keep_transaction=True,   # 잡 원장(external_ref)과 리포트가 한 커밋이다 — 줄 앞에서 커밋하지 않는다
         )
     except ValueError as exc:
         _close(job, status="failed", now=now, why=f"리포트 반입 실패: {exc}")
