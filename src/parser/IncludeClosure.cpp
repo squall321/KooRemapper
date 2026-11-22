@@ -8,6 +8,7 @@
 #include "parser/DeckWriter.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <set>
@@ -456,7 +457,17 @@ bool sameFile(const std::string& a, const std::string& b) {
     if (a.empty() || b.empty()) return false;
     std::error_code ec;
     if (fs::exists(a, ec) && fs::exists(b, ec) && fs::equivalent(a, b, ec) && !ec) return true;
+#ifdef _WIN32
+    // 윈도 파일 시스템은 대소문자를 가리지 않는다 — 아직 없는 `pre.K`(prestress output)와 `pre.k`(메시 사본)는 같은 파일이 된다
+    // (3차 4판 L-13 · Windows 에서 못 쟀다). ASCII 만 낮춘다
+    auto low = [](std::string s) {
+        for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return s;
+    };
+    return low(keyOf(a)) == low(keyOf(b));
+#else
     return keyOf(a) == keyOf(b);
+#endif
 }
 
 bool clobberPair(const std::vector<std::string>& writes, const std::vector<std::string>& reads,

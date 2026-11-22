@@ -2311,10 +2311,13 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     // ★쓰기 관문(2026-11-07 · output_guard) — 산출 · 임시 파일(쓴 뒤 지운다)이 설정 · 모델 · 그 인클루드와 같은 파일이면 gmsh 를
     //   돌리기 전에 거절한다. 예전엔 output == model 이면 쓰기 뒤 재검사가 실패할 때 「산출을 지웠다」며 **모델을 지웠다**.
     //   `preview` 는 아무것도 쓰지 않는다
+    std::vector<std::string> guardWrites{cfg.output, stlPath, geoPath, mshPath, logPath, keptPath(".stl"), keptPath(".geo"),
+                                         keptPath(".msh"), keptPath(".log")};
+#ifdef _WIN32
+    guardWrites.push_back(logPath + ".bat");   // gmsh 를 돌리는 배치 파일(`runGmsh` — 쓴 뒤 지운다) · 3차 4판 L-13(Windows 에서 못 쟀다)
+#endif
     if (!cfg.preview &&
-        KooRemapper::output_guard::refuse("meshfix", {cfg.output, stlPath, geoPath, mshPath, logPath, keptPath(".stl"), keptPath(".geo"),
-                                                       keptPath(".msh"), keptPath(".log")},
-                                          KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
+        KooRemapper::output_guard::refuse("meshfix", guardWrites, KooRemapper::output_guard::configAndModel(configPath, cfg.model), console))
         return 1;
     // ★polish 의 임시 파일 `<줄기>.kr_tmp_pol<회차>_<덩어리>.{stl,geo,msh,log}`(Windows 는 `.log.bat` 도 — 쓴 뒤 지운다)은 회차 · 덩어리 수가
     //   gmsh 를 돌려 봐야 정해진다 — 그 꼴의 이름을 가진 입력(모델 · 인클루드 · 설정)이 산출 폴더에 있으면 쓰기 전에 거절한다(2026-11-07)
