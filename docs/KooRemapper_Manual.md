@@ -1207,7 +1207,7 @@ matdb(§24) · merge · hfdamp(§43.4) · `cad_solid_merge_to_deck`(§49)도 쓴
 `*SET_*_TITLE` 도 같아 첫 멤버를 SID 로 읽었다(거짓 SID 겹침 · 진짜 SID 를 가리키는 참조를 미정의로). 행 수를 모르는 꼴 · 못 가른 자리는 정의로
 단정하지 않는다(놓치는 쪽). 섹션 번호 훑기(카드 묶음 셈 · 옛 첫 카드 셈)도 1열의 `*` · `$` 만 키워드 · 주석으로 본다 — 예전엔 들여 쓴 제목(「
 *front panel」)에서 블록을 끊어 그 SECID 를 못 보고 offset 이 그 번호를 다시 냈다. 저장소 덱 339장 · `/data` 표본 521장에서 `--strict` 의 rc ·
-확정 줄이 바뀐 덱 0. 회귀 `tools/regress/test_strict_stacked_duplicates.py` 11항.
+확정 줄이 바뀐 덱 0. 회귀 `tools/regress/test_strict_stacked_duplicates.py` 12항.
 
 **세트·경계조건·이력이 가리키는 절점도 본다(2026-10-16).** 미정의 참조에 「절점」이 들어간다 —
 `line N *SET_NODE_LIST: 절점 4개 — 첫째 379 이 정의되지 않았습니다` 처럼 **줄마다 한 건**(첫 번호와 개수)으로 센다.

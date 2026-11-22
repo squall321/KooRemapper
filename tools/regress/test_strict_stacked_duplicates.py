@@ -12,7 +12,8 @@
 
 무엇을 보나(상자 덱 — PID 1 · SECID 1 · MID 1 — 에 카드를 덧붙인다).
   S 들여 쓴 제목 — offset 의 새 SECID 가 제목 「  *front」 · 「  $5 tube」 인 섹션 2 위로 간다 · 그 섹션이 SECID 1 이면 겹침
-  T 빈 제목 — `*SET_NODE_LIST_TITLE` 의 빈 제목 · `*MAT_RIGID_TITLE` 의 빈 제목이 거짓 겹침 · 거짓 미정의를 내지 않는다
+  T 빈 제목 — `*SET_NODE_LIST_TITLE` 의 빈 제목 · `*MAT_RIGID_TITLE` 의 빈 제목이 거짓 겹침 · 거짓 미정의를 내지 않는다 · 세트의 들여 쓴
+    `*` 제목도 제목이다
   U 쌓인 묶음 — 블록을 건넌 · 한 블록 안의 SECID · MID 겹침을 잡는다 · 열 재질 · 덧붙임 · `*MAT_NONLOCAL` 은 겹침이 아니다
 
 usage: test_strict_stacked_duplicates.py <KooRemapper 바이너리>
@@ -118,6 +119,10 @@ def main():
                                    "       0.0       0.0       0.0       0.0       0.0       0.0\n")
         rc, out = run(binary, d, "info", "--strict", "box.k")
         check("T-2 빈 제목 *MAT_RIGID_TITLE 5(Card 2 CMO 1) — MID 1 겹침이 아니다(--strict rc 0)", rc == 0 and "ID 1 가" not in out, out[-300:])
+        d = box(binary, tmp, "t4", "*SET_NODE_LIST_TITLE\n  *rim nodes\n         5\n         1         2         3         4\n"
+                                   "*BOUNDARY_SPC_SET\n         5         0         1         1         1\n")
+        rc, out = run(binary, d, "info", "--strict", "box.k")
+        check("T-4 세트 제목 「  *rim nodes」(들여 쓴 `*`) — 세트 5 는 정의됐다(--strict rc 0)", rc == 0 and "세트 5" not in out, out[-300:])
         d = box(binary, tmp, "t3", "*SECTION_SHELL_TITLE\n\n" + SHELL2)
         rc, sec, out = new_secid(binary, d)
         check("T-3 빈 제목 섹션 2 — offset 의 새 SECID 는 3", rc == 0 and sec == 3, (rc, sec, out[-300:]))
