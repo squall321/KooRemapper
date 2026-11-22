@@ -59,11 +59,12 @@
 - [x] G-2 DF ② 계획을 연다(`df-request-1117.checklist.md` E-2) — ② ~ ⑥ 다 지었다(11-22)
 
 ## H. 6판 — 사용자가 고른 넷(11-22 저녁 · L-21 phase_modes · L-22 contact.depth · L-23 `*` 꼴 여섯 op)
-- [ ] H-0 해제 조건 — main push · Drive 게시는 「hwaxportal-87 이 cae00 수신을 알릴 때」 · 바이너리 설치는 「pykoocae-53 이 v141 굽기 끝(SIF
-      sha256 · 안 KooRemapper sha)을 알릴 때」
+- [ ] H-0 해제 조건 — main push · Drive 게시는 「hwaxportal-87 이 cae00 수신을 알릴 때」(아직) · 바이너리 설치는 「pykoocae-53 이 v141 굽기
+      끝을 알릴 때」 — 11-22 밤 풀림(SIF 9b81405b · 안 KooRemapper 066e21a3)
 - [x] H-1 다시 재기 — 적층 · 권취 사슬 번호 · 기본 mode swell 의 dent 판(계획 5절)
-- [ ] H-2a phase_modes — 사용자가 적은 고정구 값 따로 · 판마다 다시 셈 · 권취 탭 · PCM 먼저 · 문서(카탈로그 3 · 7 · 매뉴얼 · 도움말)
-- [ ] H-2b contact.depth — Card A 넷 · 정수 0 이상 · soft [WARN] · 카탈로그 · 도움말
-- [ ] H-2c `*` 꼴 여섯 op(+ ale · implicit 재기) — op 마다 들여 쓴 `*` 제목 사례 시험
-- [ ] H-3 변이 · 전체 회귀 · 단위 · 백엔드 · 계약
+- [x] H-2a phase_modes — 사용자가 적은 고정구 값 따로 · 판마다 다시 셈 · 권취 탭 · PCM 먼저 · 문서 `de054ee` · 나선 판 섹션 33(들임) `ab58962`
+- [x] H-2b contact.depth — Card A 넷 · 정수 0 이상 · soft [WARN] · 카탈로그 · 도움말 `6605bd4`
+- [x] H-2c `*` 꼴 여섯 op(+ ale · implicit 재기) — op 마다 들여 쓴 `*` 제목 사례 시험 `a4150f6`
+- [x] H-3 변이 41 / 46(살아남은 다섯은 같은 동작 — 맥락 노트 16절) · 전체 회귀 160 / 160 · 단위 246 / 246 · 백엔드 1118(환경 탓 4) · 계약
+      13 / 13 — 사례 더한 시험 `8ee8bc1`
 - [ ] H-4 올리기(두 멈춤이 풀린 뒤) · cae00 문서 · 알림 · 기억

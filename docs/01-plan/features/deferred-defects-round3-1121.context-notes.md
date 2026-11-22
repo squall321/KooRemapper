@@ -408,3 +408,32 @@
 - **고른 것(묻지 않았다)** — ① 사슬은 권취의 짓는 차례(탭 · PCM 먼저)로 맞춘다 — phase 1 에 번호를 비워 두는 길은 다음 판의 압입자 크기를 알아야
   해 버렸다. ② 기본 mode swell · bare 에 phase_modes dent · side 가 있으면 그 판은 고정구를 짓는다(같은 뿌리로 들였다 — 문서의 「phase_modes 는
   판의 mode 를 바꾼다」 와 맞춘다). ③ contact.depth 는 정수 0 이상(0 은 LS-DYNA 기본 2) — 음수 · 정수 아닌 값은 rc 1.
+- **L-21 phase_modes(`de054ee`)** — 설정을 읽을 때 사용자가 적은 no_fixture · no_pcm · no_impactor 를 따로 두고(userNo*), phase_modes 가 정한
+  판은 그것과 그 판의 mode 에서 다시 셈한다. 권취는 탭 · PCM 을 압입자 · 바닥판 앞에 짓는다(평평한 판 · 나선 판 둘 다). 적층 단독 덱 넷 · 권취
+  bare · swell 은 바이트가 같고, 권취 dent · side 는 그 넷의 번호만 바뀐다 — 절점 좌표 다중집합 · 요소(좌표로) · 절점 세트 · SPC · 처방 운동 ·
+  접촉 카드가 좌표로 같다(탐침 `$S/r3/e6/geomcmp.py` · `setcmp.py`). 시험 `test_battery_phase_modes.py` 41 항(빨강 6 · 나선 판은 뒤에 더함).
+- **L-22 contact.depth(`6605bd4`)** — Card A 넷(적층 면 대 면 · 자기 접촉, 권취 면 대 면 · 자기 접촉). 정수 0 이상만 — 음수 · 소수 · 글자 · 열
+  자리 이상의 수는 rc 1. soft 는 [WARN](덱은 그대로). 저장소 예제 · pyKooCAE 의 battery 설정에는 두 키가 없다(grep). 시험
+  `test_battery_contact_depth.py` 24 항(빨강 12).
+- **나선 판 섹션 33(`ab58962`) — 들인 것** — 사슬을 나선 판(`wound.flat: false`)으로 재다 `info --strict` 가 섹션 33 없음을 냈다. 고치기 전
+  판으로 나선 판 × mode 넷 × 선택 열둘 48 덱을 돌리니 36 이 같은 꼴(전해질 채움 PART 2006 → 섹션 33 은 solid_electrode · core_fill 일 때만). 5판
+  L-07 의 core_fill 과 같은 뿌리라 들였다(5판의 「96 덱」 쓸기는 나선 판을 안 쟀다). 고친 뒤 적층 · 권취 평평 · 권취 나선 144 덱 모두 strict rc
+  0(`$S/r3/e6/sweep/sweep.py`).
+- **L-23 `*` 꼴(`a4150f6`)** — contact 여섯 · cclip 여섯 · matswap 넷(옛 위치 인자 꼴 msw_*) + 여섯(YAML 꼴은 ModelAssembler::applyMatswap 의
+  mw_* 를 쓴다 — 처음엔 matswap.cpp 만 고쳐 시험이 빨갛게 남아 찾았다) · merge 하나 · optimize 넷 · modelmeta 둘 · ale 하나(여섯 밖 · 같은 꼴).
+  implicit 의 자리는 원래 줄 1열을 본다(그대로). 시험 `test_indented_star_ops.py` 12 항(고치기 전 판 빨강 11 — 대조 하나만 초록).
+- **목록 밖(이 판에서 재다 나온 것 · 고치지 않음)** — ① 같은 `*` 꼴이 여섯 밖에 남았다 — ModelAssembler 의 다른 연산 약 21 자리 + 앞 공백을
+  지우는 `ModelAssembler::isKeywordLine`(18 곳에서 쓴다) · stabilize 3 · standalone_ops 1 · strip 1(변수 이름으로 센 어림). ② ale 사용자 재질의
+  `*EOS_…_TITLE` 은 제목 줄에 새 EOSID 를 쓰고 진짜 EOSID 줄은 그대로 둔다(rc 0 — 모델에 EOS 가 있어 새 번호가 1 이 아니면 PART 가 없는 EOS 를
+  가리킨다). ③ 적층 단독 swell 덱은 요소 없는 탭 PART 카드 둘(20 · 21)을 쓴다(strict 는 통과). ④ 예제 `examples/matswap/two_cubes.k` 의 재질
+  줄은 10 칸에 안 맞게 써 있다(modelmeta 가 E 9 · rho 7.85 로 읽는다).
+- **범위 추세(6판)** — 고른 넷 가운데 셋을 짓고(TMID 는 검증런), 같은 판에 들인 것 둘(기본 mode swell 의 dent 판 고정구 · 나선 판 섹션 33) ·
+  남긴 것 넷(위 줄). `*` 꼴은 「여섯」 을 고르면서 matswap 의 YAML 길이 ModelAssembler 안에 있다는 것이 드러났다.
+- **변이(6판 · `$S/r3/e6/mut/mutate8.py`)** — 고친 자리 마흔여섯(battery 열여섯 · `*` 꼴 서른)을 하나씩 옛 꼴로. 1차 26 / 46 — 살아남은 스물에
+  사례를 더해(`8ee8bc1` — 사용자가 적은 no_impactor · no_pcm · depth 열 자리 · contact 의 *COMMENT 속 `  *SET_…` · create 의 새 CID · cclip 의
+  나눠 쓰는 파트 · *COMMENT 속 요소 블록 · matswap 의 나눠 쓰는 모래시계 · 곡선 제목 · swap_all · mids · optimize 의 `  *CONTROL_ENERGY` ·
+  TSSFAC 옛 값) 2차 15 / 20 — 모두 41 / 46. 살아남은 다섯은 같은 동작이라 재지 못한다 — 블록 안 데이터 자리의 들여 쓴 `*` 줄(contact 데이터 끝 ·
+  접촉 번호 첫 데이터 줄 · cclip 요소 블록 끝 — 올바른 덱에 그 자리가 없다)과 cclip 의 번호 최대값 훑기 둘(섹션은 sectionIdTop · 파트는 리더
+  목록이 같은 값을 낸다 · `*SET` 은 attach: cnrb 에서만 쓰인다).
+- **재기(6판)** — dev 판으로 단위 246 / 246 · 작업 트리 백엔드 1118 통과 · 4 실패(`.env` 없는 supervisor_log — 환경 탓) · MCP 계약 13 / 13 ·
+  전체 회귀 160 / 160(새 셋 포함).
