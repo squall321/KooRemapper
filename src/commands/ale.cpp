@@ -1,6 +1,7 @@
 #include "parser/DeckWriter.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
+#include "assembly/ModelAssembler.h"   // 섹션 · 모래시계 번호를 쌓인 묶음까지(조립기와 같은 가르기)
 #include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/IncludeClosure.h" // FlatDeck · partFile — flatten_includes(2026-10-17)
 #include "ale.h"
@@ -680,8 +681,9 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
         ale_findMaxIds(L, m, e, s, h);
         maxMid = std::max(maxMid, m);
         maxEosid = std::max(maxEosid, e);
-        maxSecid = std::max(maxSecid, s);
-        maxHgid = std::max(maxHgid, h);
+        // SECID · HGID 는 쌓인 묶음까지(조립기와 같은 가르기 — 3차 3판 L-10 · 첫 카드만 세면 쌓인 이웃의 번호를 다시 냈다)
+        maxSecid = std::max({maxSecid, s, KooRemapper::ModelAssembler::sectionIdTop(L)});
+        maxHgid = std::max({maxHgid, h, KooRemapper::ModelAssembler::hourglassIdTop(L)});
     };
     raiseFrom(lines);
     for (const auto& f : inclClosure.files) raiseFrom(f.lines);

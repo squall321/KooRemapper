@@ -3,6 +3,7 @@
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID · _SHELL 카드 1 정본(I10×8)
 #include "parser/IdAllocator.h"   // 못 본 자리 · 단정 못 함 경고
+#include "assembly/ModelAssembler.h"   // 섹션 번호 · 섹션 묶음 지우기를 쌓인 묶음까지(조립기와 같은 가르기)
 #include "parser/MaterialIds.h"   // 재질 번호 공용 훑기(열 재질 · 덧붙임 카드 · 쌓인 묶음 — 2026-11-08)
 #include "parser/ElementCardLayout.h"   // deckFieldWidth — 칸 폭 정본
 #include "parser/IncludeClosure.h"   // 충돌 코퍼스 — 인클루드 닫힘(정본)
@@ -772,40 +773,6 @@ bool cc_idShared(const std::vector<std::string>& lines, int fieldIdx, int target
     return false;
 }
 
-std::vector<std::string> cc_removeBlockById(const std::vector<std::string>& lines,
-                                            const std::string& prefix, int targetId) {
-    std::vector<bool> rm(lines.size(), false);
-    for (int i = 0; i < (int)lines.size(); ) {
-        std::string tr = kw_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') { ++i; continue; }
-        std::string up = kw_upper(tr);
-        if (up.rfind(prefix,0) != 0) { ++i; continue; }
-        bool hasTitle = (up.find("_TITLE") != std::string::npos);
-        int titlesLeft = hasTitle ? 1 : 0, id = -1;
-        for (int j = i+1; j < (int)lines.size(); ++j) {
-            std::string jt = kw_trim(lines[j]);
-            if (jt.empty() || jt[0]=='$') continue;
-            if (jt[0]=='*') break;
-            if (titlesLeft-- > 0) continue;
-            auto toks = kw_tok10(lines[j], cc_cw);
-            if (!toks.empty()) { try { id = std::stoi(toks[0]); } catch(...){} }
-            break;
-        }
-        if (id != targetId) { ++i; continue; }
-        int end = i + 1;
-        while (end < (int)lines.size()) {
-            std::string et = kw_trim(lines[end]);
-            if (!et.empty() && et[0]=='*') break;
-            ++end;
-        }
-        for (int k = i; k < end; ++k) rm[k] = true;
-        i = end;
-    }
-    std::vector<std::string> out;
-    for (int i = 0; i < (int)lines.size(); ++i) if (!rm[i]) out.push_back(lines[i]);
-    return out;
-}
-
 // Remove *ELEMENT_SOLID elements whose PID is in pids. Handles the single-line
 // HEX8 form (>=6 fields), the two-line 10-node form (2-field header + node line),
 // and I10/free-format widths (whitespace-first parse; fixed-8 fallback for jammed
@@ -1155,7 +1122,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     // -2147483648). 끝 번호가 상한을 넘으면 산출을 쓰기 전에 멈춘다(아래 「정수 상한」)
     long long nextNid  = (long long)std::max({mesh.getMaxNodeId(), inclReaderMax.node, KooRemapper::scalarNodeMaxId(lines)}) + 1;
     long long nextEid  = (long long)std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
-    long long nextSec  = (long long)std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
+    // SECID 는 쌓인 묶음까지(조립기와 같은 가르기 — 3차 3판 L-10 · 첫 카드만 세면 쌓인 이웃의 SECID 를 다시 냈다)
+    long long nextSec  = (long long)std::max({cc_scanMaxId(scanLines, "*SECTION"), KooRemapper::ModelAssembler::sectionIdTop(scanLines), 0}) + 1;
     // MID 는 공용 재질 훑기로 센다(열 재질 TMID · `*MAT_ADD_*` 는 빼고 · 쌓인 재질 묶음은 센다 — 11-08 (d))
     long long nextMid  = (long long)KooRemapper::matids::maxId(scanLines) + 1;
     long long nextSet  = (long long)std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
@@ -1682,8 +1650,13 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         CcPartLine pl = cc_findPartLine(lines, b.pid);
         if (pl.lineIdx < 0) { console.error("[cclip] *PART line for pid " + std::to_string(b.pid) + " not found"); return 1; }
         lines[pl.lineIdx] = cc_updatePartLine(lines[pl.lineIdx], b.newSecid, b.newMid);
-        if (pl.secid > 0 && !cc_idShared(lines, 1, pl.secid, b.pid))
-            lines = cc_removeBlockById(lines, "*SECTION", pl.secid);
+        if (pl.secid > 0 && !cc_idShared(lines, 1, pl.secid, b.pid)) {
+            // 그 SECID 의 **묶음만** 지운다(3차 3판 L-10 — 예전엔 첫 묶음이 같으면 블록을 통째로 지워 쌓인 다른 파트의 섹션을 잃었다)
+            int kept = 0;
+            KooRemapper::ModelAssembler::removeSectionSets(lines, pl.secid, kept);
+            if (kept > 0)
+                console.warning("[cclip] *SECTION SECID=" + std::to_string(pl.secid) + " 은 줄 수를 모르는 묶음이라 지우지 않았다(쌓인 이웃을 잃지 않게)");
+        }
         if (pl.mid > 0 && !cc_idShared(lines, 2, pl.mid, b.pid)) {
             // 그 MID 의 **구조 재질 정의만** 지운다(11-08 (b)) — 같은 번호 TMID 의 열 재질 · PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` 등 —
             // 파트는 남는다) · 같은 블록에 쌓인 다른 재질은 둔다. 예전엔 첫 칸이 그 MID 인 `*MAT` 블록을 다 지웠다. 재질이 덱에서 사라지면

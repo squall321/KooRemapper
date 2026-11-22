@@ -208,6 +208,14 @@ public:
                                std::string& headerBlock,
                                std::vector<std::string>& consoleLines);
 
+    // ★섹션 · 모래시계 번호를 쌓인 묶음까지(2026-11-22 · 3차 3판 L-10) — 가장 큰 SECID(아래 `sectionIdsInUse` 와 같은 규칙) · 가장 큰
+    // HGID(`*HOURGLASS` 묶음마다 · 첫 묶음만 세던 훑기가 쌓인 이웃을 놓쳐 matswap 이 그 번호를 다시 냈다), 그 번호의 섹션 · 모래시계
+    // **묶음만** 지우기(블록이 비면 블록째 · 줄 수를 모르는 묶음은 두고 kept 를 올린다 — 지운 묶음 수). 단독 matswap · cclip · ale 도 쓴다
+    static int sectionIdTop(const std::vector<std::string>& lines);
+    static int hourglassIdTop(const std::vector<std::string>& lines);
+    static int removeSectionSets(std::vector<std::string>& lines, int secid, int& kept);
+    static int removeHourglassSets(std::vector<std::string>& lines, int hgid, int& kept);
+
 private:
     struct AddedNode { int id; double x, y, z; };
     struct AddedElement {
@@ -293,7 +301,7 @@ private:
     // 옛 첫 카드 셈의 합(이월 적용의 새 SECID 겹침), 그리고 그 가장 큰 값(= 번호 커서 `maxSectionId_` · `idMaxima().section` 이 보는 값 ·
     // 이월 적용의 새 SECID 차례) — StepForge 리더(591d5b5)와 같은 규칙
     static std::set<int> sectionIdsInUse(const std::vector<std::string>& lines);
-    static int sectionIdTop(const std::vector<std::string>& lines);
+    // (sectionIdTop · hourglassIdTop · removeSectionSets · removeHourglassSets 는 위 공개 자리 — 단독 op 도 같은 가르기를 쓴다)
     // applyCarryoverPlan 이 남기는 기대 — verifyCarryoverOutput 이 쓴 덱과 대조한다
     struct CarryExpect {
         // 대조의 「앞」 메시 — 인클루드가 있는 덱(판 2)은 닫힘째 읽은 메시(`closure`), 아니면 baseMesh_

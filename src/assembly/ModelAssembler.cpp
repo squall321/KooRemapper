@@ -152,8 +152,26 @@ bool cur_setIdField(const std::string& l, int w, int& v) {
     return true;
 }
 
-CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
-    CurSectionSets out;
+// ★블록 하나를 카드 묶음으로 가른 것 — 섹션 훑기(`cur_scanSectionSets`) · 모래시계 훑기 · 묶음째 지우기(`cur_removeCardSets`)가 같은
+// 가르기를 쓴다(2026-11-22 · 미룬 결함 3차 3판 L-10 — 예전엔 matswap · cclip 이 첫 묶음의 번호만 보고 블록을 통째로 지워 쌓인 이웃
+// 묶음까지 잃었다). `rows` 는 블록의 데이터 줄(빈 줄 포함 · 1열 `$` 주석 뺌 · 끝의 빈 줄 뺌), 묶음마다 (rows 의 첫 자리 · 줄 수 · 번호).
+// 줄 수가 -1 인 묶음은 행 수를 모르는 꼴(그 자리부터 끝까지 — 그 안에 묶음이 여럿일 수 있다)이다.
+struct CurCardSetBlock {
+    size_t kwLine = 0, end = 0;          // 키워드 줄 · 블록 다음 줄(다음 키워드)
+    std::string kw;
+    int w = 10;
+    size_t t = 0;                        // 묶음마다 오는 제목 줄 수
+    std::vector<size_t> rows;
+    struct Set { size_t a; long long len; int id; };
+    std::vector<Set> sets;               // 번호를 읽은 묶음(나온 차례)
+    size_t rest = std::string::npos;     // 가르지 못한 자리(rows 의 자리)
+    bool known = true;                   // false 면 rest 부터는 꼴을 모른다
+};
+
+// prefix 로 시작하는 블록마다 — rowsOf(base, Card 1, w) 가 묶음 한 벌의 데이터 줄 수(제목 뺌 · 모르면 -1)
+template <class RowsOf>
+std::vector<CurCardSetBlock> cur_cardSetBlocks(const std::vector<std::string>& lines, const char* prefix, RowsOf rowsOf) {
+    std::vector<CurCardSetBlock> out;
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size();) {
         const std::string& l = lines[i];
@@ -166,46 +184,99 @@ CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
             const size_t h = lines[j].find_first_not_of(" \t\r");
             if (h != std::string::npos && lines[j][h] == '*') break;
             // 주석은 **1열의 `$`** 뿐이다(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」 · 리더 `isCommentLine` 과 같다) —
-            // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴 정수도
+            // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴을
             // 받게 되자(S8) 둘째 카드의 두께 `1.0` 을 SECID 1 로 읽어 진짜 SECID 2 를 놓쳤다(새 섹션이 2 를 다시 냈다 · 11-08 S8 의 퇴행)
             if (!lines[j].empty() && lines[j][0] == '$') continue;
             rows.push_back(j);
         }
-        if (kw.rfind("*SECTION_", 0) != 0) { i = j; continue; }
+        if (kw.rfind(prefix, 0) != 0) { i = j; continue; }
+        CurCardSetBlock blk;
+        blk.kwLine = i;
+        blk.end = j;
+        blk.kw = kw;
         while (!rows.empty() && lines[rows.back()].find_first_not_of(" \t\r") == std::string::npos) rows.pop_back();
-        const int w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
+        blk.w = keywordFieldWidth(l, deckFw) == 20 ? 20 : 10;
         const bool title = kw.size() > 6 && kw.compare(kw.size() - 6, 6, "_TITLE") == 0;
         const std::string base = title ? kw.substr(0, kw.size() - 6) : kw;
-        const size_t t = title ? 1 : 0;
-        std::vector<size_t> starts;
-        size_t rest = std::string::npos;
-        bool known = true;
+        const size_t t = blk.t = title ? 1 : 0;
+        std::vector<std::pair<size_t, long long>> starts;   // (자리, 줄 수 — 제목 포함 · 모르면 -1)
         for (size_t a = 0; a < rows.size();) {
-            if (a + t >= rows.size()) { rest = a; break; }                    // 묶음이 제목 줄에서 끝났다
-            const int n = cur_sectionSetRows(base, lines[rows[a + t]], w);
-            if (n < 0) { rest = a; known = false; break; }                    // 행 수를 모르는 꼴 · 못 읽은 칸
-            if (a + t + static_cast<size_t>(n) > rows.size()) { rest = a; break; }   // 마지막 묶음이 모자란다(읽은 만큼)
-            starts.push_back(a);
+            if (a + t >= rows.size()) { blk.rest = a; break; }                    // 묶음이 제목 줄에서 끝났다
+            const int n = rowsOf(base, lines[rows[a + t]], blk.w);
+            if (n < 0) { blk.rest = a; blk.known = false; break; }                // 행 수를 모르는 꼴 · 못 읽은 칸
+            if (a + t + static_cast<size_t>(n) > rows.size()) { blk.rest = a; break; }   // 마지막 묶음이 모자란다(읽은 만큼)
+            starts.emplace_back(a, static_cast<long long>(t + n));
             a += t + static_cast<size_t>(n);
         }
-        if (rest != std::string::npos) starts.push_back(rest);
-        for (size_t a : starts) {
+        if (blk.rest != std::string::npos)
+            starts.emplace_back(blk.rest, blk.known ? static_cast<long long>(rows.size() - blk.rest) : -1);
+        for (const auto& [a, len] : starts) {
             if (a + t >= rows.size()) break;
             int sid = 0;
-            if (!cur_setIdField(lines[rows[a + t]], w, sid)) { rest = a; known = false; break; }   // 묶음의 SECID 칸이 수가 아니다
-            out.defs[sid].emplace_back(rows[a + t], kw);
+            if (!cur_setIdField(lines[rows[a + t]], blk.w, sid)) { blk.rest = a; blk.known = false; break; }   // 묶음의 번호 칸이 수가 아니다
+            blk.sets.push_back({a, len, sid});
         }
-        // 넉넉한 셈은 못 가른 묶음의 **제목 줄 다음**부터 — `rest` 는 늘 묶음의 첫 줄이고 `_TITLE` 이면 그 줄은 꼴을 몰라도 제목이다(LS-DYNA ·
-        // StepForge 리더). 예전엔 그 줄부터 세어 `*SECTION_SEATBELT_TITLE` 의 제목 `2024` 가 가장 큰 SECID 가 되었다 — 이월 적용이 정상 계획을
-        // secid_order 로 거절하고 커서가 2025 로 뛰었다(적대적 검토 11-08 S10). 그 뒤에 쌓인 묶음의 제목은 자리를 몰라 그대로 센다(남은 틈 — 넉넉한 쪽)
-        if (rest != std::string::npos && !known)
-            for (size_t r = rest + t; r < rows.size(); ++r) {
-                int v = 0;
-                if (cur_digitsField(lines[rows[r]], w, v)) out.loose.insert(v);
-            }
+        blk.rows = std::move(rows);
+        out.push_back(std::move(blk));
         i = j;
     }
     return out;
+}
+
+std::vector<CurCardSetBlock> cur_sectionBlocks(const std::vector<std::string>& lines) {
+    return cur_cardSetBlocks(lines, "*SECTION_", [](const std::string& base, const std::string& c1, int w) {
+        return cur_sectionSetRows(base, c1, w);
+    });
+}
+
+// `*HOURGLASS`(·`_TITLE`) — 묶음 한 벌은 Card 1 한 줄이다(Vol_I *HOURGLASS: HGID IHQ QM IBQ Q1 Q2 QB/VDC QW)
+std::vector<CurCardSetBlock> cur_hourglassBlocks(const std::vector<std::string>& lines) {
+    return cur_cardSetBlocks(lines, "*HOURGLASS", [](const std::string& base, const std::string&, int) {
+        return base == "*HOURGLASS" ? 1 : -1;
+    });
+}
+
+CurSectionSets cur_scanSectionSets(const std::vector<std::string>& lines) {
+    CurSectionSets out;
+    for (const auto& blk : cur_sectionBlocks(lines)) {
+        for (const auto& st : blk.sets) out.defs[st.id].emplace_back(blk.rows[st.a + blk.t], blk.kw);
+        // 넉넉한 셈은 못 가른 묶음의 **제목 줄 다음**부터 — `rest` 는 늘 묶음의 첫 줄이고 `_TITLE` 이면 그 줄은 꼴을 몰라도 제목이다(StepForge
+        // 리더). 예전엔 그 줄부터 세어 `*SECTION_SEATBELT_TITLE` 의 제목 `2024` 가 가장 큰 SECID 가 되었다 — 이월 적용이 정상 계획을
+        // secid_order 로 거절하고 커서가 2025 로 뛰었다(적대적 검토 11-08 S10). 그 뒤에 쌓인 묶음의 제목은 자리를 몰라 그대로 센다(넉넉히)
+        if (blk.rest != std::string::npos && !blk.known)
+            for (size_t r = blk.rest + blk.t; r < blk.rows.size(); ++r) {
+                int v = 0;
+                if (cur_digitsField(lines[blk.rows[r]], blk.w, v)) out.loose.insert(v);
+            }
+    }
+    return out;
+}
+
+// 그 번호의 묶음만 지운다(prefix 블록 전부) — 묶음을 다 지운 블록은 키워드 줄 · 주석까지 지운다. 줄 수를 모르는 묶음(꼴을 모름 · 못 가른
+// 자리)이면 지우지 않고 kept 를 올린다(이웃 묶음을 잃지 않게 — 안 쓰이는 정의는 남아도 덱이 선다). 지운 묶음 수를 돌려준다
+int cur_removeCardSets(std::vector<std::string>& lines, const std::vector<CurCardSetBlock>& blocks, int id, int& kept) {
+    std::vector<bool> rm(lines.size(), false);
+    int n = 0;
+    for (const auto& blk : blocks) {
+        size_t left = blk.sets.size() + (blk.rest != std::string::npos && !blk.known && (blk.sets.empty() || blk.sets.back().len >= 0) ? 1 : 0);
+        size_t gone = 0;
+        for (const auto& st : blk.sets) {
+            if (st.id != id) continue;
+            if (st.len < 0) { ++kept; continue; }
+            for (long long k = 0; k < st.len; ++k) rm[blk.rows[st.a + static_cast<size_t>(k)]] = true;
+            ++gone;
+            ++n;
+        }
+        if (gone > 0 && gone == left)
+            for (size_t k = blk.kwLine; k < blk.end; ++k) rm[k] = true;   // 남은 묶음이 없다 — 블록째(키워드 · 주석 · 빈 줄)
+    }
+    if (n > 0) {
+        std::vector<std::string> out;
+        out.reserve(lines.size());
+        for (size_t k = 0; k < lines.size(); ++k) if (!rm[k]) out.push_back(lines[k]);
+        lines = std::move(out);
+    }
+    return n;
 }
 
 // 번호 커서가 볼 가장 큰 SECID — 카드 묶음의 SECID · 못 가른 자리의 행 숫자 · 옛 첫 카드 셈(공백 토큰 — `2.0` 을 2 로 읽는다) 가운데
@@ -447,6 +518,18 @@ std::set<int> ModelAssembler::definedMaterialIds(const std::vector<std::string>&
 std::map<int, std::string> ModelAssembler::definedSectionIds(const std::vector<std::string>& lines) { return cur_scanSectionIds(lines); }
 std::set<int> ModelAssembler::sectionIdsInUse(const std::vector<std::string>& lines) { return cur_scanSectionIdsInUse(lines); }
 int ModelAssembler::sectionIdTop(const std::vector<std::string>& lines) { return cur_scanMaxSectionId(lines); }
+int ModelAssembler::hourglassIdTop(const std::vector<std::string>& lines) {
+    int m = 0;
+    for (const auto& blk : cur_hourglassBlocks(lines))
+        for (const auto& st : blk.sets) m = std::max(m, st.id);
+    return m;
+}
+int ModelAssembler::removeSectionSets(std::vector<std::string>& lines, int secid, int& kept) {
+    return cur_removeCardSets(lines, cur_sectionBlocks(lines), secid, kept);
+}
+int ModelAssembler::removeHourglassSets(std::vector<std::string>& lines, int hgid, int& kept) {
+    return cur_removeCardSets(lines, cur_hourglassBlocks(lines), hgid, kept);
+}
 std::map<int, std::vector<size_t>> ModelAssembler::materialDefinitionLines(const std::vector<std::string>& lines) {
     return cur_scanMaterialDefs(lines);
 }
@@ -12543,41 +12626,6 @@ static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
     return false;
 }
 
-static std::vector<std::string> mw_removeBlock(const std::vector<std::string>& lines,
-                                                 const std::string& prefix, int targetId, int cw = 0) {
-    cw = mw_cardW(lines, cw);
-    std::vector<bool> rm(lines.size(), false);
-    for (int i=0; i<(int)lines.size(); ) {
-        std::string tr = mw_trim(lines[i]);
-        if (tr.empty()||tr[0]!='*') { ++i; continue; }
-        std::string up = mw_upper(tr);
-        if (up.rfind(mw_upper(prefix),0)!=0) { ++i; continue; }
-        bool hasTitle=(up.find("_TITLE")!=std::string::npos);
-        int titlesLeft=hasTitle?1:0; int id=-1;
-        for (int j=i+1; j<(int)lines.size(); ++j) {
-            std::string jt = mw_trim(lines[j]);
-            if (jt.empty()||jt[0]=='$') continue;
-            if (jt[0]=='*') break;
-            if (titlesLeft-->0) continue;
-            auto toks=mw_tok10(lines[j], cw);
-            if (!toks.empty()) { try{id=std::stoi(toks[0]);}catch(...){} }
-            break;
-        }
-        if (id!=targetId) { ++i; continue; }
-        int start=i, end=i+1;
-        while (end<(int)lines.size()) {
-            std::string et=mw_trim(lines[end]);
-            if (!et.empty()&&et[0]=='*') break;
-            ++end;
-        }
-        for (int k=start;k<end;++k) rm[k]=true;
-        i=end;
-    }
-    std::vector<std::string> out;
-    for (int i=0;i<(int)lines.size();++i) if(!rm[i]) out.push_back(lines[i]);
-    return out;
-}
-
 static std::string mw_resolveLine(const std::string& line,
                                    const std::vector<std::pair<std::string,int>>& sortedRemap) {
     std::string r = line;
@@ -12735,7 +12783,9 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         return std::max(mw_scanMaxId(rawLines_, prefix),
                         inclMax([prefix, this](const std::vector<std::string>& L) { return mw_scanMaxId(L, prefix, mw_cardW(rawLines_, 0)); }));
     };
-    int maxHGID  = scanMax("*HOURGLASS");
+    // HGID 는 쌓인 묶음까지(첫 묶음만 세던 훑기가 쌓인 이웃의 HGID 를 놓쳐 새 모래시계가 그 번호를 다시 냈다 — 3차 3판 L-10)
+    int maxHGID  = std::max({scanMax("*HOURGLASS"), hourglassIdTop(rawLines_),
+                             inclMax([](const std::vector<std::string>& L) { return hourglassIdTop(L); })});
     int maxLCID  = scanMax("*DEFINE_CURVE");
     // SECID · MID 는 공용 커서(`maxSectionId_` · `maxMaterialId_` — 쌓인 섹션 · 재질 묶음까지 센 값 + 같은 assemble 의 앞 op 이 낸 번호)와
     // 견준다 — 앞 op 이 덧붙인 카드(새 재질 · 섹션)는 아직 rawLines_ 에 없어 이 훑기가 못 본다. 예전엔 offset 이 낸 MID 2 · SECID 2 를 뒤의
@@ -12808,17 +12858,25 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
     // 9. Remove orphaned old keyword blocks — 재질은 위에서 지웠다(구조 재질 정의만)
     if (!midMode) {
         // SECTION swap only for PID-based targeting
+        // ★그 번호의 **묶음만** 지운다(3차 3판 L-10) — 예전엔 첫 묶음의 번호가 같으면 블록을 통째로 지워, 같은 블록에 쌓인 다른 파트의
+        //   섹션까지 잃었다(그 파트가 정의 안 된 SECID 를 가리키고, 새 섹션이 그 번호를 다시 받으면 조용히 다른 섹션을 가리켰다)
         for (int secid : oldSecids) {
             if (!mw_isSharedExcludeSet(rawLines_, 1, secid, targetPidSet)) {
-                rawLines_ = mw_removeBlock(rawLines_, "*SECTION", secid);
-                infoMessages.push_back("[matswap] Removed *SECTION SECID=" + std::to_string(secid));
+                int kept = 0;
+                const int n = removeSectionSets(rawLines_, secid, kept);
+                if (n > 0) infoMessages.push_back("[matswap] Removed *SECTION SECID=" + std::to_string(secid) + " (묶음 " + std::to_string(n) + ")");
+                if (kept > 0)
+                    infoMessages.push_back("[matswap] *SECTION SECID=" + std::to_string(secid) + " 은 줄 수를 모르는 묶음이라 지우지 않았다(쌓인 이웃을 잃지 않게)");
             }
         }
     }
     for (int hgid : oldHgids) {
         if (!mw_isSharedExcludeSet(rawLines_, 4, hgid, targetPidSet)) {
-            rawLines_ = mw_removeBlock(rawLines_, "*HOURGLASS", hgid);
-            infoMessages.push_back("[matswap] Removed *HOURGLASS HGID=" + std::to_string(hgid));
+            int kept = 0;
+            const int n = removeHourglassSets(rawLines_, hgid, kept);
+            if (n > 0) infoMessages.push_back("[matswap] Removed *HOURGLASS HGID=" + std::to_string(hgid) + " (묶음 " + std::to_string(n) + ")");
+            if (kept > 0)
+                infoMessages.push_back("[matswap] *HOURGLASS HGID=" + std::to_string(hgid) + " 은 줄 수를 모르는 묶음이라 지우지 않았다");
         }
     }
 

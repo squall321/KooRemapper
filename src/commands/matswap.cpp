@@ -205,46 +205,6 @@ static bool msw_isShared(const std::vector<std::string>& lines,
     return false;
 }
 
-static std::vector<std::string> msw_removeBlock(
-        const std::vector<std::string>& lines,
-        const std::string& prefix, int targetId) {
-    std::vector<bool> rm(lines.size(), false);
-
-    for (int i=0; i<(int)lines.size(); ) {
-        std::string tr = kw_trim(lines[i]);
-        if (tr.empty() || tr[0]!='*') { ++i; continue; }
-        std::string up = kw_upper(tr);
-        if (up.rfind(prefix,0)!=0) { ++i; continue; }
-
-        bool hasTitle=(up.find("_TITLE")!=std::string::npos);
-        int titlesLeft=hasTitle?1:0, id=-1;
-
-        for (int j=i+1; j<(int)lines.size(); ++j) {
-            std::string jt = kw_trim(lines[j]);
-            if (jt.empty()||jt[0]=='$') continue;
-            if (jt[0]=='*') break;
-            if (titlesLeft-->0) continue;
-            auto toks=kw_tok10(lines[j], msw_cw);
-            if (!toks.empty()) { try{id=std::stoi(toks[0]);}catch(...){} }
-            break;
-        }
-        if (id!=targetId) { ++i; continue; }
-
-        int start=i, end=i+1;
-        while (end<(int)lines.size()) {
-            std::string et=kw_trim(lines[end]);
-            if (!et.empty()&&et[0]=='*') break;
-            ++end;
-        }
-        for (int k=start;k<end;++k) rm[k]=true;
-        i=end;
-    }
-
-    std::vector<std::string> out;
-    for (int i=0;i<(int)lines.size();++i) if (!rm[i]) out.push_back(lines[i]);
-    return out;
-}
-
 static std::string msw_resolveLine(const std::string& line,
         const std::vector<std::pair<std::string,int>>& sortedRemap) {
     std::string r = line;
@@ -343,9 +303,13 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         return KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
             [prefix](const std::vector<std::string>& L) { return msw_scanMaxId(L, prefix); });
     };
-    int maxHGID  = scanMax("*HOURGLASS");
+    // HGID · SECID 는 쌓인 묶음까지(조립기와 같은 가르기 — 3차 3판 L-10). 첫 묶음만 세면 쌓인 이웃의 번호를 놓쳐 번들 카드가 그 번호를
+    // 다시 받았다(옛 블록을 통째로 지운 뒤 다른 파트가 그 번호로 번들 섹션을 조용히 가리켰다)
+    int maxHGID  = std::max(scanMax("*HOURGLASS"), KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
+        [](const std::vector<std::string>& L) { return KooRemapper::ModelAssembler::hourglassIdTop(L); }));
     int maxLCID  = scanMax("*DEFINE_CURVE");
-    int maxSECID = scanMax("*SECTION");
+    int maxSECID = std::max(scanMax("*SECTION"), KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
+        [](const std::vector<std::string>& L) { return KooRemapper::ModelAssembler::sectionIdTop(L); }));
     // MID 는 공용 재질 훑기로 센다 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸(MID · PID)은 MID 가 아니고, 쌓인 재질 묶음은 센다(11-08 (d) ·
     // 예전 `*MAT_` 첫 카드 셈은 TMID 로 커서를 올리고 쌓인 둘째 MID 를 다시 냈다)
     int maxMID   = KooRemapper::ids::maxOverClosure(modelLines, inclClosure,
@@ -416,13 +380,18 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
         resolvedCards.push_back(msw_resolveLine(c, sortedRemap));
 
     // 8. Remove orphaned old cards from model
+    //    그 번호의 **묶음만** 지운다(3차 3판 L-10 — 예전엔 첫 묶음이 같으면 블록을 통째로 지워 쌓인 다른 파트의 섹션 · 모래시계를 잃었다)
     if (!hgidShared  && tp.hgid >0) {
-        modelLines = msw_removeBlock(modelLines, "*HOURGLASS", tp.hgid);
-        console.println("[matswap] Removed *HOURGLASS HGID=" + std::to_string(tp.hgid));
+        int kept = 0;
+        const int n = KooRemapper::ModelAssembler::removeHourglassSets(modelLines, tp.hgid, kept);
+        if (n > 0) console.println("[matswap] Removed *HOURGLASS HGID=" + std::to_string(tp.hgid) + " (묶음 " + std::to_string(n) + ")");
+        if (kept > 0) console.warning("[matswap] *HOURGLASS HGID=" + std::to_string(tp.hgid) + " 은 줄 수를 모르는 묶음이라 지우지 않았다");
     }
     if (!secidShared && tp.secid>0) {
-        modelLines = msw_removeBlock(modelLines, "*SECTION",   tp.secid);
-        console.println("[matswap] Removed *SECTION SECID=" + std::to_string(tp.secid));
+        int kept = 0;
+        const int n = KooRemapper::ModelAssembler::removeSectionSets(modelLines, tp.secid, kept);
+        if (n > 0) console.println("[matswap] Removed *SECTION SECID=" + std::to_string(tp.secid) + " (묶음 " + std::to_string(n) + ")");
+        if (kept > 0) console.warning("[matswap] *SECTION SECID=" + std::to_string(tp.secid) + " 은 줄 수를 모르는 묶음이라 지우지 않았다(쌓인 이웃을 잃지 않게)");
     }
 
     // 9. Update target PART data line with new IDs
