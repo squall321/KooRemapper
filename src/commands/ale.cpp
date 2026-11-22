@@ -297,7 +297,12 @@ static std::string ale_presetMaterial(const std::string& preset, int mid, int eo
     return "";
 }
 
-static std::string ale_customMaterial(const std::string& path, int mid, int eosid) {
+// 사용자 재료 파일 — 첫 **구조 재질 묶음** 하나(공용 재질 훑기 `matids` — `_TITLE` 이면 제목 줄 다음 Card 1 의 MID 칸을 바꾼다 · 쌓인
+// 다음 재질 · `*MAT_ADD_*` · 열 재질은 싣지 않는다)와 첫 `*EOS_` 블록. 2026-11-22(3차 3판 L-12) 전엔 첫 `*MAT_` 블록을 통째로 베껴
+// `*MAT_ADD_EROSION` 이 앞이면 그것을 재질로 싣고, `_TITLE` 재질은 제목 줄에 MID 를 써 Card 1 의 옛 MID 가 남고, 쌓인 둘째 재질까지 실었다.
+// others 에 파일의 다른 구조 재질 수를 돌려준다(부르는 쪽이 알린다)
+static std::string ale_customMaterial(const std::string& path, int mid, int eosid, int& others) {
+    others = 0;
     std::ifstream fin(path);
     if (!fin.is_open()) return "";
     KooRemapper::yamlSkipBOM(fin);   // 맨 앞 BOM 은 건너뛴다 — 첫 `*MAT_` 줄을 키워드로 못 알아봐 블록이 통째로 빠졌다
@@ -308,30 +313,33 @@ static std::string ale_customMaterial(const std::string& path, int mid, int eosi
         blines.push_back(ln);
     }
     std::string result;
-    bool inBlock = false;
-    bool isMat = false, isEos = false;
-    bool foundMat = false, foundEos = false;
-    bool matIdDone = false, eosIdDone = false;
+    {
+        const auto sc = KooRemapper::matids::scan(blines);
+        int first = 0;
+        size_t total = 0;
+        for (const auto& b : sc.blocks)
+            for (const auto& st : b.sets) {
+                if (first == 0) first = st.mid;
+                ++total;
+            }
+        if (first == 0) return "";
+        result = KooRemapper::matids::copyDefinition(blines, first, mid);
+        others = static_cast<int>(total) - 1;
+    }
+    bool inEos = false, foundEos = false, eosIdDone = false;
     for (int i = 0; i < (int)blines.size(); ++i) {
         std::string up = kw_upper(kw_trim(blines[i]));
         if (!up.empty() && up[0] == '*') {
-            inBlock = false;
-            isMat = (up.rfind("*MAT_", 0) == 0) && !foundMat;
-            isEos = (up.rfind("*EOS_", 0) == 0) && !foundEos;
-            if (isMat) { inBlock = true; foundMat = true; matIdDone = false; }
-            if (isEos) { inBlock = true; foundEos = true; eosIdDone = false; }
+            inEos = (up.rfind("*EOS_", 0) == 0) && !foundEos;
+            if (inEos) { foundEos = true; eosIdDone = false; }
         }
-        if (!inBlock) continue;
+        if (!inEos) continue;
         std::string line = blines[i];
         if (line.empty() || line[0] == '*' || line[0] == '$') {
             result += line + "\n";
             continue;
         }
-        if (isMat && !matIdDone) {
-            line = kw_setField(line, 0, 10, std::to_string(mid));
-            matIdDone = true;
-        }
-        if (isEos && !eosIdDone) {
+        if (!eosIdDone) {
             line = kw_setField(line, 0, 10, std::to_string(eosid));
             eosIdDone = true;
         }
@@ -751,12 +759,15 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
             matCards = ale_presetMaterial(entry.material, newMid, newEosid);
         } else {
             std::string bundlePath = resolvePath(entry.material);
-            matCards = ale_customMaterial(bundlePath, newMid, newEosid);
+            int others = 0;
+            matCards = ale_customMaterial(bundlePath, newMid, newEosid, others);
             if (matCards.empty()) {
                 // 예전엔 오류만 찍고 넘어가 재료 없는 ALE 파트가 담긴 출력을 rc 0 으로 썼다
-                console.error("[ale] Cannot load bundle: " + entry.material);
+                console.error("[ale] Cannot load bundle: " + entry.material + " — 구조 재질(*MAT_ — 덧붙임 · 열 재질 말고)이 없거나 열 수 없다");
                 return 1;
             }
+            if (others > 0)
+                console.warning("[ale] " + entry.material + " 의 첫 구조 재질만 싣는다 — 다른 재질 " + std::to_string(others) + " 개는 쓰지 않았다");
         }
         insertCards += matCards;
 

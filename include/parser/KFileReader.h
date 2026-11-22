@@ -111,6 +111,7 @@ private:
     bool parseMatElasticSection(std::ifstream& file);
     bool parseMatPlasticSection(std::ifstream& file);
     bool parseMatRigidSection(std::ifstream& file);
+    bool moreSetData(std::ifstream& file);   // 같은 키워드 아래 묶음이 더 있나(엿보기 — 자리를 되돌린다)
     bool parseMatViscoelasticSection(std::ifstream& file);
     bool parseMatMooneyRivlinSection(std::ifstream& file);
     bool parseSectionShellSection(std::ifstream& file);

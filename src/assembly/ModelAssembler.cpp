@@ -2135,18 +2135,23 @@ bool ecIsCardLine(const std::string& l) {
 std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
     std::map<int, int> secElform;      // SECID → ELFORM
     std::map<int, int> partSec;        // PID → SECID
+    // ★섹션은 쌓인 묶음까지 · 블록 칸 폭으로(공용 가르기 `cur_sectionBlocks` — 3차 3판 L-12). 예전엔 첫 묶음 · 10 칸만 읽어 쌓인 2차
+    //   섹션과 LONG=Y 덱의 2차 파트를 못 알아봐 두 줄 꼴 요소의 절점 줄을 새 요소로 셌다(info 「정의되지 않은 파트」 100 건)
+    for (const auto& blk : cur_sectionBlocks(rawLines)) {
+        if (blk.kw.rfind("*SECTION_SOLID", 0) != 0) continue;
+        for (const auto& st : blk.sets) {
+            const int ef = rsIntField(rsCardFields(rawLines[blk.rows[st.a + blk.t]], static_cast<size_t>(blk.w)), 1);
+            if (st.id > 0 && ef > 0) secElform[st.id] = ef;
+        }
+    }
+    const int deckFw = deckFieldWidth(rawLines);
     for (const auto& b : rsCollectBlocks(rawLines)) {
-        if (rsStarts(b.kw, "*SECTION_SOLID")) {
-            size_t k = rsHas(b.kw, "_TITLE") ? 1u : 0u;
-            if (k >= b.data.size()) continue;
-            auto f = rsCardFields(rawLines[b.data[k]]);
-            int sid = rsIntField(f, 0), ef = rsIntField(f, 1);
-            if (sid > 0 && ef > 0) secElform[sid] = ef;
-        } else if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+        if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+            const size_t w = keywordFieldWidth(rawLines[b.kwLine], deckFw) >= 20 ? 20 : 10;
             // *PART 는 '제목 줄 + 카드 2' 가 반복된다 — 카드 2 의 칸 0 이 PID, 칸 1 이 SECID.
             // 제목 줄이 비어 있을 수 있으므로 'PID·SECID 가 모두 양수인 줄' 만 카드 2 로 본다.
             for (size_t m = 0; m < b.data.size(); ++m) {
-                auto f = rsCardFields(rawLines[b.data[m]]);
+                auto f = rsCardFields(rawLines[b.data[m]], w);
                 int pid = rsIntField(f, 0), sec = rsIntField(f, 1);
                 if (pid > 0 && sec > 0 && !partSec.count(pid)) partSec[pid] = sec;
             }
@@ -9647,6 +9652,11 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
         std::string matBlock;
         if (origMid > 0) {
             matBlock = extractMaterialBlock(origMid, newMid, deckFieldWidth(rawLines_));
+            const std::string why = stackedNeighborAfter(origMid);
+            if (!why.empty()) {
+                errorMessage_ = "iga: " + why;
+                return false;
+            }
         }
 
         // 5. Generate IGA file content
@@ -18483,6 +18493,51 @@ bool ModelAssembler::partIdInUse(int pid) const {
     if (static_cast<size_t>(bat::FAM_PART) < batteryIds_.size())
         for (const auto& [lo, hi] : batteryIds_[bat::FAM_PART]) if (pid >= lo && pid <= hi) return true;
     return false;
+}
+
+// ★IGA 가 베낄 재질 묶음의 길이를 모를 때(꼴을 모름 — `matids` 표 밖) 같은 블록 뒤쪽에 다른 재질이 쌓여 있는가(2026-11-22 · 3차 3판 L-12).
+// 베끼기는 블록 끝까지라 쌓인 이웃까지 IGA 인클루드에 실려 그 MID 가 둘이 된다. 뒤쪽 줄의 첫 칸이 `*PART` 가 가리키는 다른 MID 면
+// 이웃으로 보고 까닭을 돌려준다(빈 글이면 괜찮다) — 그 줄 수가 꼴마다 달라 묶음 끝을 가를 수 없다
+std::string ModelAssembler::stackedNeighborAfter(int mid) const {
+    std::set<int> used;
+    auto collect = [&used](const std::vector<std::string>& L) {
+        const int deckFw = deckFieldWidth(L);
+        int fw = 10;
+        bool inPart = false;
+        for (const auto& l : L) {
+            if (deckscan::isKeywordLine(l)) {
+                const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+                inPart = (kw == "*PART" || kw == "*PART_TITLE");
+                fw = keywordFieldWidth(l, deckFw) >= 20 ? 20 : 10;
+                continue;
+            }
+            if (!inPart || !deckscan::isDataLine(l)) continue;
+            const auto f = deckscan::cardFields(l, fw);
+            if (deckscan::fieldInt(f, 0) > 0 && deckscan::fieldInt(f, 1) > 0 && deckscan::fieldInt(f, 2) > 0) used.insert(deckscan::fieldInt(f, 2));
+        }
+    };
+    collect(rawLines_);
+    for (const auto& f : incl_.files) collect(f.lines);
+    std::vector<const std::vector<std::string>*> srcs{&rawLines_};
+    for (const auto& f : incl_.files) srcs.push_back(&f.lines);
+    for (const auto* L : srcs) {
+        const auto sc = matids::scan(*L);
+        const auto it = sc.defs.find(mid);
+        if (it == sc.defs.end()) continue;
+        const auto& blk = sc.blocks[it->second.front().first];
+        const auto& st = blk.sets[it->second.front().second];
+        if (st.exact) return "";
+        for (size_t l = st.card1 + 1; l < blk.end; ++l) {
+            int v = 0;
+            if ((*L)[l].empty() || (*L)[l][0] == '$' || !deckscan::digitsField((*L)[l], blk.width, v)) continue;
+            if (v != mid && used.count(v))
+                return "MID " + std::to_string(mid) + " 의 재질 꼴(" + deckscan::kwBare(deckscan::keywordToken((*L)[blk.keyword])) +
+                       ")은 묶음 한 벌의 카드 수를 몰라 블록 끝까지 베끼는데, 같은 블록 " + std::to_string(l + 1) + " 째 줄에 *PART 가 가리키는 MID " +
+                       std::to_string(v) + " 가 쌓여 있다 — IGA 인클루드에 그 재질까지 실려 번호가 겹친다. 그 재질을 제 키워드로 떼어 다시 돌리라";
+        }
+        return "";
+    }
+    return "";
 }
 
 int ModelAssembler::partMidAnywhere(int pid) const {

@@ -292,15 +292,18 @@ void KFileReader::prescanPartSections(std::ifstream& file) {
     std::map<int, int> secElform;   // SECID → ELFORM
     std::map<int, int> partSec;     // PID → SECID
 
-    auto field = [](const std::string& l, size_t idx) -> int {
-        // *PART·*SECTION 카드는 10 칸 고정폭이다. 칸이 어긋난 덱은 공백 토큰으로 되돌린다.
+    // ★칸 폭은 덱 선언(첫 `*KEYWORD` 카드)과 키워드 접미사를 따른다(2026-11-22 · 3차 3판 L-12) — 예전엔 늘 10 칸이라 LONG=Y 덱에서 2차 솔리드
+    //   파트를 못 알아봐 두 줄 꼴 요소를 한 줄 꼴로 읽었다(HEX20 100 요소가 200 · 정의 안 된 카드 100 · 음의 야코비안 — rc 0)
+    int fw = 10;
+    auto field = [&fw](const std::string& l, size_t idx) -> int {
+        // *PART·*SECTION 카드는 고정폭이다(fw). 칸이 어긋난 덱은 공백 토큰으로 되돌린다.
         std::string body = l;
         size_t cm = body.find('$');
         if (cm != std::string::npos) body = body.substr(0, cm);
         while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
         std::string f;
-        if (body.find(',') == std::string::npos && body.size() > idx * 10) {
-            f = body.substr(idx * 10, 10);
+        if (body.find(',') == std::string::npos && body.size() > idx * static_cast<size_t>(fw)) {
+            f = body.substr(idx * static_cast<size_t>(fw), static_cast<size_t>(fw));
         } else {
             std::vector<std::string> toks;
             std::string tok;
@@ -322,12 +325,20 @@ void KFileReader::prescanPartSections(std::ifstream& file) {
 
     std::string line;
     int mode = 0;          // 0 = 관심 없음, 1 = *PART, 2 = *SECTION_SOLID
+    int deckFw = 8;
+    bool kwSeen = false;
     while (std::getline(file, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         size_t g = line.find_first_not_of(" \t");
         if (g == std::string::npos) continue;
         if (line[g] == '$') continue;
         if (line[g] == '*') {
+            if (!kwSeen && isKeywordCardLine(line)) {   // 첫 `*KEYWORD` 카드만 덱 폭을 정한다(리더 · `deckFieldWidth` 와 같다)
+                kwSeen = true;
+                const int w = keywordCardDeckWidth(line);
+                if (w > 0) deckFw = w;
+            }
+            fw = keywordFieldWidth(line, deckFw) >= 20 ? 20 : 10;
             std::string up = line.substr(g);
             for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             if (up.rfind("*PART", 0) == 0 && up.rfind("*PART_ADAPTIVE", 0) != 0) mode = 1;
@@ -421,22 +432,31 @@ bool KFileReader::parseFile(std::ifstream& file) {
             }
             else if (currentKeyword_ == "MAT_ELASTIC" || currentKeyword_ == "MAT_ELASTIC_TITLE" ||
                      currentKeyword_ == "MAT_001" || currentKeyword_ == "MAT_001_TITLE") {
-                if (!parseMatElasticSection(file)) {
-                    return false;
-                }
+                // 한 키워드 아래 쌓인 재질(묶음)을 다 읽는다(3차 3판 L-12 — 예전엔 첫 묶음만 읽어 둘째 재질이 메시에 없었다)
+                do {
+                    if (!parseMatElasticSection(file)) {
+                        return false;
+                    }
+                } while (moreSetData(file));
             }
             else if (currentKeyword_ == "MAT_PIECEWISE_LINEAR_PLASTICITY" ||
                      currentKeyword_ == "MAT_PIECEWISE_LINEAR_PLASTICITY_TITLE" ||
                      currentKeyword_ == "MAT_024" || currentKeyword_ == "MAT_024_TITLE") {
-                if (!parseMatPlasticSection(file)) {
-                    return false;
-                }
+                // 한 키워드 아래 쌓인 재질(묶음)을 다 읽는다(3차 3판 L-12 — 예전엔 첫 묶음만 읽어 둘째 재질이 메시에 없었다)
+                do {
+                    if (!parseMatPlasticSection(file)) {
+                        return false;
+                    }
+                } while (moreSetData(file));
             }
             else if (currentKeyword_ == "MAT_RIGID" || currentKeyword_ == "MAT_RIGID_TITLE" ||
                      currentKeyword_ == "MAT_020" || currentKeyword_ == "MAT_020_TITLE") {
-                if (!parseMatRigidSection(file)) {
-                    return false;
-                }
+                // 한 키워드 아래 쌓인 재질(묶음)을 다 읽는다(3차 3판 L-12 — 예전엔 첫 묶음만 읽어 둘째 재질이 메시에 없었다)
+                do {
+                    if (!parseMatRigidSection(file)) {
+                        return false;
+                    }
+                } while (moreSetData(file));
             }
             else if (currentKeyword_ == "MAT_VISCOELASTIC" || currentKeyword_ == "MAT_VISCOELASTIC_TITLE" ||
                      currentKeyword_ == "MAT_006" || currentKeyword_ == "MAT_006_TITLE") {
@@ -1321,11 +1341,6 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
             line.pop_back();
         }
 
-        // Skip empty lines
-        if (line.empty()) {
-            continue;
-        }
-
         // Skip comment lines
         if (isCommentLine(line)) {
             continue;
@@ -1338,9 +1353,15 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
             return true;
         }
 
-        // Skip title line for _TITLE variants
+        // Skip title line for _TITLE variants — 빈 제목 줄도 제목이다(예전엔 빈 줄을 먼저 건너 Card 1 을 제목으로 버렸다 · 3차 3판 L-12)
         if (hasTitle && !titleSkipped) {
             titleSkipped = true;
+            continue;
+        }
+
+        // 묶음 앞의 빈 줄은 여백이다. Card 1 뒤의 빈 줄은 카드다(비어 있어도 와야 하는 카드 — `*MAT_RIGID` 의 Card 2 · 3) — 예전엔 건너
+        // 다음 묶음의 줄을 이 묶음의 카드로 셌다
+        if (dataLineCount == 0 && line.find_first_not_of(" \t") == std::string::npos) {
             continue;
         }
 
@@ -1367,8 +1388,8 @@ bool KFileReader::parseMatElasticSection(std::ifstream& file) {
 
         dataLineCount++;
 
-        // Only need first data line for *MAT_ELASTIC
-        if (dataLineCount >= 1) {
+        // 묶음 한 벌은 Card 1 — E < 0 이면 Card 1.1 이 하나 더 온다(Vol II *MAT_ELASTIC · 공용 재질 훑기 `matids` 와 같다)
+        if (dataLineCount >= (E < 0 ? 2 : 1)) {
             break;
         }
     }
@@ -1406,11 +1427,6 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
             line.pop_back();
         }
 
-        // Skip empty lines
-        if (line.empty()) {
-            continue;
-        }
-
         // Skip comment lines
         if (isCommentLine(line)) {
             continue;
@@ -1423,9 +1439,15 @@ bool KFileReader::parseMatPlasticSection(std::ifstream& file) {
             return true;
         }
 
-        // Skip title line for _TITLE variants
+        // Skip title line for _TITLE variants — 빈 제목 줄도 제목이다(예전엔 빈 줄을 먼저 건너 Card 1 을 제목으로 버렸다 · 3차 3판 L-12)
         if (hasTitle && !titleSkipped) {
             titleSkipped = true;
+            continue;
+        }
+
+        // 묶음 앞의 빈 줄은 여백이다. Card 1 뒤의 빈 줄은 카드다(비어 있어도 와야 하는 카드 — `*MAT_RIGID` 의 Card 2 · 3) — 예전엔 건너
+        // 다음 묶음의 줄을 이 묶음의 카드로 셌다
+        if (dataLineCount == 0 && line.find_first_not_of(" \t") == std::string::npos) {
             continue;
         }
 
@@ -1497,11 +1519,6 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
             line.pop_back();
         }
 
-        // Skip empty lines
-        if (line.empty()) {
-            continue;
-        }
-
         // Skip comment lines
         if (isCommentLine(line)) {
             continue;
@@ -1514,9 +1531,15 @@ bool KFileReader::parseMatRigidSection(std::ifstream& file) {
             return true;
         }
 
-        // Skip title line for _TITLE variants
+        // Skip title line for _TITLE variants — 빈 제목 줄도 제목이다(예전엔 빈 줄을 먼저 건너 Card 1 을 제목으로 버렸다 · 3차 3판 L-12)
         if (hasTitle && !titleSkipped) {
             titleSkipped = true;
+            continue;
+        }
+
+        // 묶음 앞의 빈 줄은 여백이다. Card 1 뒤의 빈 줄은 카드다(비어 있어도 와야 하는 카드 — `*MAT_RIGID` 의 Card 2 · 3) — 예전엔 건너
+        // 다음 묶음의 줄을 이 묶음의 카드로 셌다
+        if (dataLineCount == 0 && line.find_first_not_of(" \t") == std::string::npos) {
             continue;
         }
 
@@ -1709,6 +1732,22 @@ void KFileReader::skipDataLines(std::ifstream& file, int count) {
 bool KFileReader::isKeywordLine(const std::string& line) const {
     if (line.empty()) return false;
     return line[0] == '*' && line.length() > 1 && std::isalpha(line[1]);
+}
+
+// 다음 키워드 전에 데이터 줄(빈 줄 · 주석 말고)이 더 있나 — 같은 키워드 아래 쌓인 다음 묶음을 읽으려고 엿본다. 읽은 자리는 되돌린다
+bool KFileReader::moreSetData(std::ifstream& file) {
+    const std::streampos pos = file.tellg();
+    std::string line;
+    bool more = false;
+    while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.find_first_not_of(" \t") == std::string::npos || isCommentLine(line)) continue;
+        more = !isKeywordLine(line);
+        break;
+    }
+    file.clear();
+    file.seekg(pos);
+    return more;
 }
 
 bool KFileReader::isCommentLine(const std::string& line) const {

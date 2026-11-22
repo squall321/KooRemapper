@@ -122,6 +122,8 @@ public:
     bool partIdInUse(int pid) const;
     // 그 파트의 MID — 리더의 파트 · `*PART` 카드(주 덱 · 인클루드 · 넣을 블록). 못 찾으면 0
     int partMidAnywhere(int pid) const;
+    // 길이를 모르는 재질 묶음(꼴을 모름) 뒤쪽에 `*PART` 가 가리키는 다른 MID 가 쌓여 있으면 그 까닭(IGA 베끼기 — 빈 글이면 괜찮다)
+    std::string stackedNeighborAfter(int mid) const;
     bool applySplit(const SplitOperation& op);
     bool applyMerge(const MergeOperation& op);
     bool applyStrip(const StripOperation& op);
