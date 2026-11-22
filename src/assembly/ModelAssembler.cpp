@@ -19954,9 +19954,13 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             rep.dangling.push_back({(int)li + 1, "*PART", "재질", v[2]});
         else if (v[2] < 0)
             ++rep.notChecked;
-        // ★TMID(여덟째 칸) — 열 재질을 가리킨다(3차 3판 L-15 · 예전엔 보지 않아 없는 열 재질을 가리키는 파트가 `--strict` rc 0 이었다)
+        // ★TMID(여덟째 칸) — 열 재질을 가리킨다(3차 3판 L-15 · 예전엔 보지 않았다). ⚠ 단정하지 않는다(의심 — rc · `--strict` 와 무관):
+        //   Vol I *PART TMID 는 「열 · 열-구조 연성 해석이면」 모든 파트에 열 물성을 요구하고, 구조 해석은 없는 TMID 를 받는다 — 실측(11-22):
+        //   `/data` 의 battery 덱이 TMID 107 을 정의하지 않고(101 ~ 106 · 108 만) 정상 종료했다. 미정의(rc 1)로 두면 그 덱들이 다 막혔다
         if (v[3] > 0 && !tmatIds.count(v[3]))
-            rep.dangling.push_back({(int)li + 1, "*PART", "열 재질", v[3]});
+            rep.suspect.push_back({(int)li + 1, "*PART",
+                "열 재질(TMID) " + std::to_string(v[3]) + " 이 정의되지 않았습니다 — 열 · 열-구조 연성 해석이면 이 파트의 열 물성이 "
+                "없습니다(Vol I *PART TMID). 구조 해석은 LS-DYNA 가 받습니다"});
     }
 
     // ── ② 요소가 가리키는 파트 ─────────────────────────────────────────────

@@ -1608,6 +1608,7 @@ int runInfo(const std::string& meshFile, const ConsoleOutput& console, bool stri
         {
             const auto ep = checkElementPartReferences(refLines);
             ref.dangling.insert(ref.dangling.end(), ep.dangling.begin(), ep.dangling.end());
+            ref.suspect.insert(ref.suspect.end(), ep.suspect.begin(), ep.suspect.end());   // 없는 TMID(단정하지 않는다 · L-15)
             ref.notChecked += ep.notChecked;
             if (ep.hasUnreadIncludes) ref.hasUnreadIncludes = true;
             if (ref.includeNames.empty()) ref.includeNames = ep.includeNames;

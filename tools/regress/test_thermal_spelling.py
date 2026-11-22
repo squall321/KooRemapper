@@ -7,7 +7,8 @@
   열 재질 판정(`cards::isThermalMaterialKeyword`)이 번호 이름을 `*MAT_T01` ~ `*MAT_T18` 두 자리로만 받았다 — `*MAT_T1` · `*MAT_T19` ·
   `*MAT_T001` 은 구조 재질로 세어 그 첫 칸(TMID)을 MID 로 읽었다(겹침 오탐 · 없는 구조 재질을 「정의됨」 · 커서가 TMID 위로 뛴다).
   구조 재질의 번호 이름은 `*MAT_0xx`, 이름 꼴은 `*MAT_T` + 글자라 `*MAT_T` + 숫자는 열 재질 꼴로만 읽힌다.
-  `info --strict` 는 `*PART` 의 TMID(여덟째 칸)를 보지 않아 없는 열 재질을 가리키는 파트를 rc 0 으로 지나보냈다.
+  `info --strict` 는 `*PART` 의 TMID(여덟째 칸)를 보지 않았다 — 이제 없는 열 재질을 「의심」 줄로 짚는다(rc 와 무관). Vol I *PART TMID 는
+  열 · 열-구조 연성 해석에만 열 물성을 요구하고, `/data` 의 battery 덱이 TMID 107 을 정의하지 않고 정상 종료했다(실측 11-22).
   extract-parts 는 `*MAT_ADD_THERMAL_EXPANSION`(첫 칸 PID)을 고른 재질 번호와 견주어 고른 파트의 열팽창 카드를 버리고, 번호가 우연히
   고른 MID 와 같은 남의 파트 카드는 실었다.
 
@@ -15,7 +16,7 @@
   A 철자 — `*MAT_ELASTIC 2` + `*MAT_T1 2` · `*MAT_T001 2` 는 겹침이 아니다(--strict rc 0)
   B 철자 — `*PART` MID 2 를 `*MAT_T19 2` 가 정의하지 않는다(--strict rc 1)
   C 철자 — assemble offset(재질 카드)의 새 MID 가 `*MAT_T001 5` 의 TMID 위로 뛰지 않는다(2)
-  D TMID — 없는 열 재질 rc 1 · 이름 꼴 · 번호 이름으로 정의하면 rc 0 · 구조 재질 번호는 TMID 를 정의하지 않는다 ·
+  D TMID — 없는 열 재질은 의심 줄(rc 0) · 이름 꼴 · 번호 이름으로 정의하면 줄이 없다 · 구조 재질 번호는 TMID 를 정의하지 않는다 ·
     `*PART +`(20 칸) · 콤마 자유형식도 칸대로
   E extract-parts — 고른 파트의 `*MAT_ADD_THERMAL_EXPANSION` 을 싣고, 고른 MID 와 번호만 같은 남의 파트 것은 버린다
   F `*PART +`(키워드 줄의 칸폭 표지) — 맨 파트로 읽는다. 예전엔 변형으로 보아 `--strict` 가 섹션 · 재질을 안 봤고, 요소 색인이 파트의
@@ -64,6 +65,7 @@ operations:
            @MID@  7.85E-09  2.10E+05       0.3
 """
 PART10 = "         1         1         1\n"
+SUSPECT = "의심 line 14 *PART: 열 재질(TMID) %d 이 정의되지 않았습니다"
 
 
 def thermal(kw, tmid):
@@ -179,7 +181,7 @@ def main():
         tm10 = "         1         1         1         0         0         0         0         7\n"
         d = fresh(tmp, "d1")
         rc, out = strict(binary, d, part=tm10)
-        check("D-1 TMID 7 · 열 재질 없음 — 열 재질 7 미정의(--strict rc 1)", rc == 1 and "열 재질 7" in out, out[-300:])
+        check("D-1 TMID 7 · 열 재질 없음 — 의심 줄 「열 재질(TMID) 7」 · rc 0", rc == 0 and SUSPECT % 7 in out, out[-300:])
         d = fresh(tmp, "d2")
         rc, out = strict(binary, d, thermal("*MAT_THERMAL_ISOTROPIC", 7), part=tm10)
         check("D-2 TMID 7 · *MAT_THERMAL_ISOTROPIC 7 — rc 0", rc == 0 and "열 재질" not in out, out[-300:])
@@ -188,7 +190,7 @@ def main():
         check("D-3 TMID 7 · *MAT_T01 7 — rc 0", rc == 0 and "열 재질" not in out, out[-300:])
         d = fresh(tmp, "d4")
         rc, out = strict(binary, d, "*MAT_ELASTIC\n         7   7.85E-9    210000       0.3\n", part=tm10)
-        check("D-4 TMID 7 · 구조 *MAT_ELASTIC 7 뿐 — 열 재질 7 미정의(rc 1)", rc == 1 and "열 재질 7" in out, out[-300:])
+        check("D-4 TMID 7 · 구조 *MAT_ELASTIC 7 뿐 — 의심 줄(구조 번호는 TMID 를 정의하지 않는다)", rc == 0 and SUSPECT % 7 in out, out[-300:])
         d = fresh(tmp, "d5")
         open(os.path.join(d, "box.yaml"), "w").write(BOX)
         run(binary, d, "generate", "box", "box.yaml")
@@ -197,13 +199,13 @@ def main():
         body = body.replace("*PART\n", "*PART +\n", 1).replace(PART10, "%20d%20d%20d%20d%20d%20d%20d%20d\n" % (1, 1, 1, 0, 0, 0, 0, 7))
         open(p, "w", encoding="utf-8").write(body)
         rc, out = run(binary, d, "info", "--strict", "box.k")
-        check("D-5 `*PART +`(20 칸) TMID 7 · 열 재질 없음 — rc 1(20 칸으로 읽는다)", rc == 1 and "열 재질 7" in out, out[-300:])
+        check("D-5 `*PART +`(20 칸) TMID 7 · 열 재질 없음 — 의심 줄(20 칸으로 읽는다)", rc == 0 and SUSPECT % 7 in out, out[-300:])
         open(p, "w", encoding="utf-8").write(body.replace("*END", thermal("*MAT_THERMAL_ISOTROPIC", 7) + "*END"))
         rc, out = run(binary, d, "info", "--strict", "box.k")
         check("D-6 `*PART +` TMID 7 · 열 재질 7 — rc 0", rc == 0 and "열 재질" not in out, out[-300:])
         d = fresh(tmp, "d7")
         rc, out = strict(binary, d, part="1,1,1,0,0,0,0,7\n")
-        check("D-7 콤마 자유형식 TMID 7 · 열 재질 없음 — rc 1", rc == 1 and "열 재질 7" in out, out[-300:])
+        check("D-7 콤마 자유형식 TMID 7 · 열 재질 없음 — 의심 줄", rc == 0 and SUSPECT % 7 in out, out[-300:])
         d = fresh(tmp, "d8")
         rc, out = strict(binary, d, part="         1         1         1         0         0         0         0         0\n")
         check("D-8 TMID 0 — 보지 않는다(rc 0)", rc == 0 and "열 재질" not in out, out[-300:])
