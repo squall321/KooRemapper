@@ -624,6 +624,14 @@ flatten_includes: true
 - 분석 op(info·modelmeta·section·surfview·stackdiagram)은 이 키가 없어도 닫힘을 읽는다(§45). 제어 카드만 더하는 op(implicit·
   relax·stabilize·database·contact·hfdamp …)은 쪼갠 덱에서도 예전과 같다 — 이 키를 받지 않는다.
 
+**인클루드 크기 관문(2026-11-22 · 미룬 결함 3차 4판 L-01).** 닫힘을 읽는 모든 op 은 끌어온 파일을 **열기 전에** 크기를 본다 — 줄로 담는
+읽기(info · 번호 커서 · 펼치기 …)는 주 덱과 끌어온 파일의 바이트 합 × 9(줄로 가르는 리더가 쓰는 메모리 어림 — StepForge 의 「큰 덱 크기 관문」
+과 같은 값)가, 흘려 읽는 읽기(extract-parts · cleanup-nodes)는 파일 하나 × 4(줄바꿈이 없는 파일은 한 줄로 읽히고 문자열은 두 배로 자란다)가 남은
+메모리(`/proc/meminfo` MemAvailable)를 넘으면 「인클루드 닫힘이 너무 크다 …」 · 「인클루드 파일이 너무 크다 …」 를 찍고 rc 1 이다. 예전엔 474
+바이트 주 덱이 끌어온 34 GB 희소 파일(줄바꿈 없음)을 다 읽으려 해 박스 메모리를 썼고(earlyoom 이 남의 프로세스를 죽인다) 8 GB 주소 공간 상한
+아래에선 4 GB 를 쓴 뒤 rc 0 으로 「참조 무결성 OK」 였다 — 카탈로그 op 59 가운데 덱을 읽는 57 이 다 그랬고 지금은 다 열기 전에 멈춘다(최대 RSS
+500 MB 아래). 남은 메모리를 못 읽는 곳(리눅스 밖)에서는 보지 않는다. 회귀 `tools/regress/test_include_size_gate.py`.
+
 ### 용도
 평면(flat) 상세 메시(HEX8)를 굽힘(bent) 참조 구조화 메시에 등매개변수 방법으로 매핑.
 참조 메시는 **구조화된 HEX8**이어야 하며, 상세 메시는 임의 형상이어도 무방합니다.

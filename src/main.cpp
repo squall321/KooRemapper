@@ -19,6 +19,7 @@
 #include "core/ShellMesh.h"
 #include "parser/KFileReader.h"
 #include "parser/KFileWriter.h"
+#include "parser/IncludeClosure.h"   // include_closure::TooLarge — 크기 관문
 #include "parser/DeckWriter.h"   // deck_write::failures — 잘린 덱을 rc 0 으로 내지 않는다
 #include "parser/DynainWriter.h"
 #include "parser/ShellReader.h"
@@ -3189,6 +3190,10 @@ int main(int argc, char* argv[]) {
     int rc = 1;
     try {
         rc = runMain(argc, argv);
+    } catch (const KooRemapper::include_closure::TooLarge& e) {
+        ConsoleOutput console;
+        console.error(e.what());   // 인클루드 크기 관문(L-01) — 까닭 글 그대로
+        return 1;
     } catch (const std::exception& e) {
         ConsoleOutput console;
         console.error(std::string("Unhandled error: ") + e.what());

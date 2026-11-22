@@ -13,6 +13,7 @@
 #include <set>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <system_error>
 
 namespace KooRemapper {
@@ -37,6 +38,36 @@ bool isFile(const std::string& p) {
     return fs::is_regular_file(p, ec);
 }
 
+// 남은 메모리(바이트) — `/proc/meminfo` 의 MemAvailable. 못 읽으면 0(크기 관문을 끈다)
+uint64_t memAvailable() {
+    std::ifstream in("/proc/meminfo");
+    for (std::string l; std::getline(in, l);)
+        if (l.rfind("MemAvailable:", 0) == 0) {
+            try {
+                return static_cast<uint64_t>(std::stoull(l.substr(13))) * 1024u;   // kB
+            } catch (...) {
+                return 0;
+            }
+        }
+    return 0;
+}
+
+uint64_t fileBytes(const std::string& p) {
+    std::error_code ec;
+    const auto n = fs::file_size(p, ec);
+    return ec ? 0 : static_cast<uint64_t>(n);
+}
+
+std::string gib(uint64_t b) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.1f GB", static_cast<double>(b) / 1e9);
+    return buf;
+}
+
+constexpr uint64_t kLineReaderFactor = 9;   // 줄로 가르는 리더가 바이트의 몇 배를 쓰나(어림 — StepForge D-684 와 같은 값)
+// 흘려 읽는 걸음은 파일 하나가 남은 메모리의 1/4 을 넘으면 — 줄바꿈이 없는 파일은 한 줄로 읽히고 문자열은 두 배로 자란다(절반을 넘지 않게)
+constexpr uint64_t kStreamFactor = 4;
+
 // 순환 감지용 열쇠. 실제 파일이면 정규 경로, 아니면 적힌 그대로.
 std::string keyOf(const std::string& p) {
     std::error_code ec;
@@ -55,6 +86,24 @@ struct Walker {
     Closure out;
     std::vector<std::string> searchDirs;   // `*INCLUDE_PATH` — 읽은 차례로 쌓인다
     std::set<std::string> visited;
+    uint64_t bytes = 0;                    // 줄로 담은 바이트(주 덱 포함) — 크기 관문
+    uint64_t avail = memAvailable();       // 0 이면 관문을 끈다
+
+    // ★크기 관문(L-01 · 헤더의 `TooLarge`) — 열기 전에 본다
+    void sizeGate(const std::string& p) {
+        if (avail == 0) return;
+        const uint64_t s = fileBytes(p);
+        if (keepLines) {
+            bytes += s;
+            if (bytes > avail / kLineReaderFactor)
+                throw TooLarge("인클루드 닫힘이 너무 크다 — " + p + " 까지 " + gib(bytes) + "(주 덱 포함)이고 줄로 읽으면 그 " +
+                               std::to_string(kLineReaderFactor) + " 배쯤의 메모리를 쓰는데 남은 메모리는 " + gib(avail) +
+                               " 다. 열지 않고 멈췄다(덱이 아닌 큰 파일 · 희소 파일을 끌어오지 않았나 본다)");
+        } else if (s > avail / kStreamFactor) {
+            throw TooLarge("인클루드 파일이 너무 크다 — " + p + " 가 " + gib(s) + " 로 남은 메모리 " + gib(avail) + " 의 1/" +
+                           std::to_string(kStreamFactor) + " 을 넘는다(줄바꿈이 없으면 한 줄로 읽힌다). 열지 않고 멈췄다");
+        }
+    }
 
     // ⚠ `out.files` 는 재귀에서 늘어나 재할당된다 — 줄을 **참조로 잡고 재귀를 건너면 안 된다.**
     //   줄을 복사해 돌면 큰 인클루드에서 메모리가 두 배가 되므로(이 단위를 세운 까닭 중 하나다)
@@ -107,6 +156,7 @@ struct Walker {
                 out.refs.push_back(std::move(ref));
                 continue;
             }
+            sizeGate(p);
             std::ifstream in(p);
             if (!in.is_open()) {
                 out.unresolved.push_back({file, base + n.line + 1, n.name, "열 수 없다"});
@@ -233,6 +283,7 @@ Closure read(const std::string& mainPath, const std::vector<std::string>& mainLi
     w.mainDir = deckscan::dirOf(mainPath);
     w.mainLines = &mainLines;
     w.maxDepth = maxDepth;
+    w.bytes = fileBytes(mainPath);   // 주 덱은 부르는 쪽이 이미 담았다 — 합에 넣는다
     w.visited.insert(keyOf(mainPath));
     w.walk(Walker::kMain, 0);
     return std::move(w.out);

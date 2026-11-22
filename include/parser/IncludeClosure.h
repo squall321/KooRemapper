@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -38,6 +39,16 @@ namespace include_closure {
 // IDNOFF·IDEOFF·IDPOFF·IDMOFF·IDSOFF…, `_BINARY`·`_NASTRAN`·`_AUTO_OFFSET`·`_STAMPED_*`…)는
 // `notFollowed` 에 적는다. 오프셋을 모른 채 읽으면 번호가 **그럴듯하게 틀린다** — 가장 나쁜 꼴이다.
 // (실사용 88장 · 카드 408장이 전부 맨 `*INCLUDE` 였다 — 2026-10-15.)
+
+// ★크기 관문(2026-11-22 · 미룬 결함 3차 4판 L-01) — 인클루드 파일을 **열기 전에** 크기를 본다. 줄로 담는 걸음(`read`)은 주 덱과
+// 끌어온 파일의 바이트 합 × 9(줄로 가르는 리더가 쓰는 메모리 어림 — StepForge D-684 「큰 덱 크기 관문」 과 같은 값)가, 흘려 읽는
+// 걸음(`readPaths`)은 그 파일 하나가 남은 메모리(`/proc/meminfo` MemAvailable)의 1/4 을 넘으면(줄바꿈이 없는 파일은 한 줄로 읽히고
+// 문자열은 두 배로 자란다) 열지 않고 이것을 던진다. 예전엔 474 바이트 주
+// 덱이 끌어온 34 GB 희소 파일(줄바꿈이 없어 한 줄)을 다 읽으려 했다 — 박스 메모리를 쓰고(earlyoom 이 남을 죽인다) 8 GB 주소 공간
+// 상한 아래에선 4 GB 를 쓴 뒤 rc 0 으로 「참조 무결성 OK」 였다. main 이 받아 까닭을 찍고 rc 1 로 끝낸다. 남은 메모리를 못 읽으면 보지 않는다.
+struct TooLarge : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 // 따라가지 않은 인클루드 카드.
 struct NotFollowed {
