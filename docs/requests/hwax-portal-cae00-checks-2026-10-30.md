@@ -4,7 +4,8 @@
 **정본** DynaForge 쪽 결정 · 계약은 KooRemapper `platform/docs/REQUEST-postprocess-operation.md` §10, `docs/01-plan/features/{postprocess-reservation-1028,sphere-risk-map-1029}.plan.md`, 총괄 `drop-twin-1028.checklist.md`. KooSlurm 쪽은 KooSlurm `docs/sso_enable_20261029/{icn401_apply_check,sso_enable_procedure}.md`(origin `46c647e4`).
 
 ## 0. 순서 — 한 줄씩
-1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261121-120311Z` 를 받는다) → §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 확인.
+1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261121-234834Z` 를 받는다) →
+   §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 · §1-8 확인.
 2. **icn401** — `git pull && sudo ./dashboard/start_production.sh` → §3 확인(KooSlurm 문서 §2).
 3. **비밀 하나를 두 곳에** — icn401 `HEAX_GATEWAY_SECRET`(backend_5010/.env) = cae00 `KOORM_KOOSLURM_SSO_SECRET`(KooRemapper platform/.env) → §2 · §3-3.
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
@@ -16,12 +17,12 @@ SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 ## 1. cae00 — DynaForge 받기(update-all 뒤)
 10-30 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7`) · `dev_rev` 를 예약 때 반입 규칙으로(`3574342`) · **변형 뷰어 1단계** — 리포트에 StepForge fe_cad 묶음 붙이기(REST `POST /reports/{id}/cad` · MCP `attach_cad`, `aa63e2a`) · 맵에서 각도를 고르면 「형상 보기」(`d37fcbb`). 그 판의 **마이그레이션 셋**(0015 · 0016 · 0017 — 모두 null 허용 칸 · 유일 제약, 옛 코드에 영향 없음) — 그 뒤 0018 · 0019 · 0020 · 0021 이 더해져
-지금은 0015 ~ 0021 일곱이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로였고(§1-5) **11-17 판에서 다시 바뀌었다**(`248ec9bc` — §1-6). **11-21 판에서 또 바뀌었다**(`f20d5d5b` — §1-7).
+지금은 0015 ~ 0021 일곱이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로였고(§1-5) **11-17 판에서 다시 바뀌었다**(`248ec9bc` — §1-6). **11-21 판에서 또 바뀌었다**(`f20d5d5b` — §1-7). **11-21 밤 판에서 다시 바뀌었다**(`d1e2ce96` — §1-8).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`e7a6ef7`) · `revision_matches_binary` true |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `e7a6ef7` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`98f5ec6`) · `revision_matches_binary` true |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `98f5ec6` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — 바뀐 것은 바이너리뿐이라 §1-8 은 위 판 · 바이너리 줄로 본다). `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0021 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020 · 0021). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
 | MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 93개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` · `clear_report_unlink` · `create_campaign` · `ingest_campaign_manifest` · `campaign_ingest_status` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
@@ -274,13 +275,48 @@ git 으로 들어오는 파이썬(백엔드 · MCP 서버) · 정의 파일 `pla
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `e7a6ef7` · `revision_matches_binary` true · `published_utc` `2026-11-21T12:03:15Z` |
-| 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `f20d5d5bbdcb1a4a7962b209542d17992cb15e7fc539d6d06a218e5e6b13fe97` |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `e7a6ef7` · `revision_matches_binary` true · `published_utc` `2026-11-21T12:03:15Z`(11-21 낮 판 — 지금 판은 §1-8) |
+| 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `f20d5d5bbdcb1a4a7962b209542d17992cb15e7fc539d6d06a218e5e6b13fe97`(11-21 낮 판 — 지금 판은 §1-8 의 `d1e2ce96…`) |
 | 새 동작이 든 바이너리 | `platform/backend/bin/KooRemapper help tetremesh \| grep -c 2147483647` | 1 이상(옛 바이너리면 0) |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 처음엔 「Running upgrade 0020_cae_report_rows -> 0021_campaigns」 한 줄, 다시 돌리면 그 줄 없이 「✓ migrations applied」 |
 | MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 93개(`create_campaign` · `ingest_campaign_manifest` · `campaign_ingest_status` 가 새로 있다) · `MCP SMOKE: PASS` |
 | 묶음 적재 | MCP `system_capabilities` 의 `intake.batch` | true(11-17 판은 false) |
 | 캠페인 한 바퀴 | MCP `create_campaign` → `ingest_campaign_manifest`(run_key 하나) → `campaign_ingest_status` | `counts.listed` 1 · `counts.pending` 1. 지우는 길이 없으니 점검용임을 알아볼 이름으로 만든다(dev 에는 `dev-smoke-campaign-20261121T120207Z` 가 남아 있다) |
+| MCP 바인드 | `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` | 폴더가 보인다(감독자가 되살린 MCP 면 안 보인다 — §1-5) |
+
+## 1-8. cae00 — 11-21 밤 반영분(덱 · 번들 BOM 떼기 · 빈 메시 거절 — 미룬 결함 3차 1판)
+**바이너리가 바뀐 판이다**(`d1e2ce96d9b6a722…` · glibc 요구 2.35). Drive 판 `dist-20261121-234834Z`(소스 `98f5ec6` — 코드는 `cd52b79` · 뒤
+커밋은 문서만)에서 11-21 낮 판(§1-7)과 다른 파일은 `BUILD_INFO.txt` · `koorm-bin.tar.gz` · `cli.sif` 셋이다 — api · mcp · nginx · postgres SIF
+와 콘솔 묶음은 sha256 이 같다(실측). **마이그레이션은 없다**(0021 그대로). 파이썬 · 콘솔 코드는 바뀌지 않았다. MCP 도구 93 · 연산 65 그대로. SP
+서브모듈 고정은 `3196156` 그대로(키트 판 2026-11-06). 이 판을 게시하면서 Drive 의 가장 오래된 판 `dist-20261108-234149Z` 가 지워졌다(넷만 남긴다
+— 11-15 · 11-17 · 11-21 낮 · 11-21 밤).
+-  **덱 · 번들 맨 앞의 UTF-8 BOM 을 떼고 읽는다** — 덱 · 번들 · 조각 · 격자 파일을 여는 자리에서 BOM 을 건너뛰고, 산출에는 싣지 않는다. 덱을
+  받는 58 op 을 BOM 붙인 쌍둥이 덱으로 돌려 57 op 이 BOM 없는 쪽과 종료 코드 · 화면 · 산출이 같았다(§1-7 판에서는 44 op 이 달랐다 — 대개 산출에
+  BOM 붙은 `*KEYWORD` 줄이 하나 더 실리거나 산출 맨 앞에 BOM 이 실렸다). ★§1-7 의 「matswap 의 번들 덱이 BOM 으로 시작하면 rc 0 으로 틀린 덱이
+  나온다」 는 이 판에서 닫혔다(번들을 읽는 자리 둘 — YAML 꼴과 옛 자리 인자 꼴 — 을 다 고쳤다). ale 의 재료 파일(BOM 이면 `*MAT_` 블록이 통째로
+  빠지고 `*EOS_` 만 실렸다) · warpage · bend 의 격자 파일(BOM 이면 첫 행이 조용히 빠졌다)도 뗀다 — 둘 다 §1-7 판에도 있던 것이다.
+-  **조각** — `cad_solid_merge_to_deck` 은 조각의 BOM 을 떼고 넣는다(rc 0 그대로). `apply_carryover_plan` 은 BOM 으로 시작하는 조각을 그대로
+  거절하되(rc 1) 까닭 글이 BOM 을 말한다(「UTF-8 BOM 으로 시작한다 — 조각은 BOM 없이 싣는다」 — §1-7 판은 「키워드 밖의 데이터 줄」 이라고
+  했다). BOM 붙은 덱에서 낸 이월 계획은 그대로 적용하고 산출에 BOM 을 싣지 않는다(§1-7 판은 BOM 이 실린 덱을 썼다). 계획이 BOM 없는 덱에서
+  나왔는데 BOM 붙은 덱에 적용하면 예전처럼 `deck_sha` 로 거절하고, 이제 그 줄이 BOM 을 말한다.
+-  **`*INCLUDE` 뿐인 주 덱 — `strain` · `squeeze` 가 빈 메시를 거절한다** — 명령줄 꼴의 두 op 은 인클루드를 펼치지 않는다. 주 덱이 `*INCLUDE`
+  뿐이면 예전엔 rc 0 으로 빈 산출(절점 0 · 솔리드 0)을 냈고, 이제 rc 1 로 멈춘다(「… 에서 절점을 하나도 읽지 못했다」). 셸뿐인 덱은 예전처럼
+  돈다. 인클루드를 쓰는 덱은 미리 펼친 한 파일로 넘긴다.
+-  **그대로인 것** — JSON 입력(이월 계획 · id_floor 와 cad_solid_merge_to_deck 의 대응표 · rebind 의 `range_diff` · 재료 DB)의 BOM 은 예전처럼
+  rc 1 로 거절하고 까닭 글이 BOM 을 말하지 않는다 — JSON 은 BOM 없이 저장한다. BOM 없는 덱은 도움말 사례 64 를 §1-7 판과 새 판(같은 소스의 dev
+  빌드)으로 돌려 rc · 화면 · 산출이 64 / 64 같다. 도움말 글은 바뀌지 않았다.
+-  **알고 받을 것** — SmartTwinPreprocessor SIF 는 pyKooCAE 쪽이 다시 굽기 전까지 옛 바이너리를 담고 있어, 그 SIF 로 도는 REMAP 체인은 옛
+  동작이다(알렸다 — 새 판인지 가르는 판정 꾸러미를 같이 넘겼다). 이 판은 미룬 결함 3차의 다섯 판 가운데 첫 판이다(나머지 — 칸 폭 · 번호 한계 ·
+  쌓인 카드 · 재료 · 번호 커서 · 파일 · 메모리 · battery — 은 판마다 따로 올린다, `docs/01-plan/features/deferred-defects-round3-1121.plan.md`).
+  LS-DYNA 로 돌려 본 것은 없다(라이선스 만료 — BOM 덱을 솔버가 받는지는 재지 못했다).
+
+| 확인 | 명령 | 기대값 |
+|---|---|---|
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `98f5ec6` · `revision_matches_binary` true · `published_utc` `2026-11-21T23:48:37Z` |
+| 바이너리 | `sha256sum platform/backend/bin/KooRemapper` | `d1e2ce96d9b6a722bbcb944302f9893a0a14ab79840e46a1634d829f22855cfc` |
+| 새 동작이 든 바이너리 | `grep -a -c 'UTF-8 BOM 으로 시작한다' platform/backend/bin/KooRemapper` | 1 이상(§1-7 판 바이너리면 0) |
+| 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」(0021 그대로) |
+| MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 93개 그대로 · `MCP SMOKE: PASS` |
 | MCP 바인드 | `apptainer exec instance://koorm_mcp ls -d /data/svc/kooremapper` | 폴더가 보인다(감독자가 되살린 MCP 면 안 보인다 — §1-5) |
 
 ## 2. cae00 — 후처리 예약(7-1) 설정
@@ -391,7 +427,7 @@ KooSlurm `docs/sso_enable_20261029/sso_enable_procedure.md`. 켜기 전에 설 �
 - 걸린 예약이 없을 때 켠다 — 켜는 순간 신원이 admin → 실제 사용자로 바뀌어 켜기 전 예약은 403 으로 닫힌다.
 
 ## 8. 되돌리기
-- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261117-212938Z` — 코드 `c37bd03` · 바이너리 `248ec9bc` · Drive 에는 11-08 · 11-15 · 11-17 · 11-21 넷이 있다) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나), 0021 은 새 표 둘(있던 표는 그대로 · 리포트를 가리키는 FK 는 SET NULL)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 11-17 판도 마이그레이션이 없고 새 칸은 응답에만 있다(DB 에 남는 것이 없다) — 되돌리면 겹친 덱을 쓰는 op 이 다시 그 요소가 빠진 덱을 낸다. 11-21 판을 되돌리면 캠페인 길(REST 셋 · MCP 셋)이 없어지고(표 둘과 그 행은 남는다 — 옛 코드를 0021 DB 에 돌려 재지는 않았다 · 표 꼴로 본 것이다) 이번에 고친 조용한 틀림(펼치기의 바꿔 끼운 요소 · 칸이 붙은 덱 · BOM 인클루드에서 지워진 절점 — §1-7)이 돌아온다.
+- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261121-120311Z` — 코드 `e7a6ef7` · 바이너리 `f20d5d5b` · Drive 에는 11-15 · 11-17 · 11-21 낮 · 11-21 밤 넷이 있다) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나), 0021 은 새 표 둘(있던 표는 그대로 · 리포트를 가리키는 FK 는 SET NULL)이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 11-17 판도 마이그레이션이 없고 새 칸은 응답에만 있다(DB 에 남는 것이 없다) — 되돌리면 겹친 덱을 쓰는 op 이 다시 그 요소가 빠진 덱을 낸다. 11-21 판을 되돌리면 캠페인 길(REST 셋 · MCP 셋)이 없어지고(표 둘과 그 행은 남는다 — 옛 코드를 0021 DB 에 돌려 재지는 않았다 · 표 꼴로 본 것이다) 이번에 고친 조용한 틀림(펼치기의 바꿔 끼운 요소 · 칸이 붙은 덱 · BOM 인클루드에서 지워진 절점 — §1-7)이 돌아온다. 11-21 밤 판을 되돌리면 마이그레이션 없이 바이너리만 바뀐다 — 덱 · 번들 BOM 이 다시 산출에 실리고 matswap BOM 번들 · ale 재료 파일 · 격자 첫 행의 조용한 틀림과 strain · squeeze 의 빈 산출(§1-8)이 돌아온다.
 - **KooSlurm** — 그쪽 문서의 되돌리기 절.
 
 ## 9. 남은 사람 결정(참고)

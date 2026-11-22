@@ -98,3 +98,33 @@
 - 2차까지의 추세는 목록 밖 기존 결함이 열 → 열셋 → 검토 아홉이었다. 판을 거듭해도 줄지 않는다 — 2판을 열 때 이 수치를 선택지에 같이 싣는다.
 - 배운 것 — rc 와 산출만 견주는 회귀는 거짓 화면 줄을 못 본다 · 첫 오류 줄만 읽는 시험은 변이를 살린다 · 덱이 아닌 글 입력(격자)은 쌍둥이
   항을 따로 둬야 한다 · 옛 판 / 새 판 대조는 바이너리 이웃(`materials/`)까지 같은 자리에서 한다.
+
+## 6. 올리기 기록(1판 — 2026-11-21 밤)
+- **main** — `98f5ec6` 을 main 으로 앞당겼다(코드 끝은 `cd52b79` · 뒤 둘은 문서). `ee210f0` 부터 37 파일 · +1009 −30, 그 가운데 `src` ·
+  `include` 29 파일 · +83 −4, `platform/` 은 0 파일이다. SP 는 올리기 앞에서 다시 봤다 — 고정 `3196156` 위로 앞선 커밋 0 · `KIT_VERSION`
+  2026-11-06 양쪽 같다.
+- **호환 빌드** — pykoocae-53 에 빌드 앞 알림(23:31 UTC) 뒤 debian:12 빌더에서 `-j8` · 프로세스마다 주소 공간 8 GB(23:32:38 끝). 바이너리 sha256
+  `d1e2ce96d9b6a722bbcb944302f9893a0a14ab79840e46a1634d829f22855cfc` · 9,006,040 바이트 · glibc 상한 2.35 · `--version` 1.8.0.
+- **호환 바이너리로 다시 잰 것** — 단위 246 / 246 · `test_deck_bom.py` 259 항 · `test_include_only_main.py` 15 항 · 회귀 136 / 136(파일 크기
+  상한 없이).
+- **판정 꾸러미** — 사례 아홉(matswap 번들 두 꼴 · merge 덱 · strain · squeeze 의 `*INCLUDE` 뿐인 덱 · warpage 격자 · ale 재료 파일 ·
+  cad_solid_merge_to_deck 조각 · apply_carryover_plan 조각)을 호환 바이너리와 설치돼 있던 `f20d5d5b` 로 기록했다. 새 판 9 를 호환 바이너리 ·
+  설치한 바이너리를 묶은 api.sif · 새 cli.sif 에서, 옛 판 9 를 `f20d5d5b` · 헤드 SIF v140 에서 봤다(종료 코드 0 · 3). 꾸러미는 scratch 에만 있다
+  — pyKooCAE 쪽에 경로 · 쓰는 법 · 기대값을 알렸다.
+- **설치 · 재기동** — 살아 있는 잡 0 을 보고 23:43:58Z 에 `build/linux/bin` · `platform/backend/bin` 에 깔았다. API 는 감독자 창(23:44:08)에서
+  다시 띄우고 MCP 는 멈춘 뒤 `start.sh` 로(23:44:19 — `/data/svc/kooremapper` 바인드 있음). 스모크 — MCP PASS(도구 93 · 연산 65) · deckops 29 /
+  29 · allops 64 / 64(건너뜀 1 — stcx 전각도) · reports 59 / 59. 캠페인 탐침은 돌리지 않았다(파이썬이 그대로이고 탐침은 지울 수 없는 캠페인 행을
+  남긴다).
+- **cli.sif** — 다시 구웠다(141,721,600 바이트 · 안의 바이너리 `d1e2ce96`).
+- **Drive** — `dist-20261121-234834Z`(게시 23:48:37Z · BUILD_INFO 커밋 `98f5ec6` · describe `v1.7.0-1247-g98f5ec6`). 앞 판과 다른 파일은
+  `BUILD_INFO.txt` · `cli.sif` · `koorm-bin.tar.gz` 셋이고 api · mcp · nginx · postgres SIF 와 콘솔 묶음은 sha256 이 같다(게시 앞 · 뒤
+  `latest/SHA256SUMS` 대조). 가장 오래된 `dist-20261108-234149Z` 가 지워졌다(남은 판 — 11-15 · 11-17 · 11-21 낮 · 11-21 밤). 되돌릴 판은
+  `dist-20261121-120311Z`(코드 `e7a6ef7` · 바이너리 `f20d5d5b`). 마이그레이션 없음.
+- **게시 뒤** — 재기동 없이 health 가 `revision` `98f5ec6` · `revision_matches_binary` true 로 바뀌었다. 주 체크아웃 백엔드 pytest(scratch DB ·
+  설치한 바이너리) 1069 통과 · 실패 0.
+- **점검 문서** — `docs/requests/hwax-portal-cae00-checks-2026-10-30.md` 에 §1-8 을 더하고 §0 · §1 · §1-7 · §8 의 판 정보를 맞췄다. 새 동작이 든
+  바이너리는 `grep -a -c 'UTF-8 BOM 으로 시작한다'` 가 1 이상인지로 가른다(옛 판 0 · 새 판 2).
+- **알림** — 11-22 00:00 UTC 무렵 여섯 세션으로 — pykoocae-53(커밋 · 바이너리 sha256 · 판정 꾸러미 경로 · 쓰는 법 · 기대값) ·
+  hwaxportal-71(전문) · hwaxportal-87(짧은 판) · stepforge-d4(조각 · 덱 BOM · SP 고정) · smarttwinmcp-c8 · kooremapper-fd. 포털 알림에는 DF
+  2차가 멈춘 일정은 싣지 않았다(사용자에게 읽기를 확인받기 전이다) — 동시 올리기 500 은 아직 안 고쳤다는 것만 실었다.
+- **못 잰 것** — LS-DYNA 실행(라이선스 만료 — BOM 덱을 솔버가 받는지) · 운영(cae00) 스택 · 헤드 SIF v141(아직 안 구웠다 — pyKooCAE 쪽 일).
