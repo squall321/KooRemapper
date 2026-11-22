@@ -389,14 +389,15 @@ int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
 void cur_setIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
     bool inSet = false, needTitle = false;
     for (const auto& l : lines) {
-        const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
-            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l.substr(g)));
+        // 키워드 · 주석은 1열의 `*` · `$` 뿐이다(리더 · LS-DYNA 와 같다 · 3차 3판 L-09) — 예전엔 들여 쓴 제목(「  *rim」 · 「  $rim」)에서
+        // 세트를 닫거나 제목을 주석으로 건너 SID 를 못 세었다(새 세트가 그 번호를 다시 냈다)
+        if (deckscan::isKeywordLine(l)) {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
             inSet = kw.rfind("*SET_", 0) == 0;
             needTitle = inSet && kw.find("_TITLE") != std::string::npos;
             continue;
         }
-        if (!inSet || (g != std::string::npos && l[g] == '$')) continue;
+        if (!inSet || (!l.empty() && l[0] == '$')) continue;
         // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
         // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
         if (needTitle) { needTitle = false; continue; }
