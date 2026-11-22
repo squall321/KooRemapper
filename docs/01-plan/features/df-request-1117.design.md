@@ -102,3 +102,8 @@ REST 는 kebab 이고 콜론 꼴이 없다. 「그대로」 가 아닌 줄만 �
 - 차례(11-21 — 위 둘보다 뒤에 받았다) — 미룬 결함 목록의 열린 줄 스물을 여러 판에 나눠 먼저 고친다(「열린 줄 스물 전부」 —
   `deferred-defects-round3-1121.plan.md`). 고른 문장이 「DF ② ~ ⑥ 은 그동안 멈춥니다」 라, ② 계획 쓰기와 동시 올리기 고침도 그 판들 뒤로 간다.
 - 요청 쪽 답신(D-3 · 11-21 「답신 문서를 쓴다」) — `docs/requests/df-request-reply-2026-11-21.md`. 전달은 사용자가 한다.
+- 차례 고침(11-22) — 「② 계획을 지금 먼저」 를 골랐다. 2판 고침 전에 ② 계획을 쓰고 결함 판과 번갈아 진행한다(위 「차례」 줄을 갈음한다). 같은 날
+  받은 글 「계획한건 전부 만들고, 다 만들면 검증런을 cae00에서 돌릴게」 — 단계마다 멈춰 확인받지 않고 지어 올리고, 검증은 사용자가 cae00 에서
+  한다. ② 계획은 `df-provenance-health-1122.plan.md`.
+- ② 이름 · 판정(11-22) — 문턱 쓰기는 `set_campaign_health_thresholds` · `PUT /campaigns/{id}/health-thresholds`. 첫 KE 0 이하 invalid · ½mv² 와
+  10 % 넘게 다르면 warn · 자체 접촉 에너지 −100 mJ 아래 warn. 건강 수치가 없는 런은 invalid(`health_missing`)로 기본 제외.
