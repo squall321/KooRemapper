@@ -679,3 +679,46 @@ class CampaignRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ───────────── 보고서용 묶음 — 주소 하나에 판을 쌓는다(요청서 DF-13 · 마이그레이션 0024) ─────────────
+# 계획 docs/01-plan/features/df-report-bundles-1122.plan.md
+
+
+class ReportBundle(Base):
+    """묶음의 판 하나 — `bundle_id` 가 주소, `version` 이 판. 숫자는 `report_bundle_items` 에 한 행씩."""
+
+    __tablename__ = "report_bundles"
+    __table_args__ = (UniqueConstraint("bundle_id", "version", name="uq_report_bundles_version"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    bundle_id: Mapped[str] = mapped_column(String(26), nullable=False)   # ULID
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255))
+    campaign_ids: Mapped[list] = mapped_column(JSONB, nullable=False)
+    spec: Mapped[dict] = mapped_column(JSONB, nullable=False)        # 표 종류 · 그림 · include_invalid(받은 꼴을 고른 꼴로)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)   # 기준 시각 — 그때까지 받은 리포트만
+    basis: Mapped[dict] = mapped_column(JSONB, nullable=False)       # 수치 기준 줄 — 유효 n / 전체 N · 제외 까닭 · 세대 · 단위
+    tables: Mapped[list] = mapped_column(JSONB, nullable=False)      # 표마다 열 · 행(행의 숫자 칸은 항목의 item_key 와 같은 값)
+    figures: Mapped[list] = mapped_column(JSONB, nullable=False)     # 리포트 매체 인용 — 파일 id · 경로 · 케이스 · sha256
+    sources: Mapped[dict] = mapped_column(JSONB, nullable=False)     # 넣은 리포트 · 문턱 이름표 · 파트 짝 표 · 기준값 판
+    changes: Mapped[dict | None] = mapped_column(JSONB)              # 앞 판 대비 바뀐 숫자(1 판은 null)
+    citation: Mapped[dict] = mapped_column(JSONB, nullable=False)    # C1 공용 인용 꼴
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ReportBundleItem(Base):
+    """묶음 판의 숫자 하나 — 출처 경로로 리포트 · 케이스 · (파트) · 지표까지 거슬러 간다."""
+
+    __tablename__ = "report_bundle_items"
+    __table_args__ = (Index("ix_report_bundle_items_row_key", "bundle_row_id", "item_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    bundle_row_id: Mapped[int] = mapped_column(ForeignKey("report_bundles.id", ondelete="CASCADE"), nullable=False)
+    item_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    value: Mapped[float | None] = mapped_column(Float)
+    unit: Mapped[str | None] = mapped_column(String(16))
+    source_path: Mapped[str] = mapped_column(String(512), nullable=False)

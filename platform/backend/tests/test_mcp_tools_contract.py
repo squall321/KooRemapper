@@ -192,7 +192,9 @@ CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_inges
                   # ② 출처 · 유효성(DF-02 · DF-03 · 11-22)
                   "set_campaign_health_thresholds", "campaign_provenance", "campaign_health_table", "report_health",
                   # ③ 추출 완전성 · 삭제 관문(DF-04 · 11-22)
-                  "set_campaign_required_extractions", "campaign_deletion_clearance", "report_extraction")
+                  "set_campaign_required_extractions", "campaign_deletion_clearance", "report_extraction",
+                  # ④ 보고서용 묶음(DF-13 · 11-22)
+                  "build_report_bundle", "report_bundle", "report_bundle_diff")
 
 
 @needs_mcp
@@ -231,6 +233,15 @@ def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
     clear = got["campaign_deletion_clearance"]["properties"]
     assert all(v in clear["status"]["description"] for v in c["CLEARANCE_STATUSES"])
     assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in clear["limit"]["description"]
+    # ④ — 짓기 도구의 인자 = REST 본문의 칸 · 명세 설명에 표 종류 · 지표 이름이 다 있다 · 쪽 상한이 설명에 있다
+    from app.modules.campaigns import bundles as B
+    from app.modules.campaigns.routes import BundleBody, BundleSpec, FigureSpec, TableSpec
+    assert set(got["build_report_bundle"]["properties"]) == set(BundleBody.model_fields)
+    spec_desc = got["build_report_bundle"]["properties"]["spec"]["description"]
+    for name in [*BundleSpec.model_fields, *TableSpec.model_fields, *FigureSpec.model_fields, *c["BUNDLE_TABLE_KINDS"],
+                 *B.RUN_METRICS, *B.CASE_METRICS, *B.PART_METRICS]:
+        assert name in spec_desc, name
+    assert f"1~{c['BUNDLE_ITEMS_PAGE_MAX']}" in got["report_bundle"]["properties"]["limit"]["description"]
 
 
 def test_the_campaign_allowed_values_are_the_backend_constraints():
@@ -254,6 +265,11 @@ def test_the_campaign_allowed_values_are_the_backend_constraints():
     from typing import get_args
     st = _query("/api/v1/campaigns/{campaign_id}/deletion-clearance", "status")
     assert set(get_args(get_args(st.annotation)[0])) == set(CLEAR), st.annotation
+    # ④ 표 종류 = 백엔드 명세의 kind · 쪽 상한 = 두 판 읽기 경로의 limit 상한
+    from app.modules.campaigns.routes import TableSpec
+    assert set(c["BUNDLE_TABLE_KINDS"]) == set(get_args(TableSpec.model_fields["kind"].annotation))
+    for path in ("/api/v1/bundles/{bundle_id}", "/api/v1/campaigns/{campaign_id}/bundles/latest"):
+        assert c["BUNDLE_ITEMS_PAGE_MAX"] == next(m.le for m in _query(path, "limit").metadata if hasattr(m, "le")), path
 
 
 # ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────

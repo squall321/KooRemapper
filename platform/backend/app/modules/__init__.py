@@ -11,6 +11,7 @@ def register_routers(app: FastAPI) -> None:
     from app.modules.analysis.routes import router as analysis_router
     from app.modules.auth.routes import router as auth_router
     from app.modules.campaigns.routes import router as campaigns_router
+    from app.modules.campaigns.routes import bundles_router
     from app.modules.corpus.routes import router as corpus_router
     from app.modules.jobs.routes import router as jobs_router
     from app.modules.ontology.routes import admin as ontology_admin_router
@@ -28,6 +29,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(reports_router, prefix=API_PREFIX)
     # 캠페인 — 런 묶음과 그 적재 상태. 리포트 본문은 /reports/intake 가 받는다.
     app.include_router(campaigns_router, prefix=API_PREFIX)
+    # 보고서용 묶음(DF-13) — 캠페인 숫자 · 그림 재료를 판으로. 캠페인의 마지막 판은 /campaigns/{id}/bundles/latest
+    app.include_router(bundles_router, prefix=API_PREFIX)
     app.include_router(recipes_router, prefix=API_PREFIX)
     app.include_router(analysis_router, prefix=API_PREFIX)
     app.include_router(operations_router, prefix=API_PREFIX)

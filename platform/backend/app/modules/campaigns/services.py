@@ -305,3 +305,182 @@ async def peak_provenance_of(db: AsyncSession, report_id: str) -> dict:
         select(CampaignRun.extraction).where(CampaignRun.report_id == report_id).order_by(CampaignRun.id).limit(1)
     )).scalar_one_or_none()
     return X.peak_provenance(ext)
+
+
+# ───────────── 보고서용 묶음(DF-13 · 계획 docs/01-plan/features/df-report-bundles-1122.plan.md) ─────────────
+
+
+class BundleConflict(ValueError):
+    """주소의 캠페인 · 명세가 다르다 — 한 주소는 한 질문이다."""
+
+
+def _citation(bundle_id: str, version: int, campaign_ids: list[str]) -> dict:
+    """C1 공용 인용 꼴 — ReportArchive(RA-02)가 이 꼴로 묶음을 인용한다."""
+    return {"source_platform": "dynaforge", "source_kind": "dynaforge_bundle", "source_id": bundle_id,
+            "source_version": version, "scope": {"campaign_ids": campaign_ids}}
+
+
+async def _bundle_inputs(db: AsyncSession, campaigns: list[Campaign], as_of) -> list[dict]:
+    """캠페인마다 판정된 런 행 · 기준 시각 제외 · 리포트 사실(케이스 · 매체 sha256 · 단위계)을 묶음 함수가 받는 꼴로."""
+    from app.models import ImpactCase, SessionFile
+    from app.shared import storage
+
+    out: list[dict] = []
+    want_reports: set[str] = set()
+    per: list[tuple[Campaign, dict, list[dict]]] = []
+    for c in campaigns:
+        tb = H.bundle(c.health_thresholds)
+        rows = []
+        for r in (await db.execute(
+            select(CampaignRun).where(CampaignRun.campaign_id == c.id).order_by(CampaignRun.id)
+        )).scalars():
+            row = _judged(r, tb["values"], tb["ref"])
+            late = r.report_id is not None and r.ingested_at is not None and r.ingested_at > as_of
+            if late:
+                row["excluded_by"] = [*row["excluded_by"], "after_as_of"]
+            row["_has"] = r.report_id is not None and not late
+            if row["_has"]:
+                want_reports.add(r.report_id)
+            rows.append(row)
+        per.append((c, tb, rows))
+    reps: dict[str, dict] = {}
+    if want_reports:
+        for rep in (await db.execute(select(ImpactReport).where(ImpactReport.id.in_(want_reports)))).scalars():
+            reps[rep.id] = {"unit_system": (rep.sim_params or {}).get("unit_system"), "cases": [],
+                            "media": [dict(m) for m in (rep.media or []) if isinstance(m, dict)]}
+        for cs in (await db.execute(
+            select(ImpactCase).where(ImpactCase.report_id.in_(want_reports)).order_by(ImpactCase.report_id, ImpactCase.id)
+        )).scalars():
+            if cs.report_id in reps:
+                reps[cs.report_id]["cases"].append({
+                    "case_key": cs.case_key, "max_stress": cs.max_stress, "max_g": cs.max_g, "max_disp": cs.max_disp,
+                    "min_safety_factor": cs.min_safety_factor, "parts_metrics": cs.parts_metrics or {}})
+        fids = {m.get("file_id") for r in reps.values() for m in r["media"] if isinstance(m.get("file_id"), int)}
+        sha: dict[int, str | None] = {}
+        if fids:
+            for f in (await db.execute(select(SessionFile).where(SessionFile.id.in_(fids)))).scalars():
+                h = f.sha256
+                if not h:   # 옛 행 — 그 자리에서 잰다
+                    try:
+                        h = storage.sha256_of(storage.abs_path(f.rel_path))
+                    except OSError:
+                        h = None
+                sha[f.id] = h
+        for r in reps.values():
+            for m in r["media"]:
+                m["sha256"] = sha.get(m.get("file_id"))
+    for c, tb, rows in per:
+        for row in rows:
+            row["report"] = reps.get(row["report_id"]) if row.pop("_has") else None
+        out.append({"campaign_id": c.id, "name": c.name, "thresholds_ref": tb["ref"], "runs": rows})
+    return out
+
+
+async def _bundle_items(db: AsyncSession, row_id: int) -> list[dict]:
+    from app.models import ReportBundleItem
+
+    return [{"item_key": i.item_key, "value": i.value, "unit": i.unit, "source_path": i.source_path}
+            for i in (await db.execute(
+                select(ReportBundleItem).where(ReportBundleItem.bundle_row_id == row_id).order_by(ReportBundleItem.id)
+            )).scalars()]
+
+
+async def latest_bundle_row(db: AsyncSession, user_id: int, bundle_id: str, version: int | None = None):
+    """주인의 묶음 판 — `version` 이 없으면 마지막 판. 없으면 None."""
+    from app.models import ReportBundle
+
+    q = select(ReportBundle).where(ReportBundle.bundle_id == bundle_id, ReportBundle.created_by == user_id)
+    q = q.where(ReportBundle.version == version) if version is not None else q.order_by(ReportBundle.version.desc())
+    return (await db.execute(q.limit(1))).scalar_one_or_none()
+
+
+async def build_bundle(db: AsyncSession, user_id: int, campaigns: list[Campaign], spec: dict, *, as_of,
+                       bundle_id: str | None, label: str | None) -> tuple[object, bool]:
+    """묶음 판을 짓는다 — `(행, unchanged)`. 주소가 있으면 마지막 판과 견줘 같으면 그 판을 돌려준다(판을 올리지 않는다)."""
+    from sqlalchemy import insert
+
+    from app.models import ReportBundle, ReportBundleItem
+    from app.modules.campaigns import bundles as B
+
+    cids = [c.id for c in campaigns]
+    prev = None
+    if bundle_id is not None:
+        prev = await latest_bundle_row(db, user_id, bundle_id)
+        if prev is None:
+            return None, False
+        if sorted(prev.campaign_ids) != sorted(cids) or prev.spec != spec:
+            raise BundleConflict("이 주소의 캠페인 · 명세와 다릅니다 — 한 주소는 한 질문입니다. 명세를 바꾸려면 bundle_id 없이 새 주소로 지으세요"
+                                 f"(이 주소 — campaign_ids {prev.campaign_ids})")
+    built = B.build(campaigns=await _bundle_inputs(db, campaigns, as_of), spec=spec)
+    changes = None
+    if prev is not None:
+        old = {"items": await _bundle_items(db, prev.id), "figures": prev.figures, "basis": prev.basis}
+        if B.same(old, built):
+            return prev, True
+        changes = B.diff(old["items"], built["items"])
+    bid = bundle_id or ulid.new().str
+    version = (prev.version + 1) if prev is not None else 1
+    row = ReportBundle(bundle_id=bid, version=version, created_by=user_id, label=label if label is not None else (prev.label if prev else None),
+                       campaign_ids=cids, spec=spec, as_of=as_of, basis=built["basis"], tables=built["tables"],
+                       figures=built["figures"], sources=built["sources"], changes=changes,
+                       citation=_citation(bid, version, cids))
+    db.add(row)
+    await db.flush()
+    if built["items"]:
+        await db.execute(insert(ReportBundleItem), [{"bundle_row_id": row.id, **i} for i in built["items"]])
+    await db.commit()
+    await db.refresh(row)
+    return row, False
+
+
+def bundle_head(row) -> dict:
+    """판의 머리 — 주소 · 판 · 시각 · 기준 줄 · 인용."""
+    ch = row.changes or None
+    return {"bundle_id": row.bundle_id, "version": row.version, "label": row.label, "campaign_ids": row.campaign_ids,
+            "as_of": row.as_of, "created_at": row.created_at, "basis": row.basis, "citation": row.citation,
+            "changes_counts": ch["counts"] if ch else None}
+
+
+async def bundle_view(db: AsyncSession, row, *, with_items: bool, limit: int, offset: int) -> dict:
+    """판 하나 — 머리 · 명세 · 표 · 그림 · 출처 · 앞 판 대비 바뀐 숫자 · 판 목록 · (항목 쪽)."""
+    from app.models import ReportBundle, ReportBundleItem
+    from app.modules.campaigns import bundles as B
+
+    versions = list((await db.execute(
+        select(ReportBundle.version, ReportBundle.created_at).where(
+            ReportBundle.bundle_id == row.bundle_id, ReportBundle.created_by == row.created_by).order_by(ReportBundle.version)
+    )).all())
+    out = {**bundle_head(row), "spec": row.spec, "tables": row.tables, "figures": row.figures, "sources": row.sources,
+           "changes": row.changes, "versions": [{"version": v, "created_at": t} for v, t in versions],
+           "latest_version": versions[-1][0] if versions else row.version}
+    if with_items:
+        total = (await db.execute(
+            select(func.count()).select_from(ReportBundleItem).where(ReportBundleItem.bundle_row_id == row.id)
+        )).scalar_one()
+        page = list((await db.execute(
+            select(ReportBundleItem).where(ReportBundleItem.bundle_row_id == row.id).order_by(ReportBundleItem.id)
+            .offset(offset).limit(limit)
+        )).scalars())
+        out["items"] = {"total": total, "offset": offset, "limit": limit,
+                        "rows": [{"item_key": i.item_key, "value": i.value, "unit": i.unit, "source_path": i.source_path,
+                                  "source": B.parse_source(i.source_path)} for i in page]}
+    return out
+
+
+async def bundle_diff(db: AsyncSession, a, b) -> dict:
+    """두 판의 바뀐 숫자(a → b)."""
+    from app.modules.campaigns import bundles as B
+
+    d = B.diff(await _bundle_items(db, a.id), await _bundle_items(db, b.id))
+    return {"bundle_id": b.bundle_id, "from_version": a.version, "to_version": b.version, **d}
+
+
+async def latest_bundle_for_campaign(db: AsyncSession, user_id: int, campaign_id: str):
+    """그 캠페인을 담은 주인의 묶음 가운데 가장 늦게 지은 판 — 없으면 None."""
+    from app.models import ReportBundle
+
+    return (await db.execute(
+        select(ReportBundle).where(ReportBundle.created_by == user_id,
+                                   ReportBundle.campaign_ids.contains([campaign_id]))
+        .order_by(ReportBundle.id.desc()).limit(1)
+    )).scalar_one_or_none()

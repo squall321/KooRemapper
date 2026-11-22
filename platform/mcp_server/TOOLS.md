@@ -111,6 +111,9 @@ rejected(거절 — 까닭은 `reject_reason`)이고, `ingest_state` 는 그 런
 | `set_campaign_required_extractions` | campaign_id, required_extractions[]({field, parts?, states?}) | PUT /campaigns/{id}/required-extractions | 필수 추출 목록을 통째로 바꾼다(빈 목록이면 지운다). 목록이 없는 캠페인은 모든 런의 d3plot 삭제가 보류다 |
 | `campaign_deletion_clearance` | campaign_id, status?, limit?, offset? | GET /campaigns/{id}/deletion-clearance | d3plot 삭제 허가(**조회만** — 지우기는 KooChainRun) — 머리 줄(허가 · 보류 · 이미 지움) · 런마다 allow · hold · deleted 와 빠진 항목(field_missing · parts_missing · states_sampled · states_unknown) · 피크 표지 |
 | `report_extraction` | report_id | GET /reports/{id}/extraction | 리포트 하나(런 하나)의 추출 목록 · 피크 표지(`peak_provenance` — peak_source · states_read/total · peak_may_be_missed) · 그 런의 삭제 허가. 캠페인 주인이 아니면 campaign · clearance 를 비운다 |
+| `build_report_bundle` | campaign_ids[], spec({tables[]({kind, metrics?, parts?}), figures?({roles?, exts?}), include_invalid?}), as_of?, bundle_id?, label? | POST /bundles | 보고서용 묶음을 짓는다(DF-13) — 표 종류 runs · case_metrics · part_peaks · 그림 인용(파일 id · sha256 · 영상 빼고). 주소(`bundle_id`)에 판을 쌓고, 숫자가 같으면 판을 올리지 않는다(`unchanged`) · 다르면 `changes_counts`. 숫자마다 `source_path` · 수치 기준 줄(`basis.line`) · 인용 꼴(`citation`). 한 판 200,000 개까지 |
+| `report_bundle` | bundle_id? · campaign_id?(하나만), version?, items?, limit?, offset? | GET /bundles/{id} · GET /campaigns/{id}/bundles/latest | 묶음의 판 하나(기본 마지막) — 머리 · 명세 · 표 · 그림 · 출처 · 바뀐 숫자 · 판 목록. `items=true` 면 숫자 항목 쪽(`source` 는 출처 경로를 푼 것) |
+| `report_bundle_diff` | bundle_id, from_version?, to_version? | GET /bundles/{id}/diff | 두 판 사이 바뀐 숫자 — 더해짐 · 빠짐 · 값 바뀜(옛 값 → 새 값). 기본은 마지막 판과 그 앞 판 |
 | `campaign_ingest_status` | campaign_id, state?, limit?, offset? | GET /campaigns/{id}/ingest-status | 목록 수 · 상태별 수(`listed = pending + received + skipped + rejected` · `with_report`) · 런마다 상태 · report_id · sha256 · 거절 까닭 |
 | — (REST 전용) | intake 폼 + campaign_id, run_key(둘 다) | POST /reports/intake | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이 다시 오면 건너뛰고(200 · skipped) 다른 내용이면 거절(409 · 가진 리포트는 그대로). 목록에 없는 run_key 는 400. 런을 찾은 뒤의 4xx 는 까닭이 런에 적힌다(401 · 429 · 요청 꼴 422 · 5xx 는 적히지 않는다). 올리기 길은 토큰 하나에 분당 한도가 있다(429 `Retry-After`) |
 
@@ -201,7 +204,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 100개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 103개)와 같아야 한다.
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.

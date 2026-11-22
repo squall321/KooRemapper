@@ -373,3 +373,178 @@ async def campaign_deletion_clearance(
     got = await svc.clearance_table(db, c, status=status_, limit=limit, offset=offset)
     return ok({"campaign_id": campaign_id, **got, "limit": limit, "offset": offset, "environment": settings.environment},
               message=got["header"]["line"])
+
+
+# ───────────── 보고서용 묶음(DF-13 · 계획 docs/01-plan/features/df-report-bundles-1122.plan.md) ─────────────
+# 짓기 · 한 판 · 두 판 차이는 /bundles, 캠페인의 마지막 판은 /campaigns/{id}/bundles/latest
+
+bundles_router = APIRouter(tags=["bundles"], prefix="/bundles")
+_BUNDLE_CAMPAIGNS_MAX = 20
+_ITEMS_PAGE_MAX = 20000
+
+
+class TableSpec(_Strict):
+    # 표 하나 — runs(런 목록) · case_metrics(케이스 롤업) · part_peaks(파트 피크). metrics 없으면 종류의 기본 지표
+    kind: Literal["runs", "case_metrics", "part_peaks"]
+    metrics: list[str] | None = Field(default=None, min_length=1, max_length=50)
+    parts: list[Annotated[int, Field(gt=0)]] | None = Field(default=None, min_length=1, max_length=_PARTS_MAX)
+
+    @model_validator(mode="after")
+    def _known(self):
+        from app.modules.campaigns import bundles as B
+        allowed = {"runs": B.RUN_METRICS, "case_metrics": B.CASE_METRICS, "part_peaks": B.PART_METRICS}[self.kind]
+        bad = [m for m in (self.metrics or []) if m not in allowed]
+        if bad:
+            raise ValueError(f"{self.kind} 에 없는 지표 — {', '.join(bad[:10])}(받는 것: {', '.join(allowed)})")
+        if self.parts is not None and self.kind != "part_peaks":
+            raise ValueError("parts 는 part_peaks 표에만 줍니다")
+        return self
+
+
+class FigureSpec(_Strict):
+    # 그림 — 넣은 런의 리포트 매체 가운데 그 역할(없으면 모두) · 확장자(기본 png · svg)인 것. 영상은 싣지 않는다
+    roles: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]] | None = \
+        Field(default=None, min_length=1, max_length=50)
+    exts: list[Literal["png", "svg", "jpg", "jpeg", "webp", "gif"]] | None = Field(default=None, min_length=1)
+
+
+class BundleSpec(_Strict):
+    tables: list[TableSpec] = Field(min_length=1, max_length=10)
+    figures: FigureSpec | None = None
+    include_invalid: bool = False
+
+
+class BundleBody(_Strict):
+    campaign_ids: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=26)]] = \
+        Field(min_length=1, max_length=_BUNDLE_CAMPAIGNS_MAX)
+    spec: BundleSpec
+    as_of: datetime | None = None
+    bundle_id: str | None = Field(default=None, min_length=1, max_length=26)
+    label: str | None = Field(default=None, max_length=255)
+
+
+def _canonical_spec(spec: BundleSpec) -> dict:
+    """명세를 견줄 꼴로 — 기본 지표를 채우고 파트 · 역할 · 확장자를 정렬한다. 같은 종류의 표가 둘이면 422."""
+    from app.modules.campaigns import bundles as B
+    kinds = [t.kind for t in spec.tables]
+    dup = sorted({k for k in kinds if kinds.count(k) > 1})
+    if dup:
+        raise HTTPException(_UNPROCESSABLE, f"같은 종류의 표가 둘 이상입니다 — {', '.join(dup)}")
+    default = {"runs": list(B.RUN_METRICS), "case_metrics": list(B.CASE_DEFAULT), "part_peaks": list(B.PART_DEFAULT)}
+    tables = [{"kind": t.kind, "metrics": list(dict.fromkeys(t.metrics)) if t.metrics else default[t.kind],
+               "parts": sorted(set(t.parts)) if t.parts else None} for t in spec.tables]
+    fig = None
+    if spec.figures is not None:
+        fig = {"roles": sorted(set(spec.figures.roles)) if spec.figures.roles else None,
+               "exts": sorted(set(spec.figures.exts or B.EXT_DEFAULT))}
+    return {"tables": tables, "figures": fig, "include_invalid": spec.include_invalid}
+
+
+@bundles_router.post("", status_code=status.HTTP_201_CREATED)
+async def build_report_bundle(
+    body: BundleBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """보고서용 묶음을 짓는다(DF-13) — 캠페인 하나 이상 · 명세(표 · 그림) · 기준 시각(`as_of` — 그때까지 받은 리포트만, 없으면 지금).
+
+    `bundle_id` 를 주면 그 주소의 다음 판이다 — 캠페인 · 명세가 그 주소와 다르면 422, 숫자 · 그림 · 기준 줄이 마지막 판과 같으면 판을
+    올리지 않고 그 판을 `unchanged: true` 로 돌려준다(200). 새 판은 201 과 앞 판 대비 바뀐 숫자 수(`changes_counts`).
+    숫자는 항목 하나가 한 줄이고(`item_key` · `value` · `unit` · `source_path`), 판을 읽을 때 `GET /bundles/{id}?items=true` 로 쪽을 받는다.
+    한 판의 숫자는 200,000 개까지(넘으면 413). 넣는 런은 건강 표와 같다 — 제외 까닭이 없는 런(`include_invalid` 면 리포트가 있는 런 모두).
+    """
+    from datetime import timezone
+
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.campaigns import bundles as B
+    uid = user.id
+    spec = _canonical_spec(body.spec)
+    cids = list(dict.fromkeys(body.campaign_ids))
+    camps = [await _require_campaign(db, user, cid) for cid in cids]
+    as_of = body.as_of or datetime.now(timezone.utc)
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    try:
+        row, unchanged = await svc.build_bundle(db, uid, camps, spec, as_of=as_of, bundle_id=body.bundle_id, label=body.label)
+    except svc.BundleConflict as exc:
+        raise HTTPException(_UNPROCESSABLE, str(exc))
+    except B.TooMany as exc:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, str(exc))
+    except IntegrityError:
+        await db.rollback()
+        return fail("같은 주소의 판을 동시에 지었습니다 — 다시 지으세요", status_code=status.HTTP_409_CONFLICT)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "묶음을 찾을 수 없습니다.")
+    head = svc.bundle_head(row)
+    data = {**head, "unchanged": unchanged,
+            "counts": {"items": row.basis.get("items"), "tables": len(row.tables), "figures": len(row.figures)},
+            "environment": settings.environment}
+    if unchanged:
+        return ok(data, message=f"숫자가 같아 판을 올리지 않았습니다 — {row.bundle_id} 판 {row.version}")
+    ch = head["changes_counts"]
+    msg = f"묶음 {row.bundle_id} 판 {row.version} — 숫자 {row.basis.get('items')} · " + (
+        f"앞 판 대비 더해짐 {ch['added']} · 빠짐 {ch['removed']} · 바뀜 {ch['changed']}" if ch else "첫 판")
+    return ok(data, message=msg, status_code=status.HTTP_201_CREATED)
+
+
+@bundles_router.get("/{bundle_id}")
+async def report_bundle(
+    bundle_id: str,
+    version: int | None = Query(default=None, ge=1, description="판 — 없으면 마지막 판"),
+    items: bool = Query(default=False, description="참이면 숫자 항목 쪽을 싣는다(출처 경로를 푼 `source` 칸과 함께)"),
+    limit: int = Query(default=1000, ge=1, le=_ITEMS_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """묶음의 판 하나(DF-13) — 머리(주소 · 판 · 기준 시각 · 수치 기준 줄 · 인용 꼴) · 명세 · 표 · 그림(파일 id · sha256) · 출처 ·
+    앞 판 대비 바뀐 숫자(`changes`) · 판 목록. `items=true` 면 숫자 항목(`item_key` · `value` · `unit` · `source_path` · `source`)을 쪽으로.
+    """
+    row = await svc.latest_bundle_row(db, user.id, bundle_id, version)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "묶음(또는 그 판)을 찾을 수 없습니다.")
+    got = await svc.bundle_view(db, row, with_items=items, limit=limit, offset=offset)
+    return ok({**got, "environment": settings.environment}, message=row.basis.get("line"))
+
+
+@bundles_router.get("/{bundle_id}/diff")
+async def report_bundle_diff(
+    bundle_id: str,
+    from_version: int | None = Query(default=None, ge=1, alias="from", description="앞 판 — 없으면 뒤 판의 바로 앞 판"),
+    to_version: int | None = Query(default=None, ge=1, alias="to", description="뒤 판 — 없으면 마지막 판"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """두 판 사이 바뀐 숫자(DF-13) — 더해짐 · 빠짐 · 값(또는 단위) 바뀜과 그 수. 기본은 마지막 판과 그 앞 판."""
+    b = await svc.latest_bundle_row(db, user.id, bundle_id, to_version)
+    if b is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "묶음(또는 그 판)을 찾을 수 없습니다.")
+    fv = from_version if from_version is not None else b.version - 1
+    if fv < 1:
+        raise HTTPException(_UNPROCESSABLE, "판이 하나뿐입니다 — 견줄 앞 판이 없습니다.")
+    a = await svc.latest_bundle_row(db, user.id, bundle_id, fv)
+    if a is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"판 {fv} 을 찾을 수 없습니다.")
+    got = await svc.bundle_diff(db, a, b)
+    c = got["counts"]
+    return ok({**got, "environment": settings.environment},
+              message=f"판 {a.version} → {b.version} — 더해짐 {c['added']} · 빠짐 {c['removed']} · 바뀜 {c['changed']}")
+
+
+@router.get("/{campaign_id}/bundles/latest")
+async def campaign_latest_bundle(
+    campaign_id: str,
+    items: bool = Query(default=False, description="참이면 숫자 항목 쪽을 싣는다"),
+    limit: int = Query(default=1000, ge=1, le=_ITEMS_PAGE_MAX),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """그 캠페인을 담은 묶음 가운데 가장 늦게 지은 판(DF-13) — 꼴은 `GET /bundles/{id}` 와 같다. 없으면 404."""
+    await _require_campaign(db, user, campaign_id)
+    row = await svc.latest_bundle_for_campaign(db, user.id, campaign_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "이 캠페인을 담은 묶음이 없습니다 — POST /bundles 로 지으세요.")
+    got = await svc.bundle_view(db, row, with_items=items, limit=limit, offset=offset)
+    return ok({**got, "environment": settings.environment}, message=row.basis.get("line"))

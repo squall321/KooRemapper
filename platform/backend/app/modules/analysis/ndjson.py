@@ -26,6 +26,7 @@ _UNITS = {
 }
 
 # (parts_metrics 키, quantity 이름, at_time 키) — 값이 숫자일 때만 fact 로 낸다.
+# ★보고서용 묶음(campaigns/bundles.py · DF-13)도 이 두 표로 파트 피크의 지표 · 단위를 정한다 — 표는 여기 하나다
 _FACTS = [
     ("peak_stress", "stress", "time_of_peak_stress"),
     ("peak_strain", "strain", None),
@@ -35,6 +36,7 @@ _FACTS = [
     ("min_principal", "min_principal_stress", None),
     ("peak_vm_strain", "vm_strain", None),
 ]
+UNITS, FACTS = _UNITS, _FACTS   # 다른 모듈이 읽는 이름(묶음) — 표는 위 둘이다
 
 
 def _is_num(v) -> bool:

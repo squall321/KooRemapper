@@ -1315,6 +1315,85 @@ async def report_extraction(
     Extraction record, peak-source flag and deletion clearance of one report's run."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/extraction")
 
+
+# ── 보고서용 묶음(DF-13 · 계획 df-report-bundles-1122) — 캠페인 숫자 · 그림 재료를 판으로 ─────────────
+BUNDLE_TABLE_KINDS = ("runs", "case_metrics", "part_peaks")   # 백엔드 TableSpec.kind 와 같아야 한다
+BUNDLE_ITEMS_PAGE_MAX = 20000                                  # 백엔드 GET /bundles/{id} 의 limit 상한과 같아야 한다
+_A_BUNDLE_ID = "묶음 주소 — build_report_bundle 응답의 bundle_id."
+
+
+@mcp.tool()
+async def build_report_bundle(
+    campaign_ids: Annotated[list[str], Field(description="담을 캠페인 id 목록(1~20) — 모두 내 캠페인이어야 한다.")],
+    spec: Annotated[dict, Field(description=(
+        "묶음 명세 — {tables: [{kind, metrics?, parts?}], figures?: {roles?, exts?}, include_invalid?}. "
+        f"kind 는 {_one_of(BUNDLE_TABLE_KINDS)} — runs(런 목록 · 지표 pitch · roll), case_metrics(케이스 롤업 · 지표 max_stress · "
+        "max_g · max_disp · min_safety_factor — 기본 넷), part_peaks(파트 피크 · 지표 peak_stress · peak_strain · peak_g · peak_disp · "
+        "peak_principal · min_principal · peak_vm_strain — 기본 peak_stress · peak_g · parts 로 파트를 고른다). 같은 종류는 하나. "
+        "figures 는 넣은 런의 리포트 그림 가운데 역할(roles — 없으면 모두) · 확장자(exts — 기본 png · svg)인 것을 인용한다(영상은 싣지 "
+        "않는다). include_invalid 가 참이면 제외 까닭이 있는 런도 넣는다(기본 거짓 — 건강 표와 같다). 모르는 열쇠 · 지표는 거절된다."))],
+    ctx: Context,
+    as_of: Annotated[str | None, Field(description="기준 시각(선택 · ISO 8601) — 그때까지 받은 리포트만 넣는다. 비우면 지금.")] = None,
+    bundle_id: Annotated[str | None, Field(description=(
+        "있는 주소의 다음 판을 지을 때(선택) — 캠페인 · 명세가 그 주소와 같아야 한다. 숫자가 같으면 판을 올리지 않는다."))] = None,
+    label: Annotated[str | None, Field(description="이름표(선택 · 255자까지) — 비우면 앞 판의 것을 잇는다.")] = None,
+) -> dict:
+    """보고서 · 영상 생성기가 읽을 묶음을 짓는다(DF-13) — 주소(`bundle_id`) 하나에 판을 쌓는다. 결과가 바뀌면 같은 주소에서 새 판이고
+    응답 `changes_counts` 가 앞 판 대비 더해짐 · 빠짐 · 바뀐 숫자 수다(`unchanged: true` 면 숫자가 같아 판을 올리지 않았다).
+
+    판마다 수치 기준 줄(`basis.line` — 캠페인마다 「유효 n / 전체 N · 제외 까닭」 · 설정 세대 · 문턱 이름표 · 단위) · 표 · 그림
+    (파일 id · sha256) · 출처 · 인용 꼴(`citation` — ReportArchive 가 이것으로 인용한다)이 있다. 숫자는 항목 하나가 한 줄이고
+    `report_bundle(items=true)` 로 받는다 — 숫자마다 `source_path` 가 리포트 · 케이스 · (파트) · 지표까지 거슬러 간다.
+    한 판의 숫자는 200,000 개까지. 묶음은 만든 사람만 본다.
+    Build (or re-version) a report bundle of campaign numbers and figure references, with per-number provenance."""
+    body = {k: v for k, v in {"campaign_ids": campaign_ids, "spec": spec, "as_of": as_of, "bundle_id": bundle_id,
+                              "label": label}.items() if v is not None}
+    return await _post(ctx, "/bundles", body)
+
+
+@mcp.tool()
+async def report_bundle(
+    ctx: Context,
+    bundle_id: Annotated[str | None, Field(description=_A_BUNDLE_ID + " bundle_id · campaign_id 가운데 하나만 준다.")] = None,
+    campaign_id: Annotated[str | None, Field(description=(
+        "캠페인 id — 주면 그 캠페인을 담은 묶음 가운데 가장 늦게 지은 판(REST /campaigns/{id}/bundles/latest).") )] = None,
+    version: Annotated[int | None, Field(description="판(선택 · bundle_id 와 함께) — 비우면 마지막 판.")] = None,
+    items: Annotated[bool, Field(description="참이면 숫자 항목(item_key · value · unit · source_path · source)을 쪽으로 싣는다.")] = False,
+    limit: Annotated[int, Field(description=f"한 쪽의 항목 수(1~{BUNDLE_ITEMS_PAGE_MAX}).")] = 1000,
+    offset: Annotated[int, Field(description="건너뛸 항목 수 — items.total 이 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """묶음의 판 하나(DF-13) — 머리(주소 · 판 · 기준 시각 · 수치 기준 줄 · 인용 꼴) · 명세 · 표 · 그림 · 출처 · 앞 판 대비 바뀐
+    숫자(`changes`) · 판 목록. `items=true` 면 숫자 항목을 쪽으로 — `source` 는 `source_path` 를 푼 것(report_id · case_key ·
+    part_id · metric, 런 표는 campaign_id · run_key · metric)이다.
+    One bundle version (latest by default), or the latest bundle that contains a campaign."""
+    if (bundle_id is None) == (campaign_id is None):
+        raise RuntimeError("bundle_id · campaign_id 가운데 하나만 주세요.")
+    params: dict = {"items": items, "limit": limit, "offset": offset}
+    if campaign_id is not None:
+        if version is not None:
+            raise RuntimeError("version 은 bundle_id 와 함께만 줍니다.")
+        return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/bundles/latest", params)
+    if version is not None:
+        params["version"] = version
+    return await _get(ctx, f"/bundles/{_seg(bundle_id)}", params)
+
+
+@mcp.tool()
+async def report_bundle_diff(
+    bundle_id: Annotated[str, Field(description=_A_BUNDLE_ID)],
+    ctx: Context,
+    from_version: Annotated[int | None, Field(description="앞 판(선택) — 비우면 뒤 판의 바로 앞 판.")] = None,
+    to_version: Annotated[int | None, Field(description="뒤 판(선택) — 비우면 마지막 판.")] = None,
+) -> dict:
+    """묶음의 두 판 사이 바뀐 숫자(DF-13) — 더해짐 · 빠짐 · 값(또는 단위) 바뀜(옛 값 → 새 값 · 출처 경로)과 그 수. 판이 하나뿐이면
+    오류다. Numbers that changed between two versions of a bundle."""
+    params: dict = {}
+    if from_version is not None:
+        params["from"] = from_version
+    if to_version is not None:
+        params["to"] = to_version
+    return await _get(ctx, f"/bundles/{_seg(bundle_id)}/diff", params)
+
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
 # 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).
 CAE_SEVERITIES = ("CRITICAL", "WARNING", "UNKNOWN", "OK")         # 높은 것부터

@@ -53,6 +53,11 @@ def test_capabilities_declares_intake(monkeypatch):
                               "required_extractions": "/api/v1/campaigns/{campaign_id}/required-extractions",
                               "deletion_clearance": "/api/v1/campaigns/{campaign_id}/deletion-clearance",
                               "report_extraction": "/api/v1/reports/{report_id}/extraction",
+                              # ④ 보고서용 묶음(DF-13 · 11-22)
+                              "bundles": "/api/v1/bundles",
+                              "bundle": "/api/v1/bundles/{bundle_id}",
+                              "bundle_diff": "/api/v1/bundles/{bundle_id}/diff",
+                              "latest_bundle": "/api/v1/campaigns/{campaign_id}/bundles/latest",
                               "form_fields": ["campaign_id", "run_key"],
                               "states": ["pending", "received", "skipped", "rejected"]}, it
     monkeypatch.setattr(settings, "ratelimit_enabled", True)

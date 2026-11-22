@@ -216,6 +216,9 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    (`set_campaign_required_extractions`)을 두면 `campaign_deletion_clearance` 가 d3plot 을 지워도 되는 런(allow)과 보류 · 빠진 항목을
    준다 — **조회만** 한다(목록이 없으면 다 보류). 피크를 돌려주는 리포트 도구의 응답에는 `peak_provenance` 가 실린다 —
    `peak_may_be_missed: true`(d3plot 표본 상태의 피크)면 그 값을 최댓값으로 단정하지 않는다. 한 리포트는 `report_extraction`.
+   보고서 · 영상에 쓸 숫자는 손으로 옮기지 말고 `build_report_bundle`(캠페인 · 명세 — 표 runs · case_metrics · part_peaks · 그림)로
+   묶음을 지어 그 주소(`bundle_id`)와 판을 인용한다 — 숫자마다 `source_path` 가 리포트 · 케이스 · 지표까지 거슬러 가고, 다시 지으면
+   바뀐 숫자만 새 판이 된다(`report_bundle_diff`). 렌더(HTML · 영상)는 하지 않는다 — 값과 그림 재료만.
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
    StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에
