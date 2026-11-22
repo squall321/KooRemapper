@@ -2184,16 +2184,12 @@ std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
     return out;
 }
 
-ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict = false, int deckFw = 0) {
-    ElemCardIndex idx;
-    size_t n = rawLines.size();
-    idx.owner.assign(n, -1);
-    idx.span.assign(n, 0);
-    idx.eidOf.assign(n, 0);
-    idx.pidOf.assign(n, 0);
-    idx.famOf.assign(n, 0);
-    idx.opaque.assign(n, 0);
-
+// ★요소 카드 걸음 — 카드마다 `onCard(시작 줄, 카드 줄들, eid, pid, family)` · 줄 수를 확정 못 한 섹션의 데이터 줄마다 `onOpaque(줄)` ·
+//   그 섹션 키워드마다 `onOpaqueKw(info)`. 색인(`ecBuildIndex`)과 줄마다 칸을 두지 않는 소비자(`batteryTakenSpans` 의 요소 번호 —
+//   3차 4판 L-18: 큰 덱에서 줄마다 18 바이트의 색인을 잠깐 지었다)가 같은 걸음을 쓴다 — 줄 수 판정이 둘이면 갈린다
+template <class OnCard, class OnOpaque, class OnOpaqueKw>
+void ecWalk(const std::vector<std::string>& rawLines, bool strict, int deckFw, OnCard onCard, OnOpaque onOpaque, OnOpaqueKw onOpaqueKw) {
+    const size_t n = rawLines.size();
     // 칸 폭은 매뉴얼 한 곳(ElementCardLayout)에서만 정한다 — *KEYWORD 의 i10/long(19305-19360)과
     // 키워드 줄 접미사('%','+','-')다. `deckFw` 를 주면 그것이 기본 폭이다 — `*KEYWORD` 줄이 없는 줄 묶음
     // (덱 폭으로 쓴, 넣을 블록)을 그 덱의 폭으로 읽을 때다.
@@ -2204,6 +2200,8 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
     ElementKeywordInfo info;
     bool inElem = false;
     int sectionFw = fw;
+    size_t done = 0;   // 앞 카드가 삼킨 줄의 다음 자리 — 카드 줄은 시작 줄 뒤로 이어진다(사이의 주석 줄은 데이터가 아니다)
+    std::vector<size_t> own;
     for (size_t i = 0; i < n; ++i) {
         const std::string& line = rawLines[i];
         size_t g = line.find_first_not_of(" \t");
@@ -2211,15 +2209,12 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
             info = parseElementKeyword(line);
             inElem = (info.family != ElemFamily::NONE);
             sectionFw = keywordFieldWidth(line, fw);
-            if (inElem && !info.supported) {
-                idx.opaqueKws.push_back(info.keyword);
-                if (idx.opaqueReason.empty()) idx.opaqueReason = info.reason;
-            }
+            if (inElem && !info.supported) onOpaqueKw(info);
             continue;
         }
         if (!inElem || !ecIsData(line)) continue;
-        if (!info.supported) { idx.opaque[i] = 1; continue; }
-        if (idx.owner[i] >= 0) continue;          // 앞 카드가 이미 삼킨 줄
+        if (!info.supported) { onOpaque(i); continue; }
+        if (i < done) continue;          // 앞 카드가 이미 삼킨 줄
 
         auto f = ecFields(line, sectionFw, strict);
         int eid = ecInt(f, 0), pid = ecInt(f, 1);
@@ -2234,7 +2229,7 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
         const int lines = elementCardSpan(info, f, pidN).lines;
 
         // 이 카드가 차지하는 데이터 줄을 모은다(사이에 낀 주석·빈 줄은 카드에 넣지 않는다).
-        std::vector<size_t> own;
+        own.clear();
         own.push_back(i);
         size_t j = i + 1;
         while ((int)own.size() < lines && j < n) {
@@ -2256,15 +2251,34 @@ ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict
                 ++j;
             }
         }
-
-        for (size_t o : own) idx.owner[o] = (int)i;
-        idx.span[i] = (int)own.size();
-        idx.eidOf[i] = eid;
-        idx.pidOf[i] = pid;
-        idx.famOf[i] = (info.family == ElemFamily::SOLID) ? 'S'
-                     : (info.family == ElemFamily::SHELL) ? 'H' : 'T';
-        if (eid > 0) idx.countByPid[pid] += 1;
+        done = own.back() + 1;
+        onCard(i, own, eid, pid, info.family);
     }
+}
+
+ElemCardIndex ecBuildIndex(const std::vector<std::string>& rawLines, bool strict = false, int deckFw = 0) {
+    ElemCardIndex idx;
+    size_t n = rawLines.size();
+    idx.owner.assign(n, -1);
+    idx.span.assign(n, 0);
+    idx.eidOf.assign(n, 0);
+    idx.pidOf.assign(n, 0);
+    idx.famOf.assign(n, 0);
+    idx.opaque.assign(n, 0);
+    ecWalk(rawLines, strict, deckFw,
+           [&idx](size_t i, const std::vector<size_t>& own, int eid, int pid, ElemFamily fam) {
+               for (size_t o : own) idx.owner[o] = (int)i;
+               idx.span[i] = (int)own.size();
+               idx.eidOf[i] = eid;
+               idx.pidOf[i] = pid;
+               idx.famOf[i] = (fam == ElemFamily::SOLID) ? 'S' : (fam == ElemFamily::SHELL) ? 'H' : 'T';
+               if (eid > 0) idx.countByPid[pid] += 1;
+           },
+           [&idx](size_t i) { idx.opaque[i] = 1; },
+           [&idx](const ElementKeywordInfo& info) {
+               idx.opaqueKws.push_back(info.keyword);
+               if (idx.opaqueReason.empty()) idx.opaqueReason = info.reason;
+           });
     return idx;
 }
 
@@ -18389,9 +18403,9 @@ static void ma_nodeIdsIn(const std::vector<std::string>& lines, std::vector<long
 
 // 요소 — 모든 요소 족(격자 · 보 · 이산 · 질량 · 안전띠 · 플롯 · 줄 수를 모르는 변형)
 static void ma_elemIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
-    const ElemCardIndex idx = ecBuildIndex(lines);
-    for (size_t i = 0; i < lines.size(); ++i)
-        if (idx.span[i] > 0 && idx.eidOf[i] > 0) out.push_back(idx.eidOf[i]);
+    // 색인을 짓지 않고 걸음만 — 줄마다 칸을 두지 않는다(3차 4판 L-18)
+    ecWalk(lines, false, 0, [&out](size_t, const std::vector<size_t>&, int eid, int, ElemFamily) { if (eid > 0) out.push_back(eid); },
+           [](size_t) {}, [](const ElementKeywordInfo&) {});
     forEachNonGridElementCard(lines, [&out](const NonGridElementCard& c) { if (c.eid > 0) out.push_back(c.eid); });
 }
 
