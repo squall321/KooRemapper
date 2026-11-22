@@ -128,3 +128,35 @@
   hwaxportal-71(전문) · hwaxportal-87(짧은 판) · stepforge-d4(조각 · 덱 BOM · SP 고정) · smarttwinmcp-c8 · kooremapper-fd. 포털 알림에는 DF
   2차가 멈춘 일정은 싣지 않았다(사용자에게 읽기를 확인받기 전이다) — 동시 올리기 500 은 아직 안 고쳤다는 것만 실었다.
 - **못 잰 것** — LS-DYNA 실행(라이선스 만료 — BOM 덱을 솔버가 받는지) · 운영(cae00) 스택 · 헤드 SIF v141(아직 안 구웠다 — pyKooCAE 쪽 일).
+
+## 7. 2판 다시 재기(2026-11-22 · 설치된 판 `d1e2ce96`)
+- **바이너리 · 법** — 설치된 판 `d1e2ce96`(`platform/backend/bin` — 이웃 `materials` · `gmsh` 그대로)과 앞 판 `f20d5d5b`. 카탈로그 사례 덱을
+  표준 · `LONG=Y` · `I10=Y` 로 다시 쓰는 도우미(`widen.py`)는 `*INCLUDE` 파일 이름 줄을 칸으로 잘라 이름을 끊었다 — 고쳐 다시 쟀다(extract-parts
+  의 세 꼴 rc 1 은 그 탓이었다 · 이제 셋 다 rc 0). 조각(계약상 표준 폭)은 넓히지 않는다.
+- **L-05 여섯 — 앞 판과 같다**(검토 탐침 `reprobe.py` 를 두 판으로) — 두께 셸뿐인 덱의 unfold 두께 방향(입력 1.0 · 2.0 → 0.25 · 48 요소 결합 0 /
+  48 같음) · `JOBID=LONGRUN` · `memory=belong` 이 `LONG=Y` 로 · `*KEYWORD` 둘 · 들여쓴 꼴의 읽기 / 쓰기 폭 갈림 · `*KEYWORD_ID I10=Y` 의 엉뚱한
+  까닭(「Element 1 has 0 neighbors」 · 「요소 번호가 겹쳐」) · `-1.5e-120` 을 17 자로(map · tetremesh 57 자 줄) · 상한을 넘는 절점 번호(squeeze
+  · tetremesh 가 넘는 하나를 빼고 rc 0 · map · unfold 는 「non-existent node 0」). 달라진 것 하나 — 전부 넘는 덱에서 squeeze 는 이제 rc 1(1판의
+  빈 메시 거절)인데 tetremesh 는 여전히 rc 0 으로 절점 0 인 덱을 쓴다.
+- **L-04 `LONG=Y` — 카드 리더 여덟**(카탈로그 58 op × 세 꼴 · `widerc.py`) — `I10=Y` 는 판에 든 두 거절(cad_solid_merge_to_deck ·
+  apply_carryover_plan — 계획 sha 가 덱 바이트에 묶였다)뿐이다. `LONG=Y` 에서 rc 가 0 이 아닌 열여섯 가운데 아홉은 설계된 거절이다(convert ·
+  refine · disconnect · offset · restack · rbe · meshfix 의 「long 포맷 덱 — 20 칸 서식을 확정하지 못했다」 · cad_solid_merge_to_deck ·
+  apply_carryover_plan). 나머지는 제 카드 리더가 20 칸을 못 읽는 것이다 — cnrb2spring(「*CONSTRAINED_NODAL_RIGID_BODY 가 없습니다」) ·
+  cclip(「*PART line for pid 2 not found」) · matswap · ale(「PID 1 not found」) · stackwrap · neutralaxis(「MID 의 E 를 못 읽었다」).
+  cnrb2solid 는 rc 0 에 경고 한 줄(「NSID=0 not found」)로 솔리드 0 개 · 절점 25(표준 판 75)인 덱을 쓴다. info 는 rc 0 에 거짓 「[ERROR]
+  정의되지 않은 것을 가리키는 카드 2건」 을 찍는다(`--strict` 면 rc 1). extract-parts 는 셋 다 rc 0 이다(2차 F-2).
+- **L-04 정수 상한 — 넘친 번호를 rc 0 으로 쓰는 op 여덟**(`maxid.py` — `I10=Y` 덱에 번호가 2147483647 인 절점 넷 · 셸 · 파트 · 섹션 · 재질 ·
+  세트를 더했다) — meshfix(새 절점 · 요소가 -2147483648 부터) · cnrb2solid(새 절점) · matswap(새 SECID) · boundary(새 세트) · ale(PID 2147483648
+  · MID 음수) · iga(MID · `*PARAMETER_LOCAL`) · merge(새 MID — rc 1 이지만 덱은 쓴다) · cclip(보고의 `new_mid` · `new_secid`). 목록이 적은 자리
+  가운데 cad_solid_merge_to_deck 은 칸 상한으로 막고, apply_carryover_plan 은 넓힌 덱이 계획 sha 와 달라 이 탐침으로는 재지 못했다. 앞서 고친
+  tetremesh · id_floor 는 rc 1 이다. 처음 검사는 붙어 쓴 10 칸 셋을 큰 수 하나로 읽어 거짓으로 많이 셌다 — 칸 단위로 고쳐 다시 쟀다.
+- **L-08 battery** — ① 주 덱이 `I10=Y` · `LONG=Y` 여도 use_include: true 는 rc 0 으로 맨 `*INCLUDE` 와 표준 폭 battery 덱(맨 `*KEYWORD` · 절점
+  줄 56 자)을 붙인다. 우리 extract-parts 는 이 닫힘을 섞인 폭으로 거절한다. Vol_I 는 `*INCLUDE -` 가 인클루드 전체를 표준 폭으로 읽게 한다고
+  적지만(LONG 덱일 때) I10 에는 인클루드 단위 되돌림이 없다 — LS-DYNA 가 맨 `*KEYWORD` 인클루드를 어떻게 읽는지는 못 쟀다(라이선스 만료). ②
+  battery 뒤 extract_surface 의 `output_pid` 가 battery 파트 번호(11)면 셸 50 개가 battery 파트 11 에 rc 0 으로 들어간다. 주 덱 파트(솔리드 파트
+  1)를 주어도 같다 — battery 만의 것이 아니다.
+- **목록 밖** — assemble 의 extract_surface 는 새 `output_pid` 에 `*PART` 를 쓰지 않는다(정의 안 된 파트를 가리키는 셸 50 · rc 0). 단독
+  extract-surface 는 `*PART` 를 쓰되 SECID 가 그 번호인 섹션이 없다. 매뉴얼 43.7 이 「옵션 세부 동작은 확인 필요」 라고 적은 자리다. applyfold
+  경고의 숫자(`%+lld` 에 double)는 1판에서 넘긴 그대로다.
+- **범위 추세** — 열 → 열셋 → 아홉 → 1판 열여덟 → 2판 다시 재기에서 새 묶음 둘(정수 상한 넘침 일곱 op · extract_surface 의 `*PART`). 1판에서
+  넘긴 넷 가운데 셋(info 거짓 미정의 · applyfold 숫자 · `LONG=Y` 까닭 열여섯)이 이 판의 몫이다.
