@@ -1022,7 +1022,9 @@ KooRemapper.exe unfold <bent_mesh.k> <output_flat.k>
 ### 출력
 
 - `output_flat.k`: 전개된 평면 메시 — 굽힌 덱의 두께 셸(`*ELEMENT_TSHELL`) 칸은 펼친 덱에서도 `*ELEMENT_TSHELL` 이다(2026-11-08 전엔
-  원본 없는 메시 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다 · 회귀 `test_kfilewriter_blocks.py` B-3). 산출 첫 줄이 굽힌
+  원본 없는 메시 쓰기가 `*ELEMENT_SOLID` 로 써서 두께 셸이 솔리드가 됐다 · 회귀 `test_kfilewriter_blocks.py` B-3). 두께 셸은 제 절점
+  차례(아랫면 n1-4 · 윗면 n5-8 — 두께 방향)를 지킨다. 2026-11-22 전엔 격자 차례로 새로 매겨 두께 방향이 x · y 인 두께 셸이 격자 k 축으로
+  두께를 가졌고(1.0 · 2.0 → 0.25) 아랫면 · 윗면이 뒤바뀌었다(회귀 `test_unfold_tshell_axis.py`). 솔리드는 예전처럼 격자 차례다. 산출 첫 줄이 굽힌
   덱의 칸 폭을 선언한다(`*KEYWORD` · `*KEYWORD I10=Y` · `*KEYWORD LONG=Y` — 2026-11-21 전엔 늘 맨 `*KEYWORD` 아래 8칸이었다 ·
   [§3.1(n)](#31-yaml-공통-규칙-모든-op))
 - 콘솔: 격자 차원(I, J, K) 및 평면 길이(I=호 길이, J, K) 출력

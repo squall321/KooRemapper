@@ -1,6 +1,8 @@
 #include "mapper/FlatMeshGenerator.h"
 #include <cmath>
 #include <algorithm>
+#include <array>
+#include <map>
 #include <limits>
 #include <set>
 
@@ -630,6 +632,33 @@ Mesh FlatMeshGenerator::generateMesh() {
                     elem.nodeIds[c] = it->second;
                 }
                 if (!ok) continue;
+                // ★두께 셸은 제 절점 차례를 지킨다(2026-11-22 · 미룬 결함 3차 2판 L-05). 격자 차례로 새로 매기면 n1-4 → n5-8 이 격자 k 축이
+                //   되어, 두께 방향이 x · y 인 두께 셸이 다른 축으로 두께를 갖고(두께 1.0 · 2.0 → 0.25) 아랫면 · 윗면이 뒤바뀌었다(rc 0).
+                //   모서리마다 그 자리의 굽은 절점을 짝지어 입력 요소의 차례로 다시 놓고, 평판에서 뒤집히면 면 안의 감김만 되돌린다.
+                if (originalElem && originalMesh_.thickShellIds.count(elem.id)) {
+                    std::map<int, int> flatOf;   // 굽은 절점 → 이 요소 모서리의 평판 절점
+                    for (int c = 0; c < 8; ++c) {
+                        int sourceCorner = (parity == 1) ? FLIP_MAP[c] : c;
+                        const Node* bn = getNodeAt(physI(i + CORNER_OFFSETS[sourceCorner][0]), j + CORNER_OFFSETS[sourceCorner][1],
+                                                   k + CORNER_OFFSETS[sourceCorner][2]);
+                        if (bn) flatOf[bn->id] = elem.nodeIds[c];
+                    }
+                    std::array<int, 8> kept{};
+                    bool all = flatOf.size() == 8;
+                    for (int q = 0; all && q < 8; ++q) {
+                        auto f = flatOf.find(originalElem->nodeIds[q]);
+                        if (f == flatOf.end()) all = false;
+                        else kept[q] = f->second;
+                    }
+                    if (all) {
+                        auto pos = [&flatMesh](int id) { const Node* n = flatMesh.getNode(id); return n ? n->position : Vector3D(); };
+                        const Vector3D nrm = (pos(kept[2]) - pos(kept[0])).cross(pos(kept[3]) - pos(kept[1]));
+                        Vector3D bot, topc;
+                        for (int q = 0; q < 4; ++q) { bot = bot + pos(kept[q]); topc = topc + pos(kept[4 + q]); }
+                        if (nrm.dot(topc - bot) < 0) { std::swap(kept[1], kept[3]); std::swap(kept[5], kept[7]); }
+                        for (int q = 0; q < 8; ++q) elem.nodeIds[q] = kept[q];
+                    }
+                }
 
                 elem.i = i;
                 elem.j = j;

@@ -14,7 +14,7 @@ static const std::vector<OpHelp> kOpHelps = {
      {},
      {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper unfold demo_bent.k unfolded.k"},
      {},
-     {"산출 첫 줄이 굽은 덱의 칸 폭을 선언한다(*KEYWORD · *KEYWORD I10=Y · *KEYWORD LONG=Y) — 2026-11-21 전엔 I10=Y · LONG=Y 덱도", "  맨 *KEYWORD 아래 8칸으로 써서 9자리 번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 쓰지 않고 rc 1"}},
+     {"산출 첫 줄이 굽은 덱의 칸 폭을 선언한다(*KEYWORD · *KEYWORD I10=Y · *KEYWORD LONG=Y) — 2026-11-21 전엔 I10=Y · LONG=Y 덱도", "  맨 *KEYWORD 아래 8칸으로 써서 9자리 번호의 칸이 붙었다(rc 0). 번호가 그 칸에 안 들어가면 쓰지 않고 rc 1", "두께 셸(*ELEMENT_TSHELL)은 펼쳐도 제 절점 차례(아랫면 n1-4 · 윗면 n5-8)를 지킨다 — 2026-11-22 전엔 격자 차례로 새로 매겨 두께", "  방향이 x · y 인 두께 셸이 다른 축으로 두께를 가졌다(rc 0). 솔리드는 격자 차례 그대로"}},
     {"generate", "메시 생성", "시험용 곡면 메시 세트(teardrop·arc·torus…) 또는 YAML 박스 메시 생성", "생성 box 박스 teardrop arc", "KooRemapper generate [--dim-i n --dim-j n --dim-k n] <type> <output_prefix>\nKooRemapper generate box <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
