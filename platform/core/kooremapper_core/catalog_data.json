@@ -12833,7 +12833,7 @@
           "type": "integer",
           "required": false,
           "default": "1",
-          "desc": "Read but not used — the deck writes SOFT = 1 on the impactor / ground surface-to-surface contacts and SOFT = 2 on the cell self-contact, whatever this key says (until 2026-11-22 this said 'always 1', which the self-contact never was)"
+          "desc": "Read but not used — the deck writes SOFT = 1 on the impactor / ground surface-to-surface contacts and SOFT = 2 on the cell self-contact, whatever this key says; giving it prints a [WARN] saying so (since 2026-11-22). Until 2026-11-22 this said 'always 1', which the self-contact never was"
         },
         {
           "path": "contact.sofscl_base",
@@ -12868,7 +12868,7 @@
           "type": "integer",
           "required": false,
           "default": "5",
-          "desc": "Read but not used — every automatic contact's Card A writes DEPTH 5 whatever this key says (noted 2026-11-22)"
+          "desc": "DEPTH on Card A of every automatic contact (impactor / ground surface-to-surface and cell self-contact) — since 2026-11-22 (user decision); before, the key was read but every Card A wrote 5. An integer 0 or above (0 = the LS-DYNA default); a negative value (a load-curve ID in Vol_I) or a non-integer exits 1 and writes no deck (before, a non-integer was read as 0)"
         },
         {
           "path": "solid_electrode",

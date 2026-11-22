@@ -16,7 +16,7 @@ namespace bat {
 // ─────────────────────────────────────────────────────────────
 static void writeA2S(std::ostream& out, int cid, const std::string& title,
                      int ssid, int msid, int sstyp, int mstyp,
-                     double sofscl, double sst, double mst) {
+                     double sofscl, double sst, double mst, int depth) {
     char buf[256];
     // Header
     out << "*CONTACT_AUTOMATIC_SURFACE_TO_SURFACE_ID\n";
@@ -43,11 +43,11 @@ static void writeA2S(std::ostream& out, int cid, const std::string& title,
     out << buf;
 
     // Card A: SOFT SOFSCL LCIDAB MAXPAR SBOPT DEPTH BSORT FRCFRQ — SBOPT 는 정수 칸(Vol_I Card A 형 I)이다. 예전엔 「     3.000」 으로
-    //   썼다(3차 5판 L-17 · LS-PrePost 는 3 으로 읽는다 — LS-DYNA 로는 못 쟀다). 권취 · 자기 접촉도 같다
+    //   썼다(3차 5판 L-17 · LS-PrePost 는 3 으로 읽는다 — LS-DYNA 로는 못 쟀다). 권취 · 자기 접촉도 같다. DEPTH 는 contact.depth(3차 6판)
     out << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
     snprintf(buf, sizeof(buf),
              "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
-             1, sofscl, 0, 1.375, 3, 5, 0, 1);
+             1, sofscl, 0, 1.375, 3, depth, 0, 1);
     out << buf;
 
     // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
@@ -66,7 +66,7 @@ static void writeA2S(std::ostream& out, int cid, const std::string& title,
 // Helper: write CONTACT_AUTOMATIC_SINGLE_SURFACE_ID
 // ─────────────────────────────────────────────────────────────
 static void writeASS(std::ostream& out, int cid, const std::string& title,
-                     int ssid, int sstyp, double sofscl, double sst) {
+                     int ssid, int sstyp, double sofscl, double sst, int depth) {
     char buf[256];
     out << "*CONTACT_AUTOMATIC_SINGLE_SURFACE_ID\n";
     snprintf(buf, sizeof(buf), "$ %s\n%10d\n", title.c_str(), cid);
@@ -91,11 +91,11 @@ static void writeASS(std::ostream& out, int cid, const std::string& title,
              1.0, 1.0, sst, sst, 1.0, 1.0, 1.0, 1.0);
     out << buf;
 
-    // Card A: SOFT=2 (segment-based, more stable for thin elements)
+    // Card A: SOFT=2 (segment-based, more stable for thin elements) · DEPTH 는 contact.depth(3차 6판)
     out << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
     snprintf(buf, sizeof(buf),
              "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
-             2, sofscl, 0, 1.375, 3, 5, 0, 1);
+             2, sofscl, 0, 1.375, 3, depth, 0, 1);
     out << buf;
 
     // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
@@ -165,12 +165,12 @@ void writeContacts(std::ostream& out, const BatteryConfig& cfg,
                  3,                     // SSTYP=3 (part)
                  2,                     // MSTYP=2 (part set)
                  sofscl,
-                 cfg.contact.sst_ext, cfg.contact.sst_ext);
+                 cfg.contact.sst_ext, cfg.contact.sst_ext, cfg.contact.depth);
     }
 
     // 2. Cell self-contact (part set 102)
     writeASS(out, CID_CELL_SELF, "Cell_Self_Contact",
-             SID_PART_CELL, 2, sofscl, cfg.contact.sst_self);
+             SID_PART_CELL, 2, sofscl, cfg.contact.sst_self, cfg.contact.depth);
 
     // 3. TIED contacts (Phase 1: SOLID+SHELL need bonding)
     //    Phase 2: TSHELL nodes are shared → no TIED needed in jellyroll

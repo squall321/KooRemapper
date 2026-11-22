@@ -163,12 +163,14 @@ struct BatteryMatElectrolyte {
 
 // ── Contact parameters ─────────────────────────────────────────
 struct BatteryContactParams {
-    int    soft        = 1;       // 읽기만 — 쓰개는 SOFT 를 접촉마다 정한다(면 대 면 1 · 셀 자기 접촉 2 · L-17)
+    int    soft        = 1;       // 읽기만 — 쓰개는 SOFT 를 접촉마다 정한다(면 대 면 1 · 셀 자기 접촉 2 · L-17). 적으면 [WARN](3차 6판)
+    bool   softGiven   = false;   // 설정에 soft 를 적었나 — [WARN] 을 낸다
     double sofscl_base = 0.001;   // base for tier -1 (5mm mesh)
     double sofscl_pow  = 2.0;     // scaling power
     double sst_ext     = 0.05;    // mm  external contact shell thickness
     double sst_self    = 0.01;    // mm  self-contact shell thickness
-    int    depth       = 5;
+    int    depth       = 5;       // 자동 접촉 Card A 의 DEPTH(3차 6판 · 사용자 결정 — 예전엔 읽기만 하고 늘 5)
+    std::string depthText;        // 설정에 적은 글자 그대로 — 정수 0 이상인지 buildBatteryDeck 이 잰다(비면 안 적은 것)
     double maxpar      = 1.025;
     double sbopt       = 2.0;
 };

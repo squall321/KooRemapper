@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 
 // Knowledge graph (lat.md):
@@ -190,12 +191,12 @@ BatteryConfig parseBatteryConfig(const std::string& yamlFile) {
             else if (key == "sei_enabled")   cfg.swelling.seiEnabled   = bat_toBool(val);
         }
         else if (section == "contact" && indent == 2) {
-            if      (key == "soft")         cfg.contact.soft        = bat_toInt(val);
+            if      (key == "soft")         { cfg.contact.soft = bat_toInt(val); cfg.contact.softGiven = true; }
             else if (key == "sofscl_base")  cfg.contact.sofscl_base = bat_toDouble(val);
             else if (key == "sofscl_power") cfg.contact.sofscl_pow  = bat_toDouble(val);
             else if (key == "sst_external") cfg.contact.sst_ext     = bat_toDouble(val);
             else if (key == "sst_self")     cfg.contact.sst_self    = bat_toDouble(val);
-            else if (key == "depth")        cfg.contact.depth       = bat_toInt(val);
+            else if (key == "depth")        { cfg.contact.depth = bat_toInt(val); cfg.contact.depthText = val; }
         }
         else if (section == "materials" && indent == 2) {
             subsect = key;  // al_cc / nmc_cathode / graphite_anode / etc.
@@ -401,6 +402,19 @@ static bool buildBatteryDeck(const BatteryConfig& cfg, ConsoleOutput& console, c
                       "indenter: type: nail 이다");
         return false;
     }
+    // ★contact.depth 는 자동 접촉 Card A 의 DEPTH 칸에 쓴다(2026-11-22 · 3차 6판 · 사용자 결정 — 예전엔 읽기만 하고 늘 5). Vol_I 형 I 다 —
+    //   음수는 하중 곡선 번호(이 덱에 없다)고, 정수가 아닌 값은 예전 읽기로 0 이 되었다. 정수 0 이상만 받는다(0 은 LS-DYNA 기본)
+    if (!cfg.contact.depthText.empty()) {
+        const std::string& t = cfg.contact.depthText;
+        bool digits = t.size() <= 9 && std::all_of(t.begin(), t.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; });
+        if (!digits) {
+            console.error("[battery] contact.depth 는 정수 0 이상이다(자동 접촉 Card A 의 DEPTH · 음수는 하중 곡선 번호라 받지 않는다): " + t);
+            return false;
+        }
+    }
+    // contact.soft 는 접촉마다 달라 키 하나로 정하지 않는다 — 읽기만 두고 적으면 알린다(사용자 결정)
+    if (cfg.contact.softGiven)
+        console.warning("[battery] contact.soft 는 덱에 쓰지 않는다 — SOFT 는 접촉마다 정한다(면 대 면 1 · 셀 자기 접촉 2)");
 
     // Compute mesh dimensions
     double meshSize = batteryMeshSize(cfg.tier);

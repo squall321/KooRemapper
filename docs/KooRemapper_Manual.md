@@ -4535,8 +4535,10 @@ KooRemapper battery <config.yaml>
 > assemble 이 번호를 옮길 때도 그 줄의 21~30열을 LCBCKT(곡선)로 보아 옮기던 것을 그만둡니다(Card B 의 그 칸은 SHLTHK) — Card C 의
 > DPRFAC 가 번호(|값| ≥ 1)이거나 CID_RCF 가 0 이 아니면 옮기지 않고 거절합니다. 회귀 `tools/regress/test_battery_contact_optional_cards.py`.
 > Card A 의 SBOPT(정수 칸 — Vol_I Card A 형 I)는 `3` 으로 씁니다(2026-11-22 — 전엔 `3.000` 이었다. LS-PrePost 는 3 으로 읽는다 ·
-> LS-DYNA 로는 못 쟀다). 설정의 `contact.soft` · `contact.depth` 는 읽기만 하고 덱에 쓰지 않습니다 — SOFT 는 접촉마다(면 대 면 1 ·
-> 셀 자기 접촉 2), DEPTH 는 늘 5 입니다(카탈로그의 「SOFT 늘 1」 은 틀린 말이었다).
+> LS-DYNA 로는 못 쟀다). 설정의 `contact.depth` 는 모든 자동 접촉 Card A 의 DEPTH 칸에 씁니다(2026-11-22 · 사용자 결정 — 기본 5 라
+> 안 준 덱은 같습니다. 전엔 읽기만 하고 늘 5 였습니다). DEPTH 는 정수 칸이라 정수 0 이상만 받습니다 — 음수(Vol_I 에서 하중 곡선 번호)나
+> 정수가 아닌 값은 덱을 쓰지 않고 종료 코드 1 입니다(전엔 0 으로 읽혔습니다). `contact.soft` 는 읽기만 합니다 — SOFT 는 접촉마다(면 대 면
+> 1 · 셀 자기 접촉 2) 정하고, 설정에 적으면 `[WARN]` 이 그렇다고 알립니다(카탈로그의 「SOFT 늘 1」 은 틀린 말이었다).
 
 **근거**: pyKooCAE `mesh_generate.md`, `examples/battery/swell/{stacked,wound}/*.yaml`, 2026-09-18 실행 확인. 미등장 필드·기본값은 확인 필요.
 
