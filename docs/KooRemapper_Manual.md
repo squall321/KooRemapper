@@ -4433,12 +4433,12 @@ KooRemapper battery <config.yaml>
 | `dr_endtim` / `dr_tolerance` / `dr_factor` / `dr_nrcyck` | DR 파라미터 |
 | `tabs.width` / `.height` / `.pos_x_center` / `.neg_x_center` | 탭 폭 · 높이 · X 중심 [mm] — 기본 중심 17.5 · 52.5 는 폭 70 셀 기준. (stacked) 탭이 셀(0~`cell_width`)과 겹치지 않으면 종료 코드 1(`no_pcm` 이면 탭을 짓지 않는다 · 2026-11-08 전엔 덱에 없는 절점을 가리키고 종료 코드 0). 셀 끝을 넘으면 셀 안 격자 열로 좁혀 짓고 `[WARN]` 이 지은 범위를 댄다(2026-11-22 — 전엔 말없이 좁혔다) |
 
-> **덱이 가리키는 정의(2026-11-22)**: 지은 덱의 PART · 경계 카드는 그 덱에 있는 재질 · 섹션 · 세트만 가리킵니다(`info --strict` 로
-> 잽니다 — 적층 · 권취 × 선택 열두 가지 × `mode` 넷, 96 덱이 종료 코드 0). 전엔 적층 기본 설정의 전해질 PART 가 공기주머니에서만 쓰는
-> 재질(MID 8)을, 적층 `side` 의 SPC 가 짓지 않은 바닥판 세트 3 을, `no_impactor: true` 의 SPC · 처방 운동이 없는 세트 2 · 3 을, 권취
-> `core_fill: true` 의 전해질 PART 가 `solid_electrode` 일 때만 적는 섹션 33 을 가리켜 LS-DYNA 가 키워드 단계에서 멈췄습니다(battery 는
-> 종료 코드 0). 적층 `side` 는 이제 권취처럼 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는
-> 경계는 쓰는 쪽 몫입니다.
+> **덱이 가리키는 정의(2026-11-22)**: 지은 덱의 PART · 경계 카드는 그 덱에 있는 재질 · 섹션 · 세트만 가리킵니다(`info --strict` 로 잽니다 — 적층
+> · 권취(평평한 판 · 나선 판 `wound.flat: false`) × 선택 열두 가지 × `mode` 넷, 144 덱이 종료 코드 0). 전엔 적층 기본 설정의 전해질 PART 가
+> 공기주머니에서만 쓰는 재질(MID 8)을, 적층 `side` 의 SPC 가 짓지 않은 바닥판 세트 3 을, `no_impactor: true` 의 SPC · 처방 운동이 없는 세트 2 ·
+> 3 을, 권취 `core_fill: true` 와 나선 판(전해질 채움 — 2026-11-22 3차 6판에 고쳤다 · 나선 판 48 덱 가운데 36)의 전해질 PART 가
+> `solid_electrode` 일 때만 적는 섹션 33 을 가리켜 LS-DYNA 가 키워드 단계에서 멈췄습니다(battery 는 종료 코드 0). 적층 `side` 는 이제 권취처럼
+> 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는 경계는 쓰는 쪽 몫입니다.
 >
 > **`batch.phase_modes` 판의 고정구(2026-11-22 · 사용자 결정)**: 단독 `mode: swell` · `bare` 는 고정구 넷(압입자 · 바닥판 · PCM · 탭)을
 > 다 뺍니다(그대로). `batch.phase_modes` 가 mode 를 정한 판은 그 판의 mode 와 설정에 **적은** `no_fixture` · `no_pcm` · `no_impactor` 로

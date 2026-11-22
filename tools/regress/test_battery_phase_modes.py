@@ -12,7 +12,7 @@
   탭 · PCM 번호가 phase 2 의 압입자 번호와 겹쳤다 — 이제 탭 · PCM 을 먼저 짓는다(적층의 차례와 같다).
 
 무엇을 보나.
-  적층 · 권취 × phase_modes [swell, dent] · [bare, dent](use_dynain: true · phases [1, 2])
+  적층 · 권취 × phase_modes [swell, dent] · [bare, dent](use_dynain: true · phases [1, 2]) · 권취 나선 판(flat: false) [swell, dent]
     phase 1 — 압입자 · 바닥판 PART 없음 · 탭 · PCM PART 있음 · `info --strict` rc 0
     ★사슬 — phase 1 의 절점 번호가 phase 2 에 모두 같은 자리로 · 요소 번호가 모두 같은 내용으로 있다
     phase 2(dent) — 압입자 · 바닥판 · 탭 · PCM PART 있음 · 처방 운동 있음(dynain 파일이 없어 strict 는 아래 판에서)
@@ -86,24 +86,26 @@ def main():
     try:
         for mt in ("stacked", "wound"):
             imp, tp = FIX[mt]["imp"], FIX[mt]["tabpcm"]
-            for first in ("swell", "bare"):
-                rc, out, ks = gen("%s_%s" % (mt, first),
-                                  "output: bt\nmodel_type: %s\ntier: -1\nmode: dent\nuse_dynain: true\nbatch:\n  phases: [1, 2]\n"
-                                  "  phase_modes: [%s, dent]\n" % (mt, first))
-                if not check("%s · phase_modes [%s, dent] → rc 0 · 덱 둘" % (mt, first), rc == 0 and len(ks) == 2,
+            # 권취는 평평한 판(기본)과 나선 판(wound.flat: false)이 고정구를 따로 짓는다 — 둘 다 잰다
+            for first, extra in (("swell", ""), ("bare", "")) + ((("swell", "wound:\n  flat: false\n"),) if mt == "wound" else ()):
+                tag = first + (" · 나선" if extra else "")
+                rc, out, ks = gen("%s_%s%s" % (mt, first, "_spiral" if extra else ""),
+                                  "output: bt\nmodel_type: %s\ntier: -1\nmode: dent\nuse_dynain: true\n%sbatch:\n  phases: [1, 2]\n"
+                                  "  phase_modes: [%s, dent]\n" % (mt, extra, first))
+                if not check("%s · phase_modes [%s, dent] → rc 0 · 덱 둘" % (mt, tag), rc == 0 and len(ks) == 2,
                              (rc, ks, out[-300:])):
                     continue
                 p1, p2 = read_deck(ks[0]), read_deck(ks[1])
                 check("★%s · [%s, dent] phase 1 — 압입자 · 바닥판 PART 없음 · 탭 · PCM 있음(예전 권취는 압입자 · 바닥판을 실었다)"
-                      % (mt, first), not (p1[0] & imp) and tp <= p1[0], sorted(p1[0]))
+                      % (mt, tag), not (p1[0] & imp) and tp <= p1[0], sorted(p1[0]))
                 ok, bad = strict(ks[0])
-                check("%s · [%s, dent] phase 1 → info --strict rc 0" % (mt, first), ok, bad)
+                check("%s · [%s, dent] phase 1 → info --strict rc 0" % (mt, tag), ok, bad)
                 moved = [n for n, c in p1[2].items() if n not in p2[2] or max(abs(a - b) for a, b in zip(c, p2[2][n])) > 1e-6]
                 changed = [e for e, v in p1[3].items() if p2[3].get(e) != v]
                 check("★%s · [%s, dent] 사슬 — phase 1 절점 %d · 요소 %d 이 phase 2 에 같은 번호 · 자리 · 내용으로 있다(예전 권취는 "
-                      "탭 · PCM 이 압입자 번호와 겹쳤다)" % (mt, first, len(p1[2]), len(p1[3])), not moved and not changed,
+                      "탭 · PCM 이 압입자 번호와 겹쳤다)" % (mt, tag, len(p1[2]), len(p1[3])), not moved and not changed,
                       ("moved", len(moved), moved[:5], "changed", len(changed), changed[:5]))
-                check("%s · [%s, dent] phase 2 — 압입자 · 바닥판 · 탭 · PCM PART · 처방 운동 있음" % (mt, first),
+                check("%s · [%s, dent] phase 2 — 압입자 · 바닥판 · 탭 · PCM PART · 처방 운동 있음" % (mt, tag),
                       imp <= p2[0] and tp <= p2[0] and "*BOUNDARY_PRESCRIBED_MOTION_SET" in p2[1], (sorted(p2[0]), sorted(p2[1])[:8]))
 
             rc, out, ks = gen("%s_baseswell" % mt, "output: bt\nmodel_type: %s\ntier: -1\nmode: swell\nbatch:\n  phases: [1, 2]\n"

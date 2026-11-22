@@ -18,6 +18,7 @@
   ★side 덱에 바닥판 PART 가 있고 SPC 가 묶는 절점 세트가 다 덱에 있다
   ★적층 · 권취 no_impactor: true(dent · side) · 권취 core_fill: true(dent) — `info --strict` rc 0 · no_impactor 면 SPC_SET 이 없다
   ★mode: nail → rc 1 · 허용값을 말한다 · 덱 없음
+  ★권취 나선 판(wound.flat: false) dent · swell — `info --strict` rc 0(3차 6판 — 전해질 채움 PART 의 섹션 33 을 쓴다)
 
 usage: test_battery_deck_refs.py <KooRemapper 바이너리>
 """
@@ -115,6 +116,11 @@ def main():
                 spc = kw_blocks(ks[0], "*BOUNDARY_SPC_SET") if len(ks) == 1 else ["?"]
                 check("★%s · %s · no_impactor → info --strict rc 0 · SPC_SET 없음(예전엔 없는 세트 2 · 3 을 묶었다)" % (mt, mode),
                       ok and not spc, (rc, bad, len(spc)))
+        for mode in ("dent", "swell"):
+            rc, out, ks = gen("spiral_%s" % mode, "output: bt\nmodel_type: wound\ntier: -1\nmode: %s\nwound:\n  flat: false\n" % mode)
+            ok, bad = strict(ks[0]) if rc == 0 and len(ks) == 1 else (False, out[-300:])
+            check("★wound · 나선 판(flat: false) · %s → info --strict rc 0(3차 6판 — 예전엔 전해질 PART 가 없는 섹션 33 을 가리켰다)" % mode,
+                  ok, (rc, bad))
         rc, out, ks = gen("cf_wound", "output: bt\nmodel_type: wound\ntier: -1\nmode: dent\ncore_fill: true\n")
         ok, bad = strict(ks[0]) if rc == 0 and len(ks) == 1 else (False, out[-300:])
         check("★wound · dent · core_fill → info --strict rc 0(예전엔 PART 가 없는 섹션 33 을 가리켰다)", ok, (rc, bad))

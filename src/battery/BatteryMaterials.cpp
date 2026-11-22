@@ -57,8 +57,10 @@ void writeSections_Wound(std::ostream& out, const BatteryConfig& cfg) {
     writeSectionShell(out, SID_SHELL_POUCH,2,  t.pouch,    5, 0.8333);
 
     // ★core_fill 의 Wound_Electrolyte(솔리드)도 이 섹션을 쓴다(3차 5판 L-07) — 예전엔 solid_electrode 일 때만 적어 core_fill 덱의
-    //   PART 가 없는 섹션 33 을 가리켰다(LS-DYNA 는 키워드 단계에서 멈춘다)
-    if (cfg.solidElectrode || cfg.coreFill)
+    //   PART 가 없는 섹션 33 을 가리켰다(LS-DYNA 는 키워드 단계에서 멈춘다). 나선 판(wound.flat: false)의 전해질 채움(공기주머니가
+    //   아니고 buffer > 0 — buildSpiralCell 과 같은 조건)도 같은 PART 를 짓는다(3차 6판 — 예전엔 나선 판 48 덱 가운데 36 이 섹션 33 을 못 찾았다)
+    const bool spiralFill = !cfg.woundFlat && !cfg.airbagFill && t.buffer > 0.0;
+    if (cfg.solidElectrode || cfg.coreFill || spiralFill)
         // solid_elform: 1=reduced integration (stable, high AR), 2=fully integrated (accurate)
         writeSectionSolid(out, SID_W_SOLID_ELEC, cfg.solidElform);
     if (!cfg.solidElectrode) {
