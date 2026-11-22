@@ -767,6 +767,9 @@ async def _execute(job_id: str) -> None:
         job.exit_code = exit_code
         job.output_file_ids = output_ids
         job.finished_at = datetime.now(timezone.utc)
+        reaped = await asyncio.to_thread(reap_orphan_tmp, work_dir)   # 주인 없는 오래된 임시 파일(L-13)
+        if reaped:
+            logger.info("job %s: 주인 없는 임시 파일 %d개를 치웠다", job_id, len(reaped))
         if canceled:
             job.status = "canceled"
         elif exit_code == 0:
@@ -789,6 +792,35 @@ async def _execute(job_id: str) -> None:
             job.error_summary = f"exit {exit_code}: {tail}".strip()
         await db.commit()
         logger.info("job %s %s (exit=%s, %d outputs)", job_id, job.status, exit_code, len(output_ids))
+
+
+# ★바이너리가 남긴 임시 파일 치우기(2026-11-22 · 미룬 결함 3차 4판 L-13) — 취소 · 시간 초과(SIGKILL)된 잡은 `*.kr_tmp_*`(반쯤 쓴 산출 ·
+#   보고 · 잠금 · 펼친 덱 · gmsh 왕복)를 남긴다. 바이너리는 다음 실행이 **같은 산출 · 같은 호스트 · pid 이름공간**일 때만 주인 없는 것을
+#   치워(실행기로 계산 노드에서 돈 잡 · 다른 산출 이름이면 영영 남았다) 잡이 끝날 때마다 작업 폴더에서 이만큼 오래 건드리지 않은 것을
+#   지운다. 같은 세션의 로컬 잡은 한 줄로 돌지만 올리기 검사(modelmeta)가 같은 폴더에서 바이너리를 부를 수 있어 「지금 쓰는 중」 인
+#   임시 파일(mtime 이 새롭다)은 건드리지 않는다.
+_TMP_ORPHAN_AGE_SEC = 600
+
+
+def reap_orphan_tmp(work_dir: Path, now: float | None = None) -> list[str]:
+    """작업 폴더(하위 포함)에서 `_TMP_ORPHAN_AGE_SEC` 넘게 건드리지 않은 `*.kr_tmp_*` 파일을 지우고 지운 상대 경로를 돌려준다."""
+    import time
+
+    now = time.time() if now is None else now
+    gone: list[str] = []
+    try:
+        files = [p for p in work_dir.rglob("*.kr_tmp_*") if p.is_file()]
+    except OSError:
+        return gone
+    for p in files:
+        try:
+            if now - p.stat().st_mtime < _TMP_ORPHAN_AGE_SEC:
+                continue
+            p.unlink()
+            gone.append(p.relative_to(work_dir).as_posix())
+        except OSError:
+            continue
+    return gone
 
 
 _CANCELED: set[str] = set()

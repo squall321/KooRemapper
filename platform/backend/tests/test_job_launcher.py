@@ -407,12 +407,18 @@ async def test_kr_tmp_leftovers_are_not_registered_as_outputs(db, sess, monkeypa
     fake.chmod(0o755)
     monkeypatch.setattr(settings, "kooremapper_bin", fake)
     monkeypatch.setattr(settings, "job_launcher", "")
+    # 앞서 죽은 잡이 남긴 오래된 임시 파일 — 이 잡이 끝날 때 치운다(3차 4판 L-13). 이 잡이 쓴 새 것은 그대로다(지금 쓰는 중일 수 있다)
+    import time as _time
+    orphan = d / ".kr_tmp_deadbeef_99_1f_1_00000000.k"
+    orphan.write_text("x")
+    os.utime(orphan, (_time.time() - 3600, _time.time() - 3600))
     job = await _run_job(db, u, s, "database", _DB_ARGS)
     assert job.status == "succeeded", job.error_summary
     outs = await _outputs(db, job)
     assert "model_db.k" in outs, outs
     assert not [n for n in outs if ".kr_tmp_" in n], outs
     assert all((d / n).exists() for n in _KR_TMP_LEFTOVERS), "판정 때 그 파일들이 있었다(시험이 헛돌지 않았다)"
+    assert not orphan.exists(), "주인 없는 오래된 임시 파일을 잡 끝에 치운다(L-13)"
 
 
 @_needs_bin
