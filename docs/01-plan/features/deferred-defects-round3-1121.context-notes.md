@@ -167,3 +167,59 @@
   id_floor 처럼 rc 1 로 거절한다(묻지 않았다 — 앞서 정한 꼴을 따른다).
 - **차례(11-22)** — DF ② 계획을 먼저 쓰고 결함 판과 번갈아 짓는다(「② 계획을 지금 먼저」). 「계획한건 전부 만들고, 다 만들면 검증런을 cae00에서
   돌릴게」 — 판마다 멈추지 않고 짓고 올린다. 솔버로만 확인되는 줄은 cae00 검증런에 맡긴다.
+
+## 8. 2판 짓기(2026-11-22)
+- **묶음 1 — L-05 넷(`57f885c`)** — 폭 선언을 낱말로 · 첫 `*KEYWORD` 카드만(`*KEYWORD_ID` · `_JOBID` 포함) · 칸을 넘는 좌표를
+  `formatRealField` 로 · 리더가 int 를 넘는 번호를 0 으로 읽던 것을 거절로 · applyfold 경고 숫자. 시험 `test_width_decl.py` 31 항(설치된 판
+  빨강 23).
+- **묶음 4 — L-04 정수 상한(`a0a494a`)** — 새 번호가 상한을 넘으면 쓰지 않는다(조립기 `bumpId` 84 곳 · `ids::IdAllocator` · 제 손으로 세는
+  op 여섯). 시험 `test_id_cursor_limit.py` 74 항(설치된 판 빨강 17).
+- **묶음 3 — L-04 `LONG=Y`** — 리더 여덟(cnrb2solid · cnrb2spring · cclip · matswap · ale · stackwrap · neutralaxis · info)이 선언된 폭으로
+  읽는다. 고치며 쓰기 쪽 결함이 따라 나왔다 — 2판 탐침(카탈로그 58 op 을 표준 · LONG 으로 돌려 산출을 선언된 폭으로 읽기)이 rc 0 으로 LONG 덱에
+  10 칸 카드를 끼우는 op 열다섯(elform · iga · merge · formstrain · matdb · load · boundary · contact · relax · stabilize · database · hfdamp ·
+  implicit · modal · optimize)을 찾았다. 「여덟 다 읽게」 를 고르며 「새로 쓰는 카드도 덱의 폭으로」 를 같은 일로 보고 고쳤다(묻지 않았다 —
+  리더만 고치면 그 덱을 다시 읽는 op 이 틀린 값을 읽는다). 새로 지은 카드는 표준 폭으로 지어 `widenGeneratedCards` 로 넓히고, 덱에서 베낀
+  줄은 넓히지 않는다(붙어 쓴 표준 칸과 20 칸 값 하나를 글자로 가를 수 없어 「이미 넓혔나」 짐작은 뺐다).
+- **곁 파일도 주 덱 폭으로(묻지 않았다 — battery 결정과 같은 꼴)** — Vol_I 「Long Format Input」 은 인클루드를 `*INCLUDE -` · `+` 가 없으면
+  주 덱 폭으로 읽는다고 적는다. 맨 `*KEYWORD` 곁 파일(assemble 의 `.dynain` · 덱 내장 초기응력 · cclip dynain · squeeze · prestress 의 dynain ·
+  IGA 인클루드 · 단독 extract-surface 의 셸 덱)은 LONG 덱이 물면 솔버가 20 칸으로 읽을 수 있다. 이제 주 덱이 LONG 이면 `*KEYWORD LONG=Y` 와
+  20 칸으로 쓰고(`widenGeneratedDeck`), extract-surface 는 솔리드 덱의 폭(`I10=Y` 포함)을 밝힌다. IGA 파일이 베낀 재질 블록의 폭이 파일과
+  다르면 키워드에 `+` · `-` 를 단다. 우리 리더는 파일마다 제 선언을 읽고 LS-DYNA 는 물려받든 제 선언을 읽든 같은 폭이 된다.
+- **목록 밖 — `*INITIAL_STRESS_SHELL` 카드 1** — 덱 내장 · `.dynain` · cclip 셋이 `I10 + I8×7` 로 써서 여섯째 값(LARGE)이 다섯째 10 칸
+  창(NTENSR)에 들어가 그 칸이 「0       0」 이었다(10-16 에 고친 `*INITIAL_STRESS_SOLID` 와 같은 결함 — 값이 모두 0 이라 뜻은 같았다). LONG 으로
+  넓히면 그 칸이 그대로 옮겨져 드러났다. 10-16 꼴 그대로 `InitialStressCard.h` 의 `shellCard1` 하나로 쓴다(I10×8). 시험
+  `test_initial_stress_card.py` 에 셸 자리 셋을 더했다(32 항 · 고치기 전 빨강 3).
+- **죽은 참조 옮기기 · info** — merge 의 죽은 PID 옮기기(assemble 과 같은 `migrateDeadReferences` · `cleanupDeadNodeRefs` ·
+  `scanDeadReferences`)가 10 칸으로만 잘라 LONG 덱에서 죽은 참조를 하나도 못 보고 rc 0 으로 두었다(`*MAT_ADD_THERMAL_EXPANSION` 의 PID 1 · 3).
+  들머리에서 덱 폭을 정하고(`RsCardWidth`) 고쳐 쓰는 자리도 그 폭으로. info 의 섹션 · 재질 번호 모으기도 블록 폭으로 잘라 거짓 「정의되지 않은
+  카드」 가 없어졌다(`--strict` rc 0).
+- **시험** — `test_long_readers.py` 159 항(A 여섯 · B 둘 · C · D 나머지 사례 전부 — 거절 아홉은 rc ≠ 0, 그 밖은 산출 덱 · dynain · IGA 를 선언된
+  폭으로 읽은 값이 표준과 같고 `LONG=Y` 를 싣는다) · `test_initial_stress_card.py` 32 항 · 단위 246.
+- **커밋** — 묶음 3 `f01d10d`(회귀 139 / 139 · 단위 246).
+- **묶음 5 — L-08 battery(`bd28bc4`)** — 「battery 덱을 주 덱 폭으로 쓴다」 그대로. 표준 폭으로 지은 battery 덱(번호를 옮긴 뒤)을 `toDeckWidth`
+  로 주 덱 폭에 옮긴다 — I10 은 8 칸 칸(절점 번호 · TC · RC · 격자 요소 줄)만 10 칸, LONG 은 좌표 · 10 칸 카드까지 20 칸, 머리는 `I10=Y` ·
+  `LONG=Y`. battery 가 쓰는 꼴(맨 `*NODE` · 한 줄 꼴 격자 요소 셋)만 알고 모르는 `*ELEMENT_` · `*NODE_` 꼴이면 rc 1(짐작해 넓히지 않는다). 펼침
+  (use_include: false)의 거절을 뺐다 — 펼친 카드는 이미 주 덱 폭이라 다시 넓히지 않는다(처음 판은 `insertBeforeFirstEnd` 의 넓히기가 한 번 더
+  돌아 40 칸이 됐다 — 시험이 잡았다). 시험 `test_battery_deck_width.py` 108 항(적층 기본 · dent · pouch 예압 · TSHELL · 에어백 · 권취 × 인클루드
+  · 펼침 × I10 · LONG · 고치기 전 빨강 16).
+- **묶음 6 — extract_surface `output_pid`(`04cd476`)** — 「셸 섹션까지 지어 넣는다」 · 「thickness · --thickness · 새 번호면 필수」 그대로.
+  고르며 문장에 없던 셋은 결정 문장을 글자 그대로 읽었다(묻지 않았다 — 끝 보고에 적는다). ① 단독 extract-surface 의 기본값 `--output-pid 1` 은
+  그대로 두었다 — 덱에 PID 1 이 있으면 거절된다(시험 넷 · 도움말 사례 둘이 새 번호 · 두께를 준다). 기본값을 「최대값 위 새 번호」(assemble 과
+  같은 꼴)로 바꿀지는 사용자 몫이다. ② `*PART` 가 없는 메시(`generate arc` 의 덱)는 셸을 뽑은 파트의 MID 가 0 이라 0 을 옮기고 경고한다 —
+  「파트의 MID 를 옮긴다」 를 그대로 읽었다. 멈추면 `generate arc → extract-surface → shellmap` 길(도움말 사례 · 시험 넷)이 막힌다. ③ assemble
+  의 `LONG=Y` 덱은 요소를 더하는 assemble op 의 설계된 거절 그대로다. 고치며 찾은 것 — assemble 의 저절로 고른 번호가 `*PART` 없는 메시에서 요소
+  PID 1 과 겹쳤다(파트 커서가 `*PART` 카드만 센다) — 쓰는 번호를 건너뛰게 했다. 시험 `test_extract_surface_part.py` 51 항(설치된 판 빨강 18).
+  카탈로그 예제(볼트 덱)는 PID 1 이 셸 파트라 `pid: 200` 을 주었다.
+- **묶음 2 — L-05 unfold 두께 셸(`1b67f87`)** — 격자로 다시 지을 때 입력이 두께 셸이던 요소는 모서리마다 굽은 절점을 짝지어 입력 차례로
+  다시 놓고, 평판에서 뒤집히면 면 안의 감김만 되돌린다. z 축 상자도 아랫면 · 윗면이 뒤바뀌어 있었다. 시험 `test_unfold_tshell_axis.py`
+  27 항(상자 · 원호 × 두께 축 셋 · 고치기 전 빨강 8). L-05 의 정수 상한 꼬리(tetremesh 가 절점 0 인 덱을 rc 0)는 묶음 1 의 리더 거절로 rc 1
+  이 됐다(검토 탐침 덱 셋으로 다시 쟀다).
+- **목록 밖(고치지 않음)** — 단독 extract-surface 의 셸 EID 는 1 부터다(매뉴얼 3.1(h) 가 「별도 덱 — 원 덱에 들이면 겹친다」 로 적은 그대로).
+- **변이(`$S/g3/mut/mutate4.py` · `mutate4b.py`)** — 2판 고침 39 자리를 하나씩 되돌려 다시 짓고 그 자리를 지키는 시험을 돌렸다. 1차 빨강 28.
+  살아남은 열하나 가운데 아홉은 시험이 그 길을 타지 않았다 — 덱 내장 초기응력 · DR 카드 · cclip 곁 dynain · 표준 인클루드의 IGA 재질 · IGA 칸
+  자리(낱말로 견주어 못 봤다) · matswap 옛 꼴 · battery I10(낱말로 되돌려 어긋난 칸이 같아 보였다) · 공용 발행자 상한(사례 덱에 접촉이 없다) ·
+  폭 선언 낱말(변이가 옛 결함을 그대로 되살리지 않았다 — 고쳐 다시). 시험을 더해(`bea26db`) 2차 10 / 10 빨강. 둘은 같은 뜻 · 닿지 않는 길이다 —
+  인클루드를 펼칠 때 뒤 `*KEYWORD` 를 빼는 줄(리더가 이제 첫 카드만 읽는다) · merge 의 새 세트 블록 넓히기(merge 는 새 세트를 짓지 않는다 — tied
+  소비자는 보고만). 시험을 더하다 하나를 더 찾아 고쳤다 — 죽은 PID 옮기기의 열 꼴 세트 줄을 10 칸으로 고쳐 써 LONG 덱의 PID 칸이 어긋났다.
+- **전체 재기(dev 판 `1e73e714` · `bea26db`)** — 단위 246 / 246 · 백엔드 1078 통과 · 4 실패(작업 트리에 `.env` 가 없어 supervisor_log 넷 — 앞
+  판과 같다) · MCP 계약 13 / 13 · 회귀 142 / 142(파일 크기 상한 없이 — 새 시험 일곱 포함).
