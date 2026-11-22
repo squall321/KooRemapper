@@ -1222,7 +1222,7 @@ int cnrb2spring_apply(std::vector<std::string>& lines,
             endDone = true;
         }
         out.push_back(ln);
-        if (!headDone && up == "*KEYWORD") {
+        if (!headDone && KooRemapper::isKeywordCardLine(ln)) {   // `*KEYWORD I10=Y` · `*KEYWORD_ID` 도 그 카드다(예전엔 줄 전체를 견줘 놓쳤다)
             for (const auto& l : head) out.push_back(l);
             headDone = true;
         }

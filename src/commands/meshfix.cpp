@@ -1485,7 +1485,7 @@ static std::vector<NodeRefHit> refsToNodes(const std::string& model, const std::
             if (!ln.empty() && ln.back() == '\r') ln.pop_back();
             if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다)
                 const std::string kw = KooRemapper::deckscan::kwBare(KooRemapper::deckscan::keywordToken(ln));
-                if (isMain && kw == "*KEYWORD" && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
+                if (isMain && KooRemapper::isKeywordCardName(kw) && !seenKeyword) {   // 덱 폭은 첫 `*KEYWORD` 가 정한다
                     deckFw = KooRemapper::deckFieldWidth({ln});
                     seenKeyword = true;
                 }

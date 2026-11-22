@@ -149,6 +149,7 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
     KooRemapper::yamlSkipBOM(in);
     size_t lineNo = 0;
     std::string line, kw;
+    bool kwCardSeen = false;                   // 이 파일의 첫 `*KEYWORD` 카드만 폭을 정한다
     std::vector<std::string> buf;              // 지금 블록의 카드 줄
     // `*PART` 카드 2 · `*SECTION_SOLID` · `*SET_PART` 의 칸 폭 — 표준 · i10 은 10, long(`LONG=Y` · 접미사 `+`)은 20 이다. long 은 표준에서
     // 20 칸 이하인 칸이 다 20 칸이다(Vol_I 19315-19316). 예전엔 앞의 둘을 늘 10 으로 읽어 long 덱의 PID 가 0 이었다(「No *PART」)
@@ -218,9 +219,10 @@ void indexDeck(const std::string& path, DeckIndex& idx, std::set<std::string>& v
             flush();
             kw = kwBare(keywordToken(line));
             if (kw == "*END") break;                       // 그 파일은 여기서 끝난다(Vol_I 179654 — 닫힘과 같다)
-            if (kw == "*KEYWORD") {
+            if (KooRemapper::isKeywordCardName(kw) && !kwCardSeen) {   // 첫 카드만(`deckFieldWidth` 와 같다)
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) idx.fieldWidth = w;
+                kwCardSeen = true;
             }
             cardW = KooRemapper::keywordFieldWidth(line, idx.fieldWidth) >= 20 ? 20 : 10;
             if (starts(kw, "*PART") && kw != "*PART" && kw != "*PART_TITLE" &&
@@ -655,7 +657,7 @@ bool isStateKeyword(const std::string& kw) {
 }
 
 Act classify(const std::string& kw, const Opts& o, bool elemSupported, bool auxSupported) {
-    if (kw == "*KEYWORD" || kw == "*TITLE" || kw == "*END" || starts(kw, "*PARAMETER") ||
+    if (KooRemapper::isKeywordCardName(kw) || kw == "*TITLE" || kw == "*END" || starts(kw, "*PARAMETER") ||
         starts(kw, "*COMMENT") || starts(kw, "*CONTROL"))
         return Act::VERBATIM;
     // `*DATABASE_HISTORY_*` 는 절점·요소 ID 를 담는다 — 통째로 실으면 산출 덱에 없는 것을
@@ -1272,7 +1274,7 @@ Verify verifyOutput(const std::string& path, const std::vector<int>& altExisting
             remaining = 0;
             dataIdx = 0;
             inMat = starts(kw, "*MAT");
-            if (inMat || kw == "*KEYWORD") matLines.push_back(line);   // `*KEYWORD` — 재질 훑기가 덱 폭(long 20)을 거기서 읽는다
+            if (inMat || KooRemapper::isKeywordCardName(kw)) matLines.push_back(line);   // `*KEYWORD` — 재질 훑기가 덱 폭(long 20)을 거기서 읽는다
             inElem = starts(kw, "*ELEMENT");
             if (inElem) {
                 info = KooRemapper::parseElementKeyword(line);

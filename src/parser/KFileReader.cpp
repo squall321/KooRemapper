@@ -172,14 +172,10 @@ Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string*
         }
         bool seenKeyword = false;
         for (const auto& l : flat) {
-            const size_t g = l.find_first_not_of(" \t");
-            if (g != std::string::npos && l[g] == '*') {
-                std::string up = l.substr(g, 8);
-                for (auto& c : up) c = (char)std::toupper((unsigned char)c);
-                if (up == "*KEYWORD") {
-                    if (seenKeyword) continue;   // 인클루드 안의 *KEYWORD — 폭은 주 덱이 정한다
-                    seenKeyword = true;
-                }
+            // `*KEYWORD` 카드(1 칸 · `_ID` · `_JOBID` 포함 — 리더 · `deckFieldWidth` 와 같은 판정)
+            if (isKeywordCardLine(l)) {
+                if (seenKeyword) continue;   // 인클루드 안의 *KEYWORD — 폭은 주 덱이 정한다
+                seenKeyword = true;
             }
             o << l << "\n";
         }
@@ -206,6 +202,8 @@ Mesh KFileReader::readFile(const std::string& filename) {
     linesProcessed_ = 0;
     i10_ = false;
     deckFw_ = 8;
+    keywordCardSeen_ = false;
+    intOverflow_.clear();
     currentKeywordLine_.clear();
 
     std::ifstream file(filename, std::ios::binary);
@@ -240,6 +238,13 @@ Mesh KFileReader::readFile(const std::string& filename) {
     }
 
     if (!parseFile(file)) {
+        throw std::runtime_error(errorMessage_);
+    }
+    // 정수 상한을 넘는 정수를 만났다 — 예전엔 0 으로 읽어 그 절점 · 요소를 조용히 버렸다(squeeze · tetremesh 가 rc 0 으로 하나 빠진
+    // 덱을 · map · unfold 가 「non-existent node 0」 을 냈다 · 2026-11-22 · 3차 2판). 덱 전체를 거절한다
+    if (!intOverflow_.empty()) {
+        errorMessage_ = filename + " — " + intOverflow_ + " 가 LS-DYNA 정수 상한 2147483647 을 넘는다. 그 번호의 절점 · 요소를 읽을 수 "
+                        "없어 덱을 읽지 않는다 — 덱의 번호를 낮춘 뒤 다시 돌린다";
         throw std::runtime_error(errorMessage_);
     }
 
@@ -376,12 +381,17 @@ bool KFileReader::parseFile(std::ifstream& file) {
 
             // Support both regular and _TITLE variants (e.g., *NODE, *PART_TITLE)
             // Skip metadata keywords that don't need processing
-            if (currentKeyword_ == "KEYWORD" || currentKeyword_ == "TITLE") {
+            if (isKeywordCardLine(line) || currentKeyword_ == "TITLE") {
                 // Detect i10=y on *KEYWORD line (10-char integer fields)
-                // 칸 폭은 매뉴얼 한 곳에서만 정한다(Vol_I 19305-19360) — 8 / 10(i10) / 20(long).
-                int w = keywordCardDeckWidth(line);
-                if (w > 0) deckFw_ = w;
-                i10_ = (deckFw_ == 10);
+                // 칸 폭은 매뉴얼 한 곳에서만 정한다(Vol_I 19305-19360) — 8 / 10(i10) / 20(long). **첫** `*KEYWORD` 카드만 정한다 —
+                // `*KEYWORD_ID` · `*KEYWORD_JOBID` 도 그 카드다(Vol_I 201990 · 뒤따르는 ID 카드는 읽지 않고 지나간다). 예전엔 둘째
+                // 카드가 덮어쓰고 `*KEYWORD_ID I10=Y` 는 폭 선언이 아니었다 — 쓰기(`deckFieldWidth`)와 폭이 갈렸다(2026-11-22)
+                if (isKeywordCardLine(line) && !keywordCardSeen_) {
+                    int w = keywordCardDeckWidth(line);
+                    if (w > 0) deckFw_ = w;
+                    i10_ = (deckFw_ == 10);
+                    keywordCardSeen_ = true;
+                }
                 continue;
             }
             else if (currentKeyword_ == "NODE") {
@@ -1773,6 +1783,12 @@ int KFileReader::parseInt(const std::string& str) const {
 
     try {
         return std::stoi(trimmed);
+    }
+    catch (const std::out_of_range&) {
+        // 정수 꼴인데 int 를 넘는다 — 0 으로 읽으면 그 번호의 절점 · 요소가 조용히 빠진다. 처음 것을 적어 두고 읽기 끝에 거절한다
+        if (intOverflow_.empty())
+            intOverflow_ = std::to_string(currentLine_) + "째 줄의 정수 " + trimmed;
+        return 0;
     }
     catch (...) {
         return 0;

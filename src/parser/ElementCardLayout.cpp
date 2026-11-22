@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <sstream>
 #include <vector>
@@ -88,52 +89,67 @@ int solidNodesFromElform(int elform) {
     }
 }
 
+bool isKeywordCardName(const std::string& kwUpper) {
+    return kwUpper == "*KEYWORD" || kwUpper == "*KEYWORD_ID" || kwUpper == "*KEYWORD_JOBID";
+}
+
+bool isKeywordCardLine(const std::string& line) {
+    if (!deckscan::isKeywordLine(line)) return false;          // 1 칸의 `*` — 들여쓴 줄은 키워드가 아니다(Vol_I 17940)
+    return isKeywordCardName(deckscan::keywordToken(line));
+}
+
 // *KEYWORD 줄의 i10 / long 옵션 (Vol_I 19305-19312, 19356-19360).
 // "long=s" 는 표준을 읽고 long 으로 쓰라는 뜻이라 읽기 폭은 표준(8)이다(19308).
 int keywordCardDeckWidth(const std::string& keywordLine) {
+    if (!isKeywordCardLine(keywordLine)) return 0;
+    // 선택지는 이름 뒤의 낱말이다 — `LONG=Y` · `long = s` · `I10=Y` · 값 없이 쓴 `LONG`(켠 것). 예전엔 줄에서 글자 「LONG」 을
+    // 찾아 `JOBID=LONGRUN` · `memory=belong` 을 `LONG=Y` 로 읽었다(2026-11-22 · 3차 2판 — 표준 덱이 20 칸으로 나갔다).
     std::string up = keywordLine;
     for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    if (up.find("*KEYWORD") == std::string::npos) return 0;
-    auto optValue = [&](const char* name) -> char {
-        size_t p = up.find(name);
-        if (p == std::string::npos) return 0;
-        p += std::string(name).size();
-        while (p < up.size() && (up[p] == ' ' || up[p] == '\t')) ++p;
-        if (p >= up.size() || up[p] != '=') return 'Y';       // 값 없이 쓴 형태는 켠 것으로 본다
-        ++p;
-        while (p < up.size() && (up[p] == ' ' || up[p] == '\t')) ++p;
-        return p < up.size() ? up[p] : 'Y';
-    };
-    char lv = optValue("LONG");
+    std::string norm;                                            // `=` 둘레의 공백을 지운다 — 「LONG = Y」 를 낱말 하나로
+    for (size_t i = 0; i < up.size(); ++i) {
+        const char c = up[i];
+        if (c == ' ' || c == '\t' || c == '\r') {
+            size_t j = up.find_first_not_of(" \t", i);
+            const bool beforeEq = j != std::string::npos && up[j] == '=';
+            const bool afterEq = !norm.empty() && norm.back() == '=';
+            if (beforeEq || afterEq) continue;
+            norm += ' ';
+            continue;
+        }
+        norm += (c == ',') ? ' ' : c;
+    }
+    char lv = 0, iv = 0;
+    std::istringstream words(norm);
+    std::string w;
+    words >> w;                                                  // 키워드 이름
+    while (words >> w) {
+        const size_t eq = w.find('=');
+        const std::string name = w.substr(0, eq);
+        const char val = (eq == std::string::npos || eq + 1 >= w.size()) ? 'Y' : w[eq + 1];
+        if (name == "LONG") lv = val;
+        else if (name == "I10") iv = val;
+    }
     if (lv == 'Y' || lv == 'K') return 20;
-    char iv = optValue("I10");
     if (iv && iv != 'N') return 10;
     if (lv == 'S') return 8;
     return 0;
 }
 
 int deckFieldWidth(const std::vector<std::string>& lines) {
+    // 첫 `*KEYWORD` 카드(1 칸 · `*KEYWORD_ID` · `*KEYWORD_JOBID` 포함)가 정한다 — 매뉴얼은 그것이 첫 카드라 한다(Vol_I 18086).
+    // 둘째 `*KEYWORD` · 들여쓴 줄은 폭을 정하지 않는다(리더 · 쓰기가 같은 규칙 — 예전엔 리더는 마지막, 쓰기는 들여쓴 첫 줄을 셌다)
     for (const auto& l : lines) {
-        size_t s = l.find_first_not_of(" \t");
-        if (s == std::string::npos || l[s] != '*') continue;
-        int w = keywordCardDeckWidth(l);
-        if (w > 0) return w;
-        // *KEYWORD 가 아무 말도 안 했으면 표준이다. 다른 키워드는 건너뛴다.
-        std::string up = l.substr(s, 8);
-        for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        if (up == "*KEYWORD") return 8;
+        if (!isKeywordCardLine(l)) continue;
+        const int w = keywordCardDeckWidth(l);
+        return w > 0 ? w : 8;
     }
     return 8;
 }
 
 bool hasKeywordCard(const std::vector<std::string>& lines) {
-    for (const auto& l : lines) {
-        size_t s = l.find_first_not_of(" \t");
-        if (s == std::string::npos || l[s] != '*') continue;
-        std::string up = l.substr(s, 8);
-        for (auto& ch : up) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-        if (up == "*KEYWORD") return true;
-    }
+    for (const auto& l : lines)
+        if (isKeywordCardLine(l)) return true;
     return false;
 }
 
@@ -147,6 +163,17 @@ int keywordFieldWidth(const std::string& keywordLine, int deckFw) {
 }
 
 int realFieldWidth(int intFw) { return intFw >= 20 ? 20 : 16; }
+
+std::string formatRealField(double value, int width, int precision) {
+    std::string s;
+    for (int p = std::max(precision, 0); p >= 0; --p) {
+        std::ostringstream oss;
+        oss << std::scientific << std::setprecision(p) << value;
+        s = oss.str();
+        if ((int)s.size() <= width) break;
+    }
+    return (int)s.size() < width ? std::string(width - s.size(), ' ') + s : s;
+}
 
 int solidCardLines(int nodes, int extraCards) {
     if (nodes < 1) nodes = 8;
@@ -878,7 +905,7 @@ int scalarNodeMaxIdFile(const std::string& path) {
         if (g == std::string::npos) continue;
         if (deckscan::isKeywordLine(l)) {   // 1열 규칙(리더와 같다)
             const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
-            if (!kwSeen && kw == "*KEYWORD") {
+            if (!kwSeen && isKeywordCardName(kw)) {
                 const int w = keywordCardDeckWidth(l);
                 deckFw = w > 0 ? w : 8;
                 kwSeen = true;

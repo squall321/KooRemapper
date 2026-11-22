@@ -1046,7 +1046,7 @@ bool scanFragment(const std::vector<std::string>& in, FragmentScan& s, std::vect
             }
             if (keywordFieldWidth(l, 8) != 8) bad(i, "칸 폭 접미사(" + deckscan::keywordToken(l) + ") — 조각은 표준 폭이어야 한다");
             L.kind = FragmentScan::LineKind::Skip;
-            if (kw == "*KEYWORD") {
+            if (isKeywordCardName(kw)) {
                 const int w = keywordCardDeckWidth(l);
                 if (w != 0 && w != 8) bad(i, "*KEYWORD 의 폭이 표준(8)이 아니다 — 조각은 표준 폭이다");
                 blk = Blk::None;

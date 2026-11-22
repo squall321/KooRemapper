@@ -395,6 +395,7 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
     //   합쳐지지 않고 원래 PID 에 그대로 남았다(rc=0, 2줄 혼재 훑기 실측). 8자리 ID 가 붙은 고정폭 줄도 토큰이
     //   모자라 안 보였다. 칸은 `cardFields`(고정폭 → 자유형식)로 읽는다.
     int mgDeckFw = 8, mgKwFw = 8;
+    bool mgKwSeen = false;
     KooRemapper::ElementKeywordInfo mgElemInfo;
     KooRemapper::ElementCardSpan mgSpan;
     std::vector<std::string> mgCard1;
@@ -418,9 +419,10 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
             inNode = inElemSolid = inPart = inMat = inThermalExp = inSection = false;
             inUnknownMat = false;
             mgCardRemaining = 0;                      // 끝나지 않은 카드는 버린다(덱이 깨진 것이다)
-            if (up.rfind("*KEYWORD", 0) == 0) {
-                const int w = KooRemapper::keywordCardDeckWidth(trimmed);
+            if (KooRemapper::isKeywordCardLine(line) && !mgKwSeen) {   // 첫 `*KEYWORD` 카드만(1 칸 · `_ID` · `_JOBID` — `deckFieldWidth` 와 같다)
+                const int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) mgDeckFw = w;
+                mgKwSeen = true;
             }
 
             if (up.find("*NODE") == 0 && up.find("*NODE_") == std::string::npos) {

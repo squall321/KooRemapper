@@ -6759,10 +6759,8 @@ std::string ModelAssembler::formatNodeLine(int id, double x, double y, double z,
     const int rw = realFieldWidth(fw);
     noteWidth(id, fw, "노드 ID");
     std::ostringstream oss;
-    oss << std::setw(fw) << id
-        << std::setw(rw) << std::scientific << std::setprecision(9) << x
-        << std::setw(rw) << std::scientific << std::setprecision(9) << y
-        << std::setw(rw) << std::scientific << std::setprecision(9) << z;
+    // 좌표는 칸에 들게 자릿수를 줄인다 — 음수 · 세 자리 지수가 9 자리면 16 칸을 넘었다(2026-11-22)
+    oss << std::setw(fw) << id << formatRealField(x, rw) << formatRealField(y, rw) << formatRealField(z, rw);
     return oss.str();
 }
 

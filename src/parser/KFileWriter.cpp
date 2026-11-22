@@ -478,12 +478,8 @@ void KFileWriter::writeEnd(std::ostream& file) {
 }
 
 std::string KFileWriter::formatDouble(double value) const {
-    std::ostringstream oss;
-    oss << std::setw(realFieldWidth(idFieldWidth_))   // 실수 칸도 덱 폭을 따른다 — 20칸 덱은 20, 그 밖은 16
-        << std::scientific
-        << std::setprecision(precision_)
-        << value;
-    return oss.str();
+    // 실수 칸도 덱 폭을 따른다 — 20칸 덱은 20, 그 밖은 16. 칸을 넘는 값(음수 · 세 자리 지수)은 자릿수를 줄여 칸에 넣는다
+    return formatRealField(value, realFieldWidth(idFieldWidth_), precision_);
 }
 
 std::string KFileWriter::formatInt(int value, int width) const {

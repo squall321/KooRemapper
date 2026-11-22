@@ -383,7 +383,7 @@ int runApplyFold(const std::string& yamlFile, ConsoleOutput& console) {
         if (fa.read(head, 3) && std::string(head, 3) == "\xEF\xBB\xBF") sa -= 3;
         console.keyValue("Byte size", std::to_string(sa) + " → " + std::to_string(sb));
         if (sa != sb)
-            console.warning("바이트 크기가 달라졌다(" + num("%+lld", (double)(sb - sa)) +
+            console.warning(std::string("바이트 크기가 달라졌다(") + (sb > sa ? "+" : "") + std::to_string(sb - sa) +   // 예전엔 `%+lld` 에 실수를 넘겨 엉뚱한 숫자
                             ") — 좌표가 칸 폭을 넘었을 수 있다. 큰 좌표를 확인하라.");
     }
 

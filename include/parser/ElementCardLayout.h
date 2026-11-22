@@ -56,10 +56,16 @@ ElementKeywordInfo parseElementKeyword(const std::string& keywordLine);
 // 리더도 쓰기도 이 한 곳에서만 폭을 정한다 — 한쪽이 8 칸으로 쓰고 다른 쪽이 10 칸으로 읽으면
 // 새 층이 통째로 사라진다(현장 사고와 같은 모양).
 
-// *KEYWORD 줄 하나가 정하는 덱 기본 정수 칸 폭. 정하지 않으면 0.
+// `*KEYWORD` 카드의 이름인가 — *KEYWORD · *KEYWORD_ID · *KEYWORD_JOBID(Vol_I 201990 `*KEYWORD_{OPTION}`). 대문자 · 접미사 뗀 토큰.
+bool isKeywordCardName(const std::string& kwUpper);
+// `*KEYWORD` 카드 줄인가 — 1 칸의 `*` 로 시작하고 이름이 위 셋이다. 들여쓴 줄은 키워드가 아니다(Vol_I 17940).
+// 덱 폭을 읽는 곳은 모두 이 판정을 쓴다(2026-11-22 · 3차 2판 — 리더와 쓰기가 갈렸다).
+bool isKeywordCardLine(const std::string& line);
+
+// *KEYWORD 카드 줄 하나가 정하는 덱 기본 정수 칸 폭. 카드가 아니거나 정하지 않으면 0. 선택지는 낱말로 읽는다(`LONG=Y` · `I10=Y`).
 int keywordCardDeckWidth(const std::string& keywordLine);
 
-// 덱 전체의 기본 정수 칸 폭(*KEYWORD 가 없거나 말하지 않으면 8).
+// 덱 전체의 기본 정수 칸 폭 — 첫 `*KEYWORD` 카드가 정한다(없거나 말하지 않으면 8 · 둘째 카드 · 들여쓴 줄은 세지 않는다).
 int deckFieldWidth(const std::vector<std::string>& lines);
 
 // 덱에 `*KEYWORD` 카드가 있나. 매뉴얼은 「*KEYWORD 가 **첫 카드**가 아니면 옛 structured
@@ -73,6 +79,10 @@ int keywordFieldWidth(const std::string& keywordLine, int deckFw);
 
 // 같은 카드의 실수 칸 폭 — 표준·i10 은 16, long 은 20 (19345, 19348, 19360).
 int realFieldWidth(int intFw);
+
+// 실수 하나를 `width` 칸에 든 지수 꼴로(오른쪽 맞춤) — 자릿수 `precision` 에서 시작해 칸에 들 때까지 줄인다. 음수 · 세 자리
+// 지수(`-1.5e-120`)는 9 자리면 17 자라 16 칸을 넘었다(2026-11-22 · 3차 2판 — map · tetremesh 의 절점 줄 57 자).
+std::string formatRealField(double value, int width, int precision = 9);
 
 // ── 보·질량·이산 족 — **격자 요소가 아닌** `*ELEMENT_*` ──────────────────────
 //

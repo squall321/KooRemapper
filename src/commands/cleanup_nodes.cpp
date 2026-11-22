@@ -127,6 +127,7 @@ struct Scan {
     std::vector<std::string> includeRead, includeMissing, includeVariant;   // 정본 닫힘(`include_closure::readPaths`)에서 채운다
     // 덱
     int fieldWidth = 8;
+    bool widthDeclared = false;   // 첫 `*KEYWORD` 카드를 읽었다 — 그 뒤 카드는 폭을 정하지 않는다(2026-11-22)
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,9 +243,10 @@ void scanRefsStream(std::istream& in, const std::string& path, bool isMain, cons
             endElementCard();
             kw = kwBare(keywordToken(line));
             fw = KooRemapper::keywordFieldWidth(line, sc.fieldWidth);
-            if (kw == "*KEYWORD") {
+            if (KooRemapper::isKeywordCardName(kw)) {   // 첫 카드만 폭을 정한다(`deckFieldWidth` 와 같다)
                 int w = KooRemapper::keywordCardDeckWidth(line);
-                if (w > 0) sc.fieldWidth = w;
+                if (w > 0 && !sc.widthDeclared) sc.fieldWidth = w;
+                sc.widthDeclared = true;
                 fw = sc.fieldWidth;
                 mode = Mode::TEXT;
                 continue;
@@ -553,13 +555,14 @@ void bboxAfterFile(const std::string& path, int deckFw, const std::vector<int>& 
     KooRemapper::yamlSkipBOM(in);   // 맨 앞 BOM 은 건너뛴다(scanSections 와 같다)
     std::string line, kw;
     int fw = deckFw;
-    bool node = false;
+    bool node = false, kwCardSeen = false;
     while (std::getline(in, line)) {
         if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             kw = kwBare(keywordToken(line));
-            if (kw == "*KEYWORD") {
+            if (KooRemapper::isKeywordCardName(kw) && !kwCardSeen) {   // 첫 카드만(`deckFieldWidth` 와 같다)
                 int w = KooRemapper::keywordCardDeckWidth(line);
                 if (w > 0) deckFw = w;
+                kwCardSeen = true;
             }
             fw = KooRemapper::keywordFieldWidth(line, deckFw);
             if (kw == "*END") return;   // 그 파일은 여기서 끝난다
@@ -628,14 +631,16 @@ bool rewriteDeck(const Opts& o, const Scan& sc, const std::vector<int>& del,
         if (survivors.empty()) ++setsEmptied;
     };
 
+    bool kwCardSeen = false;   // 첫 `*KEYWORD` 카드만 폭을 정한다
     while (std::getline(in, line)) {
         while (!line.empty() && line.back() == '\r') line.pop_back();   // DeckWriter 가 되붙인다
         if (isKeywordLine(line)) {   // 1열 규칙(리더와 같다)
             flushSet();
             kw = kwBare(keywordToken(line));
-            if (kw == "*KEYWORD") {
+            if (KooRemapper::isKeywordCardName(kw) && !kwCardSeen) {   // 첫 카드만(`deckFieldWidth` 와 같다)
                 int wd = KooRemapper::keywordCardDeckWidth(line);
                 if (wd > 0) deckFw = wd;
+                kwCardSeen = true;
             }
             fw = KooRemapper::keywordFieldWidth(line, deckFw);
             inNode = (kw == "*NODE");

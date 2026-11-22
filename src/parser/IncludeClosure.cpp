@@ -324,7 +324,7 @@ void WidthMarks::feed(const std::string& l) {
     if (!widthSet_) {   // `deckFieldWidth` 와 같은 걸음 — 폭을 말한 첫 `*KEYWORD`, 말이 없으면 표준
         const int w = keywordCardDeckWidth(l);
         if (w > 0) { width = w; widthSet_ = true; }
-        else if (deckscan::upper(l.substr(g, 8)) == "*KEYWORD") widthSet_ = true;
+        else if (isKeywordCardLine(l)) widthSet_ = true;   // 1 칸 · `_ID` · `_JOBID` 포함 — 들여쓴 줄은 카드가 아니다
     }
     if (!deckscan::isKeywordLine(l)) return;   // 아래 둘은 1열 규칙(닫힘의 걸음과 같다)
     const std::string kw = deckscan::keywordToken(l);
