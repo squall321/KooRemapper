@@ -175,6 +175,10 @@ _PARITY = [
     {"feature": "보고서용 묶음(캠페인 숫자 · 그림 재료 · 판)", "web": False, "mcp": True,
      "note": "build_report_bundle · report_bundle · report_bundle_diff(REST /bundles · /campaigns/{id}/bundles/latest) — 숫자마다 "
              "출처 경로 · 판마다 바뀐 숫자. 렌더는 하지 않는다. 웹 화면은 아직 없다"},
+    {"feature": "캠페인 분석(각도 표 · 통계 · 피크 · 여유 · 구면 지도 · 자리 · 리비전 비교 · 설정 쌍)", "web": False, "mcp": True,
+     "note": "campaign_angle_table · campaign_angle_stats · campaign_peak_table · campaign_part_margin · campaign_sphere_map · "
+             "campaign_site_table · campaign_site_map · compare_campaigns · compare_config_pairs(쓰기 — set_campaign_part_groups · "
+             "set_campaign_criteria · set_campaign_sites · import_part_map · set_campaign_pair_rule). 웹 화면은 아직 없다"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,
@@ -242,6 +246,21 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
                 "bundle": "/api/v1/bundles/{bundle_id}",
                 "bundle_diff": "/api/v1/bundles/{bundle_id}/diff",
                 "latest_bundle": "/api/v1/campaigns/{campaign_id}/bundles/latest",
+                # ⑤ 캠페인 분석(DF-05 · 06 · 08 ~ 12 · 2026-11-22) — 판정 · 비 · 격자는 읽을 때 센다
+                "part_groups": "/api/v1/campaigns/{campaign_id}/part-groups",
+                "angle_table": "/api/v1/campaigns/{campaign_id}/angle-table",
+                "angle_stats": "/api/v1/campaigns/{campaign_id}/angle-stats",
+                "peaks": "/api/v1/campaigns/{campaign_id}/peaks",
+                "criteria": "/api/v1/campaigns/{campaign_id}/criteria",
+                "part_margin": "/api/v1/campaigns/{campaign_id}/part-margin",
+                "sphere_map": "/api/v1/campaigns/{campaign_id}/sphere-map",
+                "sites": "/api/v1/campaigns/{campaign_id}/sites",
+                "site_map": "/api/v1/campaigns/{campaign_id}/site-map",
+                "part_maps": "/api/v1/part-maps",
+                "part_map": "/api/v1/part-maps/{map_id}",
+                "compare": "/api/v1/campaigns/compare",
+                "pair_rule": "/api/v1/campaigns/{campaign_id}/pair-rule",
+                "config_pairs": "/api/v1/campaigns/{campaign_id}/config-pairs",
                 "form_fields": ["campaign_id", "run_key"],
                 "states": list(CAMPAIGN_STATES),
             },

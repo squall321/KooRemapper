@@ -12,6 +12,8 @@ def register_routers(app: FastAPI) -> None:
     from app.modules.auth.routes import router as auth_router
     from app.modules.campaigns.routes import router as campaigns_router
     from app.modules.campaigns.routes import bundles_router
+    from app.modules.campaigns.analysis_routes import part_maps_router
+    from app.modules.campaigns.analysis_routes import router as campaign_analysis_router
     from app.modules.corpus.routes import router as corpus_router
     from app.modules.jobs.routes import router as jobs_router
     from app.modules.ontology.routes import admin as ontology_admin_router
@@ -31,6 +33,9 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(campaigns_router, prefix=API_PREFIX)
     # 보고서용 묶음(DF-13) — 캠페인 숫자 · 그림 재료를 판으로. 캠페인의 마지막 판은 /campaigns/{id}/bundles/latest
     app.include_router(bundles_router, prefix=API_PREFIX)
+    # 캠페인 분석(DF-05 · 06 · 08 ~ 12) — 각도 표 · 통계 · 피크 · 여유 · 구면 지도 · 자리 · 리비전 비교 · 설정 쌍. /campaigns/compare 가 있다
+    app.include_router(campaign_analysis_router, prefix=API_PREFIX)
+    app.include_router(part_maps_router, prefix=API_PREFIX)
     app.include_router(recipes_router, prefix=API_PREFIX)
     app.include_router(analysis_router, prefix=API_PREFIX)
     app.include_router(operations_router, prefix=API_PREFIX)

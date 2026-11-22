@@ -9,6 +9,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -640,6 +641,7 @@ class Campaign(Base):
     # 건강 판정 문턱 — 기본값에서 바꾼 열쇠만(null 이면 기본값 · campaigns/health.py `DEFAULTS`) · DF-03(2026-11-22)
     health_thresholds: Mapped[dict | None] = mapped_column(JSONB)
     required_extractions: Mapped[list | None] = mapped_column(JSONB)   # [{field, parts, states}] — 삭제 허가가 보는 필수 추출(DF-04)
+    pair_rule: Mapped[dict | None] = mapped_column(JSONB)   # 설정 쌍 합격 규칙(DF-12) — {metrics: [{metric, group_key, max_diff_pct}], rank_corr_min, max_failed_pairs}
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -676,9 +678,98 @@ class CampaignRun(Base):
     superseded_by: Mapped[str | None] = mapped_column(String(128))      # 이 런을 대체한 같은 캠페인 런의 run_key
     health: Mapped[dict | None] = mapped_column(JSONB)              # 정상 종료 · 에너지비 · HG/IE · 추가 질량 · KE · NaN …
     extraction: Mapped[dict | None] = mapped_column(JSONB)          # d3plot 상태 수 · 피크 출처 · 뽑은 장 · 지움(DF-04)
+    impacts: Mapped[list | None] = mapped_column(JSONB)             # 충격 구간 [{index, t_start_ms, t_end_ms, ke_frac, peaks}](DF-05 · 06)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+# ───────────── 캠페인 분석 — 무리 · 기준값 · 파트 짝 · 자리(요청서 DF-05 · 08 · 10 · 11 · 마이그레이션 0025) ─────────────
+# 계획 docs/01-plan/features/df-campaign-analysis-1122.plan.md — 판정 · 비 · 격자는 읽을 때 센다
+
+
+class CampaignPartGroup(Base):
+    """부품 무리 — 각도 표 · 피크 표 · 여유가 무리마다 파트 최댓값을 센다(DF-05)."""
+
+    __tablename__ = "campaign_part_groups"
+    __table_args__ = (UniqueConstraint("campaign_id", "group_key", name="uq_campaign_part_groups_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    group_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255))
+    part_ids: Mapped[list] = mapped_column(JSONB, nullable=False)
+    part_key: Mapped[str | None] = mapped_column(String(64))   # 표준 부품 키(PRT-*) — 적어 두는 값
+
+
+class CriteriaBinding(Base):
+    """기준값 하나 — 파트 또는 무리 · 지표 축의 판정 기준(DF-08 · 요청서 D7 의 칸 이름)."""
+
+    __tablename__ = "criteria_bindings"
+    __table_args__ = (CheckConstraint("(part_id IS NULL) <> (group_key IS NULL)", name="ck_criteria_bindings_one_target"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), index=True, nullable=False)
+    part_id: Mapped[int | None] = mapped_column(Integer)
+    group_key: Mapped[str | None] = mapped_column(String(64))
+    failure_mode: Mapped[str | None] = mapped_column(String(64))
+    metric_axis: Mapped[str] = mapped_column(String(40), nullable=False)
+    criterion_value: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(16), nullable=False)
+    source_platform: Mapped[str | None] = mapped_column(String(64))
+    source_record_id: Mapped[str | None] = mapped_column(String(128))
+    version: Mapped[str | None] = mapped_column(String(64))
+
+
+class PartMap(Base):
+    """파트 짝 표 — 두 모델(리비전) 사이 파트 대응과 짝 근거(DF-11)."""
+
+    __tablename__ = "part_maps"
+
+    id: Mapped[str] = mapped_column(String(26), primary_key=True)   # ULID — map_id
+    created_by: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    label: Mapped[str | None] = mapped_column(String(255))
+    from_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    to_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    rows: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CampaignSite(Base):
+    """부분충격 자리 하나(DF-10) — 자리 표는 캠페인에 통째로 둔다."""
+
+    __tablename__ = "campaign_sites"
+    __table_args__ = (UniqueConstraint("campaign_id", "site_id", name="uq_campaign_sites_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_id: Mapped[str] = mapped_column(ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    site_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    face: Mapped[str | None] = mapped_column(String(8))           # TOP | BOT
+    col: Mapped[int | None] = mapped_column(Integer)
+    row: Mapped[int | None] = mapped_column(Integer)
+    x_mm: Mapped[float | None] = mapped_column(Float)
+    y_mm: Mapped[float | None] = mapped_column(Float)
+    under_category: Mapped[str | None] = mapped_column(String(64))
+    impactor: Mapped[dict | None] = mapped_column(JSONB)          # {mass_g, height_mm, ke_mj}
+    run_key: Mapped[str | None] = mapped_column(String(128))      # 그 자리를 친 런(있으면 리포트 피크 · 건강으로 채운다)
+    footprint: Mapped[dict | None] = mapped_column(JSONB)         # {measured: bool, …} — 실측이라고 받지 않으면 합성으로 본다
+
+
+class CampaignSiteMetric(Base):
+    """자리 지표 하나 — 부품 · 지표 · 값 · 시각 · 요소 · (받은) 비."""
+
+    __tablename__ = "campaign_site_metrics"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    site_row_id: Mapped[int] = mapped_column(ForeignKey("campaign_sites.id", ondelete="CASCADE"), index=True, nullable=False)
+    part: Mapped[str] = mapped_column(String(64), nullable=False)
+    metric: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[float | None] = mapped_column(Float)
+    time_ms: Mapped[float | None] = mapped_column(Float)
+    elem_id: Mapped[int | None] = mapped_column(BigInteger)
+    ratio: Mapped[float | None] = mapped_column(Float)
 
 
 # ───────────── 보고서용 묶음 — 주소 하나에 판을 쌓는다(요청서 DF-13 · 마이그레이션 0024) ─────────────

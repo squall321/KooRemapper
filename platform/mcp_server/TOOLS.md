@@ -114,6 +114,20 @@ rejected(거절 — 까닭은 `reject_reason`)이고, `ingest_state` 는 그 런
 | `build_report_bundle` | campaign_ids[], spec({tables[]({kind, metrics?, parts?}), figures?({roles?, exts?}), include_invalid?}), as_of?, bundle_id?, label? | POST /bundles | 보고서용 묶음을 짓는다(DF-13) — 표 종류 runs · case_metrics · part_peaks · 그림 인용(파일 id · sha256 · 영상 빼고). 주소(`bundle_id`)에 판을 쌓고, 숫자가 같으면 판을 올리지 않는다(`unchanged`) · 다르면 `changes_counts`. 숫자마다 `source_path` · 수치 기준 줄(`basis.line`) · 인용 꼴(`citation`). 한 판 200,000 개까지 |
 | `report_bundle` | bundle_id? · campaign_id?(하나만), version?, items?, limit?, offset? | GET /bundles/{id} · GET /campaigns/{id}/bundles/latest | 묶음의 판 하나(기본 마지막) — 머리 · 명세 · 표 · 그림 · 출처 · 바뀐 숫자 · 판 목록. `items=true` 면 숫자 항목 쪽(`source` 는 출처 경로를 푼 것) |
 | `report_bundle_diff` | bundle_id, from_version?, to_version? | GET /bundles/{id}/diff | 두 판 사이 바뀐 숫자 — 더해짐 · 빠짐 · 값 바뀜(옛 값 → 새 값). 기본은 마지막 판과 그 앞 판 |
+| `set_campaign_part_groups` | campaign_id, groups[]({group_key, label?, part_ids[], part_key?}) | PUT /campaigns/{id}/part-groups | 부품 무리를 통째로 바꾼다(빈 목록이면 지우고 all = 모든 파트로 센다) |
+| `campaign_angle_table` | campaign_id, metrics?, groups?, thickness_axis?, include_invalid?, include_ke_jump?, config_generation?, limit?, offset? | GET /campaigns/{id}/angle-table | 각도마다 방향(요청서 식 · 덱 틀) · 범주(face · edge · corner) · 라벨(26 방향) · 충격 수 · 두 번째 충격 · 첫 KE · 무리별 피크(시각 ms · 충격 차수 · KE 비) |
+| `campaign_angle_stats` | campaign_id, metric?, groups?, thickness_axis?, include_invalid?, include_ke_jump?, config_generation?, top? | GET /campaigns/{id}/angle-stats | n · 제외(excluded_ke_jump) · 다회 충격 비율 · 무리별 분포 · 상위 · 하위 · 범주별 · 라벨별 · 덮임 |
+| `campaign_peak_table` | campaign_id, metric?, groups?, include_invalid?, include_ke_jump?, config_generation?, limit?, offset? | GET /campaigns/{id}/peaks | 각도 × 무리 피크(시각 ms · 충격 차수 · KE 비 · peak_source) · 충격별 표 |
+| `set_campaign_criteria` | campaign_id, criteria[]({part_id \| group_key, failure_mode?, metric_axis, criterion_value, unit, source_platform?, source_record_id?, version?}) | PUT /campaigns/{id}/criteria | 기준값 묶음을 통째로 바꾼다(여유는 이것만 쓴다) |
+| `campaign_part_margin` | campaign_id, metric_axis?, include_invalid?, include_ke_jump?, config_generation? | GET /campaigns/{id}/part-margin | 부품 · 무리 · 지표 축마다 값 · 가운데값 · 기준값 · 출처 · 비 · 넘은 각도 비율 · 상위 10 % 각도(기준 없으면 criterion_unset) |
+| `campaign_sphere_map` | campaign_id, metric?, group?, center?, thickness_axis?, include_invalid?, include_ke_jump?, config_generation?, include_grid?, figure? | GET /campaigns/{id}/sphere-map | 경위도 격자(361 × 181 · 8 방향 역거리 제곱) · 센 띠 가운데 · Mollweide 그림(이미지 블록) · REST format=json · svg · png |
+| `set_campaign_sites` | campaign_id, sites[]({site_id, face?, col?, row?, x_mm?, y_mm?, under_category?, impactor?, run_key?, footprint?, metrics?[]}) | PUT /campaigns/{id}/sites | 부분충격 자리 표를 통째로 바꾼다 |
+| `campaign_site_table` | campaign_id | GET /campaigns/{id}/sites | 자리마다 지표 · 기준 대비 비 · 덮임(빠진 자리 · footprints_are_measured) |
+| `campaign_site_map` | campaign_id, metric?, part?, figure? | GET /campaigns/{id}/site-map | 면마다 자리 지도(이미지 블록) · 빠진 자리 빈 빨간 원 · footprint 합성 경고 |
+| `import_part_map` | from_model, to_model, rows[]({a_pid?, b_pid?, basis, center_dist_mm?, size_rel_diff?, title_token_jaccard?, role?}), label? | POST /part-maps · GET /part-maps/{id} | 파트 짝 표 — 짝 근거(basis) 필수, name 뿐인 짝은 비교에 안 쓴다 |
+| `compare_campaigns` | a, b, part_map, metric?, match?, tol_deg? | GET /campaigns/compare | 공통 각도만 — 짝별 가운데 비 · 상위 5 합 비 · 크기 high · mid · low · 사라진 · 새로 생긴 파트 |
+| `set_campaign_pair_rule` | campaign_id, metrics[]({metric, group_key?, max_diff_pct}), rank_corr_min?, max_failed_pairs? | PUT /campaigns/{id}/pair-rule | 설정 쌍 합격 규칙 |
+| `compare_config_pairs` | campaign_id, old, new | GET /campaigns/{id}/config-pairs | 같은 DOE 의 옛 · 새 세대 쌍 — 차 % · 순위 상관 · 넘은 쌍 · 판정(pass · rerun_required · no_pairs) |
 | `campaign_ingest_status` | campaign_id, state?, limit?, offset? | GET /campaigns/{id}/ingest-status | 목록 수 · 상태별 수(`listed = pending + received + skipped + rejected` · `with_report`) · 런마다 상태 · report_id · sha256 · 거절 까닭 |
 | — (REST 전용) | intake 폼 + campaign_id, run_key(둘 다) | POST /reports/intake | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이 다시 오면 건너뛰고(200 · skipped) 다른 내용이면 거절(409 · 가진 리포트는 그대로). 목록에 없는 run_key 는 400. 런을 찾은 뒤의 4xx 는 까닭이 런에 적힌다(401 · 429 · 요청 꼴 422 · 5xx 는 적히지 않는다). 올리기 길은 토큰 하나에 분당 한도가 있다(429 `Retry-After`) |
 
@@ -204,7 +218,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 103개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 117개)와 같아야 한다.
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.

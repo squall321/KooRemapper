@@ -61,7 +61,7 @@ async def get_owned(db: AsyncSession, user_id: int, campaign_id: str) -> Campaig
 
 async def upsert_runs(db: AsyncSession, campaign_id: str, items: list[dict]) -> dict:
     """런 목록을 올린다 — 새 `run_key` 는 pending 으로 더하고, 있는 것은 **온 칸만**(doe · pitch · roll · provenance ·
-    config_generation · superseded_by · health · extraction) 맞춘다.
+    config_generation · superseded_by · health · extraction · impacts) 맞춘다.
 
     상태 · 리포트는 건드리지 않고 목록에서 빼지도 않는다. 같은 캠페인의 목록 올리기는 캠페인 행 잠금으로 줄 세운다.
     다 맞춘 뒤 `superseded_by` 가 같은 캠페인의 다른 런을 가리키는지 · 고리가 없는지 보고, 깨졌으면 되감고 `BadManifest`.

@@ -58,6 +58,21 @@ def test_capabilities_declares_intake(monkeypatch):
                               "bundle": "/api/v1/bundles/{bundle_id}",
                               "bundle_diff": "/api/v1/bundles/{bundle_id}/diff",
                               "latest_bundle": "/api/v1/campaigns/{campaign_id}/bundles/latest",
+                              # ⑤ 캠페인 분석(DF-05 · 06 · 08 ~ 12 · 11-22) — 판정 · 비 · 격자는 읽을 때 센다
+                              "part_groups": "/api/v1/campaigns/{campaign_id}/part-groups",
+                              "angle_table": "/api/v1/campaigns/{campaign_id}/angle-table",
+                              "angle_stats": "/api/v1/campaigns/{campaign_id}/angle-stats",
+                              "peaks": "/api/v1/campaigns/{campaign_id}/peaks",
+                              "criteria": "/api/v1/campaigns/{campaign_id}/criteria",
+                              "part_margin": "/api/v1/campaigns/{campaign_id}/part-margin",
+                              "sphere_map": "/api/v1/campaigns/{campaign_id}/sphere-map",
+                              "sites": "/api/v1/campaigns/{campaign_id}/sites",
+                              "site_map": "/api/v1/campaigns/{campaign_id}/site-map",
+                              "part_maps": "/api/v1/part-maps",
+                              "part_map": "/api/v1/part-maps/{map_id}",
+                              "compare": "/api/v1/campaigns/compare",
+                              "pair_rule": "/api/v1/campaigns/{campaign_id}/pair-rule",
+                              "config_pairs": "/api/v1/campaigns/{campaign_id}/config-pairs",
                               "form_fields": ["campaign_id", "run_key"],
                               "states": ["pending", "received", "skipped", "rejected"]}, it
     monkeypatch.setattr(settings, "ratelimit_enabled", True)

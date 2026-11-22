@@ -141,6 +141,21 @@ class ExtractionBody(_Strict):
         return self
 
 
+class ImpactItem(_Strict):
+    # 충격 구간 하나(DF-05 · 06) — 만드는 쪽이 낸다(리포트에 충격 구간이 없다). peaks 는 무리(group_key) → 그 충격의 피크(선택)
+    index: int = Field(ge=1)
+    t_start_ms: float = Field(ge=0, allow_inf_nan=False)
+    t_end_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    ke_frac: float | None = Field(default=None, allow_inf_nan=False)
+    peaks: dict[Annotated[str, StringConstraints(min_length=1, max_length=64)], float] | None = None
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if self.t_end_ms is not None and self.t_end_ms < self.t_start_ms:
+            raise ValueError(f"충격 {self.index} 의 t_end_ms({self.t_end_ms}) 가 t_start_ms({self.t_start_ms}) 보다 앞입니다")
+        return self
+
+
 class RunItem(_Strict):
     # 빈칸 · 제어 문자 없는 글 — `stcx:<잡 id>:<DOE>` 꼴을 권한다(꼴은 검사하지 않는다)
     run_key: str = Field(min_length=1, max_length=128, pattern=r"^[^\s\x00-\x1f\x7f]+$")
@@ -153,6 +168,14 @@ class RunItem(_Strict):
     superseded_by: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[^\s\x00-\x1f\x7f]+$")
     health: HealthBody | None = None
     extraction: ExtractionBody | None = None          # ③ 추출 목록(DF-04)
+    impacts: list[ImpactItem] | None = Field(default=None, max_length=50)   # ⑤ 충격 구간(DF-05 · 06) — index 가 겹치면 422
+
+    @model_validator(mode="after")
+    def _impact_index_unique(self):
+        idx = [i.index for i in self.impacts or []]
+        if len(idx) != len(set(idx)):
+            raise ValueError(f"impacts 의 index 가 겹칩니다 — {sorted(idx)}")
+        return self
 
 
 class RunsBody(_Strict):

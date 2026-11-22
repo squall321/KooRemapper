@@ -194,7 +194,11 @@ CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_inges
                   # ③ 추출 완전성 · 삭제 관문(DF-04 · 11-22)
                   "set_campaign_required_extractions", "campaign_deletion_clearance", "report_extraction",
                   # ④ 보고서용 묶음(DF-13 · 11-22)
-                  "build_report_bundle", "report_bundle", "report_bundle_diff")
+                  "build_report_bundle", "report_bundle", "report_bundle_diff",
+                  # ⑤ 캠페인 분석(DF-05 · 06 · 08 ~ 12 · 11-22)
+                  "set_campaign_part_groups", "campaign_angle_table", "campaign_angle_stats", "campaign_peak_table",
+                  "set_campaign_criteria", "campaign_part_margin", "campaign_sphere_map", "set_campaign_sites", "campaign_site_table",
+                  "campaign_site_map", "import_part_map", "compare_campaigns", "set_campaign_pair_rule", "compare_config_pairs")
 
 
 @needs_mcp
@@ -242,6 +246,28 @@ def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
                  *B.RUN_METRICS, *B.CASE_METRICS, *B.PART_METRICS]:
         assert name in spec_desc, name
     assert f"1~{c['BUNDLE_ITEMS_PAGE_MAX']}" in got["report_bundle"]["properties"]["limit"]["description"]
+    # ⑤ — 쓰기 도구의 인자 = REST 본문의 칸(+ campaign_id) · 항목 설명에 항목 칸 이름이 다 있다 · 런 목록 설명에 충격 칸
+    from app.modules.campaigns import analysis_routes as AR
+    from app.modules.campaigns.routes import ImpactItem
+    for t, body, extra in (("set_campaign_part_groups", AR.GroupsBody, {"campaign_id"}), ("set_campaign_criteria", AR.CriteriaBody, {"campaign_id"}),
+                           ("set_campaign_sites", AR.SitesBody, {"campaign_id"}), ("import_part_map", AR.PartMapBody, set()),
+                           ("set_campaign_pair_rule", AR.PairRuleBody, {"campaign_id"})):
+        assert set(got[t]["properties"]) == set(body.model_fields) | extra, t
+    for t, arg, items in (("set_campaign_part_groups", "groups", [AR.GroupItem]), ("set_campaign_criteria", "criteria", [AR.CriterionItem]),
+                          ("set_campaign_sites", "sites", [AR.SiteItem, AR.SiteMetricItem, AR.SiteImpactor]),
+                          ("import_part_map", "rows", [AR.PartMapRow]), ("set_campaign_pair_rule", "metrics", [AR.PairMetricItem])):
+        desc = got[t]["properties"][arg]["description"]
+        for m in items:
+            for name in m.model_fields:
+                assert name in desc, (t, name)
+    for name in ImpactItem.model_fields:
+        assert name in runs_desc, name
+    for t in ("campaign_angle_table", "campaign_peak_table"):
+        assert f"1~{c['ANALYSIS_ROWS_MAX']}" in got[t]["properties"]["limit"]["description"], t
+    for t in ("campaign_angle_table", "campaign_angle_stats", "campaign_peak_table", "campaign_sphere_map", "compare_campaigns"):
+        key = "metrics" if t == "campaign_angle_table" else "metric"
+        assert all(m in got[t]["properties"][key]["description"] for m in c["ANGLE_METRICS"] + c["METRIC_ALIASES"]), t
+    assert all(a in got["campaign_part_margin"]["properties"]["metric_axis"]["description"] for a in c["MARGIN_AXES"])
 
 
 def test_the_campaign_allowed_values_are_the_backend_constraints():
@@ -270,6 +296,12 @@ def test_the_campaign_allowed_values_are_the_backend_constraints():
     assert set(c["BUNDLE_TABLE_KINDS"]) == set(get_args(TableSpec.model_fields["kind"].annotation))
     for path in ("/api/v1/bundles/{bundle_id}", "/api/v1/campaigns/{campaign_id}/bundles/latest"):
         assert c["BUNDLE_ITEMS_PAGE_MAX"] == next(m.le for m in _query(path, "limit").metadata if hasattr(m, "le")), path
+    # ⑤ 지표 · 별칭 · 축 이름 = 백엔드 각도 모듈의 것 · 행 상한 = 각도 표 · 피크 표 경로의 limit 상한 · 표 종류 축
+    from app.modules.campaigns import angles as G
+    assert c["ANGLE_METRICS"] == G.METRICS and c["METRIC_ALIASES"] == tuple(G.METRIC_ALIASES)
+    assert c["MARGIN_AXES"] == tuple(G.MARGIN_AXES) and c["THICKNESS_AXES"] == G.AXES_THICK
+    for path in ("/api/v1/campaigns/{campaign_id}/angle-table", "/api/v1/campaigns/{campaign_id}/peaks"):
+        assert c["ANALYSIS_ROWS_MAX"] == next(m.le for m in _query(path, "limit").metadata if hasattr(m, "le")), path
 
 
 # ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────

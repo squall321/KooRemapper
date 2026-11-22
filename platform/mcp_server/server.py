@@ -1147,7 +1147,8 @@ async def ingest_campaign_manifest(
         "added_mass_pct_device · added_mass_pct_total · ke0_measured · ke0_expected · contact_energy_min_mJ · nan_onset_ms · "
         "json_complete) · extraction(추출 목록 — d3plot_states_total · d3plot_states_read(total 이하) · peak_source(binout · elout · "
         "d3plot_full · d3plot_sampled) · fields_extracted[](글 또는 {field, parts[], states: all | sampled}) · d3plot_retained · "
-        "d3plot_deleted_at). 다른 열쇠는 거절된다."))],
+        "d3plot_deleted_at) · impacts(충격 구간 50 개까지 — 항목 {index(1 부터 · 겹치면 거절), t_start_ms, t_end_ms?, ke_frac?, "
+        "peaks?{무리 키: 그 충격의 피크}} — 각도 표 · 피크 표의 충격 수 · 차수가 이것으로 센다). 다른 열쇠는 거절된다."))],
     ctx: Context,
 ) -> dict:
     """캠페인의 런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
@@ -1393,6 +1394,311 @@ async def report_bundle_diff(
     if to_version is not None:
         params["to"] = to_version
     return await _get(ctx, f"/bundles/{_seg(bundle_id)}/diff", params)
+
+
+# ── 캠페인 분석(DF-05 · 06 · 08 ~ 12 · 계획 df-campaign-analysis-1122) — 각도 표 · 통계 · 피크 · 여유 · 구면 지도 · 자리 · 비교 · 설정 쌍 ─────────
+ANGLE_METRICS = ("peak_stress", "peak_strain", "peak_g", "peak_disp", "peak_principal", "min_principal", "peak_vm_strain",
+                 "peak_principal_stress", "min_principal_stress", "peak_plastic_strain", "peak_principal_strain", "min_principal_strain")
+METRIC_ALIASES = ("MET-STRESS", "MET-STRAIN", "MET-ACCEL", "MET-DISP")       # 백엔드 angles.METRIC_ALIASES 와 같아야 한다
+MARGIN_AXES = ("tension_principal_stress", "von_mises", "compressive_strain", "board_strain_ue", "effective_plastic_strain")
+THICKNESS_AXES = ("X", "Y", "Z")
+ANALYSIS_ROWS_MAX = 5000                                                      # 백엔드 각도 표 · 피크 표의 limit 상한과 같아야 한다
+_A_METRIC = (f"지표 — {_one_of(ANGLE_METRICS)} 또는 요청서 별칭 {_one_of(METRIC_ALIASES)}(MET-STRESS → peak_stress · MET-STRAIN → "
+             "peak_strain · MET-ACCEL → peak_g · MET-DISP → peak_disp).")
+_A_GROUPS = "무리 키(쉼표로 여럿 · 선택) — 비우면 정한 무리 전부(무리를 안 정했으면 all = 모든 파트)."
+_A_THICK = f"두께축(선택) — {_one_of(THICKNESS_AXES)}. 비우면 캠페인의 thickness_axis, 그것도 없으면 Z. 라벨은 덱 축으로 나온다."
+_A_INVALID = "참이면 제외 까닭이 있는 런도 넣는다(리포트가 있는 런 모두). 기본 거짓 — 건강 표와 같다."
+_A_KEJUMP = "참이면 첫 KE 가 ½mv² 와 어긋난 런(ke0_mismatch — KE 튐)도 넣는다. 기본 거짓 — 빼고 excluded_ke_jump 로 센다."
+_A_GEN = "이 설정 세대(config_generation)의 런만(선택)."
+
+
+def _filters(include_invalid, include_ke_jump, config_generation) -> dict:
+    p = {"include_invalid": include_invalid, "include_ke_jump": include_ke_jump}
+    if config_generation is not None:
+        p["config_generation"] = config_generation
+    return p
+
+
+async def _get_raw(ctx, path, params=None) -> bytes:
+    """그림(svg · png)을 바이트로 — 오류면 백엔드 글을 그대로 올린다."""
+    async with _client() as c:
+        r = await c.get(path, params=params, headers=_forward_headers(ctx))
+    if r.status_code >= 400:
+        _unwrap(r)
+        raise RuntimeError(f"HTTP {r.status_code}")
+    return r.content
+
+
+async def _figure(ctx, path, params, res: dict) -> list:
+    """`res` 뒤에 SVG 를 래스터로 바꾼 이미지 블록을 붙인다(못 만들면 `figure_png_error`)."""
+    try:
+        svg = await _get_raw(ctx, path, {**params, "format": "svg"})
+        data, fmt, w, h = await rasterize(svg)
+    except FigurePngError as e:
+        res["figure_png_error"] = str(e)
+        return [res]
+    except RuntimeError as e:
+        res["figure_png_error"] = f"download_failed: {e}"[:200]
+        return [res]
+    res["figure_png"] = {"format": fmt, "width": w, "height": h, "bytes": len(data)}
+    return [res, Image(data=data, format=fmt)]
+
+
+@mcp.tool()
+async def set_campaign_part_groups(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    groups: Annotated[list[dict], Field(description=(
+        "부품 무리 목록 — 항목 {group_key(빈칸 없는 글), label?, part_ids(정수 목록 · 1 개 이상), part_key?(표준 부품 키 PRT-*)}. "
+        "통째로 바꾸고, 빈 목록이면 지운다(그러면 무리 하나 all = 모든 파트로 센다). 같은 group_key 가 둘이면 거절된다."))],
+    ctx: Context,
+) -> dict:
+    """캠페인의 부품 무리를 정한다(DF-05) — 각도 표 · 통계 · 피크 표 · 여유 · 구면 지도가 무리마다 그 파트들의 최댓값을 센다. 캠페인 주인만.
+    Replace a campaign's part groups (used by angle tables, stats, peaks, margins and sphere maps)."""
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/part-groups", {"groups": groups})
+
+
+@mcp.tool()
+async def campaign_angle_table(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metrics: Annotated[str, Field(description="지표(쉼표로 여럿) — " + _A_METRIC)] = "peak_stress",
+    groups: Annotated[str | None, Field(description=_A_GROUPS)] = None,
+    thickness_axis: Annotated[str | None, Field(description=_A_THICK)] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+    limit: Annotated[int, Field(description=f"한 번에 받을 행 수(1~{ANALYSIS_ROWS_MAX}).")] = 1000,
+    offset: Annotated[int, Field(description="건너뛸 행 수 — matched 가 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """캠페인 각도 표(DF-05) — 각도마다 방향 벡터(덱 틀 · 요청서 식 d = (sin p·cos r, −sin r, −cos p·cos r)) · 범주(face · edge · corner) ·
+    라벨(가장 가까운 26 방향, 예 -Z · +X-Z) · 충격 수 · 두 번째 충격 시각 · 첫 KE · 무리별 피크(값 · 파트 · 시각 ms · 충격 차수 · 그 충격의
+    KE 비) · 피크 출처. 런 하나의 리포트가 전각도 리포트면 케이스마다 한 각도. 충격 구간은 런 목록의 impacts 에서 온다(없으면 null).
+    Per-angle table of a campaign: direction, category, label, impacts and group peaks."""
+    params = {"metrics": metrics, "limit": limit, "offset": offset, **_filters(include_invalid, include_ke_jump, config_generation)}
+    if groups is not None:
+        params["groups"] = groups
+    if thickness_axis is not None:
+        params["thickness_axis"] = thickness_axis
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/angle-table", params)
+
+
+@mcp.tool()
+async def campaign_angle_stats(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metric: Annotated[str, Field(description="지표 하나 — " + _A_METRIC)] = "peak_stress",
+    groups: Annotated[str | None, Field(description=_A_GROUPS)] = None,
+    thickness_axis: Annotated[str | None, Field(description=_A_THICK)] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+    top: Annotated[int, Field(description="상위 · 하위 몇 각도(1~100).")] = 10,
+) -> dict:
+    """캠페인 각도 통계(DF-05) — n · 제외 수(머리 줄 · KE 튐은 excluded_ke_jump) · 다회 충격 비율(충격 구간을 받은 각도 가운데 2 회 이상) ·
+    무리별 분포(최소 · p10 · 가운데 · p90 · 최대 · 평균) · 상위 · 하위 · 범주별 · 라벨별 · 피크 충격 차수 분포 · 덮임(26 방향 가운데 맞은 라벨).
+    Campaign-level angle statistics (distribution, top/bottom, by category/label, multi-impact ratio)."""
+    params = {"metric": metric, "top": top, **_filters(include_invalid, include_ke_jump, config_generation)}
+    if groups is not None:
+        params["groups"] = groups
+    if thickness_axis is not None:
+        params["thickness_axis"] = thickness_axis
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/angle-stats", params)
+
+
+@mcp.tool()
+async def campaign_peak_table(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metric: Annotated[str, Field(description="지표 하나 — " + _A_METRIC)] = "peak_stress",
+    groups: Annotated[str | None, Field(description=_A_GROUPS)] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+    limit: Annotated[int, Field(description=f"한 번에 받을 피크 행 수(1~{ANALYSIS_ROWS_MAX}).")] = 1000,
+    offset: Annotated[int, Field(description="건너뛸 피크 행 수.")] = 0,
+) -> dict:
+    """각도별 피크 표(DF-06) — report_part_series 를 각도마다 부르지 않고 한 번에. 피크 행(각도 × 무리 — 값 · 파트 · 시각 ms · 충격 차수 ·
+    그 충격의 KE 비 · 충격 수 · peak_source)과 충격별 행(런의 충격 구간마다 시작 · 끝 ms · KE 비 · 무리별 그 충격의 피크 — 만드는 쪽이 보냈을 때).
+    Peak table for all angles at once, plus per-impact rows."""
+    params = {"metric": metric, "limit": limit, "offset": offset, **_filters(include_invalid, include_ke_jump, config_generation)}
+    if groups is not None:
+        params["groups"] = groups
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/peaks", params)
+
+
+@mcp.tool()
+async def set_campaign_criteria(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    criteria: Annotated[list[dict], Field(description=(
+        "기준값 목록 — 항목 {part_id 또는 group_key(하나만), failure_mode?, metric_axis(" + _one_of(MARGIN_AXES) + "), "
+        "criterion_value(0 초과), unit(응력 축 MPa · board_strain_ue 는 µε · 변형률 축은 빈 글 또는 -), source_platform?, "
+        "source_record_id?, version?}. 통째로 바꾸고 빈 목록이면 지운다."))],
+    ctx: Context,
+) -> dict:
+    """캠페인의 기준값 묶음을 정한다(DF-08) — campaign_part_margin 이 이것으로만 비를 센다(리포트의 항복값은 쓰지 않는다). 출처 칸
+    (source_platform · source_record_id · version)은 MatNexus 기준 id · 판을 적는 자리다. 캠페인 주인만.
+    Replace a campaign's criteria bundle (the only source of margin ratios)."""
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/criteria", {"criteria": criteria})
+
+
+@mcp.tool()
+async def campaign_part_margin(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metric_axis: Annotated[str | None, Field(description=f"지표 축(선택) — {_one_of(MARGIN_AXES)}. 비우면 기준값에 있는 축 전부.")] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+) -> dict:
+    """부품 위험 · 허용치 여유(DF-08) — 행 = 부품 또는 무리 · 지표 축 · 값(각도 최댓값) · 가운데값 · 기준값 · 기준 출처 · 비 · 가운데 비 ·
+    기준 넘은 각도 비율 · 상위 10 % 각도. 축 — 인장 주응력(tension_principal_stress) · von Mises · 압축 변형률(절댓값) · 보드 변형률 µε(×10⁶) ·
+    유효 소성 변형률. 기준이 없는 무리는 status criterion_unset(비 null — 기준 미지정), 모르는 무리의 기준은 group_unknown.
+    Part/group margins against the campaign criteria bundle."""
+    params = _filters(include_invalid, include_ke_jump, config_generation)
+    if metric_axis is not None:
+        params["metric_axis"] = metric_axis
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/part-margin", params)
+
+
+@mcp.tool()
+async def campaign_sphere_map(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metric: Annotated[str, Field(description="지표 하나 — " + _A_METRIC)] = "peak_stress",
+    group: Annotated[str | None, Field(description="무리 키 하나(선택) — 비우면 첫 무리(무리가 없으면 all).")] = None,
+    center: Annotated[bool, Field(description="센 띠를 경도 0° 로 돌린다(기본 참 — 돌린 양은 shift_deg).")] = True,
+    thickness_axis: Annotated[str | None, Field(description=_A_THICK)] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+    include_grid: Annotated[bool, Field(description="참이면 격자 값(181 × 361)을 응답에 싣는다(크다 — 기본은 요약만).")] = False,
+    figure: Annotated[bool, Field(description="참이면 Mollweide 그림을 이미지 블록(PNG)으로 붙인다(기본 참).")] = True,
+) -> list:
+    """구면 위험도 지도(DF-09) — 각도 값을 두께 틀 경위도 격자(경도 361 × 위도 181)로 보간(가까운 8 방향 · 가중 1 / max(θ, 0.5°)²)하고
+    센 띠를 가운데로 돌린 Mollweide 컨투어(띠 칠 · 등고선 · 방향 점 · 범례). 응답 — 격자 최소 · 최대 · 방향 점 · 돌린 경도 · 출처 줄(유효 n ·
+    제외 · 세대 · 기준값 판) · 그림(이미지 블록). REST 로는 format=json · svg · png.
+    Sphere risk map (interpolated grid + Mollweide contour figure)."""
+    params = {"metric": metric, "center": center, **_filters(include_invalid, include_ke_jump, config_generation)}
+    if group is not None:
+        params["group"] = group
+    if thickness_axis is not None:
+        params["thickness_axis"] = thickness_axis
+    path = f"/campaigns/{_seg(campaign_id)}/sphere-map"
+    res = await _get(ctx, path, {**params, "format": "json"})
+    if not include_grid and isinstance(res, dict) and isinstance(res.get("grid"), dict):
+        res["grid"] = {k: v for k, v in res["grid"].items() if k != "values"} | {"values": "include_grid=true 로 받는다"}
+    return await _figure(ctx, path, params, res) if figure else [res]
+
+
+@mcp.tool()
+async def set_campaign_sites(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    sites: Annotated[list[dict], Field(description=(
+        "자리 표 — 항목 {site_id, face?(TOP · BOT), col?, row?, x_mm?, y_mm?, under_category?(받침 분류), impactor?{mass_g, height_mm, "
+        "ke_mj}, run_key?(그 자리를 친 런 — 자리 지표가 없으면 그 런의 리포트 피크 · 건강 에너지비로 채운다), footprint?{measured: 참이어야 "
+        "실측, …}, metrics?[{part, metric, value?, time_ms?, elem_id?, ratio?}]}. 통째로 바꾸고 빈 목록이면 지운다. 같은 site_id 는 거절."))],
+    ctx: Context,
+) -> dict:
+    """부분충격 자리 표를 정한다(DF-10) — campaign_site_table · campaign_site_map 이 쓴다. 자리 지표의 metric 이 여유의 지표 축 이름
+    (예 board_strain_ue)이고 그 부품의 기준값이 있으면 기준 대비 비를 센다. 캠페인 주인만.
+    Replace a campaign's impact-site table (positions, impactor, run binding, footprint, per-site metrics)."""
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/sites", {"sites": sites})
+
+
+@mcp.tool()
+async def campaign_site_table(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+) -> dict:
+    """부분충격 자리 표(DF-10) — 자리마다 위치 · 받침 · 지표(부품 피크 · 접촉력 · 이탈 시각 · 되튐 · 에너지비 — 받은 자리 지표, 없으면 묶인
+    런의 리포트 피크 · 건강 에너지비) · 기준 대비 비 · 가장 큰 비. 덮임 — 결과 없는 자리 · 면별 수 · footprints_are_measured(아니면 경고 —
+    footprint 는 합성이다). Impact-site table with coverage."""
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/sites")
+
+
+@mcp.tool()
+async def campaign_site_map(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    metric: Annotated[str | None, Field(description="칠할 자리 지표(선택) — 비우면 자리의 가장 큰 기준 대비 비(max_ratio).")] = None,
+    part: Annotated[str | None, Field(description="그 지표의 부품(선택) — 비우면 자리의 그 지표 최댓값.")] = None,
+    figure: Annotated[bool, Field(description="참이면 자리 지도 그림을 이미지 블록(PNG)으로 붙인다(기본 참).")] = True,
+) -> list:
+    """부분충격 자리 지도(DF-10) — 면(TOP · BOT)마다 자리 점을 값으로 칠하고 결과 없는 자리는 빈 빨간 원. 응답 — 자리 점 · 값 · 덮임 ·
+    그림(이미지 블록). footprint 가 실측이 아니면 그림 아래에 경고가 있다. Impact-site map figure."""
+    params: dict = {}
+    if metric is not None:
+        params["metric"] = metric
+    if part is not None:
+        params["part"] = part
+    path = f"/campaigns/{_seg(campaign_id)}/site-map"
+    res = await _get(ctx, path, {**params, "format": "json"})
+    return await _figure(ctx, path, params, res) if figure else [res]
+
+
+@mcp.tool()
+async def import_part_map(
+    from_model: Annotated[str, Field(description="앞 모델(리비전) 이름(1~255자).")],
+    to_model: Annotated[str, Field(description="뒤 모델(리비전) 이름(1~255자).")],
+    rows: Annotated[list[dict], Field(description=(
+        "짝 행 목록(1~20000) — 항목 {a_pid?, b_pid?(둘 가운데 하나는 있어야 · 한쪽만이면 사라진 · 새로 생긴 파트), basis(짝 근거 · 필수 — "
+        "name 뿐인 짝은 비교에 쓰지 않는다), center_dist_mm?, size_rel_diff?, title_token_jaccard?(0~1), role?}."))],
+    ctx: Context,
+    label: Annotated[str | None, Field(description="이름표(선택 · 255자까지).")] = None,
+) -> dict:
+    """파트 짝 표를 올린다(DF-11) — 응답 map_id 로 compare_campaigns 를 부른다. 만든 사람만 본다(REST GET /part-maps/{id}).
+    Import a part map between two model revisions (each row must state its matching basis)."""
+    body = {"from_model": from_model, "to_model": to_model, "rows": rows}
+    if label is not None:
+        body["label"] = label
+    return await _post(ctx, "/part-maps", body)
+
+
+@mcp.tool()
+async def compare_campaigns(
+    a: Annotated[str, Field(description="앞 리비전 캠페인 id.")],
+    b: Annotated[str, Field(description="뒤 리비전 캠페인 id.")],
+    part_map: Annotated[str, Field(description="파트 짝 표 id — import_part_map 의 map_id.")],
+    ctx: Context,
+    metric: Annotated[str, Field(description="지표 하나 — " + _A_METRIC)] = "peak_stress",
+    match: Annotated[str, Field(description="각도 맞춤 — doe(같은 DOE · 기본) · angle(각거리 허용치 안의 가장 가까운 짝).")] = "doe",
+    tol_deg: Annotated[float, Field(description="angle 맞춤의 각거리 허용치(도 · 0 초과 90 이하).")] = 5.0,
+) -> dict:
+    """리비전 비교(DF-11) — 공통 각도만 쓴다(n 을 싣는다). 짝마다 각도별 비 b / a 의 가운데값 · 상위 5 합(각 캠페인의 가장 큰 다섯 값 합)과
+    그 비 · 크기(high · mid · low — |log₂ 가운데 비| 0.5 · 0.25). 머리에 크기별 수 · 상위 5 짝 · name 근거뿐이라 뺀 짝 수 · 값을 못 맞춘 짝 수.
+    사라진 · 새로 생긴 파트 목록. Compare two revision campaigns on common angles through a part map."""
+    if match not in ("doe", "angle"):
+        raise RuntimeError("match 는 doe · angle 가운데 하나입니다.")
+    return await _get(ctx, "/campaigns/compare", {"a": a, "b": b, "part_map": part_map, "metric": metric, "match": match,
+                                                  "tol_deg": tol_deg})
+
+
+@mcp.tool()
+async def set_campaign_pair_rule(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    metrics: Annotated[list[dict], Field(description=(
+        "규칙 항목(1~50) — {metric(" + _A_METRIC + "), group_key?(비우면 all), max_diff_pct(0 초과 — 넘으면 그 쌍이 넘은 쌍)}."))],
+    ctx: Context,
+    rank_corr_min: Annotated[float, Field(description="순위 상관(스피어먼) 하한(−1~1 · 기본 0.9) — 아래면 재실행 필요.")] = 0.9,
+    max_failed_pairs: Annotated[int, Field(description="넘은 쌍 상한(0 이상 · 기본 2) — 넘으면 전량 재실행 필요.")] = 2,
+) -> dict:
+    """설정 쌍 합격 규칙을 정한다(DF-12) — compare_config_pairs 가 이 규칙으로 판정한다. 통째로 바꾼다. 캠페인 주인만.
+    Set the config-pair acceptance rule of a campaign."""
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/pair-rule",
+                      {"metrics": metrics, "rank_corr_min": rank_corr_min, "max_failed_pairs": max_failed_pairs})
+
+
+@mcp.tool()
+async def compare_config_pairs(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    old: Annotated[str, Field(description="옛 설정 세대(config_generation).")],
+    new: Annotated[str, Field(description="새 설정 세대(config_generation).")],
+    ctx: Context,
+) -> dict:
+    """설정 쌍 비교(DF-12) — 같은 DOE 를 옛 · 새 세대로 돌린 쌍마다 규칙의 지표 · 무리별 차 %(새 − 옛) / 옛 · 순위 상관 · 넘은 쌍 수 ·
+    판정(pass · rerun_required · no_pairs)과 까닭(failed_pairs · rank_corr). 옛 세대 런이 새 세대로 대체돼 있어도 넣는다.
+    Judge old vs new configuration pairs with the campaign pair rule."""
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/config-pairs", {"old": old, "new": new})
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
 # 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).

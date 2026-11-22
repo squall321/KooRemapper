@@ -219,6 +219,11 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    보고서 · 영상에 쓸 숫자는 손으로 옮기지 말고 `build_report_bundle`(캠페인 · 명세 — 표 runs · case_metrics · part_peaks · 그림)로
    묶음을 지어 그 주소(`bundle_id`)와 판을 인용한다 — 숫자마다 `source_path` 가 리포트 · 케이스 · 지표까지 거슬러 가고, 다시 지으면
    바뀐 숫자만 새 판이 된다(`report_bundle_diff`). 렌더(HTML · 영상)는 하지 않는다 — 값과 그림 재료만.
+   캠페인 분석은 리포트마다 모으지 말고 캠페인 도구로 — `campaign_angle_table` · `campaign_angle_stats`(방향 · 26 방향 라벨 · 다회 충격 ·
+   무리별 분포 — 무리는 `set_campaign_part_groups`) · `campaign_peak_table`(충격 구간은 런 목록의 `impacts`) · `campaign_part_margin`(기준값은
+   `set_campaign_criteria` 의 것만 — 리포트 항복값을 기준으로 쓰지 않는다) · `campaign_sphere_map`(컨투어 그림) · 부분충격은
+   `set_campaign_sites` → `campaign_site_table` · `campaign_site_map` · 리비전은 `import_part_map` → `compare_campaigns`(공통 각도만) ·
+   옛 · 새 설정은 `set_campaign_pair_rule` → `compare_config_pairs`. 두께축이 X 인 덱은 thickness_axis 를 X 로 — 라벨이 덱 축을 따른다.
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
    StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에
