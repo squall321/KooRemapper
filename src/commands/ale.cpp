@@ -15,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <limits>
 #include <cstdio>
 
 // Knowledge graph (lat.md):
@@ -680,6 +681,18 @@ int runAle(const std::string& yamlFile, ConsoleOutput& console) {
     };
     raiseFrom(lines);
     for (const auto& f : inclClosure.files) raiseFrom(f.lines);
+    // 새 번호는 ALE 파트마다 많아야 하나씩(+ 이력변수 하나)이다 — 최대값에 그 수를 더해 정수 상한을 넘으면 쓰지 않는다
+    // (2026-11-22 · 예전엔 `최대값 + 1` 이 넘쳐 음수 MID 의 `*MAT_NULL` 과 그 MID 를 가리키는 `*PART` 를 rc 0 으로 냈다)
+    {
+        const long long n = (long long)aleEntries.size();
+        const std::pair<const char*, long long> need[] = {{"재질 번호", (long long)maxMid + n}, {"EOS 번호", (long long)maxEosid + n},
+                                                          {"섹션 번호", (long long)maxSecid + n}, {"이력변수 번호", (long long)maxHgid + 1}};
+        for (const auto& [what, last] : need) {
+            if (last <= std::numeric_limits<int>::max()) continue;
+            console.error("[ale] " + KooRemapper::ids::limitWhy(what, last) + " — 출력 파일을 쓰지 않았습니다");
+            return 1;
+        }
+    }
     int nextMid = maxMid + 1;
     int nextEosid = maxEosid + 1;
     int nextSecid = maxSecid + 1;

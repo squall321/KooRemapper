@@ -4,6 +4,7 @@
 #include "parser/IncludeScan.h"      // 덱이 쪼개져 있나 — 안내·거절
 #include "parser/DeckScan.h"            // cardFields · fieldInt — 칸 읽기 정본
 #include "parser/DeckWriter.h"
+#include "parser/IdAllocator.h"   // limitWhy — 정수 상한 까닭 글
 #include "merge.h"
 #include "util/YamlComment.h"
 #include "cli/ConsoleOutput.h"
@@ -16,6 +17,7 @@
 #include <set>
 #include <array>
 #include <algorithm>
+#include <limits>
 #include <fstream>
 #include <sstream>
 #include <cmath>
@@ -932,10 +934,11 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                  ", Materials: " + std::to_string(mdl.mats.size()));
 
     // --- Phase 2: Process each merge group ---
-    int newPid = mdl.maxPartId + 1;
-    int newMid = mdl.maxMatId + 1;
-    int newSecId = mdl.maxSecId + 1;
-    int newEid = mdl.maxElemId + 1;
+    // 커서는 long long — 최대값이 정수 상한이면 `+ 1` 이 넘쳐 음수 MID 의 재질 카드를 냈다(2026-11-22). 끝 번호는 쓰기 전에 본다
+    long long newPid = (long long)mdl.maxPartId + 1;
+    long long newMid = (long long)mdl.maxMatId + 1;
+    long long newSecId = (long long)mdl.maxSecId + 1;
+    long long newEid = (long long)mdl.maxElemId + 1;
 
     // Collect all elements to remove and new elements to add
     std::set<int> removeElemIds;
@@ -1049,9 +1052,9 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
             console.info("  CTE=" + std::to_string(hom.cte));
 
         // Create merged elements
-        int grpPidNew = newPid++;
-        int grpMidNew = newMid++;
-        int grpSecNew = newSecId++;
+        int grpPidNew = (int)newPid++;
+        int grpMidNew = (int)newMid++;
+        int grpSecNew = (int)newSecId++;
 
         int nLayers = std::max(1, grp.layers);
         for (auto& col : columns) {
@@ -1136,7 +1139,7 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                 }
 
                 NewElem ne;
-                ne.id = newEid++;
+                ne.id = (int)newEid++;
                 ne.pid = grpPidNew;
                 for (int i = 0; i < 4; i++) ne.nid[i] = sortedBot[i];
                 for (int i = 0; i < 4; i++) ne.nid[i + 4] = matched[i];
@@ -1148,6 +1151,16 @@ int runMerge(const std::string& yamlFile, ConsoleOutput& console) {
                            hom, (int)columns.size(), (int)grpElemIds.size()});
     }
 
+    // ★정수 상한 — 새 파트 · 재질 · 섹션 · 요소 번호의 끝이 2147483647 을 넘으면 쓰지 않는다(예전엔 음수 번호가 실린 덱을 썼다)
+    {
+        const std::pair<const char*, long long> last[] = {{"파트 번호", newPid - 1}, {"재질 번호", newMid - 1},
+                                                          {"섹션 번호", newSecId - 1}, {"요소 번호", newEid - 1}};
+        for (const auto& [what, v] : last) {
+            if (v <= std::numeric_limits<int>::max()) continue;
+            console.error("[merge] " + KooRemapper::ids::limitWhy(what, v) + " — 출력 파일을 쓰지 않았습니다");
+            return 1;
+        }
+    }
     // --- Phase 3: Write output ---
     if (groupFailed) {
         console.error("Merge failed — no output written: " + cfg.outputPath);

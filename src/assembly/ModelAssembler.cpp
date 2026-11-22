@@ -2614,7 +2614,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                     int v = deadPids.count(m) ? ctx.newPids[layer] : m;
                     if (seen.insert(v).second) mem.push_back(v);
                 }
-                int nsid = ++maxSetId_;
+                int nsid = bumpId(maxSetId_, "세트 번호");
                 newSetBlocks.push_back(rsMakePartSetBlock(
                     nsid, "KooRemapper tied layer " + std::to_string(layer + 1) +
                           " (from set " + std::to_string(sid) + ")", mem));
@@ -2690,7 +2690,7 @@ void ModelAssembler::migrateDeadReferences(const std::set<int>& deadPids,
                        std::to_string(ctx.newPids[layer]) +
                        ") 로 바꿨습니다(상대측 기하를 적층 축에 투영해 층이 하나로 정해졌습니다)");
             } else {
-                int nsid = ++maxSetId_;
+                int nsid = bumpId(maxSetId_, "세트 번호");
                 newSetBlocks.push_back(rsMakePartSetBlock(
                     nsid, "KooRemapper restack layers (from part " + std::to_string(c.id[side]) + ")",
                     ctx.newPids));
@@ -4277,7 +4277,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
     bool midAllocExhausted = false;
     auto allocMid = [&]() -> int {
         while (maxMaterialId_ < std::numeric_limits<int>::max()) {
-            ++maxMaterialId_;
+            bumpId(maxMaterialId_, "재질 번호");
             if (usedMids.count(maxMaterialId_) || reservedMids.count(maxMaterialId_)) continue;
             usedMids.insert(maxMaterialId_);
             return maxMaterialId_;
@@ -4435,7 +4435,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             double ny = bottomNode->position.y + frac * (topNode->position.y - bottomNode->position.y);
             double nz = bottomNode->position.z + frac * (topNode->position.z - bottomNode->position.z);
 
-            int newId = ++maxNodeId_;
+            int newId = bumpId(maxNodeId_, "절점 번호");
             newCol.nodeIds[p] = newId;
             addedNodes_.push_back({newId, nx, ny, nz});
         }
@@ -4548,7 +4548,9 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             }
             newPid = layerDef.pid;
         } else {
-            int cand = (pidCursor > 0) ? pidCursor : maxPartId_ + 1;
+            // 최대값이 정수 상한이면 +1 이 넘친다 — 상한에서 멈춰 아래 「빈 번호가 없다」 로 간다(2026-11-22)
+            int cand = (pidCursor > 0) ? pidCursor : (maxPartId_ < std::numeric_limits<int>::max() ? maxPartId_ + 1
+                                                                                          : std::numeric_limits<int>::max());
             while (cand < std::numeric_limits<int>::max() &&
                    (pidTaken(cand) || reservedLayerPids.count(cand))) ++cand;
             if (cand >= std::numeric_limits<int>::max() || pidTaken(cand)) {
@@ -4562,7 +4564,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
         assignedLayerPids.insert(newPid);
         restackCreatedPids_.insert(newPid);
         if (newPid > maxPartId_) maxPartId_ = newPid;
-        int newSecId = ++maxSectionId_;
+        int newSecId = bumpId(maxSectionId_, "섹션 번호");
         layerPidEtype.push_back({newPid, layerEtype});
         layerSegInfos.push_back({newPid, layerEtype, {}, {}});
 
@@ -4683,7 +4685,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
             for (const auto& fq : footprint) {
                 if (isShell) {
                     AddedShellElement se;
-                    se.id = ++maxElementId_;
+                    se.id = bumpId(maxElementId_, "요소 번호");
                     se.pid = newPid;
                     for (int n = 0; n < 4; n++) {
                         int colIdx = fq.colIdx[n];
@@ -4695,7 +4697,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                             double nx = bn->position.x + fracMid * (tn->position.x - bn->position.x);
                             double ny = bn->position.y + fracMid * (tn->position.y - bn->position.y);
                             double nz = bn->position.z + fracMid * (tn->position.z - bn->position.z);
-                            int dupId = ++maxNodeId_;
+                            int dupId = bumpId(maxNodeId_, "절점 번호");
                             addedNodes_.push_back({dupId, nx, ny, nz});
                             shellDupMap[colIdx] = dupId;
                             it = shellDupMap.find(colIdx);
@@ -4705,7 +4707,7 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                     addedShellElements_.push_back(se);
                 } else {
                     AddedElement ae;
-                    ae.id = ++maxElementId_;
+                    ae.id = bumpId(maxElementId_, "요소 번호");
                     ae.pid = newPid;
                     ae.type = ElementType::HEX8;
                     ae.isTshell = isTshell;
@@ -4956,8 +4958,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
                 solidBotSegs.push_back(seg);
             }
             // Write both segment sets and contact
-            int ssid = ++maxSetId_;
-            int msid = ++maxSetId_;
+            int ssid = bumpId(maxSetId_, "세트 번호");
+            int msid = bumpId(maxSetId_, "세트 번호");
             // Slave SET_SEGMENT: shell selfSegs
             {
                 std::ostringstream ss;
@@ -4984,8 +4986,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
         } else if (!iIsShell && i1IsShell) {
             // lower=solid, upper=shell: slave=shell selfSegs, master=solid i topFaceSegs
-            int ssid = ++maxSetId_;
-            int msid = ++maxSetId_;
+            int ssid = bumpId(maxSetId_, "세트 번호");
+            int msid = bumpId(maxSetId_, "세트 번호");
             {
                 std::ostringstream ss;
                 ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << ssid << "\n";
@@ -5009,8 +5011,8 @@ bool ModelAssembler::applyRestack(const RestackOperation& op, double E, double n
 
         } else {
             // both shells: lower=slave, upper=master (both use selfSegs)
-            int ssid = ++maxSetId_;
-            int msid = ++maxSetId_;
+            int ssid = bumpId(maxSetId_, "세트 번호");
+            int msid = bumpId(maxSetId_, "세트 번호");
             {
                 std::ostringstream ss;
                 ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << ssid << "\n";
@@ -6477,6 +6479,12 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
     // 8칸 덱에 노드 ID 가 100000000 까지 가면 `*NODE` 16줄이 엄격 8칸 재독에서 **고유 9개**로
     // 뭉치고 요소가 없는 노드를 가리킨다. 구조 카운트는 정상이라 아무도 못 알아본다.
     // `e2281b3`(control 칸)·`d194c49`(ORTHO 거절)와 같은 규약이다 — 반쯤 맞는 덱을 내느니 멈춘다.
+    // ★새 번호가 LS-DYNA 정수 상한을 넘게 됐으면 쓰지 않는다(2026-11-22 · 3차 2판). 예전엔 커서가 넘쳐 음수 번호(-2147483648 …)의
+    //   섹션 · 세트 · 재질 · 절점이 rc 0 으로 나갔다(I10 덱의 번호가 상한일 때 — matswap · iga · boundary 실측)
+    if (!idOverflow_.empty()) {
+        errorMessage_ = idOverflow_ + " — 출력 파일을 쓰지 않았습니다: " + outputFile;
+        return false;
+    }
     if (!widthOverflow_.empty()) {
         errorMessage_ = "고정폭 초과: " + widthOverflow_ +
                         " — 이 덱은 " + std::to_string(deckFw) + "칸입니다."
@@ -6746,6 +6754,17 @@ int ModelAssembler::parseElementIdFromLine(const std::string& line) const {
 
 // *NODE 는 표준 (I8,3F16,2I8), i10 은 (I10,3F16,2I10), long 은 (I20,3F20,2I20)
 // — Vol_I 19345, 19348, 19360. 정수 칸만 바뀌는 게 아니라 long 에서는 실수 칸도 20 이다.
+int ModelAssembler::bumpId(int& cursor, const char* what) {
+    // 커서 하나를 올려 새 번호를 낸다 — 정수 상한이면 올리지 않고 까닭을 적는다(writeOutput 이 쓰지 않는다). 예전의 `++커서` 는
+    // 상한에서 넘쳐 음수 번호를 냈다
+    if (cursor >= std::numeric_limits<int>::max()) {
+        if (idOverflow_.empty())
+            idOverflow_ = ids::limitWhy(what, (long long)cursor + 1);
+        return cursor;
+    }
+    return ++cursor;
+}
+
 void ModelAssembler::noteWidth(int v, int fw, const char* what) const {
     if (fw <= 0) return;
     const std::string s = std::to_string(v);
@@ -7385,7 +7404,7 @@ bool ModelAssembler::applyTet10Convert(const Tet10ConvertOperation& op) {
         if (it != edgeMidNodeMap_.end()) {
             return it->second;
         }
-        int newId = ++maxNodeId_;
+        int newId = bumpId(maxNodeId_, "절점 번호");
         const auto& posA = baseMesh_.nodes.at(nA).position;
         const auto& posB = baseMesh_.nodes.at(nB).position;
         addedNodes_.push_back({newId,
@@ -7570,7 +7589,7 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
         auto key = std::make_pair(std::min(nA, nB), std::max(nA, nB));
         auto it = edgeMidNodeMap_.find(key);
         if (it != edgeMidNodeMap_.end()) return it->second;
-        int newId = ++maxNodeId_;
+        int newId = bumpId(maxNodeId_, "절점 번호");
         const auto& pA = baseMesh_.nodes.at(nA).position;
         const auto& pB = baseMesh_.nodes.at(nB).position;
         addedNodes_.push_back({newId, (pA.x+pB.x)*0.5, (pA.y+pB.y)*0.5, (pA.z+pB.z)*0.5});
@@ -7586,7 +7605,7 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
         auto key = std::make_pair(edgeKey, normalIdx);
         auto it = edgeThirdNodeMap_.find(key);
         if (it != edgeThirdNodeMap_.end()) return it->second;
-        int newId = ++maxNodeId_;
+        int newId = bumpId(maxNodeId_, "절점 번호");
         const auto& pA = baseMesh_.nodes.at(nA).position;
         const auto& pB = baseMesh_.nodes.at(nB).position;
         double t = (idx == 0) ? (1.0/3.0) : (2.0/3.0);
@@ -7603,7 +7622,7 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
         auto key = std::make_tuple(arr[0], arr[1], arr[2], arr[3]);
         auto it = faceCenterNodeMap_.find(key);
         if (it != faceCenterNodeMap_.end()) return it->second;
-        int newId = ++maxNodeId_;
+        int newId = bumpId(maxNodeId_, "절점 번호");
         const auto& p1 = baseMesh_.nodes.at(n1).position;
         const auto& p2 = baseMesh_.nodes.at(n2).position;
         const auto& p3 = baseMesh_.nodes.at(n3).position;
@@ -7617,7 +7636,7 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
 
     // Helper: create a unique node (no dedup needed - body centers, face interiors)
     auto createNode = [&](double x, double y, double z) -> int {
-        int newId = ++maxNodeId_;
+        int newId = bumpId(maxNodeId_, "절점 번호");
         addedNodes_.push_back({newId, x, y, z});
         return newId;
     };
@@ -7629,25 +7648,25 @@ bool ModelAssembler::applyRefine(const RefineOperation& op) {
 
     // Helper: add a sub-hex element
     auto addHex = [&](int pid, int n1, int n2, int n3, int n4, int n5, int n6, int n7, int n8) {
-        int eid = ++maxElementId_;
+        int eid = bumpId(maxElementId_, "요소 번호");
         addedElements_.push_back({eid, pid, {n1,n2,n3,n4,n5,n6,n7,n8}, ElementType::HEX8, false});
     };
 
     // Helper: add a sub-tet element (stored as degenerate hex)
     auto addTet = [&](int pid, int n1, int n2, int n3, int n4) {
-        int eid = ++maxElementId_;
+        int eid = bumpId(maxElementId_, "요소 번호");
         addedElements_.push_back({eid, pid, {n1,n2,n3,n4,n4,n4,n4,n4}, ElementType::TET4, false});
     };
 
     // Helper: add a sub-quad shell element
     auto addQuad = [&](int pid, int n1, int n2, int n3, int n4) {
-        int eid = ++maxElementId_;
+        int eid = bumpId(maxElementId_, "요소 번호");
         addedShellElements_.push_back({eid, pid, {n1,n2,n3,n4}});
     };
 
     // Helper: add a sub-tri shell element (N4=N3 convention)
     auto addTri = [&](int pid, int n1, int n2, int n3) {
-        int eid = ++maxElementId_;
+        int eid = bumpId(maxElementId_, "요소 번호");
         addedShellElements_.push_back({eid, pid, {n1,n2,n3,n3}});
     };
 
@@ -8537,7 +8556,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
                 int origId = ed.nodeIds[n];
                 double x, y, z;
                 getNodeXYZ(origId, x, y, z);
-                int newId = ++maxNodeId_;
+                int newId = bumpId(maxNodeId_, "절점 번호");
                 addedNodes_.push_back({newId, x, y, z});
                 newNodeIds[n] = newId;
                 newNodeCount++;
@@ -8636,7 +8655,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
                 } else {
                     double x, y, z;
                     getNodeXYZ(nid, x, y, z);
-                    int newId = ++maxNodeId_;
+                    int newId = bumpId(maxNodeId_, "절점 번호");
                     addedNodes_.push_back({newId, x, y, z});
                     nodePartRemap[{nid, pid}] = newId;
                     dupNodeCount++;
@@ -8676,10 +8695,10 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
         }
 
         if (op.mode == "czm") {
-            int cohPartId = op.cohesivePartId > 0 ? op.cohesivePartId : (++maxPartId_);
-            int cohSecIdSolid = ++maxSectionId_;
-            int cohSecIdShell = (shellInterPartFaces.empty()) ? cohSecIdSolid : (++maxSectionId_);
-            int cohMatId = ++maxMaterialId_;
+            int cohPartId = op.cohesivePartId > 0 ? op.cohesivePartId : (bumpId(maxPartId_, "파트 번호"));
+            int cohSecIdSolid = bumpId(maxSectionId_, "섹션 번호");
+            int cohSecIdShell = (shellInterPartFaces.empty()) ? cohSecIdSolid : (bumpId(maxSectionId_, "섹션 번호"));
+            int cohMatId = bumpId(maxMaterialId_, "재질 번호");
             int cohElemCount = 0;
 
             // --- Solid cohesive elements (ELFORM=19) ---
@@ -8713,7 +8732,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
                     auto itH = nodePartRemap.find({origNid, pidHigh});
                     cohNodes[4 + i] = (itH != nodePartRemap.end()) ? itH->second : origNid;
                 }
-                int cohEid = ++maxElementId_;
+                int cohEid = bumpId(maxElementId_, "요소 번호");
                 addedElements_.push_back({cohEid, cohPartId, cohNodes, ElementType::HEX8, false});
                 cohElemCount++;
             }
@@ -8738,7 +8757,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
                     auto itH = nodePartRemap.find({origNid, pidHigh});
                     cohNodes[4 + i] = (itH != nodePartRemap.end()) ? itH->second : origNid;
                 }
-                int cohEid = ++maxElementId_;
+                int cohEid = bumpId(maxElementId_, "요소 번호");
                 addedElements_.push_back({cohEid, cohPartId, cohNodes, ElementType::HEX8, false});
                 cohElemCount++;
             }
@@ -8785,7 +8804,8 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
             //   입도는 **SET_NODE 만**이다 — 매뉴얼상 SET 네임스페이스는 종류별이라 다른 종류의 큰 번호에
             //   끌려갈 이유가 없다.
             ids::UsedIds setUse;
-            setUse.raise(ids::Ns::SetNode, maxPartId_ + 999);           // 관례의 바닥 — 그 아래는 쓴 것으로 친다
+            setUse.raise(ids::Ns::SetNode, (int)std::min<long long>((long long)maxPartId_ + 999,
+                                                                   std::numeric_limits<int>::max()));   // 관례의 바닥 — 그 아래는 쓴 것으로 친다
             setUse.raise(ids::Ns::SetNode, bc_findMaxSetNodeId(rawLines_));
             setUse.raise(ids::Ns::SetNode, inclMax(bc_findMaxSetNodeId));   // 못 본 자리는 로더가 말했다
             ids::IdAllocator setIds(setUse);
@@ -8818,6 +8838,7 @@ bool ModelAssembler::applyDisconnect(const DisconnectOperation& op) {
                 constraintCount++;
             }
 
+            if (!setIds.overflow().empty() && idOverflow_.empty()) idOverflow_ = setIds.overflow();   // writeOutput 이 거절한다
             addedKeywordBlocks_.push_back(kwBlock.str());
             int totalIfaces = static_cast<int>(interPartFaces.size() + shellInterPartFaces.size());
             infoMessages.push_back("  Disconnect (mefem): " + std::to_string(totalIfaces) +
@@ -9170,7 +9191,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
     }
 
     // ---- 3. Resolve output PID -----------------------------------------
-    int outPid = op.outputPid > 0 ? op.outputPid : ++maxPartId_;
+    int outPid = op.outputPid > 0 ? op.outputPid : bumpId(maxPartId_, "파트 번호");
     if (op.outputPid > 0) maxPartId_ = std::max(maxPartId_, op.outputPid);
 
     // ---- 4. Mid-surface mode -------------------------------------------
@@ -9231,7 +9252,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             if (bestB < 0) { ++unmatched; continue; }
             auto tp_ = getNodePosition(tNid);
             auto bp_ = getNodePosition(bestB);
-            int midId = ++maxNodeId_;
+            int midId = bumpId(maxNodeId_, "절점 번호");
             addedNodes_.push_back({midId,
                 (tp_.x + bp_.x) * 0.5,
                 (tp_.y + bp_.y) * 0.5,
@@ -9243,7 +9264,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
         int emitted = 0, skipped = 0;
         for (const auto& tf : topFaces) {
             AddedShellElement s;
-            s.id = ++maxElementId_;
+            s.id = bumpId(maxElementId_, "요소 번호");
             s.pid = outPid;
             for (int& n : s.nodeIds) n = 0;
             bool ok = true;
@@ -9286,7 +9307,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
     int triCount = 0, quadCount = 0;
     for (const auto& f : *chosen) {
         AddedShellElement s;
-        s.id = ++maxElementId_;
+        s.id = bumpId(maxElementId_, "요소 번호");
         s.pid = outPid;
         for (int& n : s.nodeIds) n = 0;
         bool tri = (f[3] == f[2] || f[3] == 0 || f[3] == f[0]);
@@ -9430,12 +9451,12 @@ bool ModelAssembler::applyIGA(const IGAOperation& op, const std::string& outputP
         double offT = computeOff(tgt.bboxScaleT, lenT, rt);
 
         // 3. Allocate new IDs
-        int newId = ++maxPartId_;
+        int newId = bumpId(maxPartId_, "파트 번호");
         if (newId > maxSectionId_) maxSectionId_ = newId;
 
         // 4. Find original MID and copy material
         int origMid = findPartMid(pid);
-        int newMid = ++maxMaterialId_;
+        int newMid = bumpId(maxMaterialId_, "재질 번호");
         std::string matBlock;
         if (origMid > 0) {
             matBlock = extractMaterialBlock(origMid, newMid);
@@ -10136,9 +10157,9 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
     }
 
     // 2. Auto-assign IDs (placeholder - will implement getNextPartId later)
-    int actualPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
-    int actualSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
-    int actualMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+    int actualPid = (op.newPid > 0) ? op.newPid : (bumpId(maxPartId_, "파트 번호"));
+    int actualSecid = (op.newSecid > 0) ? op.newSecid : (bumpId(maxSectionId_, "섹션 번호"));
+    int actualMid = (op.newMid > 0) ? op.newMid : (bumpId(maxMaterialId_, "재질 번호"));
     // 명시 ID 도 카운터에 올린다 — 안 올리면 다층 offset 의 둘째 층·뒤 op 의 자동 번호가 모델 최대+1 부터 다시
     // 매겨져(new_pid 10 다음 층이 PID 2) 층이 많거나 명시값이 작으면 이 ID 와 겹친다
     maxPartId_ = std::max(maxPartId_, actualPid);
@@ -10203,7 +10224,7 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
                 int origNid = shell.nodeIds[i];
                 if (origNid <= 0 || shiftedNodeMap.count(origNid)) continue;
 
-                int newNid = ++maxNodeId_;
+                int newNid = bumpId(maxNodeId_, "절점 번호");
                 Vector3D origPos = getNodePosition(origNid);
                 Vector3D normal = perNodeNormals.count(origNid)
                     ? perNodeNormals[origNid] : offsetDir;
@@ -10319,8 +10340,8 @@ bool ModelAssembler::applyOffset(const OffsetOperation& op, double E, double nu)
             auto seg = [](const auto& n) {   // ShellElement(4칸) · AddedShellElement(8칸) 둘 다 앞 넷을 쓴다
                 return std::array<int, 4>{n[0], n[1], n[2], n[3] > 0 ? n[3] : n[2]};   // 삼각형은 n4 = n3
             };
-            const int ssid = ++maxSetId_;
-            const int msid = ++maxSetId_;
+            const int ssid = bumpId(maxSetId_, "세트 번호");
+            const int msid = bumpId(maxSetId_, "세트 번호");
             auto setBlock = [](int sid, const std::vector<std::array<int, 4>>& segs) {
                 std::ostringstream ss;
                 ss << "*SET_SEGMENT\n$#     sid\n" << std::setw(10) << sid << "\n";
@@ -10972,7 +10993,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
                 if (bottomToTopNodes[layer][origNid] == 0) {
                     // Create new node
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
                     Vector3D newPos = origPos + direction * (layerThickness * layer);
 
@@ -11005,7 +11026,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
     for (const auto& shell : surface) {
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
-            elem.id = ++maxElementId_;
+            elem.id = bumpId(maxElementId_, "요소 번호");
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
@@ -11073,7 +11094,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 int origNid = shell.nodeIds[i];
 
                 if (bottomToTopNodes[layer][origNid] == 0) {
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
                     Vector3D newPos = origPos + direction * (layerThickness * layer);
 
@@ -11108,7 +11129,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
-            elem.id = ++maxElementId_;
+            elem.id = bumpId(maxElementId_, "요소 번호");
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
@@ -11188,7 +11209,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
                 if (bottomToTopNodes[layer][origNid] == 0) {
                     // Create new node using THIS node's local normal
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
 
                     // Look up the per-node direction
@@ -11238,7 +11259,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
-            elem.id = ++maxElementId_;
+            elem.id = bumpId(maxElementId_, "요소 번호");
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
@@ -11313,7 +11334,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 int origNid = shell.nodeIds[i];
 
                 if (bottomToTopNodes[layer][origNid] == 0) {
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
 
                     // Get THIS node's thickness
@@ -11352,7 +11373,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
-            elem.id = ++maxElementId_;
+            elem.id = bumpId(maxElementId_, "요소 번호");
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
@@ -11424,7 +11445,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
                 int origNid = shell.nodeIds[i];
 
                 if (bottomToTopNodes[layer][origNid] == 0) {
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
 
                     // Get THIS node's direction
@@ -11482,7 +11503,7 @@ void ModelAssembler::extrudeToSolid(const std::vector<ShellElement>& surface,
 
         for (int layer = 0; layer < numLayers; ++layer) {
             AddedElement elem;
-            elem.id = ++maxElementId_;
+            elem.id = bumpId(maxElementId_, "요소 번호");
             elem.pid = newPid;
             elem.type = ElementType::HEX8;
 
@@ -11633,7 +11654,7 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
             std::vector<int> layerNodes{nid};
 
             for (int layer = 1; layer <= numLayers; ++layer) {
-                int newNid = ++maxNodeId_;
+                int newNid = bumpId(maxNodeId_, "절점 번호");
                 Vector3D offsetPos = basePos + direction * (layer * layerThickness);
 
                 AddedNode an;
@@ -11660,7 +11681,7 @@ void ModelAssembler::extrudeToTShell(const std::vector<ShellElement>& surface,
             auto bot = [&](int k) { return nodeLayerMap[shell.nodeIds[k]][layer]; };
             auto top = [&](int k) { return nodeLayerMap[shell.nodeIds[k]][layer + 1]; };
             AddedElement ae;
-            ae.id = ++maxElementId_;
+            ae.id = bumpId(maxElementId_, "요소 번호");
             ae.pid = newPid;
             ae.isTshell = true;
             if (isTria) {
@@ -11699,7 +11720,7 @@ void ModelAssembler::createOffsetShell(const std::vector<ShellElement>& surface,
             Vector3D basePos = getNodePosition(nid);
             Vector3D offsetPos = basePos + direction * offset;
 
-            int newNid = ++maxNodeId_;
+            int newNid = bumpId(maxNodeId_, "절점 번호");
             AddedNode an;
             an.id = newNid;
             an.x = offsetPos.x;
@@ -11713,7 +11734,7 @@ void ModelAssembler::createOffsetShell(const std::vector<ShellElement>& surface,
     // Create shell elements
     for (const auto& shell : surface) {
         AddedShellElement newShell;
-        newShell.id = ++maxElementId_;
+        newShell.id = bumpId(maxElementId_, "요소 번호");
         newShell.pid = newPid;
         newShell.elform = 2;  // Standard QUAD4/TRIA3
 
@@ -11751,9 +11772,9 @@ void ModelAssembler::applyConnectionCZM(
     std::vector<AddedElement>& offsetElements,
     const OffsetOperation& op) {
 
-    int czmPid = op.czmPartId > 0 ? op.czmPartId : ++maxPartId_;
+    int czmPid = op.czmPartId > 0 ? op.czmPartId : bumpId(maxPartId_, "파트 번호");
     int czmSecid = czmPid;
-    int czmMid = op.czmMid > 0 ? op.czmMid : ++maxMaterialId_;
+    int czmMid = op.czmMid > 0 ? op.czmMid : bumpId(maxMaterialId_, "재질 번호");
 
     std::cout << "[INFO] Connection mode: czm (cohesive elements, PID=" << czmPid << ")\n";
 
@@ -11764,7 +11785,7 @@ void ModelAssembler::applyConnectionCZM(
             int nid = shell.nodeIds[i];
             if (nid <= 0) continue;
             if (origNodeToDupNode.find(nid) == origNodeToDupNode.end()) {
-                int newNid = ++maxNodeId_;
+                int newNid = bumpId(maxNodeId_, "절점 번호");
                 Vector3D pos = getNodePosition(nid);
 
                 AddedNode an;
@@ -11791,7 +11812,7 @@ void ModelAssembler::applyConnectionCZM(
     // 3. Create cohesive elements
     for (const auto& shell : sourceSurface) {
         AddedElement cohElem;
-        cohElem.id = ++maxElementId_;
+        cohElem.id = bumpId(maxElementId_, "요소 번호");
         cohElem.pid = czmPid;
         cohElem.type = ElementType::HEX8;
 
@@ -11837,7 +11858,7 @@ void ModelAssembler::applyConnectionContact(
             int origNid = elem.nodeIds[i];
 
             if (origNodeToNewNode.find(origNid) == origNodeToNewNode.end()) {
-                int newNid = ++maxNodeId_;
+                int newNid = bumpId(maxNodeId_, "절점 번호");
                 Vector3D pos = getNodePosition(origNid);
 
                 AddedNode an;
@@ -11907,14 +11928,14 @@ bool ModelAssembler::applyMultiMaterialOffset(const OffsetOperation& op, double 
         // Auto-assign IDs for this layer
         if (layerIdx == 0) {
             // First layer uses specified IDs or auto
-            layerOp.newPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
-            layerOp.newSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
-            layerOp.newMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+            layerOp.newPid = (op.newPid > 0) ? op.newPid : (bumpId(maxPartId_, "파트 번호"));
+            layerOp.newSecid = (op.newSecid > 0) ? op.newSecid : (bumpId(maxSectionId_, "섹션 번호"));
+            layerOp.newMid = (op.newMid > 0) ? op.newMid : (bumpId(maxMaterialId_, "재질 번호"));
         } else {
             // Subsequent layers always auto-increment
-            layerOp.newPid = ++maxPartId_;
-            layerOp.newSecid = ++maxSectionId_;
-            layerOp.newMid = ++maxMaterialId_;
+            layerOp.newPid = bumpId(maxPartId_, "파트 번호");
+            layerOp.newSecid = bumpId(maxSectionId_, "섹션 번호");
+            layerOp.newMid = bumpId(maxMaterialId_, "재질 번호");
         }
 
         // Apply single-layer offset
@@ -11952,9 +11973,9 @@ bool ModelAssembler::applyDualOffsetPrestress(const OffsetOperation& op, double 
     }
 
     // 2. Auto-assign IDs
-    int actualPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
-    int actualSecid = (op.newSecid > 0) ? op.newSecid : (++maxSectionId_);
-    int actualMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
+    int actualPid = (op.newPid > 0) ? op.newPid : (bumpId(maxPartId_, "파트 번호"));
+    int actualSecid = (op.newSecid > 0) ? op.newSecid : (bumpId(maxSectionId_, "섹션 번호"));
+    int actualMid = (op.newMid > 0) ? op.newMid : (bumpId(maxMaterialId_, "재질 번호"));
 
     // 3. Extract source surface
     std::vector<ShellElement> sourceSurface;
@@ -11979,7 +12000,7 @@ bool ModelAssembler::applyDualOffsetPrestress(const OffsetOperation& op, double 
                 int origNid = shell.nodeIds[i];
                 if (origNid <= 0) continue;
                 if (origToBottomNode.find(origNid) == origToBottomNode.end()) {
-                    int newNid = ++maxNodeId_;
+                    int newNid = bumpId(maxNodeId_, "절점 번호");
                     Vector3D origPos = getNodePosition(origNid);
                     Vector3D normal = computeShellNormal(shell);
 
@@ -12152,16 +12173,16 @@ void ModelAssembler::createCzmElementsForDualOffset(
     const std::map<int, int>& origToBottomNode,
     const OffsetOperation& op) {
 
-    int czmPid = op.czmPartId > 0 ? op.czmPartId : ++maxPartId_;
+    int czmPid = op.czmPartId > 0 ? op.czmPartId : bumpId(maxPartId_, "파트 번호");
     int czmSecid = czmPid;
-    int czmMid = ++maxMaterialId_;
+    int czmMid = bumpId(maxMaterialId_, "재질 번호");
 
     std::cout << "[INFO] Creating CZM elements for dual offset (PID=" << czmPid << ")\n";
 
     // Create cohesive elements
     for (const auto& shell : sourceSurface) {
         AddedElement cohElem;
-        cohElem.id = ++maxElementId_;
+        cohElem.id = bumpId(maxElementId_, "요소 번호");
         cohElem.pid = czmPid;
         cohElem.type = ElementType::HEX8;
 
@@ -12641,10 +12662,11 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         if (p.type!='I' && p.type!='R') continue;
         std::string idt = mw_idType(p.name);
         int newVal;
-        if      (idt=="HGID")  newVal = ++maxHGID;
-        else if (idt=="LCID")  newVal = ++maxLCID;
-        else if (idt=="SECID") newVal = ++maxSECID;
-        else if (idt=="MID")   newVal = (reuseableMid>0) ? reuseableMid : ++maxMID;
+        // 새 번호는 bumpId 로 — 정수 상한이면 올리지 않고 writeOutput 이 거절한다(예전엔 -2147483648 의 SECID 를 rc 0 으로 냈다)
+        if      (idt=="HGID")  newVal = bumpId(maxHGID, "HGID");
+        else if (idt=="LCID")  newVal = bumpId(maxLCID, "LCID");
+        else if (idt=="SECID") newVal = bumpId(maxSECID, "섹션 번호");
+        else if (idt=="MID")   newVal = (reuseableMid>0) ? reuseableMid : bumpId(maxMID, "재질 번호");
         else if (idt=="PID")   continue;
         else                   newVal = p.ivalue;
         remap[p.name] = newVal;
@@ -14593,7 +14615,8 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
     }
 
     // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
-    int nextSetId = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId)) + 1;
+    // 세트 커서는 마지막으로 낸 번호를 든다 — 새 번호는 bumpId(정수 상한에서 멈추고 writeOutput 이 거절 · 2026-11-22)
+    int setCursor = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId));
     int nextCurveId = std::max(ld_findMaxCurveId(rawLines_), inclMax(ld_findMaxCurveId)) + 1;
     std::vector<std::string> insertBlocks;
     int loadCount = 0;
@@ -14764,7 +14787,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
         // 6. Generate SET_SEGMENT (only if we need a new one)
         int ssid = existingSetId;
         if (ssid == 0) {
-            ssid = nextSetId++;
+            ssid = bumpId(setCursor, "세트 번호");
             std::string title = "Load_PID" + std::to_string(pid) + "_" + lc.mode;
             insertBlocks.push_back(ld_generateSetSegment(ssid, selectedFaces, title));
         }
@@ -14783,7 +14806,7 @@ bool ModelAssembler::applyLoad(const LoadOperation& op) {
     if (!insertBlocks.empty()) {
         deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
     }
-    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
+    maxSetId_ = std::max(maxSetId_, setCursor);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[load] Applied " + std::to_string(loadCount) + " load case(s)");
     return true;
@@ -15239,7 +15262,8 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
     }
 
     // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
-    int nextSetId = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId)) + 1;
+    // 세트 커서는 마지막으로 낸 번호를 든다 — 새 번호는 bumpId(정수 상한에서 멈추고 writeOutput 이 거절 · 2026-11-22)
+    int setCursor = std::max(ld_findMaxSetSegmentId(rawLines_), inclMax(ld_findMaxSetSegmentId));
     // 새 접촉 CID 는 덱의 기존 `_ID` CID **위로** 발행한다(단독 contact 와 같은 규율).
     int nextContactId = std::max(ct_findMaxContactId(rawLines_), inclMax(ct_findMaxContactId)) + 1;
     std::vector<std::string> insertBlocks;
@@ -15298,11 +15322,11 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         for (int idx : sIdxSet) sFaces.push_back(sFacesAll[idx]);
                         for (int idx : mIdxSet) mFaces.push_back(mFacesAll[idx]);
 
-                        ssid = nextSetId++;
+                        ssid = bumpId(setCursor, "세트 번호");
                         insertBlocks.push_back(ld_generateSetSegment(ssid, sFaces,
                             "Slave_PID" + std::to_string(slavePids[0]) + "_facing"));
                         sstyp = 0;
-                        msid = nextSetId++;
+                        msid = bumpId(setCursor, "세트 번호");
                         insertBlocks.push_back(ld_generateSetSegment(msid, mFaces,
                             "Master_PID" + std::to_string(masterPids[0]) + "_facing"));
                         mstyp = 0;
@@ -15316,7 +15340,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         auto f = ld_extractSurface(baseMesh_, pid);
                         allFaces.insert(allFaces.end(), f.begin(), f.end());
                     }
-                    ssid = nextSetId++;
+                    ssid = bumpId(setCursor, "세트 번호");
                     insertBlocks.push_back(ld_generateSetSegment(ssid, allFaces,
                         "Slave_PID" + std::to_string(slavePids[0])));
                     sstyp = 0;
@@ -15329,7 +15353,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                         auto f = ld_extractSurface(baseMesh_, pid);
                         allFaces.insert(allFaces.end(), f.begin(), f.end());
                     }
-                    msid = nextSetId++;
+                    msid = bumpId(setCursor, "세트 번호");
                     insertBlocks.push_back(ld_generateSetSegment(msid, allFaces,
                         "Master_PID" + std::to_string(masterPids[0])));
                     mstyp = 0;
@@ -15379,10 +15403,10 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                     for (int idx : sIdxSet) sf.push_back(sFaces[idx]);
                     for (int idx : mIdxSet) mf.push_back(mFaces[idx]);
 
-                    int sid1 = nextSetId++;
+                    int sid1 = bumpId(setCursor, "세트 번호");
                     insertBlocks.push_back(ld_generateSetSegment(sid1, sf,
                         "Detect_Slave_PID" + std::to_string(act.slave.pid)));
-                    int sid2 = nextSetId++;
+                    int sid2 = bumpId(setCursor, "세트 번호");
                     insertBlocks.push_back(ld_generateSetSegment(sid2, mf,
                         "Detect_Master_PID" + std::to_string(act.master.pid)));
 
@@ -15450,10 +15474,10 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
                               << " (" << sf.size() << "+" << mf.size() << " segments)\n";
 
                     if (act.autoCreate) {
-                        int sid1 = nextSetId++;
+                        int sid1 = bumpId(setCursor, "세트 번호");
                         insertBlocks.push_back(ld_generateSetSegment(sid1, sf,
                             "Detect_Slave_PID" + std::to_string(pidA)));
-                        int sid2 = nextSetId++;
+                        int sid2 = bumpId(setCursor, "세트 번호");
                         insertBlocks.push_back(ld_generateSetSegment(sid2, mf,
                             "Detect_Master_PID" + std::to_string(pidB)));
 
@@ -15481,7 +15505,7 @@ bool ModelAssembler::applyContact(const ContactOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
-    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
+    maxSetId_ = std::max(maxSetId_, setCursor);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[contact] Applied " + std::to_string(contactCount) + " contact(s)");
     return true;
@@ -15620,7 +15644,8 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
 
     // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
     int maxSetNodeId = std::max(bc_findMaxSetNodeId(rawLines_), inclMax(bc_findMaxSetNodeId));
-    int nextSetId = maxSetNodeId + 1;
+    // 세트 커서는 마지막으로 낸 번호를 든다 — 새 번호는 bumpId(정수 상한에서 멈추고 writeOutput 이 거절 · 2026-11-22)
+    int setCursor = maxSetNodeId;
     std::vector<std::string> insertBlocks;
     int bcCount = 0;
 
@@ -15678,7 +15703,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
             }
 
             // Generate SET_NODE
-            usedSetId = nextSetId++;
+            usedSetId = bumpId(setCursor, "세트 번호");
             std::string title = "BC_PID" + std::to_string(pid) + "_" + bc.dof;
             insertBlocks.push_back(bc_generateSetNode(usedSetId, nodeIds, title));
         }
@@ -15698,7 +15723,7 @@ bool ModelAssembler::applyBoundary(const BoundaryOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
-    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
+    maxSetId_ = std::max(maxSetId_, setCursor);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[boundary] Applied " + std::to_string(bcCount) + " boundary condition(s)");
     return true;
@@ -15846,7 +15871,8 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
 
     // 인클루드 파일도 같은 스캐너로 센다(`inclMax`) — 이미 있는 번호를 다시 내지 않게
     int maxSetNodeId = std::max(bc_findMaxSetNodeId(rawLines_), inclMax(bc_findMaxSetNodeId));
-    int nextSetId = maxSetNodeId + 1;
+    // 세트 커서는 마지막으로 낸 번호를 든다 — 새 번호는 bumpId(정수 상한에서 멈추고 writeOutput 이 거절 · 2026-11-22)
+    int setCursor = maxSetNodeId;
     int nextCnrbPid = std::max(rbe_findMaxCnrbPid(rawLines_), inclMax(rbe_findMaxCnrbPid)) + 1;
     int nextIcid = std::max(rbe_findMaxIcid(rawLines_), inclMax(rbe_findMaxIcid)) + 1;
     std::vector<std::string> insertBlocks;
@@ -15918,7 +15944,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
             cx /= validCount; cy /= validCount; cz /= validCount;
 
             // Create centroid node
-            int centroidNid = ++maxNodeId_;
+            int centroidNid = bumpId(maxNodeId_, "절점 번호");
             addedNodes_.push_back({centroidNid, cx, cy, cz});
             nodesCreated++;
 
@@ -15931,7 +15957,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
                 std::vector<int> allNodes;
                 allNodes.push_back(centroidNid);
                 allNodes.insert(allNodes.end(), nodeIds.begin(), nodeIds.end());
-                int setId = nextSetId++;
+                int setId = bumpId(setCursor, "세트 번호");
                 std::string setTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
                 insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
                 std::string cnrbTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
@@ -15951,7 +15977,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
                 const auto& face = selectedFaces[fi];
 
                 // Create centroid node for this face
-                int centroidNid = ++maxNodeId_;
+                int centroidNid = bumpId(maxNodeId_, "절점 번호");
                 addedNodes_.push_back({centroidNid,
                     finfo.centroid[0], finfo.centroid[1], finfo.centroid[2]});
                 nodesCreated++;
@@ -15970,7 +15996,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
                     std::vector<int> allNodes;
                     allNodes.push_back(centroidNid);
                     allNodes.insert(allNodes.end(), cornerNodes.begin(), cornerNodes.end());
-                    int setId = nextSetId++;
+                    int setId = bumpId(setCursor, "세트 번호");
                     std::string setTitle = "RBE2_PID" + std::to_string(pid)
                                          + "_face" + std::to_string(fi);
                     insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
@@ -15987,7 +16013,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
 
     // 주 덱의 첫 *END 앞에 한 번(없으면 끝에)
     if (!insertBlocks.empty()) deckscan::insertBeforeFirstEnd(rawLines_, insertBlocks);
-    maxSetId_ = std::max(maxSetId_, nextSetId - 1);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
+    maxSetId_ = std::max(maxSetId_, setCursor);   // 공용 세트 커서도 올린다 — 뒤 op(battery …)이 이 세트를 센다(2026-11-08 · G1)
 
     infoMessages.push_back("[rbe] Created " + std::to_string(rbeCount)
         + " constraint(s), " + std::to_string(nodesCreated) + " centroid node(s)");
@@ -18000,7 +18026,7 @@ void ModelAssembler::fixNegativeJacobianElements(const std::vector<int>& pids) {
                 }
             }
 
-            ++maxElementId_;
+            bumpId(maxElementId_, "요소 번호");
             AddedElement tet;
             tet.id = maxElementId_;
             tet.pid = pid;
@@ -18625,7 +18651,7 @@ bool ModelAssembler::applySplit(const SplitOperation& op) {
         double my = by + t * (ty - by);
         double mz = bz + t * (tz - bz);
 
-        int nid = ++maxNodeId_;
+        int nid = bumpId(maxNodeId_, "절점 번호");
         addedNodes_.push_back({nid, mx, my, mz});
         midNodeMap[key] = nid;
         return nid;
@@ -18688,7 +18714,7 @@ bool ModelAssembler::applySplit(const SplitOperation& op) {
                 newNids[fpElem.topLocal[c]] = layerNids[sub + 1][c];
             }
 
-            int newEid = ++maxElementId_;
+            int newEid = bumpId(maxElementId_, "요소 번호");
             addedElements_.push_back({newEid, ei.pid, newNids, ei.etype, false});
         }
         ++splitCount;
@@ -19244,9 +19270,9 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
     else E_hom = 0.5 * (E_voigt + E_reuss);
 
     // Assign IDs
-    int newPid = (op.newPid > 0) ? op.newPid : (++maxPartId_);
-    int newMid = (op.newMid > 0) ? op.newMid : (++maxMaterialId_);
-    int newSec = ++maxSectionId_;
+    int newPid = (op.newPid > 0) ? op.newPid : (bumpId(maxPartId_, "파트 번호"));
+    int newMid = (op.newMid > 0) ? op.newMid : (bumpId(maxMaterialId_, "재질 번호"));
+    int newSec = bumpId(maxSectionId_, "섹션 번호");
 
     // Create merged elements — split each column into op.layers groups
     int nLayers = std::max(1, op.layers);
@@ -19321,7 +19347,7 @@ bool ModelAssembler::applyMerge(const MergeOperation& op) {
             }
 
             AddedElement ne;
-            ne.id = ++maxElementId_;
+            ne.id = bumpId(maxElementId_, "요소 번호");
             ne.pid = newPid;
             ne.type = ElementType::HEX8;
             for (int i=0;i<4;i++) ne.nodeIds[i] = sortedBot[i];

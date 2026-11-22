@@ -38,6 +38,13 @@ namespace ids {
 //   Contact — `*CONTACT_*_ID` 의 CID
 enum class Ns { Set, SetNode, Contact };
 
+// LS-DYNA 정수 상한(Vol_I 19325 — 단정밀 정수의 절댓값 2,147,483,647)을 넘는 새 번호의 까닭 글 — 모든 발행자가 같은 문구를 쓴다
+// (tetremesh · id_floor 의 2026-11-21 문구와 같다).
+inline std::string limitWhy(const std::string& what, long long value) {
+    return what + " " + std::to_string(value) + " — LS-DYNA 정수 상한 2147483647 을 넘는다. 이 덱 위로는 번호를 더 낼 수 "
+           "없다 — 덱의 번호를 낮춘 뒤 다시 돌린다";
+}
+
 inline const char* nameOf(Ns ns) {
     return ns == Ns::Set ? "SET" : ns == Ns::SetNode ? "SET_NODE" : "CONTACT";
 }
@@ -104,17 +111,25 @@ class IdAllocator {
 public:
     explicit IdAllocator(UsedIds used) : used_(std::move(used)) {}
 
+    // 다음 번호 — 정수 상한을 넘게 되면 상한을 돌려주고 `overflow()` 에 까닭을 적는다(부르는 쪽이 보고 쓰지 않는다 · 2026-11-22).
+    // 예전엔 `최대값 + 1` 이 넘쳐 음수 번호의 세트를 냈다
     int issue(Ns ns) {
         auto it = next_.find(ns);
-        if (it == next_.end()) it = next_.emplace(ns, used_.maxOf(ns) + 1).first;
-        return it->second++;
+        if (it == next_.end()) it = next_.emplace(ns, (long long)used_.maxOf(ns) + 1).first;
+        if (it->second > 2147483647LL) {
+            if (overflow_.empty()) overflow_ = limitWhy(std::string(nameOf(ns)) + " 번호", it->second);
+            return 2147483647;
+        }
+        return (int)it->second++;
     }
+    const std::string& overflow() const { return overflow_; }
 
     const UsedIds& used() const { return used_; }
 
 private:
     UsedIds used_;
-    std::map<Ns, int> next_;
+    std::map<Ns, long long> next_;
+    std::string overflow_;
 };
 
 }  // namespace ids

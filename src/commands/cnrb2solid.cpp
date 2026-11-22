@@ -18,6 +18,7 @@
 #include <set>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -394,6 +395,17 @@ static void cs_noteWidth(int v, const char* what) {
     }
 }
 
+// 새 번호 커서 — 정수 상한이면 올리지 않고 까닭을 적는다(쓰기 관문이 거절 · 2026-11-22). 예전의 `++커서` 는 상한에서 넘쳐
+// -2147483648 부터의 절점 · 솔리드를 rc 0 으로 냈다(I10 덱의 번호가 상한일 때)
+static std::string cs_idOverflow;
+static int cs_bump(int& cursor, const char* what) {
+    if (cursor >= std::numeric_limits<int>::max()) {
+        if (cs_idOverflow.empty()) cs_idOverflow = KooRemapper::ids::limitWhy(what, (long long)cursor + 1);
+        return cursor;
+    }
+    return ++cursor;
+}
+
 static std::string cs_fmtNode(int nid, double x, double y, double z) {
     cs_noteWidth(nid, "노드");
     char buf[128];
@@ -668,7 +680,7 @@ static bool cs_convertOneCnrb(
                 Vec3 pos = cs_add(cs_add(zCenter,
                                   cs_scale(perp1, xl)),
                                   cs_scale(perp2, yl));
-                ++nodeId;
+                cs_bump(nodeId, "새 절점 번호");
                 zn.core[ci*(m+1)+cj] = nodeId;
                 result.nodeLines.push_back(cs_fmtNode(nodeId, pos.x, pos.y, pos.z));
             }
@@ -683,7 +695,7 @@ static bool cs_convertOneCnrb(
                 Vec3 pos = cs_add(cs_add(zCenter,
                                   cs_scale(perp1, R_ring*std::cos(theta))),
                                   cs_scale(perp2, R_ring*std::sin(theta)));
-                ++nodeId;
+                cs_bump(nodeId, "새 절점 번호");
                 zn.rings[ri][k] = nodeId;
                 result.nodeLines.push_back(cs_fmtNode(nodeId, pos.x, pos.y, pos.z));
             }
@@ -718,7 +730,7 @@ static bool cs_convertOneCnrb(
                 int t1 = znTop.core[(ci+1)*(m+1)+ cj  ];
                 int t2 = znTop.core[(ci+1)*(m+1)+(cj+1)];
                 int t3 = znTop.core[ ci   *(m+1)+(cj+1)];
-                ++elemId;
+                cs_bump(elemId, "새 요소 번호");
                 result.elemLines.push_back(cs_fmtHex8(elemId, cnrb.pid,
                     b0, b1, b2, b3, t0, t1, t2, t3));
             }
@@ -755,7 +767,7 @@ static bool cs_convertOneCnrb(
                 int t1 = znTop.rings[0][kn];
                 int t2 = coreBoundaryTop[kn];
                 int t3 = coreBoundaryTop[k];
-                ++elemId;
+                cs_bump(elemId, "새 요소 번호");
                 result.elemLines.push_back(cs_fmtHex8(elemId, cnrb.pid,
                     b0, b1, b2, b3, t0, t1, t2, t3));
             }
@@ -774,7 +786,7 @@ static bool cs_convertOneCnrb(
                 int t1 = znTop.rings[ri][kn];
                 int t2 = znTop.rings[ri-1][kn];
                 int t3 = znTop.rings[ri-1][k];
-                ++elemId;
+                cs_bump(elemId, "새 요소 번호");
                 result.elemLines.push_back(cs_fmtHex8(elemId, cnrb.pid,
                     b0, b1, b2, b3, t0, t1, t2, t3));
             }
@@ -782,8 +794,8 @@ static bool cs_convertOneCnrb(
     }
 
     // --- 11. Part, Section, Material ---
-    ++secId;
-    ++matId;
+    cs_bump(secId, "새 섹션 번호");
+    cs_bump(matId, "새 재질 번호");
 
     result.partLines.push_back("*PART");
     result.partLines.push_back(cnrb.title.empty() ? "CNRB_" + std::to_string(cnrb.pid) + "_Solid" : cnrb.title + "_Solid");
@@ -810,7 +822,7 @@ static bool cs_convertOneCnrb(
     }
 
     // --- 12. Tied Contact (original hole nodes ↔ new solid part) ---
-    ++setId;
+    cs_bump(setId, "새 세트 번호");
 
     // SET_NODE_LIST for original CNRB nodes
     result.setLines.push_back("*SET_NODE_LIST_TITLE");
@@ -831,7 +843,7 @@ static bool cs_convertOneCnrb(
     // CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET — CID 는 덱(과 인클루드)의 기존 `_ID` CID **위로** 낸다.
     // 예전에는 함수 안 `static` 카운터가 1 부터 냈다 — 덱의 기존 접촉 CID 1 과 겹쳤다(재현 rc 0). 같은 CID 가
     // 둘이면 LS-DYNA 가 키워드 단계에서 멈춘다(단독 contact 와 같은 규율).
-    const int contactId = ++contactCursor;
+    const int contactId = cs_bump(contactCursor, "새 접촉 번호");
     result.contactLines.push_back("*CONTACT_TIED_SURFACE_TO_SURFACE_OFFSET_ID");
     {
         char buf[64]; snprintf(buf, sizeof(buf), "%10d", contactId);
@@ -868,6 +880,7 @@ int cnrb2solid_convert(std::vector<std::string>& lines,
     //   다시 읽는 쪽은 칸을 어긋나게 자른다(ElementCardLayout.h:54 가 경고한 그 사고).
     cs_fieldWidth = KooRemapper::deckFieldWidth(lines);
     cs_widthOverflow.clear();
+    cs_idOverflow.clear();
     cs_widthOverflowCount = 0;
     cs_widthOverflowMax = 0;
 
@@ -1182,6 +1195,10 @@ int runCnrb2Solid(const std::string& yamlFile, ConsoleOutput& console) {
     // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.
     // 8칸을 넘긴 ID 가 있으면 **파일을 쓰지 않는다.** 잘라 쓰면 다음 칸을 침범하고, 그 덱은
     // LS-DYNA 가 엉뚱한 노드를 읽는다 — 성공을 보고하며 틀린 답을 내는 것보다 멈추는 것이 낫다.
+    if (!cs_idOverflow.empty()) {   // 새 번호가 정수 상한을 넘게 됐다 — 쓰지 않는다
+        console.error("[cnrb2solid] " + cs_idOverflow + " — 출력 파일을 쓰지 않았습니다: " + outPath);
+        return 1;
+    }
     if (!cs_widthOverflow.empty()) {
         console.error("[cnrb2solid] 8칸을 넘긴 ID " + std::to_string(cs_widthOverflowCount) +
                       "건(최대 " + std::to_string(cs_widthOverflowMax) + ") — 예: " + cs_widthOverflow +

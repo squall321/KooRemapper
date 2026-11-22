@@ -37,6 +37,7 @@
 #include <set>
 #include <array>
 #include <algorithm>
+#include <limits>
 #include <queue>
 #include <cmath>
 #include <cstdlib>
@@ -1588,10 +1589,18 @@ static void buildFinalMesh(const Mesh& mesh, int pid,
                             std::vector<FinalNode>& finalNodes,
                             std::vector<FinalElem>& finalElems,
                             int& nodesAdded, int& elemsAdded,
-                            ConsoleOutput& console) {
-    // 인클루드에 이미 있는 번호 위로 낸다(쪼갠 덱 = 쪼개지 않은 덱)
-    int maxNid = std::max(mesh.getMaxNodeId(), cfg.idFloorNode);
-    int maxEid = std::max(mesh.getMaxElementId(), cfg.idFloorElem);
+                            ConsoleOutput& console, std::string& idWhy) {
+    // 인클루드에 이미 있는 번호 위로 낸다(쪼갠 덱 = 쪼개지 않은 덱). 번호는 long long 으로 세고 정수 상한을 넘으면 `idWhy` 에
+    // 적는다 — 예전엔 `최대값 + 1 + 차례` 가 넘쳐 -2147483648 부터의 절점 · 요소를 rc 0 으로 썼다(2026-11-22)
+    const long long maxNid = std::max(mesh.getMaxNodeId(), cfg.idFloorNode);
+    const long long maxEid = std::max(mesh.getMaxElementId(), cfg.idFloorElem);
+    auto idOf = [&](long long v, const char* what) -> int {
+        if (v > std::numeric_limits<int>::max()) {
+            if (idWhy.empty()) idWhy = KooRemapper::ids::limitWhy(what, v);
+            return std::numeric_limits<int>::max();
+        }
+        return (int)v;
+    };
 
     std::map<int,int> gmshToFinal; // gmsh_id → final model node ID
 
@@ -1607,7 +1616,7 @@ static void buildFinalMesh(const Mesh& mesh, int pid,
             if (it != bndMap.end()) {
                 gmshToFinal[gn.id] = it->second; // keep original ID
             } else {
-                int newId = maxNid + 1 + counter++;
+                int newId = idOf(maxNid + 1 + counter++, "새 절점 번호");
                 gmshToFinal[gn.id] = newId;
                 finalNodes.push_back({newId, gn.x, gn.y, gn.z});
             }
@@ -1616,7 +1625,7 @@ static void buildFinalMesh(const Mesh& mesh, int pid,
         // free / snap: all gmsh nodes → new IDs
         int counter = 0;
         for (auto& gn : gmshNodes) {
-            int newId = maxNid + 1 + counter++;
+            int newId = idOf(maxNid + 1 + counter++, "새 절점 번호");
             gmshToFinal[gn.id] = newId;
             finalNodes.push_back({newId, gn.x, gn.y, gn.z});
         }
@@ -1665,7 +1674,7 @@ static void buildFinalMesh(const Mesh& mesh, int pid,
     int eCounter = 0;
     for (auto& ge : gmshElems) {
         FinalElem fe;
-        fe.id = maxEid + 1 + eCounter++;
+        fe.id = idOf(maxEid + 1 + eCounter++, "새 요소 번호");
         bool ok = true;
         for (int i=0;i<4;++i) {
             auto it = gmshToFinal.find(ge.nodes[i]);
@@ -2547,10 +2556,16 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     std::vector<FinalNode> finalNodes;
     std::vector<FinalElem> finalElems;
     int nodesAdded=0, elemsAdded=0;
+    std::string idWhy;
     buildFinalMesh(mesh, cfg.pid, cfg,
                    gmshNodes, gmshElems,
                    finalNodes, finalElems,
-                   nodesAdded, elemsAdded, console);
+                   nodesAdded, elemsAdded, console, idWhy);
+    if (!idWhy.empty()) {   // 정수 상한 — 쓰지 않는다(gmsh 가 쓴 임시 파일도 지운다 — 아래 쓰기 길과 같다)
+        for (auto& p : {stlPath, geoPath, mshPath, logPath}) { std::error_code ec; fs::remove(p, ec); }
+        console.error("[meshfix] " + idWhy + " — 출력 파일을 쓰지 않았습니다");
+        return 1;
+    }
     console.keyValue("Nodes added to model",    std::to_string(nodesAdded));
     console.keyValue("Elements added to model", std::to_string(elemsAdded));
 

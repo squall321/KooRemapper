@@ -1149,16 +1149,18 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         console.println("  열지 못한 파일: " + names);
     }
     // 스칼라 절점(`*NODE_SCALAR` — 리더가 담지 않는다)의 번호 위로도 — 번호는 `*NODE` 와 겹치면 안 된다(셋째 묶음)
-    int nextNid  = std::max({mesh.getMaxNodeId(), inclReaderMax.node, KooRemapper::scalarNodeMaxId(lines)}) + 1;
-    int nextEid  = std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
-    int nextSec  = std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
+    // 커서는 long long 으로 센다 — 최대값이 정수 상한이면 `+ 1` 이 넘쳐 음수 번호를 냈다(2026-11-22 · 보고의 new_mid · new_secid
+    // -2147483648). 끝 번호가 상한을 넘으면 산출을 쓰기 전에 멈춘다(아래 「정수 상한」)
+    long long nextNid  = (long long)std::max({mesh.getMaxNodeId(), inclReaderMax.node, KooRemapper::scalarNodeMaxId(lines)}) + 1;
+    long long nextEid  = (long long)std::max(mesh.getMaxElementId(), inclReaderMax.elem) + 1;
+    long long nextSec  = (long long)std::max(cc_scanMaxId(scanLines, "*SECTION"), 0) + 1;
     // MID 는 공용 재질 훑기로 센다(열 재질 TMID · `*MAT_ADD_*` 는 빼고 · 쌓인 재질 묶음은 센다 — 11-08 (d))
-    int nextMid  = KooRemapper::matids::maxId(scanLines) + 1;
-    int nextSet  = std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
+    long long nextMid  = (long long)KooRemapper::matids::maxId(scanLines) + 1;
+    long long nextSet  = (long long)std::max(cc_scanMaxId(scanLines, "*SET"), 0) + 1;
     // extra part-like ids (CNRB shares the part id space with *PART variants)
-    int nextPidX = std::max(cc_scanMaxPartId(scanLines),
+    long long nextPidX = std::max(cc_scanMaxPartId(scanLines),
                             cc_scanMaxId(scanLines, "*CONSTRAINED_NODAL_RIGID_BODY"));
-    for (const auto& [pid, p] : mesh.getParts()) nextPidX = std::max(nextPidX, pid);
+    for (const auto& [pid, p] : mesh.getParts()) nextPidX = std::max(nextPidX, (long long)pid);
     ++nextPidX;
 
     std::vector<CcBuilt> builds;
@@ -1342,7 +1344,7 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         int nP = (int)shape.size();
         int nW = std::max(1, r.nWidth);
         int nT = solid ? std::max(1, r.nThick) : 0;   // thickness element layers
-        int baseNid = nextNid, baseEid = nextEid;
+        int baseNid = (int)nextNid, baseEid = (int)nextEid;   // 상한을 넘었으면 아래에서 쓰지 않는다
         double y0 = (fr.W - W) / 2.0;
         b.isSolid = solid;
 
@@ -1424,8 +1426,8 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
         }
 
         // ---- section + material cards (new SECID/MID, PID kept)
-        b.newSecid = nextSec++;
-        b.newMid = nextMid++;
+        b.newSecid = (int)nextSec++;
+        b.newMid = (int)nextMid++;
         double rhoClip = mat.rho;
         const MaterialData* mdBox = mesh.getMaterial(mesh.getParts().at(pid).materialId);
         double rhoBox = (mdBox && mdBox->density > 0) ? mdBox->density : mat.rho;
@@ -1514,9 +1516,9 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
                 console.warning("[cclip] pid " + std::to_string(pid) +
                                 ": attach=cnrb found no board nodes within attach_tol — CNRB spans foot only");
             std::ostringstream atSS;
-            int sid = nextSet++;
+            int sid = (int)nextSet++;
             bat::writeSetNodeList(atSS, sid, "CCLIP_FOOT_" + std::to_string(pid), setNids);
-            int cnrbPid = nextPidX++;
+            int cnrbPid = (int)nextPidX++;
             atSS << "*CONSTRAINED_NODAL_RIGID_BODY\n"
                  << "$#     pid     cid    nsid   pnode    iprt  drflag  rrflag\n";
             char buf[128];
@@ -1700,6 +1702,17 @@ int runCclip(const std::string& yamlFile, ConsoleOutput& console) {
     for (const auto& b : builds) if (!b.stress.empty() || !b.stressSolid.empty()) anyStress = true;
     // *INCLUDE must be relative to the DECK's directory (LS-DYNA convention),
     // so use the basename even when output points into a subdirectory
+    // ★정수 상한 — 새 절점 · 요소 · 섹션 · 재질 · 세트 · 파트 번호의 끝이 2147483647 을 넘으면 아무 산출도 쓰지 않는다
+    {
+        const std::pair<const char*, long long> last[] = {{"절점 번호", nextNid - 1}, {"요소 번호", nextEid - 1},
+                                                          {"섹션 번호", nextSec - 1}, {"재질 번호", nextMid - 1},
+                                                          {"세트 번호", nextSet - 1}, {"파트 번호", nextPidX - 1}};
+        for (const auto& [what, v] : last) {
+            if (v <= std::numeric_limits<int>::max()) continue;
+            console.error("[cclip] " + KooRemapper::ids::limitWhy(what, v) + " — 출력 파일을 쓰지 않았습니다");
+            return 1;
+        }
+    }
     std::string dynainName = outPrefix + ".dynain";
     {
         size_t sl = dynainName.find_last_of("/\\");

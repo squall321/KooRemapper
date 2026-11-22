@@ -597,6 +597,9 @@ private:
     // 엄격 재독 시 고유 9개로 뭉쳤다). 여기 기록해 두고 writeOutput 이 rc≠0 으로 받는다.
     mutable std::string widthOverflow_;
     void noteWidth(int v, int fw, const char* what) const;
+    // 새 번호 커서 — `++커서` 대신 이것으로 낸다. 정수 상한이면 올리지 않고 `idOverflow_` 에 적는다(writeOutput 이 거절 · 2026-11-22)
+    std::string idOverflow_;
+    int bumpId(int& cursor, const char* what);
 };
 
 // 요소·파트의 **절대 참조**를 본다 — 요소가 없는 파트를, 파트가 없는 섹션·재질을 가리키나.

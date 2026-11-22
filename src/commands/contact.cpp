@@ -1392,6 +1392,11 @@ int runContact(const std::string& yamlFile, ConsoleOutput& console) {
         console.error("YAML missing 'output' key (required for non-analyze actions)");
         return 1;
     }
+    // 새 세트 · 접촉 번호가 정수 상한을 넘게 됐으면 쓰지 않는다(2026-11-22 · 예전엔 음수 번호를 냈다)
+    if (!ids.overflow().empty()) {
+        console.error("[contact] " + ids.overflow() + " — 출력 파일을 쓰지 않았습니다");
+        return 1;
+    }
 
     // 원본 덱의 개행을 따른다 — 안 그러면 CRLF 덱이 조용히 LF 로 바뀌거나,
     // 원본 줄만 CRLF 로 남고 새로 넣은 줄이 LF 가 되어 **한 파일 안에서 개행이 갈린다**.

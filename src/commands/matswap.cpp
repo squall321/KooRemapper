@@ -11,6 +11,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -371,14 +372,23 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
 
     // 6. Build remap table: &PARAM_NAME -> new integer value
     std::map<std::string,int> remap;
+    // 새 번호 — 정수 상한이면 올리지 않고 까닭을 적어 쓰지 않는다(2026-11-22 · 예전엔 `++최대값` 이 넘쳐 음수 SECID 를 냈다)
+    std::string idWhy;
+    auto bump = [&](int& c, const char* what) -> int {
+        if (c >= std::numeric_limits<int>::max()) {
+            if (idWhy.empty()) idWhy = KooRemapper::ids::limitWhy(what, (long long)c + 1);
+            return c;
+        }
+        return ++c;
+    };
     for (const auto& p : bundle.params) {
         if (p.type!='I' && p.type!='R') continue;
         std::string idt = msw_idType(p.name);
         int newVal;
-        if      (idt=="HGID")  newVal = ++maxHGID;
-        else if (idt=="LCID")  newVal = ++maxLCID;
-        else if (idt=="SECID") newVal = ++maxSECID;
-        else if (idt=="MID")   newVal = reuseMid ? tp.mid : ++maxMID;
+        if      (idt=="HGID")  newVal = bump(maxHGID, "HGID");
+        else if (idt=="LCID")  newVal = bump(maxLCID, "LCID");
+        else if (idt=="SECID") newVal = bump(maxSECID, "섹션 번호");
+        else if (idt=="MID")   newVal = reuseMid ? tp.mid : bump(maxMID, "재질 번호");
         else if (idt=="PID")   continue;
         else                   newVal = p.ivalue;
         remap[p.name] = newVal;
@@ -386,6 +396,10 @@ int runMatswap(const std::string& modelFile, const std::string& bundleFile,
                         std::to_string(p.ivalue) + " -> " + std::to_string(newVal));
     }
 
+    if (!idWhy.empty()) {
+        console.error("[matswap] " + idWhy + " — 출력 파일을 쓰지 않았습니다");
+        return 1;
+    }
     // Sort by name length descending to avoid prefix collisions
     std::vector<std::pair<std::string,int>> sortedRemap(remap.begin(), remap.end());
     std::sort(sortedRemap.begin(), sortedRemap.end(),
