@@ -224,6 +224,8 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    `set_campaign_criteria` 의 것만 — 리포트 항복값을 기준으로 쓰지 않는다) · `campaign_sphere_map`(컨투어 그림) · 부분충격은
    `set_campaign_sites` → `campaign_site_table` · `campaign_site_map` · 리비전은 `import_part_map` → `compare_campaigns`(공통 각도만) ·
    옛 · 새 설정은 `set_campaign_pair_rule` → `compare_config_pairs`. 두께축이 X 인 덱은 thickness_axis 를 X 로 — 라벨이 덱 축을 따른다.
+   핫스팟을 덱 좌표로 묶을 때는 이동값부터(`set_campaign_frame_offset` — 리포트 좌표는 결과 틀) → `campaign_hotspot_sites`(bbox 포함률이
+   99 % 아래면 이동값을 의심). 세션을 근거로 쓰기 전에 `get_session` 의 `environment` · `revision_warning` 을 본다. 파트 제목은 `rename_session_part`.
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
    StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에

@@ -73,6 +73,10 @@ def test_capabilities_declares_intake(monkeypatch):
                               "compare": "/api/v1/campaigns/compare",
                               "pair_rule": "/api/v1/campaigns/{campaign_id}/pair-rule",
                               "config_pairs": "/api/v1/campaigns/{campaign_id}/config-pairs",
+                              # ⑥ 핫스팟 자리 · 덱 세션(DF-07 · DF-15 · 11-22)
+                              "frame_offset": "/api/v1/campaigns/{campaign_id}/frame-offset",
+                              "hotspot_sites": "/api/v1/campaigns/{campaign_id}/hotspot-sites",
+                              "rename_session_part": "/api/v1/sessions/{session_id}/parts/{part_id}",
                               "form_fields": ["campaign_id", "run_key"],
                               "states": ["pending", "received", "skipped", "rejected"]}, it
     monkeypatch.setattr(settings, "ratelimit_enabled", True)

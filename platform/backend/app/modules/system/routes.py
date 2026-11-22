@@ -179,6 +179,11 @@ _PARITY = [
      "note": "campaign_angle_table · campaign_angle_stats · campaign_peak_table · campaign_part_margin · campaign_sphere_map · "
              "campaign_site_table · campaign_site_map · compare_campaigns · compare_config_pairs(쓰기 — set_campaign_part_groups · "
              "set_campaign_criteria · set_campaign_sites · import_part_map · set_campaign_pair_rule). 웹 화면은 아직 없다"},
+    {"feature": "캠페인 핫스팟 자리(덱 좌표 · 각도 사이 되풀이)", "web": False, "mcp": True,
+     "note": "campaign_hotspot_sites · set_campaign_frame_offset — 결과 틀 + 이동값 = 덱 틀, bbox 포함률. 웹 화면은 아직 없다"},
+    {"feature": "덱 세션 판 · CAD 연결 · 파트 이름", "web": False, "mcp": True,
+     "note": "get_session 응답의 environment · deck_revision_label · linked_cad · revision_warning(라벨 · 연결은 REST PATCH /sessions/{id}) · "
+             "rename_session_part(*PART 제목 제자리 바꾸기)"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,
@@ -261,6 +266,10 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
                 "compare": "/api/v1/campaigns/compare",
                 "pair_rule": "/api/v1/campaigns/{campaign_id}/pair-rule",
                 "config_pairs": "/api/v1/campaigns/{campaign_id}/config-pairs",
+                # ⑥ 핫스팟 자리 · 덱 세션(DF-07 · DF-15 · 2026-11-22)
+                "frame_offset": "/api/v1/campaigns/{campaign_id}/frame-offset",
+                "hotspot_sites": "/api/v1/campaigns/{campaign_id}/hotspot-sites",
+                "rename_session_part": "/api/v1/sessions/{session_id}/parts/{part_id}",
                 "form_fields": ["campaign_id", "run_key"],
                 "states": list(CAMPAIGN_STATES),
             },

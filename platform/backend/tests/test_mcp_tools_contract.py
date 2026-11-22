@@ -198,7 +198,9 @@ CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_inges
                   # ⑤ 캠페인 분석(DF-05 · 06 · 08 ~ 12 · 11-22)
                   "set_campaign_part_groups", "campaign_angle_table", "campaign_angle_stats", "campaign_peak_table",
                   "set_campaign_criteria", "campaign_part_margin", "campaign_sphere_map", "set_campaign_sites", "campaign_site_table",
-                  "campaign_site_map", "import_part_map", "compare_campaigns", "set_campaign_pair_rule", "compare_config_pairs")
+                  "campaign_site_map", "import_part_map", "compare_campaigns", "set_campaign_pair_rule", "compare_config_pairs",
+                  # ⑥ 핫스팟 자리 · 덱 세션(DF-07 · DF-15 · 11-22)
+                  "set_campaign_frame_offset", "campaign_hotspot_sites", "rename_session_part")
 
 
 @needs_mcp
@@ -268,6 +270,11 @@ def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
         key = "metrics" if t == "campaign_angle_table" else "metric"
         assert all(m in got[t]["properties"][key]["description"] for m in c["ANGLE_METRICS"] + c["METRIC_ALIASES"]), t
     assert all(a in got["campaign_part_margin"]["properties"]["metric_axis"]["description"] for a in c["MARGIN_AXES"])
+    # ⑥ — 쓰기 도구의 인자 = REST 본문(+ 경로 칸)
+    from app.modules.campaigns.analysis_routes import FrameOffsetBody
+    from app.modules.sessions.schemas import PartRename
+    assert set(got["set_campaign_frame_offset"]["properties"]) == set(FrameOffsetBody.model_fields) | {"campaign_id"}
+    assert set(got["rename_session_part"]["properties"]) == set(PartRename.model_fields) | {"session_id", "part_id"}
 
 
 def test_the_campaign_allowed_values_are_the_backend_constraints():

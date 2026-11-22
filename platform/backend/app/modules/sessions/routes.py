@@ -9,6 +9,7 @@ from app.models import User
 from app.modules.sessions import services as svc
 from app.modules.sessions.schemas import (
     FileRead,
+    PartRename,
     SessionCreate,
     SessionRead,
     SessionUpdate,
@@ -23,6 +24,23 @@ router = APIRouter(tags=["sessions"])
 
 
 # ── sessions ────────────────────────────────────────────────────────
+def _revision_warning(label: str | None, cad: dict | None) -> str | None:
+    """덱 판 라벨과 연결된 CAD 판이 둘 다 있고(앞뒤 공백 · 대소문자를 빼고) 다르면 경고 글(DF-15)."""
+    rev = (cad or {}).get("revision")
+    if not label or not rev or label.strip().casefold() == str(rev).strip().casefold():
+        return None
+    return f"덱 판 「{label}」 과 연결된 CAD 판 「{rev}」 이 다르다 — 리포트를 근거로 쓰기 전에 판을 맞추세요"
+
+
+def _session_out(s, **extra) -> dict:
+    """세션 응답 — 환경 · 덱 판 · CAD 연결 · 판 경고를 싣는다(DF-15 — 모든 세션 응답에 environment)."""
+    d = SessionRead.model_validate(s).model_dump()
+    d["environment"] = settings.environment
+    d["revision_warning"] = _revision_warning(s.deck_revision_label, s.linked_cad)
+    d.update(extra)
+    return d
+
+
 @router.get("/sessions")
 async def list_sessions(
     limit: int = Query(200, ge=1, le=1000),
@@ -33,9 +51,7 @@ async def list_sessions(
     rows = (await svc.list_sessions(db, user))[offset : offset + limit]
     data = []
     for s, count in rows:
-        d = SessionRead.model_validate(s).model_dump()
-        d["file_count"] = count
-        data.append(d)
+        data.append(_session_out(s, file_count=count))
     return ok(data)
 
 
@@ -46,7 +62,7 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
 ):
     s = await svc.create_session(db, user.id, body.name, body.description)
-    return ok(SessionRead.model_validate(s).model_dump(), message="세션 생성됨", status_code=201)
+    return ok(_session_out(s), message="세션 생성됨", status_code=201)
 
 
 async def _require_session(db, user, session_id):
@@ -80,10 +96,7 @@ async def get_session(
 ):
     s = await _require_viewable(db, user, session_id)
     files = await svc.list_files(db, session_id)
-    d = SessionRead.model_validate(s).model_dump()
-    d["file_count"] = len(files)
-    d["files"] = [FileRead.model_validate(f).model_dump() for f in files]
-    return ok(d)
+    return ok(_session_out(s, file_count=len(files), files=[FileRead.model_validate(f).model_dump() for f in files]))
 
 
 @router.patch("/sessions/{session_id}")
@@ -103,9 +116,60 @@ async def update_session(
     if body.visibility is not None:
         # 이 세션을 조직에 여는 행위 — 소유자만 도달한다(_require_session).
         s.visibility = body.visibility
+    # 덱 판 · CAD 연결(DF-15) — 보낸 칸만(null 이면 지운다)
+    if "deck_revision_label" in body.model_fields_set:
+        s.deck_revision_label = body.deck_revision_label.strip() if body.deck_revision_label else None
+    if "linked_cad" in body.model_fields_set:
+        s.linked_cad = body.linked_cad.model_dump() if body.linked_cad is not None else None
     await db.commit()
     await db.refresh(s)
-    return ok(SessionRead.model_validate(s).model_dump(), message="수정됨")
+    return ok(_session_out(s), message="수정됨")
+
+
+@router.patch("/sessions/{session_id}/parts/{part_id}")
+async def rename_session_part(
+    session_id: str,
+    part_id: int,
+    body: PartRename,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """세션 덱 파일의 *PART 제목을 바꾼다(DF-15) — 그 파일 주 덱에서 「제목 줄 + PID 가 맞는 Card 1」 을 찾아 제목 줄만 고친다(줄 끝 꼴 · 다른
+    바이트 그대로 · 제자리). 자리가 없거나(인클루드 안이면 그 파일을 file_id 로) 둘 이상이면 422. 제목은 70 자까지 · 출력 가능한 ASCII ·
+    `*` · `$` 로 시작하지 않는다. 파일의 sha256 · 메타의 파트 제목을 고친다. 세션 주인만."""
+    import asyncio
+    import os
+
+    from app.modules.sessions import part_title as PT
+    await _require_session(db, user, session_id)
+    if part_id <= 0:
+        raise HTTPException(422, "part_id 는 1 이상입니다.")
+    f = await svc.get_owned_file(db, user.id, session_id, body.file_id)
+    if f is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "파일을 찾을 수 없습니다.")
+    path = storage.abs_path(f.rel_path)
+    data = await asyncio.to_thread(path.read_bytes)
+    try:
+        new, info = PT.rename(data, part_id, body.title)
+    except PT.TitleError as exc:
+        raise HTTPException(422, str(exc))
+    tmp = path.with_name(path.name + ".kr_tmp_rename")
+    await asyncio.to_thread(tmp.write_bytes, new)
+    os.replace(tmp, path)
+    f.sha256 = await asyncio.to_thread(storage.sha256_of, path)
+    f.size_bytes = len(new)
+    meta = dict(f.meta or {})
+    for holder in (meta, meta.get("modelmeta") if isinstance(meta.get("modelmeta"), dict) else None):
+        if holder is None or not isinstance(holder.get("parts"), list):
+            continue
+        holder["parts"] = [({**p, **{k: body.title for k in ("title", "name") if k in p}}
+                            if isinstance(p, dict) and str(p.get("pid", p.get("part_id", p.get("id")))) == str(part_id) else p)
+                           for p in holder["parts"]]
+    f.meta = meta
+    await db.commit()
+    return ok({"session_id": session_id, "file_id": f.id, "part_id": part_id, "title": body.title, "old_title": info["old_title"],
+               "line_no": info["line_no"], "sha256": f.sha256, "environment": settings.environment},
+              message=f"파트 {part_id} 제목 「{info['old_title']}」 → 「{body.title}」(줄 {info['line_no']})")
 
 
 @router.delete("/sessions/{session_id}")

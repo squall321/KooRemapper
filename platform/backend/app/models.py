@@ -81,6 +81,9 @@ class Session(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     storage_path: Mapped[str] = mapped_column(String(512), nullable=False)  # rel to storage_dir
+    # 덱 판 라벨 · 연결된 CAD(StepForge 과제 · 판) — 리스크 앱이 판을 헷갈리지 않게(DF-15 · 0026). 둘이 다르면 세션 응답이 경고한다
+    deck_revision_label: Mapped[str | None] = mapped_column(String(64))
+    linked_cad: Mapped[dict | None] = mapped_column(JSONB)   # {project_id, revision}
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     # 공개 범위 — company|department|team|private (HEAX Hub 와 같은 4단).
     # 기본 private: 만들어 두기만 한 세션이 조직에 노출되지 않는다. 넓히는 것은 소유자의 명시 행위.
@@ -642,6 +645,7 @@ class Campaign(Base):
     health_thresholds: Mapped[dict | None] = mapped_column(JSONB)
     required_extractions: Mapped[list | None] = mapped_column(JSONB)   # [{field, parts, states}] — 삭제 허가가 보는 필수 추출(DF-04)
     pair_rule: Mapped[dict | None] = mapped_column(JSONB)   # 설정 쌍 합격 규칙(DF-12) — {metrics: [{metric, group_key, max_diff_pct}], rank_corr_min, max_failed_pairs}
+    frame_offset: Mapped[dict | None] = mapped_column(JSONB)   # 결과(d3plot) 틀 → 덱 틀 이동값 {dx, dy, dz, source}(DF-07)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -128,6 +128,9 @@ rejected(거절 — 까닭은 `reject_reason`)이고, `ingest_state` 는 그 런
 | `compare_campaigns` | a, b, part_map, metric?, match?, tol_deg? | GET /campaigns/compare | 공통 각도만 — 짝별 가운데 비 · 상위 5 합 비 · 크기 high · mid · low · 사라진 · 새로 생긴 파트 |
 | `set_campaign_pair_rule` | campaign_id, metrics[]({metric, group_key?, max_diff_pct}), rank_corr_min?, max_failed_pairs? | PUT /campaigns/{id}/pair-rule | 설정 쌍 합격 규칙 |
 | `compare_config_pairs` | campaign_id, old, new | GET /campaigns/{id}/config-pairs | 같은 DOE 의 옛 · 새 세대 쌍 — 차 % · 순위 상관 · 넘은 쌍 · 판정(pass · rerun_required · no_pairs) |
+| `set_campaign_frame_offset` | campaign_id, dx, dy, dz, source? | PUT /campaigns/{id}/frame-offset | 결과(d3plot) 틀 → 덱 틀 이동값 |
+| `campaign_hotspot_sites` | campaign_id, part_id, criterion?, radius_mm?, dx?, dy?, dz?, include_invalid?, include_ke_jump?, config_generation? | GET /campaigns/{id}/hotspot-sites | 핫스팟 군집을 덱 틀로 묶은 자리 — 덱 중심 · 되풀이 각도 · 응력 분포 · 대표 각도 · bbox 포함률 |
+| `rename_session_part` | session_id, part_id, file_id, title | PATCH /sessions/{id}/parts/{pid} | *PART 제목을 제자리에서 바꾼다(70 자 · ASCII) |
 | `campaign_ingest_status` | campaign_id, state?, limit?, offset? | GET /campaigns/{id}/ingest-status | 목록 수 · 상태별 수(`listed = pending + received + skipped + rejected` · `with_report`) · 런마다 상태 · report_id · sha256 · 거절 까닭 |
 | — (REST 전용) | intake 폼 + campaign_id, run_key(둘 다) | POST /reports/intake | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이 다시 오면 건너뛰고(200 · skipped) 다른 내용이면 거절(409 · 가진 리포트는 그대로). 목록에 없는 run_key 는 400. 런을 찾은 뒤의 4xx 는 까닭이 런에 적힌다(401 · 429 · 요청 꼴 422 · 5xx 는 적히지 않는다). 올리기 길은 토큰 하나에 분당 한도가 있다(429 `Retry-After`) |
 
@@ -218,7 +221,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 117개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 120개)와 같아야 한다.
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.

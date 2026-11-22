@@ -15,6 +15,7 @@ from app.database import get_db
 from app.models import Campaign, User
 from app.modules.campaigns import analysis as A
 from app.modules.campaigns import angles as G
+from app.modules.campaigns import hotspots as HS
 from app.modules.campaigns import services as svc
 from app.modules.campaigns import sphere as SP
 from app.shared.auth import get_current_user
@@ -671,3 +672,74 @@ async def compare_config_pairs(
     return ok({"campaign_id": campaign_id, "old": {"config_generation": old, "header": ho}, "new": {"config_generation": new, "header": hn},
                "pair_rule": c.pair_rule, **got, "environment": settings.environment},
               message=f"쌍 {got['common_doe']} · 넘은 쌍 {got['failed_pairs']} · 판정 {got['verdict']}")
+
+
+# ── ⑥ 핫스팟 자리(DF-07) ─────────────────────────────────────────────────────
+
+class FrameOffsetBody(_Strict):
+    dx: float = Field(allow_inf_nan=False)
+    dy: float = Field(allow_inf_nan=False)
+    dz: float = Field(allow_inf_nan=False)
+    source: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)] | None = None
+
+
+@router.put("/{campaign_id}/frame-offset")
+async def set_campaign_frame_offset(campaign_id: str, body: FrameOffsetBody, user: User = Depends(get_current_user),
+                                    db: AsyncSession = Depends(get_db)):
+    """결과(d3plot) 틀 → 덱 틀 이동값을 캠페인에 둔다(DF-07) — 덱 좌표 = 결과 좌표 + (dx, dy, dz). `source` 에 근거(예: 덱 원점 메모)를
+    적는다. 핫스팟 자리가 인자로 받지 않으면 이것을 쓴다."""
+    c = await _campaign(db, user, campaign_id)
+    got = await A.set_frame_offset(db, c, body.model_dump())
+    return ok({"campaign_id": campaign_id, "frame_offset": got, "environment": settings.environment},
+              message=f"이동값 ({got['dx']}, {got['dy']}, {got['dz']})")
+
+
+@router.get("/{campaign_id}/hotspot-sites")
+async def campaign_hotspot_sites(
+    campaign_id: str,
+    part_id: int = Query(gt=0, description="파트 id"),
+    criterion: str | None = Query(default=None, max_length=64, description="판정 기준 — 비우면 그 파트의 기준이 하나일 때만(여럿이면 422)"),
+    radius_mm: float | None = Query(default=None, gt=0, le=1000, description="묶음 반경 mm — 비우면 군집 반경 가운데값의 2 배(없으면 5)"),
+    dx: float | None = Query(default=None, description="이동값 x — dx · dy · dz 를 다 주면 캠페인의 frame_offset 대신 쓴다"),
+    dy: float | None = Query(default=None, description="이동값 y"),
+    dz: float | None = Query(default=None, description="이동값 z"),
+    include_invalid: bool = _Filters["include_invalid"], include_ke_jump: bool = _Filters["include_ke_jump"],
+    config_generation: str | None = _Filters["config_generation"],
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """캠페인 핫스팟 자리(DF-07) — 넣은 런의 핫스팟 군집(그 파트 · 기준)을 덱 틀(결과 틀 + 이동값)로 옮겨 반경 안에서 묶는다. 자리마다 덱 중심 ·
+    되풀이 각도 수 · 최대 응력 분포 · 대표 각도. 원본 K 파일 메타에 파트 bbox 가 있으면 bbox 포함률(99 % 아래면 경고 — 이동값을 의심). 면적으로
+    거르지 않으므로 합친 파트도 빠지지 않는다(`merged_part` 는 가릴 칸이 없어 null)."""
+    c = await _campaign(db, user, campaign_id)
+    given = [dx, dy, dz]
+    if any(v is not None for v in given) and not all(v is not None for v in given):
+        raise HTTPException(_UNPROCESSABLE, "dx · dy · dz 는 셋 다 주거나 하나도 주지 않습니다.")
+    warnings = []
+    if all(v is not None for v in given):
+        off, osrc = (dx, dy, dz), "query"
+    elif c.frame_offset:
+        off, osrc = (c.frame_offset["dx"], c.frame_offset["dy"], c.frame_offset["dz"]), "campaign"
+    else:
+        off, osrc = (0.0, 0.0, 0.0), "none"
+        warnings.append("이동값이 없다 — 결과 틀 좌표를 덱 좌표로 읽었다(set_campaign_frame_offset 또는 dx · dy · dz)")
+    runs, hd = await A.analysis_runs(db, c, include_invalid=include_invalid, include_ke_jump=include_ke_jump,
+                                     config_generation=config_generation)
+    items = await A.hotspot_items(db, runs, part_id)
+    crits = sorted({i["criterion"] for i in items if i["criterion"]})
+    if criterion is None and len(crits) > 1:
+        raise HTTPException(_UNPROCESSABLE, f"파트 {part_id} 의 판정 기준이 여럿입니다 — criterion 을 고르세요: {', '.join(crits)}")
+    if criterion is not None:
+        items = [i for i in items if i["criterion"] == criterion]
+    r = radius_mm or HS.default_radius(items)
+    sites = HS.sites(items, off, r)
+    bb = await A.deck_part_bbox(db, [x["report_id"] for x in runs], part_id)
+    cont = HS.bbox_containment(items, off, bb["bbox_min"], bb["bbox_max"]) if bb else {"ratio": None, "inside": None, "total": len(items)}
+    if bb is None:
+        cont["note"] = "원본 K 파일 메타(modelmeta)에 이 파트의 bbox 가 없다 — 포함률을 못 쟀다"
+    elif cont["ratio"] is not None and cont["ratio"] < 0.99:
+        warnings.append(f"bbox 포함률 {cont['ratio'] * 100:.1f} % — 이동값이 틀렸을 수 있다(99 % 아래)")
+    return ok({"campaign_id": campaign_id, "header": hd, "part_id": part_id, "criterion": criterion or (crits[0] if crits else None),
+               "criteria_seen": crits, "frame_offset": {"dx": off[0], "dy": off[1], "dz": off[2], "source": osrc},
+               "radius_mm": r, "n_clusters": len(items), "sites": sites, "bbox": bb, "bbox_containment": cont,
+               "merged_part": None, "warnings": warnings, "environment": settings.environment},
+              message=f"자리 {len(sites)} · 군집 {len(items)} · " + hd["line"])

@@ -193,3 +193,47 @@ async def set_pair_rule(db: AsyncSession, campaign: Campaign, rule: dict | None)
     campaign.pair_rule = rule
     await db.commit()
     return campaign.pair_rule
+
+
+# ── 핫스팟 자리(DF-07) ───────────────────────────────────────────────────────
+
+async def set_frame_offset(db: AsyncSession, campaign: Campaign, offset: dict | None) -> dict | None:
+    campaign.frame_offset = offset
+    await db.commit()
+    return campaign.frame_offset
+
+
+async def hotspot_items(db: AsyncSession, runs: list[dict], part_id: int) -> list[dict]:
+    """넣은 런의 리포트 핫스팟 군집(그 파트 · 모든 기준) — 군집마다 런 · 각도 · 중심(결과 틀) · 최대 응력 · 반경 · 기준."""
+    from app.modules.reports import services as rsvc
+
+    out = []
+    for run in runs:
+        rep = await db.get(ImpactReport, run["report_id"])
+        if rep is None:
+            continue
+        res = await rsvc.hotspots(db, rep, part_id=part_id, top=0)
+        if not res.get("available"):
+            continue
+        for c in res.get("clusters") or []:
+            out.append({"run_key": run["run_key"], "case_key": c.get("case_key") or "single", "doe": run["doe"],
+                        "report_id": run["report_id"], "center": c.get("center"), "stress_max": c.get("stress_max"),
+                        "radius_enclosing": c.get("radius_enclosing"), "criterion": c.get("criterion")})
+    return out
+
+
+async def deck_part_bbox(db: AsyncSession, report_ids: list[str], part_id: int) -> dict | None:
+    """리포트의 원본 K 파일 메타(modelmeta)에서 그 파트의 덱 틀 bbox — 처음 찾은 것."""
+    from app.models import SessionFile
+
+    for rid in report_ids:
+        rep = await db.get(ImpactReport, rid)
+        if rep is None or rep.source_kfile_id is None:
+            continue
+        f = await db.get(SessionFile, rep.source_kfile_id)
+        mm = ((f.meta or {}).get("modelmeta") or {}) if f is not None else {}
+        for p in mm.get("parts") or []:
+            if isinstance(p, dict) and str(p.get("pid")) == str(part_id) and p.get("bbox_min") and p.get("bbox_max"):
+                return {"bbox_min": p["bbox_min"], "bbox_max": p["bbox_max"], "report_id": rid, "file_id": f.id,
+                        "title": p.get("title")}
+    return None

@@ -260,7 +260,9 @@ async def create_session(
 @mcp.tool()
 async def get_session(session_id: str, ctx: Context) -> dict:
     """세션 상세와 포함 파일 목록(meta 포함)을 반환한다 — "이 세션에 뭐가 들어 있나"의 입구.
-    파일 하나의 깊은 메타는 inspect_file, 잡 이력은 list_session_jobs."""
+    파일 하나의 깊은 메타는 inspect_file, 잡 이력은 list_session_jobs. 응답에 environment(dev · prod · unknown) ·
+    deck_revision_label(덱 판 라벨) · linked_cad(연결된 StepForge 과제 · 판) · revision_warning(둘이 다르면 경고 글)이 있다(DF-15 —
+    라벨 · 연결은 REST PATCH /sessions/{id} 로 둔다). 파트 제목 바꾸기는 rename_session_part."""
     return await _get(ctx, f"/sessions/{_seg(session_id)}")
 
 
@@ -1699,6 +1701,64 @@ async def compare_config_pairs(
     판정(pass · rerun_required · no_pairs)과 까닭(failed_pairs · rank_corr). 옛 세대 런이 새 세대로 대체돼 있어도 넣는다.
     Judge old vs new configuration pairs with the campaign pair rule."""
     return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/config-pairs", {"old": old, "new": new})
+
+
+# ── 핫스팟 자리 · 덱 세션 관리(DF-07 · DF-15 · 계획 df-hotspot-session-1122) ─────────────
+
+@mcp.tool()
+async def set_campaign_frame_offset(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    dx: Annotated[float, Field(description="이동값 x(mm) — 덱 좌표 = 결과(d3plot) 좌표 + (dx, dy, dz).")],
+    dy: Annotated[float, Field(description="이동값 y(mm).")],
+    dz: Annotated[float, Field(description="이동값 z(mm).")],
+    ctx: Context,
+    source: Annotated[str | None, Field(description="근거(선택 · 255자까지) — 예: 덱 원점 메모 · 재집계 문서.")] = None,
+) -> dict:
+    """캠페인의 결과 틀 → 덱 틀 이동값을 정한다(DF-07) — campaign_hotspot_sites 가 인자로 받지 않으면 이것을 쓴다. 캠페인 주인만.
+    Set the result-to-deck frame offset of a campaign."""
+    body = {"dx": dx, "dy": dy, "dz": dz}
+    if source is not None:
+        body["source"] = source
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/frame-offset", body)
+
+
+@mcp.tool()
+async def campaign_hotspot_sites(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    part_id: Annotated[int, Field(description="파트 id(1 이상).")],
+    ctx: Context,
+    criterion: Annotated[str | None, Field(description="판정 기준(선택) — 비우면 그 파트의 기준이 하나일 때만(여럿이면 오류 글에 목록).")] = None,
+    radius_mm: Annotated[float | None, Field(description="묶음 반경 mm(선택) — 비우면 군집 반경 가운데값의 2 배(없으면 5).")] = None,
+    dx: Annotated[float | None, Field(description="이동값 x(선택) — dx · dy · dz 를 다 주면 캠페인의 이동값 대신 쓴다.")] = None,
+    dy: Annotated[float | None, Field(description="이동값 y(선택).")] = None,
+    dz: Annotated[float | None, Field(description="이동값 z(선택).")] = None,
+    include_invalid: Annotated[bool, Field(description=_A_INVALID)] = False,
+    include_ke_jump: Annotated[bool, Field(description=_A_KEJUMP)] = False,
+    config_generation: Annotated[str | None, Field(description=_A_GEN)] = None,
+) -> dict:
+    """캠페인 핫스팟 자리(DF-07) — 런마다의 핫스팟 군집(그 파트 · 기준)을 덱 틀로 옮겨 반경 안에서 묶는다. 자리마다 덱 중심 · 되풀이 각도 수 ·
+    최대 응력 분포 · 대표 각도 · 군집 수. 원본 K 파일 메타에 파트 bbox 가 있으면 bbox 포함률(99 % 아래면 warnings — 이동값을 의심). 이동값이
+    없으면 결과 틀 좌표 그대로 읽었다고 warnings 에 적는다. Hotspot sites across angles in deck coordinates."""
+    params = {"part_id": part_id, **_filters(include_invalid, include_ke_jump, config_generation)}
+    for k, v in (("criterion", criterion), ("radius_mm", radius_mm), ("dx", dx), ("dy", dy), ("dz", dz)):
+        if v is not None:
+            params[k] = v
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/hotspot-sites", params)
+
+
+@mcp.tool()
+async def rename_session_part(
+    session_id: Annotated[str, Field(description="세션 id.")],
+    part_id: Annotated[int, Field(description="파트 id(1 이상).")],
+    file_id: Annotated[int, Field(description="그 파트의 *PART 가 있는 세션 K 파일 id(인클루드 안이면 그 파일).")],
+    title: Annotated[str, Field(description="새 제목 — 70 자까지 · 출력 가능한 ASCII · `*` · `$` 로 시작하지 않는다.")],
+    ctx: Context,
+) -> dict:
+    """세션 덱 파일의 *PART 제목을 바꾼다(DF-15) — 제목 줄만 제자리에서 고친다(줄 끝 꼴 · 다른 바이트 그대로). 파트 정의가 그 파일에 없거나
+    둘 이상이면 오류다. 파일의 sha256 이 바뀐다(응답에 새 값). 세션 주인만. Rename a part title in a session deck file in place."""
+    async with _client() as c:
+        return _unwrap(await c.patch(f"/sessions/{_seg(session_id)}/parts/{_seg(part_id)}",
+                                     json={"file_id": file_id, "title": title}, headers=_forward_headers(ctx)))
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
 # 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).

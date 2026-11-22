@@ -16,6 +16,25 @@ class SessionUpdate(BaseModel):
     status: str | None = Field(default=None, pattern="^(active|archived)$")
     # 공개 범위 — 소유자만 바꿀 수 있다(라우터가 _require_session 으로 이미 강제).
     visibility: str | None = Field(default=None, pattern="^(company|department|team|private)$")
+    # 덱 판 라벨 · 연결된 CAD(DF-15) — 보낸 칸만 맞춘다(null 은 지운다)
+    deck_revision_label: str | None = Field(default=None, min_length=1, max_length=64)
+    linked_cad: "LinkedCad | None" = None
+
+
+class LinkedCad(BaseModel):
+    """연결된 CAD — StepForge 과제 id · 판(DF-15)."""
+
+    model_config = {"extra": "forbid"}
+    project_id: str = Field(min_length=1, max_length=128)
+    revision: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class PartRename(BaseModel):
+    """덱 파일의 *PART 제목 바꾸기(DF-15)."""
+
+    model_config = {"extra": "forbid"}
+    file_id: int = Field(gt=0)
+    title: str = Field(max_length=70)
 
 
 class SessionRead(BaseModel):
@@ -24,6 +43,8 @@ class SessionRead(BaseModel):
     description: str | None
     status: str
     visibility: str = "private"
+    deck_revision_label: str | None = None
+    linked_cad: dict | None = None
     created_at: datetime
     updated_at: datetime
     file_count: int | None = None
@@ -43,3 +64,6 @@ class FileRead(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+SessionUpdate.model_rebuild()
