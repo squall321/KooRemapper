@@ -552,8 +552,9 @@ struct StripOperation {
 struct ExtractSurfaceOperation {
     int targetPid = 0;          // 0 = all parts (source solids)
     std::string face = "all";   // top | bottom | all  (ignored when midSurface=true)
-    int outputPid = 0;          // PID for the new shell part (0 = auto = ++maxPartId_)
+    int outputPid = 0;          // PID for the new shell part (0 = auto = ++maxPartId_) — 이미 있는 번호면 rc 1(2026-11-22)
     bool midSurface = false;    // average top↔bottom node positions → midsurface shells
+    double thickness = 0.0;     // 새 셸 파트의 *SECTION_SHELL 두께 T1~T4 — 새 번호면 필수(0 = 없다 · 2026-11-22 사용자 결정)
 };
 
 struct AssemblyOperation {

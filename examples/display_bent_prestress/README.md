@@ -114,8 +114,10 @@ whatever `*MAT_*` cards exist in base_model.
 ### Pre-extracted shell (legacy, mutually exclusive with `simple_bent:`)
 
 ```bash
-KooRemapper extract-surface simple_bent_display.k bent_shell.k --face top
+KooRemapper extract-surface simple_bent_display.k bent_shell.k --face top --output-pid 1001 --thickness 0.5
 ```
+`--output-pid` must be a PID the solid deck does not use yet and `--thickness` is required — the shell part is
+written with its own `*PART` and `*SECTION_SHELL` (since 2026-11-22).
 Then in YAML:
 ```yaml
 shell_bent: bent_shell.k         # instead of simple_bent:

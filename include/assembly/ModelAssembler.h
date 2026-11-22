@@ -117,6 +117,11 @@ public:
     // battery 덱을 얹기 전 이 실행의 모델이 이미 쓰는 번호(족마다 `bat::IdFam` 차례 · 정렬된 닫힌 구간) — 주 덱 · 인클루드 · 덧붙인 덱의
     // 머리 · 덱 쓰기 때 넣을 블록 · 리더가 읽은 것 · 더한 절점 · 요소 · 로드 뒤 커서로 낸 번호 · 앞 battery 덱. 넘치게 센다(2026-11-08)
     std::vector<std::vector<std::pair<long long, long long>>> batteryTakenSpans() const;
+    // 그 파트 번호를 이 실행의 모델이 이미 쓰는가 — `*PART` 카드(주 덱 · 인클루드 · 덧붙인 덱 · 넣을 블록) · 리더의 파트 · 요소의 PID ·
+    // 앞 battery 덱. 커서 창은 넣지 않는다(쓰인 번호만 — extract_surface 의 output_pid 거절 · 2026-11-22)
+    bool partIdInUse(int pid) const;
+    // 그 파트의 MID — 리더의 파트 · `*PART` 카드(주 덱 · 인클루드 · 넣을 블록). 못 찾으면 0
+    int partMidAnywhere(int pid) const;
     bool applySplit(const SplitOperation& op);
     bool applyMerge(const MergeOperation& op);
     bool applyStrip(const StripOperation& op);

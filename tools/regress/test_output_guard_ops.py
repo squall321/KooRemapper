@@ -292,7 +292,7 @@ def positional_ops(st, binary):
     """위치 인자 op — 입력과 같은 산출 · 대조."""
     print("[map · shellmap · unfold · strain · prestress]")
     d, _ = st.case("prestress", "pos")   # generate arc demo — demo_bent.k · demo_flat.k · demo_flat_fine.k · demo_flat_tet.k
-    run(binary, d, ["extract-surface", "demo_bent.k", "bent_top.k", "--face", "top"])
+    run(binary, d, ["extract-surface", "demo_bent.k", "bent_top.k", "--face", "top", "--output-pid", "99", "--thickness", "0.5"])
     expect_refused("map output == flat", binary, d, ["map", "demo_bent.k", "demo_flat_fine.k", "demo_flat_fine.k"])
     expect_refused("map output == bent", binary, d, ["map", "demo_bent.k", "demo_flat_fine.k", "demo_bent.k"])
     expect_refused("shellmap output == flat_detail", binary, d, ["shellmap", "bent_top.k", "demo_flat_fine.k", "demo_flat_fine.k"])
@@ -337,7 +337,8 @@ def positional_ops(st, binary):
     d, _ = st.case("squeeze", "pos")   # box.k · sq.yaml
     expect_refused("extract-surface output == solid", binary, d, ["extract-surface", "box.k", "box.k", "--face", "top"])
     expect_refused("squeeze prefix box → box.k == mesh", binary, d, ["squeeze", "box.k", "sq.yaml", "box"])
-    expect_ok("extract-surface 대조", binary, d, ["extract-surface", "box.k", "box_top.k", "--face", "top"], ["box.k"], "box_top.k")
+    expect_ok("extract-surface 대조", binary, d, ["extract-surface", "box.k", "box_top.k", "--face", "top", "--output-pid", "99",
+                                                  "--thickness", "0.5"], ["box.k"], "box_top.k")
     expect_ok("squeeze 대조", binary, d, ["squeeze", "box.k", "sq.yaml", "box_sq"], ["box.k", "sq.yaml"], "box_sq.dynain")
     write(os.path.join(d, "gb.k"), SPEC["generate"]["files"]["box.yaml"].replace("output: box.k", "output: gb"))
     expect_refused("generate box 설정 gb.k + output gb → 설정을 덮는다", binary, d, ["generate", "box", "gb.k"])

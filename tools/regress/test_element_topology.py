@@ -188,7 +188,8 @@ def main():
     try:
         # ── A: ★TET4 자유면은 **삼각형 4개**다 (가짜 면도, 빠진 면도 없다) ──
         one_tet(os.path.join(d, "tet.k"))
-        rc, out = run(binary, d, "extract-surface", "tet.k", "tshell.k", "--face", "all")
+        # 새 셸 파트 번호 · 두께(2026-11-22 — 있는 번호는 거절 · 새 번호면 두께 필수)
+        rc, out = run(binary, d, "extract-surface", "tet.k", "tshell.k", "--face", "all", "--output-pid", "99", "--thickness", "1.0")
         check("A-1 extract-surface rc=0", rc == 0, out[-250:])
         check("A-2 ★자유면이 **4개**다 (옛 육면체 표는 5개를 냈다)",
               "Extracted 4 surface faces" in out,

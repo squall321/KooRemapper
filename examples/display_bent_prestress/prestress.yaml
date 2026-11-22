@@ -31,7 +31,10 @@
 #   simple_bent_display.k is 3D HEX8, but `replace` requires a QUAD4 shell
 #   reference. Extract the top-surface mid-plane shell once:
 #
-#     KooRemapper extract-surface simple_bent_display.k bent_shell.k --face top
+#     KooRemapper extract-surface simple_bent_display.k bent_shell.k --face top --output-pid 1001 --thickness 0.5
+#
+#   (--output-pid: a PID the solid deck does not use yet · --thickness: required — the shell part gets its own
+#    *PART and *SECTION_SHELL since 2026-11-22)
 #
 #   Options:
 #     --face top       : outward-facing top free faces (default direction)

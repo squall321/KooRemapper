@@ -1674,7 +1674,15 @@
           "flag": "--output-pid",
           "required": false,
           "default": "1",
-          "description": "Part ID for emitted shell elements"
+          "description": "Part ID for the new shell part. Must be a PID the solid deck (and its *INCLUDE closure) does not use yet — an existing PID exits 1 and writes nothing (the default 1 is refused when the deck has PID 1). The new PID gets its own *PART and *SECTION_SHELL (since 2026-11-22)."
+        },
+        {
+          "name": "thickness",
+          "type": "number",
+          "role": "flag",
+          "flag": "--thickness",
+          "required": true,
+          "description": "T1-T4 of the new *SECTION_SHELL (ELFORM 2, SHRF 1.0, NIP 2, SECID = the deck's max SECID + 1). Required: without it, or with 0 / a negative / a non-number, the op exits 1 and writes nothing. The *PART MID is the MID of the solid part(s) the shells came from (0 with a warning when the part has no MID) — parts with different MIDs exit 1 (pick one with --pid)."
         },
         {
           "name": "mid_surface",
@@ -1690,11 +1698,12 @@
         "args": {
           "solid_file": "bolt_simple_solid.k",
           "output_shell": "bolt_surface.k",
-          "pid": 0,
+          "pid": 200,
           "face": "all",
-          "output_pid": 1
+          "output_pid": 300,
+          "thickness": 0.5
         },
-        "note": "Extracts all free surfaces from solid mesh and emits as PID 1 shell elements. For mid-surface mode on a layered part, add --mid-surface flag to pair top/bottom faces."
+        "note": "Extracts all free surfaces of the solid part (PID 200) and writes them as a new shell part PID 300 with its own *PART (MID of PID 200) and *SECTION_SHELL (T1-T4 0.5). For mid-surface mode on a layered part, add --mid-surface flag to pair top/bottom faces."
       },
       "example_folder": "examples/cnrb2solid",
       "notes": "\n**Free face detection**: A face is considered free if it belongs to exactly 1 element. Interior faces (shared by 2+ elements) are discarded. Face winding order is preserved from the first element containing that face (used for later orientation).\n\n**Top/bottom discrimination**: Uses unweighted centroid Z of face versus parent element centroid Z. If dz = face_z - elem_z: dz > 0 → top; dz < 0 → bottom; dz ≈ 0 (degenerate, face exactly on element plane) → neither top nor bottom, only included in 'all' mode.\n\n**Mid-surface mode algorithm**: (1) Collect all unique node IDs on top and bottom free face sets. (2) Build 2D spatial hash from bottom-side nodes with cell size = bbox_diagonal / sqrt(node_count) (0.5–1.5× typical element size). (3) For each top node, find closest bottom node in 3×3 hash window (XY distance only). If no match found, node is skipped with warning. (4) Create mid-node at average of matched top/bottom pair coordinates (XYZ all three dimensions averaged). (5) Remap top face winding to mid node IDs. If a top node has no match, entire face is skipped.\n\n**Degenerate triangles (TRIA3)**: Written as degenerate QUAD4 with N4=N3 per LS-DYNA convention (4th node = 3rd node). Input TET4 meshes with TRIA3 boundary faces are auto-detected via isTriangle(n[3]==n[2] || n[3]==0 || n[3]==n[0]) logic.\n\n**Mutually exclusive options**: None. However, 'face' parameter is logically ignored when mid_surface=true (mid-surface mode uses top+bottom regardless).\n\n**Common gotchas**:\n- mid_surface requires BOTH top and bottom face sets present; if either is empty, command fails with error \"requires both top and bottom free faces (found top=N, bottom=M)\".\n- Top/bottom detection is Z-only, ignoring X/Y symmetry; if mesh spans multiple Z-levels with layered structure not aligned to Z, discrimination may fail.\n- Spatial hash cell size in mid-surface mode is adaptive; with very coarse or very dense meshes, pairing may fail or pair distant nodes. No user control over cell size.\n- Output K-file contains ONLY *NODE and *ELEMENT_SHELL blocks; input solid HEX8/TET4 elements and interior nodes are NOT preserved (external post-processing required if retention needed).\n- Node IDs in output are those used by emitted shells only; unused nodes from input are dropped.\n- If all top/bottom nodes match, output node count = original node count (mid_surface creates new IDs but reuses spatial locations). If partial match, output node count < 2× input top/bottom nodes.\n\nOUTPUT GUARD (since 2026-11-07): before opening any file the op compares every file it will write (output_shell) with every file it reads (the solid mesh and its *INCLUDE closure) by resolved path, symlink and hard link (./a.k, an absolute path and ../dir/a.k are the same file). A match exits 1 with an [ERROR] that names both paths; nothing is written and the inputs are untouched. A file of the same name in another folder, or an existing file the op does not read, is overwritten as before.",
@@ -1733,7 +1742,14 @@
           "type": "integer",
           "required": false,
           "default": "0 (assemble) / 1 (CLI)",
-          "desc": "Part ID for emitted shell elements (0 in assemble mode = auto-increment ++maxPartId_; >0 = explicit value). CLI default is 1."
+          "desc": "Part ID for the new shell part (0 in assemble mode = a new number above the model's max; >0 = explicit value, CLI default 1). A PID the model already uses (main deck, includes, earlier operations, battery) exits 1 and writes nothing. The new PID gets its own *PART and *SECTION_SHELL (since 2026-11-22)."
+        },
+        {
+          "path": "thickness",
+          "type": "number",
+          "required": true,
+          "default": null,
+          "desc": "T1-T4 of the new *SECTION_SHELL (ELFORM 2, SHRF 1.0, NIP 2, new SECID). Required — missing, 0, negative or non-number exits 1 and writes nothing. CLI: --thickness. The *PART MID is the MID of the solid part(s) the shells came from (0 with a warning when the part has no MID); different MIDs exit 1 (pick one with target_pid / --pid)."
         },
         {
           "path": "mid_surface",
@@ -9478,7 +9494,7 @@
           "type": "number",
           "required": false,
           "default": null,
-          "desc": "(offset) Total thickness of generated solid (sum of all layers); overridden if thickness_formula or material_cards with individual thicknesses present."
+          "desc": "(offset) Total thickness of generated solid (sum of all layers); overridden if thickness_formula or material_cards with individual thicknesses present. (extract_surface) T1-T4 of the new shell part's *SECTION_SHELL (ELFORM 2, NIP 2) — required for extract_surface (missing or <= 0 exits 1)."
         },
         {
           "path": "operations[].thickness_formula",
@@ -10587,7 +10603,7 @@
           "type": "integer",
           "required": false,
           "default": "0",
-          "desc": "(extract_surface) PID for new shell part (0 = auto-increment from max)."
+          "desc": "(extract_surface) PID for the new shell part (0 = a new number above the model's max). A PID the model already uses exits 1 and writes nothing; the new PID gets *PART + *SECTION_SHELL (since 2026-11-22)."
         },
         {
           "path": "operations[].mid_surface",

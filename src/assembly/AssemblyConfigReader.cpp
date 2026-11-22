@@ -1351,6 +1351,7 @@ AssemblyConfig AssemblyConfigReader::readString(const std::string& yamlContent) 
                         } else if (op.type == AssemblyOperation::EXTRACT_SURFACE) {
                             if (key == "face") op.extractSurface.face = stripQuotes(val);
                             else if (key == "output_pid") op.extractSurface.outputPid = std::stoi(val);
+                            else if (key == "thickness") op.extractSurface.thickness = std::stod(val);
                             else if (key == "mid_surface" || key == "midsurface")
                                 op.extractSurface.midSurface = (val == "true" || val == "yes" || val == "1");
                         } else if (op.type == AssemblyOperation::IGA) {

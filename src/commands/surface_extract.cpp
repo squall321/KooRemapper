@@ -6,6 +6,10 @@
 #include "core/Element.h"
 #include "core/Vector3D.h"
 #include "cli/ConsoleOutput.h"
+#include "parser/DeckScan.h"           // 파트 · 섹션 번호 훑기(칸 폭 · 키워드)
+#include "parser/ElementCardLayout.h"  // deckFieldWidth · keywordFieldWidth · formatRealField
+#include "parser/IdAllocator.h"        // ids::limitWhy — 새 SECID 가 정수 상한을 넘을 때
+#include "parser/IncludeClosure.h"     // 인클루드 닫힘 — 이미 있는 파트 번호 · 섹션 번호
 
 #include <algorithm>
 #include <array>
@@ -110,7 +114,7 @@ void writeShellKFile(std::ostream& out,
                      const ExtractSurfaceOptions& opts,
                      const std::map<int, Vector3D>& nodes,
                      const std::vector<FaceKey>& shells,
-                     int fw) {
+                     int fw, int secId, int mid) {
     const int iw = fw >= 20 ? 20 : (fw == 10 ? 10 : 8);   // 절점 · 요소 줄의 정수 칸
     const int rw = fw >= 20 ? 20 : 16;                     // 좌표 칸
     const int cw = fw >= 20 ? 20 : 10;                     // 10 칸 카드(*PART)
@@ -126,13 +130,21 @@ void writeShellKFile(std::ostream& out,
     out << "Extracted surface (PID " << opts.outputPid << ")\n";
     out << "$#     pid     secid       mid     eosid       hgid      grav    adpopt      tmid\n";
     out << std::setw(cw) << opts.outputPid
-        << std::setw(cw) << opts.outputPid
-        << std::setw(cw) << 1
+        << std::setw(cw) << secId
+        << std::setw(cw) << mid
         << std::setw(cw) << 0
         << std::setw(cw) << 0
         << std::setw(cw) << 0
         << std::setw(cw) << 0
         << std::setw(cw) << 0 << "\n";
+
+    // 새 셸 섹션 — ELFORM 2 · SHRF 1.0 · NIP 2(LS-DYNA 기본과 같다) · T1~T4 = --thickness (2026-11-22 사용자 결정)
+    out << "*SECTION_SHELL\n";
+    out << "$#   secid    elform      shrf       nip\n";
+    out << std::setw(cw) << secId << std::setw(cw) << 2 << std::setw(cw) << "1.0" << std::setw(cw) << 2 << "\n";
+    out << "$#      t1        t2        t3        t4\n";
+    for (int k = 0; k < 4; ++k) out << formatRealField(opts.thickness, cw);
+    out << "\n";
 
     out << "*NODE\n";
     out << "$#   nid               x               y               z      tc      rc\n";
@@ -163,6 +175,29 @@ void writeShellKFile(std::ostream& out,
     out << "*END\n";
 }
 
+// 솔리드 덱과 그 인클루드 닫힘이 정의하는 파트 번호(`*PART` 카드 — PID · SECID 가 양수인 줄)와 가장 큰 섹션 번호(`*SECTION_*` 데이터 줄의
+// 첫 칸 — 넘치게 센다: 크게 세면 새 SECID 가 더 위로 갈 뿐이다). 파일마다 제 `*KEYWORD` 폭 · 키워드 접미사로 자른다.
+void scanDeckIds(const std::vector<std::string>& lines, std::set<int>& pids, long long& maxSec) {
+    const int deckFw = deckFieldWidth(lines);
+    std::string kw;
+    int fw = 10;
+    for (const auto& l : lines) {
+        if (deckscan::isKeywordLine(l)) {
+            kw = deckscan::kwBare(deckscan::keywordToken(l));
+            fw = keywordFieldWidth(l, deckFw) >= 20 ? 20 : 10;
+            continue;
+        }
+        if (!deckscan::isDataLine(l)) continue;
+        const auto f = deckscan::cardFields(l, fw);
+        if (kw == "*PART" || kw == "*PART_TITLE") {
+            const int pid = deckscan::fieldInt(f, 0);
+            if (pid > 0 && deckscan::fieldInt(f, 1) > 0) pids.insert(pid);
+        } else if (kw.rfind("*SECTION_", 0) == 0) {
+            maxSec = std::max<long long>(maxSec, deckscan::fieldInt(f, 0));
+        }
+    }
+}
+
 } // anonymous namespace
 
 
@@ -188,8 +223,69 @@ int runExtractSurface(const std::string& solidFile,
                  std::to_string(mesh.elements.size()) + " elements, " +
                  std::to_string(mesh.parts.size()) + " parts");
 
+    // ★새 셸 파트(2026-11-22 · 사용자 결정 「셸 섹션까지 지어 넣는다」 · 「thickness · --thickness · 새 번호면 필수」) — --output-pid 가 솔리드
+    //   덱(인클루드까지)에 이미 있는 파트 번호면 멈춘다(예전엔 rc 0 으로 그 번호의 *PART 를 하나 더 썼다). 새 번호에는 *PART 와
+    //   *SECTION_SHELL 을 짓는다 — 예전 *PART 는 SECID 칸에 PID 를, MID 칸에 1 을 박아 정의 안 된 섹션 · 엉뚱한 재질을 가리켰다.
+    std::set<int> usedPids;
+    long long maxSecId = 0;
+    {
+        std::vector<std::string> mainLines;
+        std::ifstream f(solidFile, std::ios::binary);
+        for (std::string ln; std::getline(f, ln);) {
+            if (!ln.empty() && ln.back() == '\r') ln.pop_back();
+            if (mainLines.empty() && ln.size() >= 3 && ln.compare(0, 3, "\xEF\xBB\xBF") == 0) ln.erase(0, 3);
+            mainLines.push_back(ln);
+        }
+        scanDeckIds(mainLines, usedPids, maxSecId);
+        for (const auto& inc : include_closure::read(solidFile, mainLines).files) scanDeckIds(inc.lines, usedPids, maxSecId);
+    }
+    for (const auto& [eid, e] : mesh.elements) { (void)eid; usedPids.insert(e.partId); }
+    for (const auto& [pid, p] : mesh.parts) { (void)p; usedPids.insert(pid); }
+    if (opts.outputPid <= 0) {
+        console.error("--output-pid 는 1 이상이다(받은 값 " + std::to_string(opts.outputPid) + ")");
+        return 1;
+    }
+    if (usedPids.count(opts.outputPid)) {
+        console.error("--output-pid " + std::to_string(opts.outputPid) + " 은 " + solidFile + "(인클루드까지)에 이미 있는 파트 번호다 — "
+                      "새 번호를 주라. 새 번호에 *PART 와 *SECTION_SHELL 을 짓는다. 아무 파일도 쓰지 않았다");
+        return 1;
+    }
+    if (!(opts.thickness > 0.0)) {
+        console.error("새 셸 파트(PID " + std::to_string(opts.outputPid) + ")의 *SECTION_SHELL 두께가 없다 — --thickness T 를 주라"
+                      "(T1~T4 · ELFORM 2 · NIP 2). 아무 파일도 쓰지 않았다");
+        return 1;
+    }
+    if (maxSecId >= std::numeric_limits<int>::max()) {
+        console.error("[extract-surface] " + ids::limitWhy("섹션 번호", maxSecId + 1) + " — 아무 파일도 쓰지 않았다");
+        return 1;
+    }
+    const int newSecId = static_cast<int>(maxSecId + 1);
+    // 셸을 뽑은 솔리드 파트들의 MID 하나 — 서로 다르면 멈춘다. `*PART` 가 없는 메시(`generate arc` 의 덱)는 MID 가 0 이라 0 을 그대로
+    // 옮기고 알린다(기준면으로만 쓰는 덱 — 해석에 쓰려면 재질을 정한다)
+    auto shellMid = [&](const std::set<int>& srcPids, int& mid) {
+        std::map<int, int> midOf;
+        for (int pid : srcPids) {
+            const auto it = mesh.parts.find(pid);
+            midOf[pid] = it == mesh.parts.end() ? 0 : std::max(0, it->second.materialId);
+        }
+        std::set<int> mids;
+        for (const auto& [pid, m] : midOf) { (void)pid; mids.insert(m); }
+        if (mids.size() != 1) {
+            std::string list;
+            for (const auto& [pid, m] : midOf) list += (list.empty() ? "" : " · ") + std::string("PID ") + std::to_string(pid) + " → MID " + std::to_string(m);
+            console.error("셸을 뽑은 솔리드 파트들의 MID 가 서로 다르다(" + list + ") — 새 셸 파트의 MID 를 하나로 정할 수 없다. --pid 로 "
+                          "한 파트만 고르라. 아무 파일도 쓰지 않았다");
+            return false;
+        }
+        mid = *mids.begin();
+        if (mid == 0)
+            console.warning("셸을 뽑은 솔리드 파트에 MID 가 없다 — 새 셸 파트(PID " + std::to_string(opts.outputPid) + ")의 *PART MID 칸도 0 "
+                            "이다. 해석에 쓰려면 재질을 정하라");
+        return true;
+    };
+
     // ---- 2. Build face-count map ------------------------------------------
-    struct FaceVal { int count; FaceKey winding; double elemZ; };
+    struct FaceVal { int count; FaceKey winding; double elemZ; int pid; };
     std::map<FaceKey, FaceVal> faceMap;
 
     int elemsScanned = 0;
@@ -203,7 +299,7 @@ int runExtractSurface(const std::string& solidFile,
             std::sort(fn.begin(), fn.end());
             FaceKey key{fn[0], fn[1], fn[2], fn[3]};
             auto it = faceMap.find(key);
-            if (it == faceMap.end()) faceMap[key] = {1, orig, ezc};
+            if (it == faceMap.end()) faceMap[key] = {1, orig, ezc, elem.partId};
             else ++it->second.count;
         }
     }
@@ -218,11 +314,13 @@ int runExtractSurface(const std::string& solidFile,
 
     // ---- 3. Always partition free faces into top / bottom ----------------
     std::vector<FaceKey> topFaces, bottomFaces;
+    std::set<int> topPids, bottomPids, allPids;   // 그 면을 가진 솔리드 요소의 PID — 새 셸 파트의 MID 를 정한다
     for (const auto& [key, val] : faceMap) {
         if (val.count != 1) continue;
+        allPids.insert(val.pid);
         double dz = faceCentroidZ(val.winding, mesh) - val.elemZ;
-        if (dz > 0)      topFaces.push_back(val.winding);
-        else if (dz < 0) bottomFaces.push_back(val.winding);
+        if (dz > 0)      { topFaces.push_back(val.winding); topPids.insert(val.pid); }
+        else if (dz < 0) { bottomFaces.push_back(val.winding); bottomPids.insert(val.pid); }
         // dz == 0 (face exactly on element centroid plane) is a degenerate
         // corner case; treat as "side" and drop from top/bottom buckets.
     }
@@ -333,6 +431,8 @@ int runExtractSurface(const std::string& solidFile,
             return 1;
         }
 
+        int mid = 0;
+        if (!shellMid(topPids, mid)) return 1;   // 가운데 면은 윗면의 감김으로 짓는다
         // 원본 솔리드 덱의 개행을 따른다
         KooRemapper::DeckWriter out_w(outputFile, KooRemapper::deck_newline::detect(solidFile));
         if (!out_w.ok()) {
@@ -340,7 +440,7 @@ int runExtractSurface(const std::string& solidFile,
             return 1;
         }
         std::ostream& out = out_w.stream();
-        writeShellKFile(out, solidFile, opts, midPositions, midShells, reader.deckFieldWidth());
+        writeShellKFile(out, solidFile, opts, midPositions, midShells, reader.deckFieldWidth(), newSecId, mid);
         out_w.close();
 
         console.info("Mid-surface: " + std::to_string(midShells.size()) + " shells, "
@@ -380,6 +480,8 @@ int runExtractSurface(const std::string& solidFile,
         }
     }
 
+    int mid = 0;
+    if (!shellMid(opts.face == "top" ? topPids : opts.face == "bottom" ? bottomPids : allPids, mid)) return 1;
     // 원본 솔리드 덱의 개행을 따른다
     KooRemapper::DeckWriter out_w(outputFile, KooRemapper::deck_newline::detect(solidFile));
     if (!out_w.ok()) {
@@ -387,7 +489,7 @@ int runExtractSurface(const std::string& solidFile,
         return 1;
     }
     std::ostream& out = out_w.stream();
-    writeShellKFile(out, solidFile, opts, usedNodes, outFaces, reader.deckFieldWidth());
+    writeShellKFile(out, solidFile, opts, usedNodes, outFaces, reader.deckFieldWidth(), newSecId, mid);
     out_w.close();
 
     // Stats

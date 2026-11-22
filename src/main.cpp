@@ -95,6 +95,8 @@
 #include <memory>
 #include <limits>
 #include <climits>
+#include <cmath>
+#include <cstdlib>
 #include <sstream>
 #include <iomanip>
 #include <set>
@@ -2082,7 +2084,7 @@ static int runMain(int argc, char* argv[]) {
         if (argc < 4) {
             console.error(
                 "Usage: KooRemapper extract-surface <solid.k> <output_shell.k> "
-                "[--pid N] [--face top|bottom|all] [--output-pid N]");
+                "[--pid N] [--face top|bottom|all] [--output-pid N] [--thickness T]");
             return 1;
         }
         ExtractSurfaceOptions opts;
@@ -2100,7 +2102,16 @@ static int runMain(int argc, char* argv[]) {
             if (a == "--pid")            opts.filterPid = std::stoi(need("--pid"));
             else if (a == "--face")      opts.face      = need("--face");
             else if (a == "--output-pid") opts.outputPid = std::stoi(need("--output-pid"));
-            else if (a == "--mid-surface") {
+            else if (a == "--thickness") {
+                const std::string v = need("--thickness");
+                char* end = nullptr;
+                const double t = std::strtod(v.c_str(), &end);
+                if (end == v.c_str() || *end != '\0' || !std::isfinite(t) || t <= 0.0) {
+                    console.error("--thickness 는 0 보다 큰 수다(받은 값 '" + v + "')");
+                    return 1;
+                }
+                opts.thickness = t;
+            } else if (a == "--mid-surface") {
                 opts.midSurface = true;
             } else {
                 console.error("Unknown option: " + a);

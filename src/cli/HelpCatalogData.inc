@@ -7,7 +7,7 @@ static const std::vector<OpHelp> kOpHelps = {
      {"bent 참조는 구조화 HEX8 이어야 한다. generate 가 bent/flat/flat_fine/flat_tet 세트를 만든다.", "output(과 YAML 의 prestress.output 이 낼 dynain · 메시 사본 · CSV)이 bent · flat(그 인클루드까지) · 설정과 같은 파일이면", "  아무것도 쓰지 않고 rc 1 — 메시 사본이 map 산출 자리인 것(output: foo.k + prestress.output: foo.dynain)만은 받는다.", "  재료가 없으면(E · nu 없음 · 기준에 K-파일 재료 없음) 고리는 prestress.output 자리에 CSV 만 쓴다 — 그것이 map 산출과", "  겹치는 것도 map 이 쓰기 전에 거절한다(2026-11-07)", "bbox_align: source 가 평판의 크기를 바꾸면 그 평판(<output>.kr_tmp_preproc_flat.k · 평판의 카드를 그대로 · 성공이든 실패든 끝나면 지운다)이 고리", "  prestress 의 기준이다 — 2026-11-07 전엔 이 파일을 쓰지 않아 크기를 맞추기 전 평판을 기준으로 썼다. 그 파일을 못 쓰면(디스크 참 ·", "  크기 상한) [WARN] 을 내고 고리는 원래 평판을 쓴다 — 산출은 멀쩡해 종료 코드는 그대로다(2026-11-08)", "고리의 기준은 뒤집어도(flip_input_* · flip_x/y/z) 평판의 *PART · *SECTION · *MAT 카드를 싣는다 — E · nu 없이도 K-파일", "  재료로 응력(예전엔 뒤집은 기준이 메시만 실어 변형률만 냈다 · 2026-11-07)", "고리 dynain 의 머리줄 $ Reference mesh: 는 임시 사본 대신 원래 평판 이름과 무엇을 한 사본인지 댄다(2026-11-08 — 지운 임시 이름을 댔다)", "칸 폭은 평판(flat) 덱의 `*KEYWORD` 선언 하나를 따른다(맨 8 · I10=Y 10 · LONG=Y 20 — 실수 칸은 16 · 16 · 20). 다시 쓰는 *NODE ·", "  *ELEMENT_SOLID 블록은 맨 키워드 아래 그 폭으로 쓰고 셸 · 두께 셸 블록은 원본 줄 그대로다. 번호가 그 칸에 안 들어가면", "  (8칸 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않고 rc 1 — 예전엔 칸이 붙은 덱을 rc 0 으로 썼다(2026-11-21)"}},
     {"shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개", "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
      {},
-     {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper extract-surface demo_bent.k bent_top.k --face top", "KooRemapper shellmap bent_top.k demo_flat_fine.k shellmapped.k"},
+     {"KooRemapper generate --dim-i 20 --dim-j 5 arc demo", "KooRemapper extract-surface demo_bent.k bent_top.k --face top --output-pid 99 --thickness 0.5", "KooRemapper shellmap bent_top.k demo_flat_fine.k shellmapped.k"},
      {},
      {"단일 곡률(원통형) 면에 적합. 이중 곡률이면 왜곡 경고가 난다.", "칸 폭은 flat_detail 덱의 `*KEYWORD` 선언 하나를 따른다(맨 8 · I10=Y 10 · LONG=Y 20 — 실수 칸은 16 · 16 · 20). 다시 쓰는 *NODE ·", "  *ELEMENT_SOLID 블록은 맨 키워드 아래 그 폭으로 쓰고 셸 · 두께 셸 블록은 원본 줄 그대로다. 번호가 그 칸에 안 들어가면", "  (8칸 덱의 `*NODE %` 블록에 9자리 번호) 쓰지 않고 rc 1 — 예전엔 칸이 붙은 덱을 rc 0 으로 썼다(2026-11-21)"}},
     {"unfold", "메시 매핑", "굽힌 구조화 HEX8 메시를 평면으로 전개 (map 의 역)", "전개 펼치기 flat", "KooRemapper unfold <bent_mesh> <output_flat>",
@@ -323,7 +323,7 @@ operations:
      {"KooRemapper generate box box.yaml", "KooRemapper iga iga.yaml"},
      {},
      {"IGA 재질은 원 파트 MID 의 구조 재질을 새 MID 로 베낀다(2026-11-08) — 같은 번호 TMID 의 열 재질 · *MAT_ADD_* 는 고르지 않고 _TITLE", "  재질도 찾으며(주 덱에 없으면 인클루드) MID 칸만 칸 폭 그대로 바꾼다. 예전엔 첫 칸이 그 MID 인 첫 *MAT 블록을 베꼈다"}},
-    {"extract-surface", "표면·재메시", "솔리드 파트의 윗면/아랫면/전체 표면을 셸로 추출", "표면추출 surface shell 면", "KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N]",
+    {"extract-surface", "표면·재메시", "솔리드 파트의 윗면/아랫면/전체 표면을 셸로 추출", "표면추출 surface shell 면", "KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N] [--thickness T]",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0
 ly: 10.0
@@ -339,9 +339,9 @@ secid: 1
 pid: 1
 part_title: PLATE
 )KRH"}},
-     {"KooRemapper generate box box.yaml", "KooRemapper extract-surface box.k box_top.k --face top --output-pid 10"},
+     {"KooRemapper generate box box.yaml", "KooRemapper extract-surface box.k box_top.k --face top --output-pid 10 --thickness 0.5"},
      {},
-     {}},
+     {"--output-pid 는 솔리드 덱(인클루드까지)이 아직 쓰지 않는 파트 번호여야 한다 — 있는 번호면 아무 파일도 쓰지 않고 rc 1(기본값 1 도", "  덱에 PID 1 이 있으면 거절된다). 새 번호에 *PART 와 *SECTION_SHELL(ELFORM 2 · SHRF 1.0 · NIP 2 · 새 SECID = 덱의 최대 SECID + 1)을", "  쓰고, *PART 의 MID 는 셸을 뽑은 솔리드 파트의 MID 다(*PART 가 없는 메시면 0 · 경고) — 그 파트들의 MID 가 서로 다르면 rc 1(--pid", "  로 한 파트만). 예전엔 *PART 의", "  SECID 칸에 PID 를, MID 칸에 1 을 박았다(2026-11-22 사용자 결정)", "--thickness T 는 그 섹션의 T1~T4 — 새 번호면 필수다(없거나 0 이하 · 수가 아니면 rc 1)", "assemble 의 `type: extract_surface` 도 같다 — `output_pid`(빼면 최대값 위 새 번호) · `thickness`(필수). 이미 있는 번호면 rc 1", "  (예전엔 그 파트에 셸을 rc 0 으로 넣었고, 새 번호면 *PART 없이 셸만 썼다)", "산출 덱은 솔리드 덱의 칸 폭(맨 · I10=Y · LONG=Y)을 머리에 밝히고 그 폭으로 쓴다(2026-11-22)"}},
     {"tetremesh", "표면·재메시", "TET4 파트의 불량 요소 패치를 국소 재메시 (localimprove | tetgen)", "사면체 품질 tet remesh", "KooRemapper tetremesh <config.yaml>",
      {{"tet.yaml", R"KRH(model: demo_flat_tet.k
 output: demo_flat_tet_fixed.k

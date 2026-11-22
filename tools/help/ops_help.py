@@ -68,7 +68,7 @@ op("map", "메시 매핑", "평면 상세 메시를 굽힌 구조화 HEX8 참조
 op("shellmap", "메시 매핑", "굽힌 QUAD4 셸을 참조로 평면 상세 메시를 매핑", "셸매핑 shell 곡면 전개",
    "KooRemapper shellmap [--thickness <t>] <bent_shell> <flat_detail> <output>",
    cmds=["KooRemapper generate --dim-i 20 --dim-j 5 arc demo",
-         "KooRemapper extract-surface demo_bent.k bent_top.k --face top",
+         "KooRemapper extract-surface demo_bent.k bent_top.k --face top --output-pid 99 --thickness 0.5",
          "KooRemapper shellmap bent_top.k demo_flat_fine.k shellmapped.k"],
    outputs=["shellmapped.k"],
    notes=["단일 곡률(원통형) 면에 적합. 이중 곡률이면 왜곡 경고가 난다.",
@@ -356,10 +356,19 @@ operations:
 
 # ── 표면·재메시 ──
 op("extract-surface", "표면·재메시", "솔리드 파트의 윗면/아랫면/전체 표면을 셸로 추출", "표면추출 surface shell 면",
-   "KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N]",
+   "KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N] [--thickness T]",
    files={"box.yaml": BOX},
-   cmds=[BOX_CMD, "KooRemapper extract-surface box.k box_top.k --face top --output-pid 10"],
-   outputs=["box_top.k"])
+   cmds=[BOX_CMD, "KooRemapper extract-surface box.k box_top.k --face top --output-pid 10 --thickness 0.5"],
+   outputs=["box_top.k"],
+   notes=["--output-pid 는 솔리드 덱(인클루드까지)이 아직 쓰지 않는 파트 번호여야 한다 — 있는 번호면 아무 파일도 쓰지 않고 rc 1(기본값 1 도",
+          "  덱에 PID 1 이 있으면 거절된다). 새 번호에 *PART 와 *SECTION_SHELL(ELFORM 2 · SHRF 1.0 · NIP 2 · 새 SECID = 덱의 최대 SECID + 1)을",
+          "  쓰고, *PART 의 MID 는 셸을 뽑은 솔리드 파트의 MID 다(*PART 가 없는 메시면 0 · 경고) — 그 파트들의 MID 가 서로 다르면 rc 1(--pid",
+          "  로 한 파트만). 예전엔 *PART 의",
+          "  SECID 칸에 PID 를, MID 칸에 1 을 박았다(2026-11-22 사용자 결정)",
+          "--thickness T 는 그 섹션의 T1~T4 — 새 번호면 필수다(없거나 0 이하 · 수가 아니면 rc 1)",
+          "assemble 의 `type: extract_surface` 도 같다 — `output_pid`(빼면 최대값 위 새 번호) · `thickness`(필수). 이미 있는 번호면 rc 1",
+          "  (예전엔 그 파트에 셸을 rc 0 으로 넣었고, 새 번호면 *PART 없이 셸만 썼다)",
+          "산출 덱은 솔리드 덱의 칸 폭(맨 · I10=Y · LONG=Y)을 머리에 밝히고 그 폭으로 쓴다(2026-11-22)"])
 op("tetremesh", "표면·재메시", "TET4 파트의 불량 요소 패치를 국소 재메시 (localimprove | tetgen)", "사면체 품질 tet remesh",
    "KooRemapper tetremesh <config.yaml>",
    files={"tet.yaml": """model: demo_flat_tet.k

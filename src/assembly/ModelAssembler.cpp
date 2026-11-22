@@ -9161,8 +9161,22 @@ std::string ModelAssembler::generateIGAContent(
 bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
     // 대상이 인클루드 안에만 있으면 멈춘다 — 주 덱만 고쳐 아무것도 안 바뀐 덱을 내지 않는다(`targetsReachable` · 2026-10-17)
     if (!targetsReachable({op.targetPid}, "extract-surface")) return false;
+    // ★새 셸 파트(2026-11-22 · 사용자 결정 「셸 섹션까지 지어 넣는다」 · 「thickness · --thickness · 새 번호면 필수」) — output_pid 가 이미
+    //   있는 파트 번호면 멈춘다(예전엔 그 파트에 셸을 rc 0 으로 넣었다 — battery 파트 11 · 솔리드 파트 1). 새 번호에는 *PART 와
+    //   *SECTION_SHELL(ELFORM 2 · NIP 2 · 새 SECID · MID 는 셸을 뽑은 솔리드 파트의 것)을 짓는다 — 예전엔 *PART 를 쓰지 않아 셸이 정의 안 된
+    //   파트를 가리켰다.
+    if (op.outputPid > 0 && partIdInUse(op.outputPid)) {
+        errorMessage_ = "extract_surface: output_pid " + std::to_string(op.outputPid) + " 은 이 모델(주 덱 · 인클루드 · 앞 처리)에 이미 있는 "
+                        "파트 번호다 — 새 번호를 주거나 빼라(빼면 최대값 위 새 번호). 새 번호에 *PART 와 *SECTION_SHELL 을 짓는다";
+        return false;
+    }
+    if (!(op.thickness > 0.0) || !std::isfinite(op.thickness)) {
+        errorMessage_ = "extract_surface: 새 셸 파트의 *SECTION_SHELL 두께(thickness)가 없거나 0 보다 큰 수가 아니다 — thickness 를 주라"
+                        "(T1~T4 · ELFORM 2 · NIP 2)";
+        return false;
+    }
     using FaceKey = std::array<int,4>;
-    struct FaceVal { int count; FaceKey winding; double elemZ; };
+    struct FaceVal { int count; FaceKey winding; double elemZ; int pid; };
 
     // Lambda — element centroid Z (uses live position lookup, so previous
     // ops' node movements propagate correctly).
@@ -9201,7 +9215,7 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             std::sort(fn.begin(), fn.end());
             FaceKey key{fn[0], fn[1], fn[2], fn[3]};
             auto it = faceMap.find(key);
-            if (it == faceMap.end()) faceMap[key] = {1, orig, ezc};
+            if (it == faceMap.end()) faceMap[key] = {1, orig, ezc, e.partId};
             else ++it->second.count;
         }
     };
@@ -9228,17 +9242,59 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
 
     // ---- 2. Partition free faces ----------------------------------------
     std::vector<FaceKey> topFaces, bottomFaces, allFreeFaces;
+    std::set<int> topPids, bottomPids, allPids;   // 그 면을 가진 솔리드 요소의 PID — 새 셸 파트의 MID 를 정한다
     for (const auto& [key, val] : faceMap) {
         if (val.count != 1) continue;
         allFreeFaces.push_back(val.winding);
+        allPids.insert(val.pid);
         double dz = faceCentroidZ(val.winding) - val.elemZ;
-        if (dz > 0)      topFaces.push_back(val.winding);
-        else if (dz < 0) bottomFaces.push_back(val.winding);
+        if (dz > 0)      { topFaces.push_back(val.winding); topPids.insert(val.pid); }
+        else if (dz < 0) { bottomFaces.push_back(val.winding); bottomPids.insert(val.pid); }
+    }
+
+    // ---- 2b. 새 셸 파트의 MID — 셸을 뽑은 솔리드 파트들의 MID 하나(없거나 서로 다르면 멈춘다) ----
+    int shellMid = 0;
+    {
+        const std::set<int>& src = op.midSurface ? topPids   // 가운데 면은 윗면의 감김으로 짓는다
+                                 : op.face == "top" ? topPids : op.face == "bottom" ? bottomPids : allPids;
+        std::map<int, int> midOf;   // `*PART` 가 없는 파트는 MID 0 — 0 을 그대로 옮기고 알린다(서로 다르면 멈춘다)
+        for (int pid : src) midOf[pid] = partMidAnywhere(pid);
+        std::set<int> mids;
+        for (const auto& [pid, m] : midOf) { (void)pid; mids.insert(m); }
+        if (mids.size() > 1) {
+            std::string list;
+            for (const auto& [pid, m] : midOf)
+                list += (list.empty() ? "" : " · ") + std::string("PID ") + std::to_string(pid) + " → MID " + std::to_string(m);
+            errorMessage_ = "extract_surface: 셸을 뽑은 솔리드 파트들의 MID 가 서로 다르다(" + list + ") — 새 셸 파트의 MID 를 하나로 정할 수 "
+                            "없다. target_pid 로 한 파트만 고르라";
+            return false;
+        }
+        if (!mids.empty()) shellMid = *mids.begin();
+        if (shellMid == 0)
+            infoMessages.push_back("[WARN] extract_surface: 셸을 뽑은 솔리드 파트에 MID 가 없다 — 새 셸 파트의 *PART MID 칸도 0 이다. 해석에 "
+                                   "쓰려면 재질을 정하라");
     }
 
     // ---- 3. Resolve output PID -----------------------------------------
     int outPid = op.outputPid > 0 ? op.outputPid : bumpId(maxPartId_, "파트 번호");
+    // 저절로 고른 번호도 쓰는 번호를 건너뛴다 — 파트 커서는 `*PART` 카드만 세어, `*PART` 가 없는 메시(요소 PID 1)에서 1 을 냈다(2026-11-22)
+    while (op.outputPid <= 0 && idOverflow_.empty() && partIdInUse(outPid)) outPid = bumpId(maxPartId_, "파트 번호");   // 상한이면 멈춘다(쓰기가 거절)
     if (op.outputPid > 0) maxPartId_ = std::max(maxPartId_, op.outputPid);
+    // 새 셸 파트의 *PART · *SECTION_SHELL — 셸을 다 지은 뒤 넣는다(표준 폭으로 지어 덱 쓰기 때 덱 폭으로 넓힌다)
+    auto emitShellPart = [&]() {
+        const int secId = bumpId(maxSectionId_, "섹션 번호");
+        std::ostringstream b;
+        b << "*PART\n" << "Extracted surface (PID " << outPid << ")\n";
+        b << "$#     pid     secid       mid\n";
+        b << std::setw(10) << outPid << std::setw(10) << secId << std::setw(10) << shellMid << "\n";
+        b << "*SECTION_SHELL\n" << "$#   secid    elform      shrf       nip\n";
+        b << std::setw(10) << secId << std::setw(10) << 2 << std::setw(10) << "1.0" << std::setw(10) << 2 << "\n";
+        b << "$#      t1        t2        t3        t4\n";
+        for (int k = 0; k < 4; ++k) b << formatRealField(op.thickness, 10);
+        b << "\n";
+        addedKeywordBlocks_.push_back(b.str());
+        return secId;
+    };
 
     // ---- 4. Mid-surface mode -------------------------------------------
     if (op.midSurface) {
@@ -9328,9 +9384,10 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
             else    { --maxElementId_; ++skipped; }
         }
 
+        const int secId = emitShellPart();
         infoMessages.push_back("  extract_surface(mid): " + std::to_string(emitted) +
             " shells, " + std::to_string(topToMid.size()) + " new mid nodes (PID " +
-            std::to_string(outPid) + ")" +
+            std::to_string(outPid) + " · SECID " + std::to_string(secId) + " · MID " + std::to_string(shellMid) + ")" +
             (unmatched > 0 ? " — " + std::to_string(unmatched) + " unpaired top nodes" : "") +
             (skipped > 0   ? " — " + std::to_string(skipped)   + " skipped faces" : ""));
         return true;
@@ -9365,9 +9422,10 @@ bool ModelAssembler::applyExtractSurface(const ExtractSurfaceOperation& op) {
         if (tri) ++triCount; else ++quadCount;
     }
 
+    const int secId = emitShellPart();
     infoMessages.push_back("  extract_surface(" + op.face + "): " +
         std::to_string(quadCount + triCount) + " shells emitted to PID " +
-        std::to_string(outPid) +
+        std::to_string(outPid) + " (SECID " + std::to_string(secId) + " · MID " + std::to_string(shellMid) + ")" +
         (triCount > 0 ? " (" + std::to_string(quadCount) + " QUAD4, " +
                         std::to_string(triCount) + " TRIA3)" : ""));
     return true;
@@ -18357,6 +18415,63 @@ std::vector<std::vector<std::pair<long long, long long>>> ModelAssembler::batter
     std::vector<std::vector<std::pair<long long, long long>>> out(bat::FAM_COUNT);
     for (size_t fam = 0; fam < out.size(); ++fam) out[fam] = bat::spansOf(std::move(ids[fam]), std::move(extra[fam]));
     return out;
+}
+
+bool ModelAssembler::partIdInUse(int pid) const {
+    if (baseMesh_.parts.count(pid)) return true;
+    for (const auto& [eid, e] : baseMesh_.elements) { (void)eid; if (e.partId == pid) return true; }
+    for (const auto& e : addedElements_) if (e.pid == pid) return true;
+    for (const auto& e : addedShellElements_) if (e.pid == pid) return true;
+    std::vector<long long> ids;
+    ma_partIdsIn(rawLines_, ids);
+    for (const auto& f : incl_.files) ma_partIdsIn(f.lines, ids);
+    for (const auto& d : addedDecks_) ma_partIdsIn(d, ids);
+    {
+        std::vector<std::string> pending;
+        for (const auto& blk : addedKeywordBlocks_) {
+            std::istringstream in(blk);
+            for (std::string l; std::getline(in, l);) pending.push_back(l);
+        }
+        ma_partIdsIn(pending, ids);
+    }
+    if (std::find(ids.begin(), ids.end(), static_cast<long long>(pid)) != ids.end()) return true;
+    if (static_cast<size_t>(bat::FAM_PART) < batteryIds_.size())
+        for (const auto& [lo, hi] : batteryIds_[bat::FAM_PART]) if (pid >= lo && pid <= hi) return true;
+    return false;
+}
+
+int ModelAssembler::partMidAnywhere(int pid) const {
+    const auto it = baseMesh_.parts.find(pid);
+    if (it != baseMesh_.parts.end() && it->second.materialId > 0) return it->second.materialId;
+    // `*PART` · `*PART_TITLE` 카드 — 블록 폭으로(제목 줄은 PID · SECID 가 양수가 아니라 걸리지 않는다)
+    auto scan = [pid](const std::vector<std::string>& L) {
+        const int deckFw = deckFieldWidth(L);
+        int fw = 10;
+        bool inPart = false;
+        for (const auto& l : L) {
+            if (deckscan::isKeywordLine(l)) {
+                const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+                inPart = (kw == "*PART" || kw == "*PART_TITLE");
+                fw = keywordFieldWidth(l, deckFw) >= 20 ? 20 : 10;
+                continue;
+            }
+            if (!inPart || !deckscan::isDataLine(l)) continue;
+            const auto f = deckscan::cardFields(l, fw);
+            if (deckscan::fieldInt(f, 0) == pid && deckscan::fieldInt(f, 1) > 0) return deckscan::fieldInt(f, 2);
+        }
+        return 0;
+    };
+    int m = scan(rawLines_);
+    for (size_t k = 0; m <= 0 && k < incl_.files.size(); ++k) m = scan(incl_.files[k].lines);
+    if (m <= 0) {
+        std::vector<std::string> pending;
+        for (const auto& blk : addedKeywordBlocks_) {
+            std::istringstream in(blk);
+            for (std::string l; std::getline(in, l);) pending.push_back(l);
+        }
+        m = scan(pending);
+    }
+    return m > 0 ? m : 0;
 }
 
 bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string& configDir,

@@ -4673,9 +4673,9 @@ operations:
 **호출형태**: positional op (help `Usage:` 와 정확히 일치).
 
 ```bash
-KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N]
+KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bottom|all] [--output-pid N] [--thickness T]
 ```
-**표 43-6. extract-surface 인자·옵션 — 위치인자 2개와 파트·면 선택 플래그.**
+**표 43-6. extract-surface 인자·옵션 — 위치인자 2개와 파트·면 선택 · 새 셸 파트 플래그.**
 
 
 | 인자/옵션 | 설명 |
@@ -4684,9 +4684,23 @@ KooRemapper extract-surface <solid.k> <output_shell.k> [--pid N] [--face top|bot
 | `<output_shell.k>` | 출력 셸 K파일 (positional 2) |
 | `--pid N` | 대상 파트 ID |
 | `--face top\|bottom\|all` | 추출할 면 선택 |
-| `--output-pid N` | 출력 셸에 부여할 파트 ID |
+| `--output-pid N` | 새 셸 파트 ID(기본 1) — 솔리드 덱(인클루드까지)이 아직 쓰지 않는 번호여야 한다 |
+| `--thickness T` | 새 셸 파트의 `*SECTION_SHELL` 두께 T1~T4 — **필수**(없거나 0 이하 · 수가 아니면 종료 코드 1) |
 
-**근거**: help(`Usage:`), pyKooCAE `surface_remesh.md`. 옵션 세부 동작·기본값은 정본 예제가 없어 플래그 이름 기준이며 확인 필요.
+**새 셸 파트(2026-11-22 · 사용자 결정)**: `--output-pid` 가 솔리드 덱(인클루드 닫힘까지)에 이미 있는 파트 번호면 아무 파일도 쓰지 않고
+종료 코드 1 입니다 — 기본값 1 도 덱에 PID 1 이 있으면 거절됩니다. 새 번호에는 `*PART`(SECID = 덱의 최대 SECID + 1 · MID = 셸을 뽑은
+솔리드 파트의 MID — `*PART` 가 없는 메시(`generate arc` 의 덱)면 0 과 경고)와 `*SECTION_SHELL`(ELFORM 2 · SHRF 1.0 · NIP 2 · T1~T4 =
+`--thickness`)을 씁니다. 셸을 뽑은 파트들의 MID 가 서로
+다르면(`--pid` 없이 여러 파트의 면) 종료 코드 1 입니다 — `--pid` 로 한 파트만 고릅니다. 예전엔 `*PART` 의 SECID 칸에 PID 를, MID 칸에
+1 을 박아 정의 안 된 섹션 · 엉뚱한 재질을 가리켰습니다. 재질 카드는 싣지 않습니다(솔리드 덱의 것) — 이 덱만으로는 MID 가 정의되지
+않습니다. 산출 덱은 솔리드 덱의 칸 폭(맨 · `I10=Y` · `LONG=Y`)을 머리에 밝히고 그 폭으로 씁니다.
+
+assemble 의 `type: extract_surface` 도 같습니다 — `output_pid`(빼면 모델 최대값 위 새 번호) · `thickness`(필수) · `target_pid` ·
+`face` · `mid_surface`. 이 실행의 모델(주 덱 · 인클루드 · 앞 처리 · battery 덱)이 이미 쓰는 번호면 종료 코드 1 입니다. 예전엔 그
+파트에 셸을 종료 코드 0 으로 넣었고, 새 번호면 `*PART` 없이 셸만 써 정의 안 된 파트를 가리켰습니다. `LONG=Y` 덱은 요소를 더하는
+assemble op 처럼 거절합니다.
+
+**근거**: help(`Usage:`), pyKooCAE `surface_remesh.md`, 회귀 `test_extract_surface_part.py`(단독 · assemble).
 
 ---
 

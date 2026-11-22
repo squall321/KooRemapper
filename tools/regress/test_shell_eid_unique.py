@@ -88,7 +88,7 @@ def main():
     block = os.path.join(EX, "iga", "block_2x2x1.k")
     arc = os.path.join(EX, "arc30", "arc30_flat.k")
     ex_surf = ("base_model: deck.k\noutput: out\noperations:\n  - type: extract_surface\n    target_pid: 2\n"
-               "    face: top\n    output_pid: 101\n")
+               "    face: top\n    output_pid: 101\n    thickness: 0.5\n")   # 새 셸 파트는 두께가 있어야 한다(2026-11-22)
     run_case(binary, "A extract_surface(top)", block, ex_surf)
 
     def add_shell(body):
@@ -108,7 +108,7 @@ def main():
     run_case(binary, "B 덱에 셸이 이미 있다", block, ex_surf, patch=add_shell)
     run_case(binary, "C mid_surface", block,
              "base_model: deck.k\noutput: out\noperations:\n  - type: extract_surface\n    target_pid: 2\n"
-             "    mid_surface: true\n    output_pid: 102\n")
+             "    mid_surface: true\n    output_pid: 102\n    thickness: 0.5\n")
     offset = ("base_model: deck.k\noutput: out\noperations:\n  - type: offset\n    source_pid: 1\n"
               "    element_type: %s\n    thickness: 1.5\n    shell_thickness: 1.5\n    num_layers: 1\n"
               "    offset_direction: +z\n    new_pid: 10\n    part_title: \"Offset\"\n    material_card: |\n"

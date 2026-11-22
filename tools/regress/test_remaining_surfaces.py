@@ -284,7 +284,8 @@ def body(binary, gmsh, tmp):
           f"rc={rc} {out[-250:]}")
 
     # extract-surface 는 YAML 설정이 없다 — 경로는 명령줄 인자뿐이라 §3.1(a) 대상이 아니다
-    rc, out = run(binary, tmp, "extract-surface", "data/box.k", "data/es_out.k", "--face", "top")
+    rc, out = run(binary, tmp, "extract-surface", "data/box.k", "data/es_out.k", "--face", "top", "--output-pid", "99",
+                  "--thickness", "0.5")
     check("extract-surface: 경로를 명령줄 인자로 받고 작업 폴더 기준으로 동작 (YAML 설정 없음)",
           rc == 0 and os.path.exists(os.path.join(data, "es_out.k")), f"rc={rc} {out[-250:]}")
     rc, out = run(binary, tmp, "extract-surface", "cfg/mm.yaml", "x.k")
