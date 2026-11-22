@@ -73,6 +73,13 @@ def main():
                 rc, text = run(binary, case.run, case.cmd)
                 check("%s — %s 가 /dev/full 이면 rc 1 · 까닭" % (spec["name"], o), rc == 1 and ("멈췄다" in text or "Cannot write" in text), (rc, text[-300:]))
             shutil.rmtree(root, ignore_errors=True)
+        # prestress --csv — 변형률 CSV(DynainWriter::writeStrainCSV)
+        d = os.path.join(top, "prestress_csv")
+        os.makedirs(d)
+        run(binary, d, "KooRemapper generate --dim-i 20 --dim-j 5 arc demo")
+        os.symlink("/dev/full", os.path.join(d, "demo_pre.csv"))
+        rc, text = run(binary, d, "KooRemapper prestress --E 210000 --nu 0.3 --csv demo_flat.k demo_bent.k demo_pre")
+        check("prestress — --csv 의 demo_pre.csv 가 /dev/full 이면 rc 1 · 까닭", rc == 1 and "멈췄다" in text, (rc, text[-300:]))
     finally:
         shutil.rmtree(top, ignore_errors=True)
     print()

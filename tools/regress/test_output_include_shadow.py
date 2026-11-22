@@ -12,6 +12,7 @@
 무엇을 보나(주 덱 A/box.k — `*INCLUDE_PATH B` · `*INCLUDE part.k` · part.k 는 B 에만 있다).
   A database(공용 관문) — output part.k · ../C/part.k 는 rc 1 · 아무것도 안 쓴다 / 다른 이름은 rc 0 / 못 찾은 인클루드 이름도 rc 1
   B assemble(조립기 관문) — output part(→ part.k) rc 1 / `flatten_includes: true` 면 산출에 `*INCLUDE` 가 없어 rc 0
+  C `.dynain` 은 보지 않는다 — 모델이 아직 없는 `<산출>.dynain` 을 끌어오고 assemble 이 그것을 쓰는 꼴(map + prestress 고리와 같은 쓰임)
 
 usage: test_output_include_shadow.py <KooRemapper 바이너리>
 """
@@ -113,6 +114,18 @@ def main():
         made = os.path.join(a, "part.k")
         flat = rc == 0 and os.path.exists(made) and "*INCLUDE\n" not in open(made, encoding="utf-8").read()
         check("B flatten_includes: true — 산출에 *INCLUDE 가 없어 rc 0", flat, (rc, out[-300:]))
+        print("[C .dynain 은 보지 않는다 — 덱이 끌어오는 dynain 을 이번 실행이 만든다]")
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import test_deck_bom as T
+        spec = {x["name"]: x for x in T.OPS}["assemble"]
+        case = T.Case(binary, os.path.join(tmp, "asm"), spec)
+        shutil.copytree(case.base, case.run)
+        main_k = os.path.join(case.run, case.decks[0])
+        txt = open(main_k, encoding="utf-8").read()
+        open(main_k, "w", encoding="utf-8").write(txt.replace("*END", "*INCLUDE\nbox_assembled.dynain\n*END", 1))
+        rc, out = run(binary, case.run, *case.cmd.split()[1:])
+        check("C 모델이 아직 없는 box_assembled.dynain 을 끌어온다 · assemble 이 그 dynain 을 쓴다 — 인클루드 이름으로 막지 않는다",
+              "인클루드 이름" not in out and os.path.exists(os.path.join(case.run, "box_assembled.dynain")), (rc, out[-300:]))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
