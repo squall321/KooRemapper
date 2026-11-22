@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "parser/IncludeClosure.h"
+
 namespace KooRemapper {
 
 class ConsoleOutput;
@@ -25,9 +27,18 @@ namespace output_guard {
 // apply* 가 읽은 입력을 스스로 적는다).
 
 // 읽는 파일 하나 — 경로와 그 몫(사람이 읽는 말 — "model" · "인클루드" · "dynain" …). 메시지에 그대로 나간다.
+// 덱이 끌어오는 인클루드 이름 하나 — 적힌 이름 · 그 이름을 찾은 경로(못 찾았으면 빈 글자)
+struct IncludeName {
+    std::string name, path;
+};
+
 struct Input {
     std::string path;
     std::string role;
+    // 이 덱(모델)이 끌어오는 인클루드 이름(닫힘 전체 · 못 찾은 이름 · 변형 카드의 이름 포함). 산출 덱이 이 이름을 그대로 싣으므로 쓸
+    // 파일이 제 폴더에서 이 이름 자리인데 그 이름이 원래 가리키던 자리가 아니면 산출이 자기를 끌어온다(`findClash` · 3차 4판 L-06).
+    // 펼쳐 쓴 산출이면 비운다
+    std::vector<IncludeName> includeNames = {};
 };
 
 // 명령줄의 설정 파일을 적어 둔다 — main 이 op 을 부르기 전에. 이 실행의 모든 관문이 읽는 파일로 본다(빈 경로는 무시).
@@ -40,11 +51,17 @@ void clearConfigs();
 // 덱을 흘려 읽고 줄은 담지 않는다. `role` 은 모델의 몫(인클루드는 「<role> 의 인클루드」). 따라가지 않는 변형 인클루드
 // (`*INCLUDE_TRANSFORM` …)가 가리키는 파일 · 깊이 상한을 넘은 이름의 파일도 든다 — 산출 덱이 그 카드를 그대로 싣는다(셋째 묶음).
 std::vector<Input> modelInputs(const std::string& modelPath, const std::string& role = "model");
+// 닫힘의 인클루드 이름 — 따라간 · 못 찾은 · 순환 · 깊이 · 변형 카드의 이름 전부(`Input::includeNames` 에 싣는다)
+std::vector<IncludeName> includeNamesOf(const include_closure::Closure& clo);
 // 설정 파일(빈 경로면 뺀다)과 모델 · 그 인클루드 닫힘 — 대부분의 op 이 읽는 것이 이것이다.
 std::vector<Input> configAndModel(const std::string& configPath, const std::string& modelPath);
 
 // 쓸 파일(`writes` — 빈 경로는 건너뛴다)이 읽는 파일(`reads` + 적어 둔 설정)이나 다른 쓸 파일과 같은 첫 짝을 찾는다.
-// 있으면 true 와 두 경로를 다 적은 문장(`why`).
+// 있으면 true 와 두 경로를 다 적은 문장(`why`). ★쓸 파일이 제 폴더에서 읽는 덱의 인클루드 이름(`Input::includeNames` — 상대 이름)
+// 자리이고 그 이름이 원래 다른 파일을 가리켰으면 걸린다(2026-11-22 · 3차 4판 L-06) — LS-DYNA 는 인클루드를 덱 폴더에서 먼저 찾으므로,
+// 주 덱이 `*INCLUDE_PATH` 폴더에서 찾던 `part.k` 를 산출 이름으로 주면 산출 덱의 `*INCLUDE part.k` 가 자기 자신을 끌어온다(예전엔 rc 0).
+// 쓸 파일이 그 이름이 찾은 파일 그 자체면 덮기라 이 판정이 아니다(읽는 파일과의 겹침). `.dynain` 은 `*INCLUDE` 를 싣지 않으므로 보지
+// 않는다(map + prestress 고리 — 덱이 끌어오는 dynain 을 이번 실행이 쓴다).
 bool findClash(const std::vector<std::string>& writes, const std::vector<Input>& reads, std::string& why);
 
 // `findClash` 를 묻고 걸리면 `[<op>] …` 을 [ERROR] 로 찍고 true — 부르는 쪽은 아무것도 열지 않고 rc 1 로 끝낸다.

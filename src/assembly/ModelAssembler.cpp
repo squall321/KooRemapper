@@ -722,10 +722,13 @@ bool ModelAssembler::materialsReachable(const std::vector<int>& mids, const std:
 //   incl_ 이 비므로 원본 닫힘을 다시 읽는다(펼친 산출이 인클루드 파일을 덮으면 원래 덱이 깨진다).
 void ModelAssembler::noteModelInputs(const std::string& filename, bool flattened) {
     if (flattened) {
-        for (auto& in : output_guard::modelInputs(filename)) guardInputs_.push_back(std::move(in));
+        for (auto& in : output_guard::modelInputs(filename)) {
+            in.includeNames.clear();   // 펼친 산출은 `*INCLUDE` 를 싣지 않는다 — 이름을 가릴 일이 없다(L-06)
+            guardInputs_.push_back(std::move(in));
+        }
         return;
     }
-    guardInputs_.push_back({filename, "model"});
+    guardInputs_.push_back({filename, "model", output_guard::includeNamesOf(incl_)});
     for (const auto& f : incl_.files) guardInputs_.push_back({f.path, "model 의 인클루드"});
     // 깊이 상한을 넘은 이름의 파일 · 따라가지 않는 변형 인클루드(`*INCLUDE_TRANSFORM` …)의 파일도 — 산출 덱이 그 카드를 그대로 싣는다
     // (셋째 묶음 — 실측: convert 가 output 을 그 파일로 주면 rc 0 으로 덮었다 · `output_guard::modelInputs` 와 같은 목록)
@@ -825,8 +828,10 @@ bool ModelAssembler::planRunWrites(const std::vector<AssemblyOperation>& ops, co
     //   이름이 같을 수 없다)
     const std::string deckOut = outputPrefix + ".k";
     std::vector<output_guard::Input> deckReads;
-    for (const auto& in : guardInputs_)
+    for (const auto& in : guardInputs_) {
         if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_))) deckReads.push_back(in);
+        else deckReads.push_back({"", in.role, in.includeNames});   // in-place 는 경로만 뺀다 — 인클루드 이름 자리는 그대로 본다(L-06)
+    }
     if (output_guard::findClash({deckOut}, deckReads, why)) {
         errorMessage_ = why + " — 출력 파일을 쓰지 않았습니다: " + deckOut +
                         " / an output is the same file as an input or another output; nothing written";
@@ -5703,9 +5708,10 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
         for (const auto& igaf : igaFiles_) side.push_back(igaf.fullpath);
         side.insert(side.end(), plannedWrites_.begin(), plannedWrites_.end());
         std::vector<output_guard::Input> deckReads;
-        for (const auto& in : guardInputs_)
-            if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_)))
-                deckReads.push_back(in);
+        for (const auto& in : guardInputs_) {
+            if (!(inPlaceAllowed_ && in.role == "model" && include_closure::sameFile(in.path, baseModelPath_))) deckReads.push_back(in);
+            else deckReads.push_back({"", in.role, in.includeNames});   // in-place 는 경로만 뺀다 — 인클루드 이름 자리는 그대로 본다(L-06)
+        }
         std::vector<std::string> all{outputFile};
         all.insert(all.end(), side.begin(), side.end());
         std::string why;

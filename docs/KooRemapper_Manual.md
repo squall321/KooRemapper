@@ -495,12 +495,18 @@ BOM 을 싣지 않습니다. 도움말 예시 밖의 설정 꼴은 재지 않았
 - **`map` 의 prestress 고리** — 메시 사본이 map 산출 그 자리인 것(`output: foo.k` + `prestress.output: foo.dynain`)은
   [§6](#6-prestress--초기-응력변형률-계산)의 쓰임이라 막지 않습니다. dynain · CSV 가 map 산출을 덮는 것과 사본이 `bent` ·
   `flat` 을 덮는 것은 막습니다 — 재료가 없어 CSV 가 `prestress.output` 자리에 갈 때도 map 이 쓰기 전에 봅니다.
-- **거절하지 않는 것** — 다른 폴더의 같은 이름, 입력과 상관없는 기존 파일(예전처럼 덮어씁니다), 이름이 고유한 임시 파일
-  (`flatten_includes` 의 `.<이름>.kr_tmp_flat_….k` 등).
+- **거절하지 않는 것** — 다른 폴더의 같은 이름(모델이 끌어오는 인클루드 이름이 아니면 — 아래), 입력과 상관없는 기존 파일(예전처럼
+  덮어씁니다), 이름이 고유한 임시 파일(`flatten_includes` 의 `.<이름>.kr_tmp_flat_….k` 등).
 - 설정 파일은 명령줄의 `.yaml`·`.yml` 과 op 이 읽는 설정 경로입니다. 산출을 명령줄의 `.yaml` 로 받는 op 은 없습니다.
 - 단독 `battery` 의 덱(batch 면 조합의 덱 전부 — 하나라도 걸리면 어느 덱도 쓰지 않습니다)과 `foldsurface` 의
   `<output>_curve.csv` 도 견줍니다(2026-11-08 — 그 전엔 견주지 않아, 그 자리가 설정을 가리키는 심볼릭 링크면 설정을 덮고
   종료 코드 0 이었습니다).
+- **산출이 인클루드 이름을 가린다(2026-11-22 · 미룬 결함 3차 4판 L-06)** — LS-DYNA 는 `*INCLUDE` 이름을 덱 폴더에서 먼저 찾고 경로가 없는 이름만
+  `*INCLUDE_PATH` 폴더에서 찾습니다. 모델이 끌어오는 인클루드 이름(상대 이름)이 쓸 파일의 폴더에서 그 쓸 파일 자신을 가리키고, 그 이름이 원래
+  다른 파일을 가리켰거나 찾지 못한 이름이면 거절합니다(산출 덱이 같은 카드를 실어 자기 자신을 끌어온다 — 예전엔 rc 0). 주 덱이 `*INCLUDE_PATH`
+  폴더에서 찾던 `part.k` 를 `output: part.k`(주 덱 폴더) · `output: ../other/part.k` 로 주면 걸립니다. 그 이름이 찾은 파일 그 자체를 덮는 것은
+  위의 「읽는 파일과 같다」 판정이고, `.dynain` 은 `*INCLUDE` 를 싣지 않아 보지 않습니다(map + prestress 고리). `flatten_includes: true` 로 펼친
+  산출은 `*INCLUDE` 를 싣지 않아 걸리지 않습니다. 회귀 `tools/regress/test_output_include_shadow.py`.
 - 회귀 `tools/regress/test_output_guard_ops.py` — op 마다 모델 · 인클루드 · 설정 · 다른 입력 · 하드/심볼릭 링크 · `../` 철자는
   거절, 대조 · 다른 폴더의 같은 이름 · 상관없는 기존 파일은 그대로 도는지 봅니다.
 
