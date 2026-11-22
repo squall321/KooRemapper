@@ -15,6 +15,7 @@
   · 칸 읽기(이 파일 — C++ 와 따로): Card A 뒤에 카드가 있으면 Card B 의 PENMAX(1~10열)는 0, Card C 의 IGNORE(11~20열)는 1
   · 우리 리더(`contact analyze`)도 같은 뜻으로 읽는다 — 「Card B:」 에 PENMAX 가 없고 「Card C: IGNORE=1」
   · 권취 dent 의 압입자 접촉(Card A 만)은 그대로
+  · Card A 의 SBOPT 는 정수 칸에 정수 3 으로 쓴다(2026-11-22 · 3차 5판 L-17 — 예전엔 「     3.000」)
 
 usage: test_battery_contact_optional_cards.py <KooRemapper 바이너리>
 """
@@ -93,6 +94,9 @@ def main():
                 except ValueError as e:
                     got[kw] = "못 읽음: %s" % e
             ok = all((got.get(kw) == (7, 0.0, 1)) if bc else got.get(kw) == "A 만" for kw, bc in want.items())
+            sb = [ls[4][40:50] for kw, ls in contacts(deck) if len(ls) > 4]
+            check("★%s — Card A 의 SBOPT(41~50열)는 정수 3(Vol_I 형 I · 예전엔 「     3.000」 · 3차 5판 L-17)" % name,
+                  bool(sb) and all(x.strip() == "3" for x in sb), sb)
             check("★%s — Card B 의 PENMAX(1~10열) 0 · Card C 의 IGNORE(11~20열) 1(예전엔 Card B 자리에 IGNORE 1 → PENMAX 1)" % name,
                   ok, got)
             with open(os.path.join(d, "c.yaml"), "w", encoding="utf-8") as f:

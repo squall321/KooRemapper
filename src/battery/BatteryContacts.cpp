@@ -42,11 +42,12 @@ static void writeA2S(std::ostream& out, int cid, const std::string& title,
              1.0, 1.0, sst, mst, 1.0, 1.0, 1.0, 1.0);
     out << buf;
 
-    // Card A: SOFT SOFSCL LCIDAB MAXPAR SBOPT DEPTH BSORT FRCFRQ
+    // Card A: SOFT SOFSCL LCIDAB MAXPAR SBOPT DEPTH BSORT FRCFRQ — SBOPT 는 정수 칸(Vol_I Card A 형 I)이다. 예전엔 「     3.000」 으로
+    //   썼다(3차 5판 L-17 · LS-PrePost 는 3 으로 읽는다 — LS-DYNA 로는 못 쟀다). 권취 · 자기 접촉도 같다
     out << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
     snprintf(buf, sizeof(buf),
-             "%10d%10.4f%10d%10.4f%10.3f%10d%10d%10d\n",
-             1, sofscl, 0, 1.375, 3.0, 5, 0, 1);
+             "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
+             1, sofscl, 0, 1.375, 3, 5, 0, 1);
     out << buf;
 
     // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
@@ -93,8 +94,8 @@ static void writeASS(std::ostream& out, int cid, const std::string& title,
     // Card A: SOFT=2 (segment-based, more stable for thin elements)
     out << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
     snprintf(buf, sizeof(buf),
-             "%10d%10.4f%10d%10.4f%10.3f%10d%10d%10d\n",
-             2, sofscl, 0, 1.375, 3.0, 5, 0, 1);
+             "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
+             2, sofscl, 0, 1.375, 3, 5, 0, 1);
     out << buf;
 
     // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
@@ -146,7 +147,7 @@ static void writeTied(std::ostream& out, int cid, const std::string& title,
 void writeContacts(std::ostream& out, const BatteryConfig& cfg,
                    int nUnitCells,
                    const std::vector<int>& cellPids) {
-    writeComment(out, "Contacts (SOFT=1)");
+    writeComment(out, "Contacts (SOFT=1 · cell self-contact SOFT=2)");   // 예전 「SOFT=1」 은 자기 접촉(SOFT=2)과 어긋났다(L-17)
 
     double meshSize = batteryMeshSize(cfg.tier);
     double sofscl   = batterySofscl(meshSize,

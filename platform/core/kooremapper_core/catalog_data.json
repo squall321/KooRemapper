@@ -12833,7 +12833,7 @@
           "type": "integer",
           "required": false,
           "default": "1",
-          "desc": "SOFT contact flag (always 1, read-only)"
+          "desc": "Read but not used — the deck writes SOFT = 1 on the impactor / ground surface-to-surface contacts and SOFT = 2 on the cell self-contact, whatever this key says (until 2026-11-22 this said 'always 1', which the self-contact never was)"
         },
         {
           "path": "contact.sofscl_base",
@@ -12868,7 +12868,7 @@
           "type": "integer",
           "required": false,
           "default": "5",
-          "desc": "Contact search depth (elements)"
+          "desc": "Read but not used — every automatic contact's Card A writes DEPTH 5 whatever this key says (noted 2026-11-22)"
         },
         {
           "path": "solid_electrode",

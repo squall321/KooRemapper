@@ -1660,8 +1660,8 @@ void WoundMeshGen::flushContacts() {
                  1.0, 1.0, sst, sst, 1.0, 1.0, 1.0, 1.0);
         out_ << buf;
         out_ << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
-        snprintf(buf, sizeof(buf), "%10d%10.4f%10d%10.4f%10.3f%10d%10d%10d\n",
-                 1, sofscl, 0, 1.375, 3.0, 5, 0, 1);
+        snprintf(buf, sizeof(buf), "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
+                 1, sofscl, 0, 1.375, 3, 5, 0, 1);
         out_ << buf;
     }
 
@@ -1683,8 +1683,8 @@ void WoundMeshGen::flushContacts() {
     out_ << buf;
     // Card A: SOFT=2 (segment-based, stable for thin elements)
     out_ << "$#    soft    sofscl    lcidab    maxpar     sbopt     depth     bsort    frcfrq\n";
-    snprintf(buf, sizeof(buf), "%10d%10.4f%10d%10.4f%10.3f%10d%10d%10d\n",
-             2, sofscl, 0, 1.375, 3.0, 5, 0, 1);
+    snprintf(buf, sizeof(buf), "%10d%10.4f%10d%10.4f%10d%10d%10d%10d\n",
+             2, sofscl, 0, 1.375, 3, 5, 0, 1);
     out_ << buf;
     // Card B · C(2026-11-08 · 6차 검토 P2) — 매뉴얼 차례(Vol_I *CONTACT 「Data cards」: ID · Card 1~3 · Optional Card A · B · C)와 꼴.
     //   Card C 를 쓰려면 Card B 가 와야 한다 — Card B 는 기본값(PENMAX 0.0 = 형의 기본 · 나머지 0). Card C 의 IGNORE=1 은 처음 겹침을

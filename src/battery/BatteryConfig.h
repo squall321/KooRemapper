@@ -163,7 +163,7 @@ struct BatteryMatElectrolyte {
 
 // ── Contact parameters ─────────────────────────────────────────
 struct BatteryContactParams {
-    int    soft        = 1;       // SOFT flag (always 1)
+    int    soft        = 1;       // 읽기만 — 쓰개는 SOFT 를 접촉마다 정한다(면 대 면 1 · 셀 자기 접촉 2 · L-17)
     double sofscl_base = 0.001;   // base for tier -1 (5mm mesh)
     double sofscl_pow  = 2.0;     // scaling power
     double sst_ext     = 0.05;    // mm  external contact shell thickness
