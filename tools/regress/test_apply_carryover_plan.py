@@ -1038,6 +1038,16 @@ def part_l(binary):
     rc, out, rep = apply_case(binary, d)
     check("L-4d 셸 섹션의 빈 제목 줄 · 두께 3.0 — SECID 3 이 두 번이 아니다(rc 0 · part_duplicate 없음)",
           rc == 0 and "part_duplicate" not in kinds(rep), (rc, sorted(kinds(rep)), details(rep, "part_duplicate")[:200]))
+    # L-4f 셸 섹션의 들여 쓴 `*` 제목(「  *CAN#4_sec」 — 1열이 아니라 키워드가 아니다 · 3차 3판 L-09). 예전 섹션 훑기는 그 줄에서 블록을 끊어
+    #      SECID 4 를 못 보았다(섹션이 덱에 없다 · 그 번호를 새 섹션에 다시 낼 수 있었다)
+    d = stage(EX, "l4f")
+    deck = os.path.join(d, "deck.k")
+    body = open(deck, encoding="utf-8").read()
+    write(deck, body.replace(can, can.replace("CAN#4_sec\n", "  *CAN#4_sec\n")))
+    reseal(d)
+    rc, out, rep = apply_case(binary, d)
+    check("L-4f 셸 섹션의 들여 쓴 `*` 제목 — SECID 4 가 덱에 있다(rc 0 · 거절 없음)", rc == 0 and not kinds(rep) - {"fragment_bytes"},
+          (rc, sorted(kinds(rep)), out[-300:]))
     # L-4e 한 키워드 아래 쌓인 둘째 묶음이 옮기는 PID 3 의 SECID 3 을 또 정의한다 — 카드 묶음 셈은 그것도 센다(예전 첫 카드 셈은 놓쳤다)
     d = stage(EX, "l4e")
     add_before_end(d, "*SECTION_SOLID\n         7         1\n         3         2\n")
