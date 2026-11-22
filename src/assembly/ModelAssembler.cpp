@@ -67,9 +67,10 @@ std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(c
     std::map<int, std::vector<std::pair<size_t, std::string>>> defs;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string& l = lines[i];
-        size_t s = l.find_first_not_of(" \t");
-        if (s == std::string::npos || l[s] != '*') continue;
-        std::string up = l.substr(s);
+        // 키워드 · 주석은 1열의 `*` · `$` 뿐이다(리더 · LS-DYNA 와 같다 · 3차 3판 L-09) — 예전엔 들여 쓴 `*` 제목(「  *front」)에서 블록을 끊고
+        // 들여 쓴 `$` 제목(「  $5 tube」)을 주석으로 건너 SECID 를 못 읽거나 둘째 카드를 SECID 로 읽었다
+        if (!deckscan::isKeywordLine(l)) continue;
+        std::string up = l;
         for (auto& c : up) c = (char)std::toupper((unsigned char)c);
         if (up.rfind("*SECTION_", 0) != 0) continue;
         // `_TITLE` 이면 제목줄이 한 줄 더 있다 — 그것을 SECID 로 읽으면 이 스캐너도 같은 맹점을
@@ -78,8 +79,8 @@ std::map<int, std::vector<std::pair<size_t, std::string>>> cur_scanSectionDefs(c
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
             size_t h = d.find_first_not_of(" \t\r");
-            if (h != std::string::npos && d[h] == '$') continue;
-            if (h != std::string::npos && d[h] == '*') break;
+            if (deckscan::isKeywordLine(d)) break;
+            if (!d.empty() && d[0] == '$') continue;
             // `_TITLE` 의 제목 줄은 비어 있어도 그 줄이다(LS-DYNA · StepForge 는 빈 줄도 카드로 읽는다). 예전엔 빈 줄을 먼저 건너뛰어
             // SECID 카드를 제목으로 버리고 두께 줄(`3.0`)을 SECID 3 으로 읽었다 — 이월 적용이 PID 3 을 part_duplicate 로 거짓 거절했다(11-08 #4)
             if (skip > 0) { --skip; continue; }
@@ -175,8 +176,9 @@ std::vector<CurCardSetBlock> cur_cardSetBlocks(const std::vector<std::string>& l
     const int deckFw = deckFieldWidth(lines);
     for (size_t i = 0; i < lines.size();) {
         const std::string& l = lines[i];
-        const size_t g = l.find_first_not_of(" \t");
-        if (g == std::string::npos || l[g] != '*') { ++i; continue; }
+        // 키워드는 1열의 `*` 뿐이다(리더 · LS-DYNA 와 같다 · 3차 3판 L-09) — 예전엔 들여 쓴 `*` 줄(`*SECTION_SHELL_TITLE` 의 제목 「  *front」)에서
+        // 블록을 끊어 그 묶음의 SECID 를 못 읽었다(새 섹션이 그 번호를 다시 냈다)
+        if (!deckscan::isKeywordLine(l)) { ++i; continue; }
         const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
         // 줄 목록은 고른 블록만 만든다(3차 3판 L-15 — 예전엔 `*NODE` 처럼 수백만 줄인 남의 블록도 줄 번호를 다 모은 뒤 버렸다 · 300 만 절점에서
         // 한 번에 수십 MB)
@@ -184,8 +186,7 @@ std::vector<CurCardSetBlock> cur_cardSetBlocks(const std::vector<std::string>& l
         size_t j = i + 1;
         std::vector<size_t> rows;   // 블록의 데이터 줄(빈 줄 포함 · 주석 뺌)
         for (; j < lines.size(); ++j) {
-            const size_t h = lines[j].find_first_not_of(" \t\r");
-            if (h != std::string::npos && lines[j][h] == '*') break;
+            if (deckscan::isKeywordLine(lines[j])) break;
             if (!want) continue;
             // 주석은 **1열의 `$`** 뿐이다(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」 · 리더 `isCommentLine` 과 같다) —
             // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴을

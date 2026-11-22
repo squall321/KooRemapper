@@ -217,6 +217,9 @@ public:
     static int hourglassIdTop(const std::vector<std::string>& lines);
     static int removeSectionSets(std::vector<std::string>& lines, int secid, int& kept);
     static int removeHourglassSets(std::vector<std::string>& lines, int hgid, int& kept);
+    // 같은 묶음 셈으로 SECID 마다 정의한 묶음의 Card 1 줄 전부(나온 차례) — 둘 이상이면 두 번 정의됐다(StepForge 권고 D-681 · 이월 적용 ·
+    // `info --strict` 의 겹침 — 3차 3판 L-09 에서 공개 자리로)
+    static std::map<int, std::vector<size_t>> sectionDefinitionLines(const std::vector<std::string>& lines);
 
 private:
     struct AddedNode { int id; double x, y, z; };
@@ -298,7 +301,7 @@ private:
     static std::map<int, std::string> definedPartVariantIds(const std::vector<std::string>& lines);
     // 같은 훑기로 번호마다 정의한 블록의 키워드 줄 전부(나온 차례) — 둘 이상이면 그 번호가 두 번 정의됐다(StepForge 권고 D-681)
     static std::map<int, std::vector<size_t>> materialDefinitionLines(const std::vector<std::string>& lines);
-    static std::map<int, std::vector<size_t>> sectionDefinitionLines(const std::vector<std::string>& lines);
+    // (sectionDefinitionLines 는 위 공개 자리)
     // 덱이 쓰는 SECID — 섹션 블록의 카드 묶음(SOLID · SHELL · TSHELL 은 쌓인 묶음까지 정확히) · 행 수를 모르는 꼴은 행마다 첫 칸 숫자 ·
     // 옛 첫 카드 셈의 합(이월 적용의 새 SECID 겹침), 그리고 그 가장 큰 값(= 번호 커서 `maxSectionId_` · `idMaxima().section` 이 보는 값 ·
     // 이월 적용의 새 SECID 차례) — StepForge 리더(591d5b5)와 같은 규칙

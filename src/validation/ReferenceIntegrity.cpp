@@ -6,6 +6,9 @@
 #include "commands/contact_helpers.h"
 
 #include "parser/IncludeScan.h"
+#include "parser/DeckScan.h"
+#include "parser/MaterialIds.h"
+#include "assembly/ModelAssembler.h"   // sectionDefinitionLines — 섹션 카드 묶음 셈의 정본
 
 #include <algorithm>
 #include <cctype>
@@ -129,58 +132,48 @@ ReferenceReport checkSetReferences(const std::vector<std::string>& lines) {
     std::set<int> definedSets;
     // 종류 → (SID → 처음 본 줄). 같은 종류 안에서 SID 가 겹치는지 보려고 둔다.
     std::map<std::string, std::map<int, int>> seenSetIds;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        std::string t = trim(lines[i]);
-        if (!isKeyword(t)) continue;
-        std::string kw = upper(t);
-        // `*SECTION_*`·`*MAT_*` 도 **같은 종류 안에서 ID 가 유일해야 한다.** 겹치면 LS-DYNA 가
-        // 키워드 단계에서 멈춘다. 실측(2026-09-28): `restack` 이 파트가 참조하지 않는 `*SECTION`
-        // 을 못 보고 그 번호를 재발행해 SECID 를 겹치게 만들었다(rc=0 이었다).
-        //
-        // ⚠ 첫 칸이 **구조 MID 가 아닌** `*MAT_` 변종을 빼야 한다. 실측으로 오탐 4장을 냈다 —
-        //    `*MAT_THERMAL_*` 의 첫 칸은 **TMID**(열 재질 ID)로 다른 네임스페이스다
-        //    (`materials/test_matdb_result.k` 등). `*MAT_ADD_*` 는 첫 칸이 **PID** 이고
-        //    `*MAT_NONLOCAL` 도 자기 ID 체계다.
-        // ⚠ 한 키워드 아래 정의가 **여러 장** 오므로 첫 카드만 보면 안 된다(매뉴얼 "Card Sets").
-        //    그래서 데이터 줄 전체를 훑되, **첫 칸이 정수인 줄만** 후보로 본다.
-        // 열 재질은 번호 이름(`*MAT_T01`~`T18`)도 TMID 다 — 예전엔 `*MAT_THERMAL_` 만 빼서 `*MAT_T01 2` 와 `*MAT_ELASTIC 2` 를 같은 번호의
-        // 겹침(망가진 카드)으로 보았다(Vol II 는 같은 TMID · MID 를 허락한다 · 11-08 #3)
-        const bool matOtherNs = starts(kw, "*MAT_ADD_") || isThermalMaterialKeyword(kw) ||
-                                starts(kw, "*MAT_NONLOCAL");
-        if (starts(kw, "*SECTION_") || (starts(kw, "*MAT_") && !matOtherNs)) {
-            const bool isSec = starts(kw, "*SECTION_");
-            std::string ns = isSec ? "SECTION" : "MAT";
-            int skip = titleLines(kw);
-            // ⚠ 한 키워드 아래 카드 세트가 여러 장이고 **세트 길이 표가 우리에겐 없다.** 그래서
-            // 여기서는 **첫 정의만** 본다 — 넘치게 세면 두 번째 카드(두께·물성 줄)의 첫 칸을 ID 로
-            // 오해해 오탐이 난다. 놓치는 쪽을 택한다.
-            for (size_t j = i + 1; j < lines.size(); ++j) {
-                std::string d = trim(lines[j]);
-                if (d.empty() || isComment(d)) continue;
-                if (isKeyword(d)) break;
-                if (skip > 0) { --skip; continue; }
-                if (hasParameterRef(lines[j])) break;
-                int id = 0;
-                if (firstFieldId(lines[j], id) && id > 0 && !has(kw, "_COLLECT")) {
-                    auto& slot = seenSetIds[ns][id];
-                    if (slot > 0)
-                        rep.damaged.push_back({(int)j + 1, "*" + ns,
-                            "ID " + std::to_string(id) + " 가 line " + std::to_string(slot) +
-                            " 과 겹칩니다 — 같은 종류의 ID 는 유일해야 합니다"});
-                    else
-                        slot = (int)j + 1;
-                }
-                break;
-            }
-            continue;
+    // `*SECTION_*`·`*MAT_*` 도 **같은 종류 안에서 ID 가 유일해야 한다.** 겹치면 LS-DYNA 가 키워드 단계에서 멈춘다. 실측(2026-09-28):
+    // `restack` 이 파트가 참조하지 않는 `*SECTION` 을 못 보고 그 번호를 재발행해 SECID 를 겹치게 만들었다(rc=0 이었다).
+    // ★공용 카드 묶음 셈으로 센다(2026-11-22 · 미룬 결함 3차 3판 L-09) — 섹션은 `ModelAssembler::sectionDefinitionLines`, 재질은
+    //   `matids::scan`(구조 재질만 — 열 재질의 TMID · `*MAT_ADD_*` 의 첫 칸은 MID 가 아니다). 예전엔 여기 따로 블록마다 **첫 정의만** 보아
+    //   쌓인 묶음(매뉴얼 Card Sets)의 겹침을 놓쳤고, `_TITLE` 의 빈 제목 줄을 건너뛰어 Card 1 을 제목으로 · 둘째 카드의 첫 칸을 번호로
+    //   읽었다(`*MAT_RIGID_TITLE` 의 CMO `1` 이 MID 1 과 겹친다고 했다). 행 수를 모르는 꼴 · 못 가른 자리는 셈이 넉넉히 세는 쪽이라
+    //   정의로 단정하지 않는다(놓치는 쪽 — 오탐이 더 비싸다).
+    // ⚠ `*MAT_NONLOCAL` 의 첫 칸은 제 번호 체계(IDNL)다 — 재질 번호와 견주지 않는다(예전 그대로).
+    {
+        auto report = [&rep](const char* ns, const std::map<int, std::vector<size_t>>& defs) {
+            std::vector<std::pair<size_t, std::string>> found;
+            for (const auto& [id, at] : defs)
+                for (size_t k = 1; k < at.size(); ++k)
+                    found.push_back({at[k], "ID " + std::to_string(id) + " 가 line " + std::to_string(at[0] + 1) +
+                                                " 과 겹칩니다 — 같은 종류의 ID 는 유일해야 합니다"});
+            std::sort(found.begin(), found.end());
+            for (const auto& [li, what] : found) rep.damaged.push_back({(int)li + 1, std::string("*") + ns, what});
+        };
+        report("SECTION", ModelAssembler::sectionDefinitionLines(lines));
+        std::map<int, std::vector<size_t>> mats;
+        for (const auto& blk : matids::scan(lines).blocks) {
+            if (starts(deckscan::kwBare(deckscan::keywordToken(lines[blk.keyword])), "*MAT_NONLOCAL")) continue;
+            for (const auto& st : blk.sets)
+                if (st.mid > 0) mats[st.mid].push_back(st.card1);
         }
+        report("MAT", mats);
+    }
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        // 키워드는 1열의 `*` 뿐이다(리더 · LS-DYNA 와 같다) — 들여 쓴 `*` 줄(제목 「  *front」)은 앞 블록의 데이터다(L-09)
+        if (!deckscan::isKeywordLine(lines[i])) continue;
+        std::string kw = upper(trim(lines[i]));
         if (!starts(kw, "*SET_")) continue;
         int skip = titleLines(kw);
         for (size_t j = i + 1; j < lines.size(); ++j) {
             std::string d = trim(lines[j]);
-            if (d.empty() || isComment(d)) continue;
-            if (isKeyword(d)) break;
+            if (deckscan::isKeywordLine(lines[j])) break;
+            if (!lines[j].empty() && lines[j][0] == '$') continue;   // 주석은 1열의 `$` 뿐
+            // `_TITLE` 의 제목 줄은 비어 있어도 · 들여 쓴 `*` · `$` 로 시작해도 제목이다(L-09) — 예전엔 빈 제목을 건너뛰어 SID 줄을 제목으로,
+            // 첫 멤버 줄을 SID 로 읽었다(없는 SID 겹침 · 진짜 SID 를 미정의로)
             if (skip > 0) { --skip; continue; }
+            if (d.empty() || isComment(d)) continue;
             auto f = fields10(lines[j]);
             int sid = 0;
             if (!f.empty() && toInt(f[0], sid) && sid > 0) {
