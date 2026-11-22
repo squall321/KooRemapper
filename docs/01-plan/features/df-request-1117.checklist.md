@@ -32,5 +32,10 @@
 - [x] E-1 나머지 13건 설계서와 이름표 — 11-21 사용자 확인(이름표 「표 그대로 승인」 · 건강 문턱 「요청서 값을 기본으로」 · footprint 「생성기에
   청하고 기다린다」 — 설계안 6절)
   - ① 단계(DF-01 캠페인 적재)는 11-20 에 짓고 11-21 에 올렸다 — `df-campaign-intake-1120.plan.md` · Drive `dist-20261121-120311Z`.
-- [ ] E-2 ② 단계(DF-02 출처 · DF-03 유효성 · 동시 올리기 고침)의 계획 · 체크리스트 · 맥락 — 미룬 결함
-  3차(`deferred-defects-round3-1121.plan.md`)의 판들이 올라간 뒤에 쓴다(11-21 「열린 줄 스물 전부」 — 「DF ② ~ ⑥ 은 그동안 멈춥니다」)
+- [x] E-2 2차 ② ~ ⑥ — 11-22 「계획한건 전부 만들고」 로 단계마다 멈추지 않고 지었다(계획 · 체크리스트 · 맥락은 단계마다).
+  - ② DF-02 · 03 · 동시 올리기 — `df-provenance-health-1122.plan.md` · Drive `dist-20261122-042305Z`
+  - ③ DF-04 — `df-extraction-clearance-1122.plan.md` · Drive `dist-20261122-062855Z`
+  - ④ DF-13 — `df-report-bundles-1122.plan.md` · Drive `dist-20261122-085355Z`
+  - ⑤ DF-05 · 06 · 08 ~ 12 — `df-campaign-analysis-1122.plan.md` · ⑥ DF-07 · DF-15 나머지 — `df-hotspot-session-1122.plan.md` · 파이썬만(코드
+    `4cca82a` · dev DB 0026 · Drive 는 ④ 판 그대로)
+  - cae00 검증런 안내 `docs/requests/cae00-verification-run-2026-11-22.md`
