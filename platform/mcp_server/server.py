@@ -1087,6 +1087,9 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
 # (test_mcp_tools_contract 가 대조한다).
 CAMPAIGN_STATES = ("pending", "received", "skipped", "rejected")
 CAMPAIGN_RUNS_MAX = 5000
+CLEARANCE_STATUSES = ("allow", "hold", "deleted")   # 백엔드 GET /campaigns/{id}/deletion-clearance 의 status 와 같아야 한다
+_A_REQUIRED = ("필수 추출 목록 — 항목마다 field(자유 글 128자까지 · 대소문자 · 앞뒤 공백은 가리지 않는다) · parts(정수 목록 · 없으면 모든 파트) · "
+               "states(all · sampled — 기본 all, 모든 상태를 읽은 추출이어야 채워진다). 같은 항목이 둘이면 거절된다.")
 _A_CAMPAIGN_ID = "캠페인 id — create_campaign 응답의 campaign_id(같은 이름으로 다시 만들면 오류 글에 그 id 가 있다)."
 # 건강 판정 문턱(DF-03) — 열쇠 · 기본값은 백엔드 campaigns/health.py `DEFAULTS` 와 같아야 한다(test_mcp_tools_contract 가 대조한다)
 HEALTH_THRESHOLD_DEFAULTS = {"energy_ratio_max": 1.05, "hg_over_ie_max": 0.10, "added_mass_pct_max": 0.5, "ke0_rel_tol": 0.10,
@@ -1114,6 +1117,7 @@ async def create_campaign(
     impactor: Annotated[dict | None, Field(
         description="충격자(선택) — {mass_g, height_mm, ke_mj} 가운데 아는 것만(0 이상). 다른 열쇠는 거절된다.")] = None,
     health_thresholds: Annotated[dict | None, Field(description=_A_THRESHOLDS)] = None,
+    required_extractions: Annotated[list[dict] | None, Field(description=_A_REQUIRED)] = None,
 ) -> dict:
     """캠페인(한 과제 · 한 판의 런 묶음)을 만든다 — 응답의 `campaign_id` 로 런 목록을 올리고 리포트를 받는다.
 
@@ -1126,7 +1130,7 @@ async def create_campaign(
         "name": name, "project": project, "dev_rev": dev_rev, "analysis_method": analysis_method,
         "analysis_target": analysis_target, "doe_strategy": doe_strategy, "drop_height_mm": drop_height_mm,
         "duration_ms": duration_ms, "thickness_axis": thickness_axis, "impactor": impactor,
-        "health_thresholds": health_thresholds,
+        "health_thresholds": health_thresholds, "required_extractions": required_extractions,
     }.items() if v is not None}
     return await _post(ctx, "/campaigns", body)
 
@@ -1141,13 +1145,15 @@ async def ingest_campaign_manifest(
         "deep_report_flags · submitted_at) · config_generation(설정 세대 이름표 64자) · superseded_by(이 런을 대체한 같은 캠페인 "
         "런의 run_key) · health(건강 수치 — normal_termination · scheduler_state · energy_ratio_max · hg_over_ie_max(비) · "
         "added_mass_pct_device · added_mass_pct_total · ke0_measured · ke0_expected · contact_energy_min_mJ · nan_onset_ms · "
-        "json_complete). 다른 열쇠는 거절된다."))],
+        "json_complete) · extraction(추출 목록 — d3plot_states_total · d3plot_states_read(total 이하) · peak_source(binout · elout · "
+        "d3plot_full · d3plot_sampled) · fields_extracted[](글 또는 {field, parts[], states: all | sampled}) · d3plot_retained · "
+        "d3plot_deleted_at). 다른 열쇠는 거절된다."))],
     ctx: Context,
 ) -> dict:
     """캠페인의 런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
 
     새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 **보낸 칸**(doe · pitch · roll · provenance ·
-    config_generation · superseded_by · health)만 맞춘다 — 객체 칸은 통째로 바뀌고, 안 보낸 칸은 그대로고 null 을 보내면 비운다.
+    config_generation · superseded_by · health · extraction)만 맞춘다 — 객체 칸은 통째로 바뀌고, 안 보낸 칸은 그대로고 null 을 보내면 비운다.
     `superseded_by` 는 같은 캠페인의 다른 run_key 여야 한다(자기 자신 · 고리는 거절). 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고, 목록에서 런을 빼는 길은
     없다. 목록에 없는 `run_key` 로 온 리포트는 거절된다 — 목록을 먼저 올린다. 응답은 `added` · `updated` · `unchanged` · `listed`.
     Upload a campaign's run manifest (idempotent upsert; runs are never removed)."""
@@ -1253,6 +1259,61 @@ async def report_health(
     health_missing(invalid) 이다.
     Health and validity of one report's run (judged with its campaign's thresholds)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/health")
+
+
+@mcp.tool()
+async def set_campaign_required_extractions(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    required_extractions: Annotated[list[dict], Field(description=_A_REQUIRED + " 빈 목록이면 지운다.")],
+    ctx: Context,
+) -> dict:
+    """캠페인의 필수 추출 목록을 통째로 바꾼다 — d3plot 을 지우기 전에 DynaForge 에 들어와 있어야 할 추출(DF-04).
+
+    목록이 없는 캠페인은 모든 런의 삭제가 보류다(`required_extractions_unset`). 허가는 읽을 때 세므로 바꾼 목록이 곧바로
+    `campaign_deletion_clearance` · `report_extraction` 에 든다. 캠페인 주인만.
+    Replace a campaign's required-extraction list (empty list clears it; unset means every deletion is held)."""
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/required-extractions",
+                      {"required_extractions": required_extractions})
+
+
+@mcp.tool()
+async def campaign_deletion_clearance(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    status: Annotated[str | None, Field(description=f"이 허가 상태의 런만(선택) — {_one_of(CLEARANCE_STATUSES)}. 비우면 모두.")] = None,
+    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 머리 줄은 이 값과 무관하게 전체다.")] = 200,
+    offset: Annotated[int, Field(description="건너뛸 런 수 — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """캠페인의 d3plot 삭제 허가 — **조회만** 한다(지우기는 KooChainRun). 머리 줄(`header.line` — 「삭제 허가 a / 전체 N · 보류 h ·
+    이미 지움 d」 와 까닭별 수) · 필수 목록 · 런마다 추출 · 피크 표지(`peak_provenance`) · 허가(`clearance` {status: allow | hold |
+    deleted, reasons, missing}).
+
+    보류 까닭 — required_extractions_unset(필수 목록 없음) · no_report · extraction_missing(추출 목록 없음) · extraction_incomplete
+    (`missing` 의 항목마다 field_missing · parts_missing(`parts_missing` 에 빠진 파트) · states_sampled(필수는 모든 상태인데 표본) ·
+    states_unknown). 이미 지운 런은 deleted 이고, 빠진 항목이 있으면 extraction_lost(다시 못 뽑는다)를 단다.
+    Deletion clearance of a campaign's d3plots (read-only): header, required list, per-run allow/hold/deleted with missing items."""
+    params: dict = {"limit": limit, "offset": offset}
+    if status is not None:
+        if status not in CLEARANCE_STATUSES:
+            raise RuntimeError(f"status 는 {list(CLEARANCE_STATUSES)} 중 하나여야 합니다.")
+        params["status"] = status
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/deletion-clearance", params)
+
+
+@mcp.tool()
+async def report_extraction(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+) -> dict:
+    """리포트 하나(런 하나)의 추출 목록 · 피크 출처 표지 · 그 런의 d3plot 삭제 허가 — 캠페인 런에 묶인 리포트면 그 캠페인의 필수
+    목록으로 허가를 센다. 캠페인 주인이 아니면 `campaign` · `clearance` 를 비운다. 캠페인 밖 리포트는 `extraction: null` 이다.
+
+    피크 표지(`peak_provenance`) — peak_source · states_read · states_total · peak_may_be_missed(d3plot 표본 상태에서 나온 피크면
+    true · binout · elout 이면 false · 모르면 null). 같은 표지가 피크를 돌려주는 리포트 도구(report_summary · report_query ·
+    report_worst_cases · report_case · report_part_risk · report_directional · report_scatter · report_angle_stats ·
+    report_hotspots · report_findings)의 응답에도 실린다.
+    Extraction record, peak-source flag and deletion clearance of one report's run."""
+    return await _get(ctx, f"/reports/{_seg(report_id)}/extraction")
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
 # 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).

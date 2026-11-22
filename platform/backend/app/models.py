@@ -639,6 +639,7 @@ class Campaign(Base):
     impactor: Mapped[dict | None] = mapped_column(JSONB)  # {mass_g, height_mm, ke_mj}
     # 건강 판정 문턱 — 기본값에서 바꾼 열쇠만(null 이면 기본값 · campaigns/health.py `DEFAULTS`) · DF-03(2026-11-22)
     health_thresholds: Mapped[dict | None] = mapped_column(JSONB)
+    required_extractions: Mapped[list | None] = mapped_column(JSONB)   # [{field, parts, states}] — 삭제 허가가 보는 필수 추출(DF-04)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -674,6 +675,7 @@ class CampaignRun(Base):
     config_generation: Mapped[str | None] = mapped_column(String(64))   # 사람이 붙이는 설정 세대 이름표
     superseded_by: Mapped[str | None] = mapped_column(String(128))      # 이 런을 대체한 같은 캠페인 런의 run_key
     health: Mapped[dict | None] = mapped_column(JSONB)              # 정상 종료 · 에너지비 · HG/IE · 추가 질량 · KE · NaN …
+    extraction: Mapped[dict | None] = mapped_column(JSONB)          # d3plot 상태 수 · 피크 출처 · 뽑은 장 · 지움(DF-04)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

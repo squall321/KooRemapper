@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.models import Campaign, User
+from app.modules.campaigns import extraction as X
 from app.modules.campaigns import health as H
 from app.modules.campaigns import services as svc
 from app.reports.datahub import DataHubError, parse_stage
@@ -22,6 +23,10 @@ router = APIRouter(tags=["campaigns"], prefix="/campaigns")
 _UNPROCESSABLE = 422
 _DOE_MAX = 64
 _RUNS_MAX = 5000
+_FIELDS_MAX = 1000      # 런 하나가 싣는 추출 장 수
+_REQUIRED_MAX = 200     # 캠페인의 필수 추출 항목 수
+_PARTS_MAX = 10000
+_FieldName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
 
 
 class _Strict(BaseModel):
@@ -44,6 +49,26 @@ class ThresholdsBody(_Strict):
     contact_energy_min_mJ: float | None = Field(default=None, allow_inf_nan=False)
 
 
+class RequiredItem(_Strict):
+    # 필수 추출 한 항목(DF-04) — parts 가 없으면 「모든 파트」, states 기본 all(모든 상태를 읽은 추출이어야 한다)
+    field: _FieldName
+    parts: list[Annotated[int, Field(gt=0)]] | None = Field(default=None, max_length=_PARTS_MAX)
+    states: Literal["all", "sampled"] = "all"
+
+
+def _required_items(items: list[RequiredItem] | None) -> list[dict]:
+    """필수 목록 → 저장 꼴(파트는 정렬 · 겹침 없이). 같은 field · parts · states 가 둘이면 422."""
+    out, seen = [], set()
+    for it in items or []:
+        parts = None if it.parts is None else sorted(set(it.parts))
+        key = (X.field_key(it.field), tuple(parts) if parts is not None else None, it.states)
+        if key in seen:
+            raise HTTPException(_UNPROCESSABLE, f"required_extractions 에 같은 항목이 둘입니다 — field {it.field!r}")
+        seen.add(key)
+        out.append({"field": it.field, "parts": parts, "states": it.states})
+    return out
+
+
 class CampaignBody(_Strict):
     name: str = Field(min_length=1, max_length=255)
     project: str | None = Field(default=None, max_length=64)   # 과제명 — intake 폼의 project 와 같은 길이
@@ -56,6 +81,8 @@ class CampaignBody(_Strict):
     thickness_axis: Literal["X", "Y", "Z", "x", "y", "z"] | None = None
     impactor: ImpactorBody | None = None
     health_thresholds: ThresholdsBody | None = None   # 건강 판정 문턱 — 나중엔 PUT /campaigns/{id}/health-thresholds
+    # 필수 추출 목록(DF-04) — 삭제 허가가 본다. 나중엔 PUT /campaigns/{id}/required-extractions
+    required_extractions: list[RequiredItem] | None = Field(default=None, max_length=_REQUIRED_MAX)
 
 
 class ProvenanceBody(_Strict):
@@ -90,6 +117,30 @@ class HealthBody(_Strict):
     json_complete: bool | None = None
 
 
+class FieldItem(_Strict):
+    # 뽑은 장 하나(DF-04) — parts 가 없으면 「모든 파트」, states 가 없으면 런의 상태 수로 정한다(read = total 이면 all)
+    field: _FieldName
+    parts: list[Annotated[int, Field(gt=0)]] | None = Field(default=None, max_length=_PARTS_MAX)
+    states: Literal["all", "sampled"] | None = None
+
+
+class ExtractionBody(_Strict):
+    # 런 추출 목록(DF-04) — 요청서 표의 칸 그대로. 허가 · 피크 표지는 읽을 때 캠페인의 필수 목록으로 센다
+    d3plot_states_total: int | None = Field(default=None, ge=0)
+    d3plot_states_read: int | None = Field(default=None, ge=0)
+    peak_source: Literal["binout", "elout", "d3plot_full", "d3plot_sampled"] | None = None
+    fields_extracted: list[_FieldName | FieldItem] | None = Field(default=None, max_length=_FIELDS_MAX)   # 글 하나 = {field: 그 글}
+    d3plot_retained: bool | None = None
+    d3plot_deleted_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _read_le_total(self):
+        t, r = self.d3plot_states_total, self.d3plot_states_read
+        if t is not None and r is not None and r > t:
+            raise ValueError(f"d3plot_states_read({r}) 가 d3plot_states_total({t}) 보다 큽니다")
+        return self
+
+
 class RunItem(_Strict):
     # 빈칸 · 제어 문자 없는 글 — `stcx:<잡 id>:<DOE>` 꼴을 권한다(꼴은 검사하지 않는다)
     run_key: str = Field(min_length=1, max_length=128, pattern=r"^[^\s\x00-\x1f\x7f]+$")
@@ -101,6 +152,7 @@ class RunItem(_Strict):
     config_generation: str | None = Field(default=None, min_length=1, max_length=64)
     superseded_by: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[^\s\x00-\x1f\x7f]+$")
     health: HealthBody | None = None
+    extraction: ExtractionBody | None = None          # ③ 추출 목록(DF-04)
 
 
 class RunsBody(_Strict):
@@ -112,7 +164,8 @@ def _campaign_dict(c: Campaign) -> dict:
         "campaign_id": c.id, "name": c.name, "project": c.project, "dev_rev": c.dev_rev,
         "analysis_method": c.analysis_method, "analysis_target": c.analysis_target, "doe_strategy": c.doe_strategy,
         "drop_height_mm": c.drop_height_mm, "duration_ms": c.duration_ms, "thickness_axis": c.thickness_axis,
-        "impactor": c.impactor, "health_thresholds": H.bundle(c.health_thresholds), "created_at": c.created_at,
+        "impactor": c.impactor, "health_thresholds": H.bundle(c.health_thresholds),
+        "required_extractions": c.required_extractions, "created_at": c.created_at,
     }
 
 
@@ -150,6 +203,7 @@ async def create_campaign(
     changed = {k: v for k, v in (body.health_thresholds.model_dump(exclude_none=True) if body.health_thresholds else {}).items()
                if v != H.DEFAULTS[k]}
     fields["health_thresholds"] = changed or None
+    fields["required_extractions"] = _required_items(body.required_extractions) or None
     row = await svc.create_campaign(db, uid, fields)
     if row is None:
         cid = await svc.find_by_name(db, uid, name)
@@ -170,7 +224,7 @@ async def ingest_campaign_manifest(
     """런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
 
     새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 보낸 칸(doe · pitch · roll · provenance ·
-    config_generation · superseded_by · health)만 맞춘다 — 객체 칸은 통째로 바꾸고 null 은 비운다. 다시 올려도 된다. 한 요청
+    config_generation · superseded_by · health · extraction)만 맞춘다 — 객체 칸은 통째로 바꾸고 null 은 비운다. 다시 올려도 된다. 한 요청
     안에 같은 `run_key` 가 둘이면 422 고, 목록에서 런을 빼는 길은 없다. 한 요청에 5,000 런까지. `superseded_by` 는 같은
     캠페인의 다른 run_key 여야 한다(같은 요청에서 더하는 런도 된다 · 자기 자신 · 고리는 422).
     """
@@ -272,5 +326,50 @@ async def campaign_health_table(
     """
     c = await _require_campaign(db, user, campaign_id)
     got = await svc.health_table(db, c, include_invalid=include_invalid, limit=limit, offset=offset)
+    return ok({"campaign_id": campaign_id, **got, "limit": limit, "offset": offset, "environment": settings.environment},
+              message=got["header"]["line"])
+
+
+class RequiredBody(_Strict):
+    required_extractions: list[RequiredItem] = Field(max_length=_REQUIRED_MAX)
+
+
+@router.put("/{campaign_id}/required-extractions")
+async def set_campaign_required_extractions(
+    campaign_id: str,
+    body: RequiredBody,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """캠페인의 필수 추출 목록을 통째로 바꾼다(DF-04) — 빈 목록이면 지운다. 항목은 `field`(자유 글 — 견줄 때 대소문자 · 앞뒤 공백을
+    가리지 않는다) · `parts`(정수 목록 · 없으면 모든 파트) · `states`(`all` · `sampled`, 기본 all).
+
+    목록이 없는 캠페인은 모든 런의 삭제가 보류다(`required_extractions_unset` — 무엇을 지켜야 할지 모르면 지워도 된다고 하지 않는다).
+    """
+    c = await _require_campaign(db, user, campaign_id)
+    got = await svc.set_required(db, c, _required_items(body.required_extractions))
+    return ok({"campaign_id": campaign_id, "required_extractions": got, "environment": settings.environment},
+              message=f"필수 추출 {len(got or [])}항목" if got else "필수 추출 목록을 지웠습니다 — 모든 런의 삭제가 보류됩니다.")
+
+
+@router.get("/{campaign_id}/deletion-clearance")
+async def campaign_deletion_clearance(
+    campaign_id: str,
+    status_: Literal["allow", "hold", "deleted"] | None = Query(default=None, alias="status",
+                                                                 description="이 허가 상태의 런만 — allow · hold · deleted"),
+    limit: int = Query(default=200, ge=1, le=_RUNS_MAX),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """캠페인의 d3plot 삭제 허가(DF-04) — **조회만** 한다(지우기는 KooChainRun KC-05). 머리 줄(허가 · 보류 · 이미 지움 수와
+    까닭별 수) · 필수 목록 · 런마다 추출 · 피크 표지 · 허가(`clearance` {status: allow | hold | deleted, reasons, missing}).
+
+    보류 까닭 — `required_extractions_unset` · `no_report` · `extraction_missing` · `extraction_incomplete`(빠진 항목은 `missing` —
+    항목마다 `field_missing` · `parts_missing` · `states_sampled` · `states_unknown`). 이미 지운 런은 `deleted` 이고 빠진 항목이 있으면
+    `extraction_lost` 를 단다(다시 못 뽑는다).
+    """
+    c = await _require_campaign(db, user, campaign_id)
+    got = await svc.clearance_table(db, c, status=status_, limit=limit, offset=offset)
     return ok({"campaign_id": campaign_id, **got, "limit": limit, "offset": offset, "environment": settings.environment},
               message=got["header"]["line"])

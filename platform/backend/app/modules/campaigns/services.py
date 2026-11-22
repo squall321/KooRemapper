@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Campaign, CampaignRun, ImpactReport
+from app.modules.campaigns import extraction as X
 from app.modules.campaigns import health as H
 
 STATES = ("pending", "received", "skipped", "rejected")
@@ -60,7 +61,7 @@ async def get_owned(db: AsyncSession, user_id: int, campaign_id: str) -> Campaig
 
 async def upsert_runs(db: AsyncSession, campaign_id: str, items: list[dict]) -> dict:
     """런 목록을 올린다 — 새 `run_key` 는 pending 으로 더하고, 있는 것은 **온 칸만**(doe · pitch · roll · provenance ·
-    config_generation · superseded_by · health) 맞춘다.
+    config_generation · superseded_by · health · extraction) 맞춘다.
 
     상태 · 리포트는 건드리지 않고 목록에서 빼지도 않는다. 같은 캠페인의 목록 올리기는 캠페인 행 잠금으로 줄 세운다.
     다 맞춘 뒤 `superseded_by` 가 같은 캠페인의 다른 런을 가리키는지 · 고리가 없는지 보고, 깨졌으면 되감고 `BadManifest`.
@@ -269,3 +270,38 @@ def judged_run(run: CampaignRun, campaign: Campaign) -> dict:
     """리포트 건강 응답 한 덩이 — 판정 · 제외 까닭 · 문턱 묶음."""
     tb = H.bundle(campaign.health_thresholds)
     return {**_judged(run, tb["values"], tb["ref"]), "thresholds": tb}
+
+
+async def set_required(db: AsyncSession, campaign: Campaign, items: list[dict]) -> list[dict] | None:
+    """캠페인의 필수 추출 목록을 통째로 바꾼다 — 빈 목록이면 지운다(null). 저장한 목록을 돌려준다."""
+    campaign.required_extractions = items or None
+    await db.commit()
+    return campaign.required_extractions
+
+
+def cleared_run(run: CampaignRun, campaign: Campaign) -> dict:
+    """런 한 행 → 추출 · 피크 표지 · 삭제 허가를 붙인 응답 행."""
+    return {
+        "run_key": run.run_key, "doe": run.doe, "report_id": run.report_id,
+        "extraction": run.extraction, "peak_provenance": X.peak_provenance(run.extraction),
+        "clearance": X.clearance(has_report=run.report_id is not None, extraction=run.extraction,
+                                 required=campaign.required_extractions),
+    }
+
+
+async def clearance_table(db: AsyncSession, campaign: Campaign, *, status: str | None, limit: int, offset: int) -> dict:
+    """캠페인의 런마다 삭제 허가 — 머리 줄(허가 · 보류 · 이미 지움 수와 까닭별 수) · 필수 목록 · 런마다 허가와 빠진 항목."""
+    rows = [cleared_run(r, campaign) for r in (await db.execute(
+        select(CampaignRun).where(CampaignRun.campaign_id == campaign.id).order_by(CampaignRun.id)
+    )).scalars()]
+    shown = rows if status is None else [r for r in rows if r["clearance"]["status"] == status]
+    return {"header": X.header(rows), "required_extractions": campaign.required_extractions, "matched": len(shown),
+            "runs": shown[offset:offset + limit]}
+
+
+async def peak_provenance_of(db: AsyncSession, report_id: str) -> dict:
+    """리포트의 피크 출처 표지 — 그 리포트를 가진 캠페인 런의 추출에서. 캠페인 밖이면 모른다(`known: false`)."""
+    ext = (await db.execute(
+        select(CampaignRun.extraction).where(CampaignRun.report_id == report_id).order_by(CampaignRun.id).limit(1)
+    )).scalar_one_or_none()
+    return X.peak_provenance(ext)

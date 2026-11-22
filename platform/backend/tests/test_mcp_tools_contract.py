@@ -90,7 +90,7 @@ def _query(path: str, name: str):
     for r in app.routes:
         if getattr(r, "path", "") == path and "GET" in getattr(r, "methods", set()):
             for p in r.dependant.query_params:
-                if p.name == name:
+                if name in (p.name, getattr(p, "alias", None)):   # 별칭으로도 — `status` 는 모듈 이름과 겹쳐 `status_` 로 받는다
                     return p.field_info
     raise AssertionError(f"{path} 에 {name} 가 없다")
 
@@ -190,7 +190,9 @@ def test_the_cae_allowed_values_are_the_backend_constraints():
 
 CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_ingest_status",
                   # ② 출처 · 유효성(DF-02 · DF-03 · 11-22)
-                  "set_campaign_health_thresholds", "campaign_provenance", "campaign_health_table", "report_health")
+                  "set_campaign_health_thresholds", "campaign_provenance", "campaign_health_table", "report_health",
+                  # ③ 추출 완전성 · 삭제 관문(DF-04 · 11-22)
+                  "set_campaign_required_extractions", "campaign_deletion_clearance", "report_extraction")
 
 
 @needs_mcp
@@ -218,6 +220,17 @@ def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
         assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in got[t]["properties"]["limit"]["description"], t
     for k, v in c["HEALTH_THRESHOLD_DEFAULTS"].items():
         assert k in got["create_campaign"]["properties"]["health_thresholds"]["description"], k
+    # ③ — 런 목록 설명에 추출 칸이 다 있고, 필수 목록 설명에 항목 칸이 다 있다 · 쓰기 도구의 인자 = REST 본문(+ campaign_id)
+    from app.modules.campaigns.routes import ExtractionBody, FieldItem, RequiredBody, RequiredItem
+    for name in [*ExtractionBody.model_fields, *FieldItem.model_fields]:
+        assert name in runs_desc, name
+    for t, arg in (("create_campaign", "required_extractions"), ("set_campaign_required_extractions", "required_extractions")):
+        desc = got[t]["properties"][arg]["description"]
+        assert all(name in desc for name in RequiredItem.model_fields), (t, desc)
+    assert set(got["set_campaign_required_extractions"]["properties"]) == set(RequiredBody.model_fields) | {"campaign_id"}
+    clear = got["campaign_deletion_clearance"]["properties"]
+    assert all(v in clear["status"]["description"] for v in c["CLEARANCE_STATUSES"])
+    assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in clear["limit"]["description"]
 
 
 def test_the_campaign_allowed_values_are_the_backend_constraints():
@@ -231,9 +244,16 @@ def test_the_campaign_allowed_values_are_the_backend_constraints():
                                           if hasattr(m, "max_length"))
     from app.modules.campaigns.health import DEFAULTS
     assert c["HEALTH_THRESHOLD_DEFAULTS"] == DEFAULTS
-    for path in ("/api/v1/campaigns/{campaign_id}/provenance", "/api/v1/campaigns/{campaign_id}/health"):
+    for path in ("/api/v1/campaigns/{campaign_id}/provenance", "/api/v1/campaigns/{campaign_id}/health",
+                 "/api/v1/campaigns/{campaign_id}/deletion-clearance"):
         limit = _query(path, "limit")
         assert c["CAMPAIGN_RUNS_MAX"] == next(m.le for m in limit.metadata if hasattr(m, "le")), path
+    # 허가 상태 단어 = 백엔드 판정의 상태 = 경로의 status 허용값
+    from app.modules.campaigns.extraction import STATUSES as CLEAR
+    assert c["CLEARANCE_STATUSES"] == CLEAR
+    from typing import get_args
+    st = _query("/api/v1/campaigns/{campaign_id}/deletion-clearance", "status")
+    assert set(get_args(get_args(st.annotation)[0])) == set(CLEAR), st.annotation
 
 
 # ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────

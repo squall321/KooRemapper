@@ -49,6 +49,10 @@ def test_capabilities_declares_intake(monkeypatch):
                               "health": "/api/v1/campaigns/{campaign_id}/health",
                               "health_thresholds": "/api/v1/campaigns/{campaign_id}/health-thresholds",
                               "report_health": "/api/v1/reports/{report_id}/health",
+                              # ③ 추출 완전성 · 삭제 관문(DF-04 · 11-22)
+                              "required_extractions": "/api/v1/campaigns/{campaign_id}/required-extractions",
+                              "deletion_clearance": "/api/v1/campaigns/{campaign_id}/deletion-clearance",
+                              "report_extraction": "/api/v1/reports/{report_id}/extraction",
                               "form_fields": ["campaign_id", "run_key"],
                               "states": ["pending", "received", "skipped", "rejected"]}, it
     monkeypatch.setattr(settings, "ratelimit_enabled", True)

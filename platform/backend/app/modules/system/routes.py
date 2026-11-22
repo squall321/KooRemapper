@@ -169,6 +169,9 @@ _PARITY = [
     {"feature": "캠페인 런 출처 · 유효성(설정 세대 · 건강 판정)", "web": False, "mcp": True,
      "note": "campaign_provenance · campaign_health_table · report_health · set_campaign_health_thresholds — 출처 · 건강 수치는 "
              "런 목록(ingest_campaign_manifest)에 싣는다. 웹 화면은 아직 없다"},
+    {"feature": "캠페인 추출 완전성 · d3plot 삭제 허가(조회만)", "web": False, "mcp": True,
+     "note": "campaign_deletion_clearance · report_extraction · set_campaign_required_extractions — 추출 목록은 런 목록에, 필수 "
+             "목록은 캠페인에 싣는다. 피크를 돌려주는 리포트 응답에 peak_provenance 가 실린다. 지우기는 하지 않는다. 웹 화면은 아직 없다"},
     {"feature": "내 정보(whoami)", "web": True, "mcp": True},
     {"feature": "시스템 상태", "web": True, "mcp": True},
     {"feature": "허브 기준정보 보기(온톨로지)", "web": True, "mcp": True,
@@ -227,6 +230,10 @@ async def capabilities(request: Request, _user: User = Depends(get_current_user)
                 "health": "/api/v1/campaigns/{campaign_id}/health",
                 "health_thresholds": "/api/v1/campaigns/{campaign_id}/health-thresholds",
                 "report_health": "/api/v1/reports/{report_id}/health",
+                # ③ 추출 완전성 · 삭제 관문(DF-04 · 2026-11-22) — 런 목록이 extraction 을 받는다 · 허가는 조회만
+                "required_extractions": "/api/v1/campaigns/{campaign_id}/required-extractions",
+                "deletion_clearance": "/api/v1/campaigns/{campaign_id}/deletion-clearance",
+                "report_extraction": "/api/v1/reports/{report_id}/extraction",
                 "form_fields": ["campaign_id", "run_key"],
                 "states": list(CAMPAIGN_STATES),
             },

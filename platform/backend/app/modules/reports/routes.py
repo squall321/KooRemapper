@@ -548,6 +548,47 @@ async def find_reports(
     return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
 
 
+def _with_peak(data, pp: dict):
+    """피크를 돌려주는 응답에 피크 출처 표지(DF-04)를 싣는다 — 객체면 `peak_provenance` 칸, 목록이면 항목(객체)마다(목록 꼴은 그대로).
+
+    값은 그 리포트를 가진 캠페인 런의 추출 목록에서만 온다(리포트 생성기는 아직 내지 않는다) — 모르면 `known: false` · 네 칸 null.
+    """
+    if isinstance(data, dict):
+        return {**data, "peak_provenance": pp}
+    if isinstance(data, list):
+        return [{**x, "peak_provenance": pp} if isinstance(x, dict) else x for x in data]
+    return data
+
+
+@router.get("/reports/{report_id}/extraction")
+async def report_extraction(
+    request: Request,
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트 하나(런 하나)의 추출 목록 · 피크 출처 표지 · 그 런의 d3plot 삭제 허가(DF-04 — 조회만).
+
+    캠페인 런에 묶인 리포트면 그 캠페인의 필수 목록으로 허가를 센다. 캠페인은 만든 사람만 보므로 다른 사람에게는 `campaign` · `run_key` ·
+    `clearance` 를 비우고 추출 · 표지만 준다. 캠페인 밖 리포트는 `extraction: null` · 표지 `known: false` 다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    got = await camp_svc.run_of_report(db, r.id)
+    if got is None:
+        return ok({"report_id": r.id, "campaign": None, "run_key": None, "extraction": None,
+                   "peak_provenance": await camp_svc.peak_provenance_of(db, r.id), "clearance": None,
+                   "environment": settings.environment})
+    run, camp = got
+    body = camp_svc.cleared_run(run, camp)
+    mine = camp.created_by == user.id
+    return ok({"report_id": r.id,
+               "campaign": {"campaign_id": camp.id, "name": camp.name, "run_key": run.run_key} if mine else None,
+               "run_key": run.run_key if mine else None,
+               "extraction": body["extraction"], "peak_provenance": body["peak_provenance"],
+               "clearance": body["clearance"] if mine else None,
+               "environment": settings.environment})
+
+
 @router.get("/reports/{report_id}/health")
 async def report_health(
     request: Request,
@@ -585,7 +626,7 @@ async def get_report(
     db: AsyncSession = Depends(get_db),
 ):
     r = await _require_report(db, user, report_id, request)
-    return ok(ReportRead.model_validate(r).model_dump())
+    return ok(_with_peak(ReportRead.model_validate(r).model_dump(), await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/query")
@@ -614,12 +655,12 @@ async def query_report_facts(
     """
     r = await _require_report(db, user, report_id, request)
     try:
-        return ok(await svc.query_facts(
+        return ok(_with_peak(await svc.query_facts(
             db, r, part_id=part_id, category=category, angle_name=angle_name,
             near_roll=near_roll, near_pitch=near_pitch, near_yaw=near_yaw,
             angle_tol_deg=angle_tol_deg, metric=metric,
             min_value=min_value, max_value=max_value, sort=sort, limit=limit,
-        ))
+        ), await camp_svc.peak_provenance_of(db, r.id)))
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
@@ -639,9 +680,9 @@ async def list_report_cases(
 
     sphere=최악 방향, impact=최악 위치, deep=단건.
     """
-    await _require_report(db, user, report_id, request)
+    r = await _require_report(db, user, report_id, request)
     rows = await svc.list_cases(db, report_id, sort=sort, order=order, limit=limit, offset=offset)
-    return ok([CaseRead.model_validate(c).model_dump() for c in rows])
+    return ok(_with_peak([CaseRead.model_validate(c).model_dump() for c in rows], await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/cases/{case_key}")
@@ -652,11 +693,11 @@ async def get_report_case(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    await _require_report(db, user, report_id, request)
+    r = await _require_report(db, user, report_id, request)
     c = await svc.get_case(db, report_id, case_key)
     if c is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "케이스를 찾을 수 없습니다.")
-    return ok(CaseRead.model_validate(c).model_dump())
+    return ok(_with_peak(CaseRead.model_validate(c).model_dump(), await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/parts")
@@ -669,7 +710,7 @@ async def report_part_risk(
 ):
     """파트별 최악값과 발생 케이스(각도/위치) + 최소 안전율."""
     r = await _require_report(db, user, report_id, request)
-    return ok(await svc.part_risk(db, r, part_id))
+    return ok(_with_peak(await svc.part_risk(db, r, part_id), await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/directional")
@@ -682,7 +723,7 @@ async def report_directional(
 ):
     """방향 취약도 — 방향 범주(면/엣지/코너·F1~F6)별 최악. part_id 로 파트 한정."""
     r = await _require_report(db, user, report_id, request)
-    return ok(await svc.directional(db, r, part_id))
+    return ok(_with_peak(await svc.directional(db, r, part_id), await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/scatter")
@@ -697,7 +738,7 @@ async def report_scatter(
     """방향 섭동 산포 분석(sphere) — 26 정준방향별 metric 산포(mean/std/CoV/최악)·민감도."""
     r = await _require_report(db, user, report_id, request)
     try:
-        return ok(await svc.scatter(db, r, metric=metric, part_id=part_id))
+        return ok(_with_peak(await svc.scatter(db, r, metric=metric, part_id=part_id), await camp_svc.peak_provenance_of(db, r.id)))
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
@@ -738,9 +779,9 @@ async def report_angle_stats(
     백분위/IQR/최악) + 부품별 위험·민감도 분해. 있는 물리량은 available_metrics 로 안내."""
     r = await _require_report(db, user, report_id, request)
     try:
-        return ok(await svc.angle_group_stats(
+        return ok(_with_peak(await svc.angle_group_stats(
             db, r, metric=metric, part_id=part_id, category=category, angle_name=angle_name,
-            near_lon=near_lon, near_lat=near_lat, tol_deg=tol_deg, top_parts=top_parts))
+            near_lon=near_lon, near_lat=near_lat, tol_deg=tol_deg, top_parts=top_parts), await camp_svc.peak_provenance_of(db, r.id)))
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc))
 
@@ -814,8 +855,8 @@ async def report_hotspots(
       그 표시가 없다(`compact_note`).
     """
     r = await _require_report(db, user, report_id, request)
-    return ok(await svc.hotspots(db, r, criterion=criterion, part_id=part_id,
-                                 top=top, order=order, case_key=case_key))
+    return ok(_with_peak(await svc.hotspots(db, r, criterion=criterion, part_id=part_id,
+                                            top=top, order=order, case_key=case_key), await camp_svc.peak_provenance_of(db, r.id)))
 
 
 @router.get("/reports/{report_id}/contact_profile")
@@ -949,7 +990,7 @@ async def report_findings(
     if severity:
         sev = severity.upper()
         items = [f for f in items if (f.get("severity") or "").upper() == sev]
-    return ok(items)
+    return ok(_with_peak(items, await camp_svc.peak_provenance_of(db, r.id)))
 
 
 class PublishDataHubBody(BaseModel):
