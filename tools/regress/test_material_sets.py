@@ -156,6 +156,15 @@ def main():
             check("C — 새 재질은 *MAT_NULL_TITLE · 제목 그대로 · Card 1 첫 칸이 파트의 새 MID", ok,
                   (ls[k:k + 3] if k is not None else None, part))
             check("C — *MAT_ADD_EROSION 은 싣지 않는다", "*MAT_ADD_EROSION" not in txt.upper(), "")
+        # C2 — 재료 파일에 구조 재질이 둘이면 첫 것(*MAT_NULL_TITLE 7)만 싣고 다른 하나를 알린다
+        with open(os.path.join(d, "fluid.k"), "w", encoding="utf-8") as f:
+            f.write("*KEYWORD\n*MAT_NULL_TITLE\nmy fluid\n" + row(7, 1.0e-9, 0.0, 0.0) + "*MAT_ELASTIC\n" + row(8, 7.85e-9, 2.1e5, 0.3) +
+                    "*EOS_LINEAR_POLYNOMIAL\n" + row(3, 0.0, 2200.0) + row(0.0, 0.0, 1.0) + "*END\n")
+        rc, out = run(binary, d, "ale", "ale.yaml")
+        if check("C2 ale 재료 파일에 구조 재질 둘 — rc 0", rc == 0 and os.path.exists(o), out[-300:]):
+            txt = open(o, encoding="utf-8").read().upper()
+            check("C2 — 첫 구조 재질(*MAT_NULL_TITLE)만 싣고 *MAT_ELASTIC 은 새로 싣지 않는다 · 다른 재질 1 개를 알린다",
+                  "*MAT_NULL_TITLE" in txt and txt.count("*MAT_ELASTIC") == 1 and "다른 재질 1 개" in out, (txt.count("*MAT_ELASTIC"), out[-300:]))
 
         print("[D — LONG=Y 2차 솔리드]")
         d = os.path.join(top, "d")

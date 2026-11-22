@@ -16,7 +16,9 @@
   B matswap 두 꼴 · 쌓인 묶음의 뒤 번호(섹션 블록 [1, 3] + [2]) — 새 SECID 가 3 이 아니다 · 번호 겹침 없음 · SECID 3 이 남는다
   C cclip — 상자 섹션(SECID 2) 뒤에 SECID 3 을 쌓고 그것을 쓰는 파트 9 — SECID 3 이 원래 솔리드 섹션 그대로 남고 상자의 새 섹션은 3 이
     아니다(설치된 판은 블록째 지우고 새 셸 섹션에 3 을 줘 파트 9 가 그것을 조용히 가리켰다)
-  D ale — 섹션 블록에 SECID 2 · 모래시계 블록에 HGID 2 를 쌓은 덱 — 새 SECID · HGID 가 겹치지 않는다
+  D ale — 섹션 블록에 SECID 2 · 모래시계 블록에 HGID 2 를 쌓은 덱 — 새 SECID · HGID 가 겹치지 않는다(D2 — 섹션을 다른 파트와 나눠 써서
+    ale 가 새 SECID 를 내는 덱)
+  A · B · C 는 바꾼 파트의 옛 묶음이 지워졌는지도 본다(변이 — 지우기를 끈 판이 살아남았다)
 
 usage: test_stacked_cards.py <KooRemapper 바이너리>
 """
@@ -151,10 +153,13 @@ def main():
                         defs["HG"].get(2) == orig["HG"][2]
                     check(name + " — PID 2 의 SECID 2 · HGID 2 가 원래 값 그대로다", ok,
                           (p2, defs["SEC"].get(2), defs["HG"].get(2)))
+                    check(name + " — 바꾼 파트의 옛 SECID 1 · HGID 1 묶음은 지웠다(쌓인 블록에서 그 묶음만)",
+                          1 not in defs["SEC"] and 1 not in defs["HG"], (sorted(defs["SEC"]), sorted(defs["HG"])))
                 else:
                     p1 = [p for p in parts if p[0] == 1]
                     check(name + " — SECID 3 이 남고 새 SECID 는 3 이 아니다", 3 in defs["SEC"] and p1 and p1[0][1] not in (1, 2, 3),
                           (sorted(defs["SEC"]), p1))
+                    check(name + " — 바꾼 파트의 옛 SECID 1 묶음은 지웠다(같은 블록의 3 은 남는다)", 1 not in defs["SEC"], sorted(defs["SEC"]))
 
         print("[C — cclip]")
         cc = SPEC["cclip"]["files"]
@@ -186,6 +191,7 @@ def main():
             check("C cclip — 쌓인 SECID 3 이 원래 솔리드 섹션(ELFORM 1) 그대로 하나 · 상자의 새 섹션은 3 이 아니다 · 겹침 없음",
                   defs["SEC"].get(3, [[]])[0][:2] == ["3", "1"] and len(defs["SEC"].get(3, [])) == 1 and box and box[0][1] != 3
                   and not dups(defs), (defs["SEC"].get(3), box, dups(defs)))
+            check("C cclip — 상자의 옛 SECID 2 묶음은 지웠다(같은 블록에 쌓인 3 은 남는다)", 2 not in defs["SEC"], sorted(defs["SEC"]))
 
         print("[D — ale]")
         al = SPEC["ale"]["files"]
@@ -209,6 +215,15 @@ def main():
             defs, parts = facts(open(o, encoding="utf-8").read())
             check("D ale — SECID · HGID 겹침 없음(쌓인 2 위로 냈다)", not dups(defs).get("SEC") and not dups(defs).get("HG")
                   and 2 in defs["SEC"] and 2 in defs["HG"], (sorted(defs["SEC"]), sorted(defs["HG"]), dups(defs)))
+        # D2 — 다른 파트(9)가 ALE 파트의 섹션 1 을 나눠 쓰면 ale 는 새 SECID 를 낸다 — 쌓인 2 위로
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(t.replace("*END", "*PART\nshared\n%10d%10d%10d\n*END" % (9, 1, 1), 1))
+        rc, out = run(binary, d, "ale", "ale.yaml")
+        if check("D2 ale · 섹션 1 을 파트 9 와 나눠 씀 · 쌓인 SECID 2 — rc 0", rc == 0 and os.path.exists(o), out[-300:]):
+            defs, parts = facts(open(o, encoding="utf-8").read())
+            p1 = [q for q in parts if q[0] == 1]
+            check("D2 ale — 새 SECID 가 1 · 2 가 아니고 겹침 없음", p1 and p1[0][1] not in (1, 2) and not dups(defs).get("SEC"),
+                  (p1, sorted(defs["SEC"]), dups(defs)))
     finally:
         shutil.rmtree(top, ignore_errors=True)
     print()
