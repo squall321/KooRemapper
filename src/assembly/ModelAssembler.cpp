@@ -379,31 +379,36 @@ int cur_scanMaxPartVariantId(const std::vector<std::string>& lines) {
 // *SET_..._TITLE 은 키워드 다음 줄이 제목이다 — 예전엔 그 제목 줄을 SID 로 읽으려다 실패하고
 // inSet 을 꺼 버려 진짜 SID 줄을 영영 못 봤다. 그러면 maxSetId_ 가 0 으로 남아
 // 새로 만드는 *SET_SEGMENT 가 덱에 이미 있는 세트와 같은 번호로 난다.
-int cur_scanMaxSetId(const std::vector<std::string>& lines) {
-    int maxId = 0;
-    bool inSet = false;
-    bool needTitle = false;
-    for (const auto& line : lines) {
-        size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
-            std::string up = line.substr(g);
-            for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            inSet = (up.rfind("*SET_", 0) == 0);
-            needTitle = inSet && (up.find("_TITLE") != std::string::npos);
+// 줄들의 `*SET_*` SID 전부(모든 종류를 한 통으로 · 블록의 첫 데이터 줄 · `_TITLE` 이면 제목 다음) — 번호 커서(`cur_scanMaxSetId`)와 battery 의
+// 겹침 판정(`batteryTakenSpans`)이 같은 훑기를 쓴다(3차 3판 L-16 — 예전엔 같은 규칙의 사본이 둘이었다)
+void cur_setIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
+    bool inSet = false, needTitle = false;
+    for (const auto& l : lines) {
+        const size_t g = l.find_first_not_of(" \t");
+        if (g != std::string::npos && l[g] == '*') {
+            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l.substr(g)));
+            inSet = kw.rfind("*SET_", 0) == 0;
+            needTitle = inSet && kw.find("_TITLE") != std::string::npos;
             continue;
         }
-        if (!inSet) continue;
-        if (g != std::string::npos && line[g] == '$') continue;
+        if (!inSet || (g != std::string::npos && l[g] == '$')) continue;
         // 제목 줄은 비어 있을 수 있다 — 건너뛰면 구성원 값을 SID 로 읽어
         // maxSetId_ 가 어긋나고 새로 만드는 세트가 덱의 세트와 번호로 부딪친다.
         if (needTitle) { needTitle = false; continue; }
         try {
-            int sid = std::stoi(line);
-            if (sid > maxId) maxId = sid;
+            const int sid = std::stoi(l);
+            if (sid > 0) out.push_back(sid);
         } catch (...) {}
         inSet = false;
     }
-    return maxId;
+}
+
+int cur_scanMaxSetId(const std::vector<std::string>& lines) {
+    std::vector<long long> ids;
+    cur_setIdsIn(lines, ids);
+    long long m = 0;
+    for (long long v : ids) m = std::max(m, v);
+    return static_cast<int>(m);
 }
 }  // namespace
 
@@ -13490,12 +13495,13 @@ static std::string md_updatePartTmid(const std::string& partDataLine, int tmid, 
     return md_setField(partDataLine, 7 * cw, cw, tmid);   // TMID 는 여덟째 칸 — LONG 이면 칸 폭 20
 }
 
+// newSid — 이 덱에 새로 쓰는 세트 번호(공용 세트 커서에서 받는다 · 3차 3판 L-16). DB 카드의 세트 번호는 DB 관례(DB MID + 800000)다 —
+// 예전엔 덱에도 그 관례(모델 MID + 800000)로 써 덱 · 같은 실행의 다른 세트와 번호가 겹칠 수 있었고, 두 번 돌리면 남은 옛 세트와 겹쳤다
 static std::vector<std::string> md_substituteDampingCard(const std::string& cardText,
-        int dbMid, int modelMid, const std::vector<int>& pids,
+        int dbMid, int newSid, const std::vector<int>& pids,
         double alphaScale = 1.0, double alphaFloor = 0.0) {
     auto lines = md_splitLines(cardText);
     int dbSid = dbMid + 800000;
-    int newSid = modelMid + 800000;
 
     // Track keyword context so we know when the next non-comment data line
     // belongs to a DAMPING_PART_MASS card. LS-DYNA has multiple variants
@@ -13659,10 +13665,9 @@ static std::vector<int> md_enumerateAllPids(const std::vector<std::string>& line
 // Build a default DAMPING_PART_MASS_SET + DAMPING_PART_STIFFNESS_SET pair
 // for an unmatched PID. Uses alphaFloor as VALDMP and a small fixed beta=0.01
 // (Phase A explicit numerical noise damping minimum).
-static std::vector<std::string> md_buildDefaultDampingForPid(int pid, double alpha,
+static std::vector<std::string> md_buildDefaultDampingForPid(int pid, int sid, double alpha,
                                                               double beta = 0.01) {
     std::vector<std::string> out;
-    int sid = pid + 800000;
     char buf[160];
 
     out.push_back("$");
@@ -14221,6 +14226,10 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         }
     }
 
+    // 감쇠 세트의 SID 는 공용 세트 커서로 낸다(3차 3판 L-16) — 단독 matdb 는 멤버 커서를 채우지 않는 길(`loadRawOnly`)로 읽으므로 여기서
+    // 주 덱 · 인클루드의 세트 번호 위로 올린다(assemble 길은 이미 그 위다)
+    maxSetId_ = std::max({maxSetId_, cur_scanMaxSetId(rawLines_), inclMax([](const std::vector<std::string>& L) { return cur_scanMaxSetId(L); })});
+
     // 7. Build new cards to insert
     std::vector<std::string> insertCards;
     int structCount = 0, thermalCount = 0, expansionCount = 0, dampingCount = 0;
@@ -14269,7 +14278,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             auto pids = mw_getPidsByMid(rawLines_, {mi.modelMid});
             if (!pids.empty()) {
                 auto dampLines = md_substituteDampingCard(
-                    dbMat.cardDamping, mi.dbMid, mi.modelMid, pids,
+                    dbMat.cardDamping, mi.dbMid, bumpId(maxSetId_, "세트 번호"), pids,
                     dampCfg.scale, dampCfg.floor);
                 insertCards.push_back("$");
                 insertCards.push_back("$ Damping for MID " + std::to_string(mi.modelMid)
@@ -14303,7 +14312,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         auto allPids = md_enumerateAllPids(rawLines_);
         for (int pid : allPids) {
             if (pidsWithDamping.count(pid)) continue;
-            auto dampLines = md_buildDefaultDampingForPid(pid, dampCfg.floor);
+            auto dampLines = md_buildDefaultDampingForPid(pid, bumpId(maxSetId_, "세트 번호"), dampCfg.floor);
             for (auto& dl : dampLines) insertCards.push_back(dl);
             ++defaultDampingCount;
             char buf[256];
@@ -16055,7 +16064,9 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
     int maxSetNodeId = std::max(bc_findMaxSetNodeId(rawLines_), inclMax(bc_findMaxSetNodeId));
     // 세트 커서는 마지막으로 낸 번호를 든다 — 새 번호는 bumpId(정수 상한에서 멈추고 writeOutput 이 거절 · 2026-11-22)
     int setCursor = maxSetNodeId;
-    int nextCnrbPid = std::max(rbe_findMaxCnrbPid(rawLines_), inclMax(rbe_findMaxCnrbPid)) + 1;
+    // CNRB 의 PID 는 파트 번호와 한 이름공간이다(Vol_I *CONSTRAINED_NODAL_RIGID_BODY — 강체 파트) — 공용 파트 커서로 낸다(3차 3판 L-16).
+    // 예전엔 덱의 CNRB 최대값 위로만 내 `*PART` 번호(상자 PID 1)와 겹칠 수 있었다
+    maxPartId_ = std::max({maxPartId_, rbe_findMaxCnrbPid(rawLines_), inclMax(rbe_findMaxCnrbPid)});
     int nextIcid = std::max(rbe_findMaxIcid(rawLines_), inclMax(rbe_findMaxIcid)) + 1;
     std::vector<std::string> insertBlocks;
     int rbeCount = 0;
@@ -16143,7 +16154,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
                 std::string setTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
                 insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
                 std::string cnrbTitle = "RBE2_PID" + std::to_string(pid) + "_spider";
-                insertBlocks.push_back(rbe_generateCnrb(nextCnrbPid++, setId, cnrbTitle));
+                insertBlocks.push_back(rbe_generateCnrb(bumpId(maxPartId_, "파트 번호"), setId, cnrbTitle));
             }
             rbeCount++;
 
@@ -16182,7 +16193,7 @@ bool ModelAssembler::applyRbe(const RbeOperation& op) {
                     std::string setTitle = "RBE2_PID" + std::to_string(pid)
                                          + "_face" + std::to_string(fi);
                     insertBlocks.push_back(bc_generateSetNode(setId, allNodes, setTitle));
-                    insertBlocks.push_back(rbe_generateCnrb(nextCnrbPid++, setId, setTitle));
+                    insertBlocks.push_back(rbe_generateCnrb(bumpId(maxPartId_, "파트 번호"), setId, setTitle));
                 }
                 faceConstraints++;
             }
@@ -18393,27 +18404,6 @@ static void ma_partIdsIn(const std::vector<std::string>& lines, std::vector<long
     for (const auto& [pid, kw] : cur_scanPartVariantIds(lines)) { (void)kw; out.push_back(pid); }
 }
 
-// 세트 — 모든 종류를 한 통으로(`cur_scanMaxSetId` 와 같은 규칙 — 블록의 첫 데이터 줄 · `_TITLE` 이면 제목 다음)
-static void ma_setIdsIn(const std::vector<std::string>& lines, std::vector<long long>& out) {
-    bool inSet = false, needTitle = false;
-    for (const auto& l : lines) {
-        const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
-            const std::string kw = deckscan::kwBare(deckscan::keywordToken(l.substr(g)));
-            inSet = kw.rfind("*SET_", 0) == 0;
-            needTitle = inSet && kw.find("_TITLE") != std::string::npos;
-            continue;
-        }
-        if (!inSet || (g != std::string::npos && l[g] == '$')) continue;
-        if (needTitle) { needTitle = false; continue; }
-        try {
-            const int sid = std::stoi(l);
-            if (sid > 0) out.push_back(sid);
-        } catch (...) {}
-        inSet = false;
-    }
-}
-
 // 접촉 — `*CONTACT_…_ID` 의 ID 카드 CID(1~10열 · 쉼표가 그 안에 있으면 그 앞). contact 정본 리더(`ct_parseContacts` — `contact create` ·
 // 번호 발급 `ct_findMaxContactId` 와 같은 칸)의 값을 그대로 쓴다. ★예전엔 `cardFields` 로 읽어, ID 카드가 `CID I10 + HEADING A70` 인
 // `         3Metal-Metal thermal`(LS-PrePost · 우리 `contact create` 가 쓰는 꼴)을 토큰 「3Metal-Metal」 로 읽고 CID 를 놓쳤다
@@ -18432,7 +18422,7 @@ std::vector<std::vector<std::pair<long long, long long>>> ModelAssembler::batter
         for (int v : cur_scanSectionIdsInUse(L)) ids[bat::FAM_SECTION].push_back(v);
         for (int v : matids::inUse(L)) ids[bat::FAM_MAT].push_back(v);
         for (int fam : {bat::FAM_TMAT, bat::FAM_HOURGLASS, bat::FAM_CURVE}) ma_definedIdsIn(L, fam, ids[static_cast<size_t>(fam)]);
-        ma_setIdsIn(L, ids[bat::FAM_SET]);
+        cur_setIdsIn(L, ids[bat::FAM_SET]);
         ma_contactIdsIn(L, ids[bat::FAM_CONTACT]);
     };
     // 줄 — 주 덱(앞 op 이 넣은 블록까지) · 인클루드 · 이 실행이 덧붙인 battery 덱의 머리 · 덱 쓰기 때 넣을 블록(새 파트 · 섹션 · 재질 …)
