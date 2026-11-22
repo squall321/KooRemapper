@@ -583,7 +583,9 @@ stackdiagram SVG · cclip 보고와 압축 덱 · generate 의 덱 · cleanup-no
 **일부러 남기는 파일은 표지가 없습니다** — `meshfix` 는 gmsh 나 그 산출 읽기가 실패하면 살펴보라고 gmsh 왕복 파일을 남기는데, 그때
 보이는 이름 `<줄기>__mf.{stl,geo,msh,log}`(있는 것만)로 바꿔 남겨 플랫폼이 산출로 올리고, `[ERROR]` 의 See log · 남긴 목록 · 남긴
 `.geo` 의 Merge · Save 도 그 이름을 댑니다(마지막 검토 — 표지를 붙인 뒤 그 파일이 걸러져 세션에 안 올라갔고 말은 표지 이름을 댔다 ·
-회귀 T-K · `test_job_launcher.py`). 남길 이름도 쓸 파일이라 그 이름의 입력이 있으면 gmsh 전에 거절합니다.
+회귀 T-K · `test_job_launcher.py`). 남길 이름도 쓸 파일이라 그 이름의 입력이 있으면 gmsh 전에 거절합니다. gmsh **앞** 단계(경계 STL ·
+다듬기 · 쪼개기 · `.geo`)에서 멈추면 이 실행의 `.kr_tmp_mf.*` 를 치웁니다(2026-11-22 · 3차 4판 L-20 — 예전엔 숨은 채 남았다 · 회귀
+`test_meshfix_temp_cleanup.py`).
 
 #### (n) 메시를 다시 쓰는 op 은 덱이 선언한 칸 폭 하나로 쓴다 · 번호가 안 들어가면 거절 (2026-11-21)
 

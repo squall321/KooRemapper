@@ -2435,15 +2435,22 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
         console.warning("Input bad-Jac (J<0.15): " + std::to_string(ar.badElemCount));
 
 
+    // gmsh 앞 단계(STL · 다듬기 · 쪼개기 · .geo)에서 멈추면 이 실행의 임시 파일을 치운다(3차 4판 L-20 — 예전엔 `.kr_tmp_mf.*` 가 숨은 채
+    // 남았다). gmsh 가 실패한 뒤에는 살펴보라고 보이는 이름(`<줄기>__mf.*`)으로 남긴다(아래 `keepForInspection`)
+    auto failBeforeGmsh = [&](const std::string& e) {
+        console.error(e);
+        for (const auto& p : {stlPath, geoPath, mshPath, logPath}) { std::error_code ec; fs::remove(p, ec); }
+        return 1;
+    };
     // 5. STL
     console.info("Extracting boundary surface...");
     int stlFaces = 0;
-    if (!extractSTL(mesh, cfg.pid, stlPath, err, &stlFaces)) { console.error(err); return 1; }
+    if (!extractSTL(mesh, cfg.pid, stlPath, err, &stlFaces)) return failBeforeGmsh(err);
     console.keyValue("STL faces (after filter)", std::to_string(stlFaces));
 
     // 5b. Laplacian smoothing — micro-chamfer at 90° feature edges
     if (cfg.smoothSurface > 0) {
-        if (!smoothSTLFile(stlPath, cfg.smoothSurface, err)) { console.error(err); return 1; }
+        if (!smoothSTLFile(stlPath, cfg.smoothSurface, err)) return failBeforeGmsh(err);
         console.keyValue("STL smooth steps", std::to_string(cfg.smoothSurface));
     }
 
@@ -2452,7 +2459,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     if (refineLevels > 0) {
         if (cfg.refineSurface < 0)
             console.keyValue("Auto refine_surface", std::to_string(refineLevels) + " levels");
-        if (!subdivideSTLFile(stlPath, refineLevels, err)) { console.error(err); return 1; }
+        if (!subdivideSTLFile(stlPath, refineLevels, err)) return failBeforeGmsh(err);
         int refinedFaces = 0;
         {
             std::ifstream stlf(stlPath); std::string ln;
@@ -2465,7 +2472,7 @@ int runMeshFix(const char* configPath, ConsoleOutput& console) {
     }
 
     // 6. Geo script
-    if (!writeGeoScript(geoPath, stlPath, mshPath, ar, cfg, err)) { console.error(err); return 1; }
+    if (!writeGeoScript(geoPath, stlPath, mshPath, ar, cfg, err)) return failBeforeGmsh(err);
 
     // 실패하면 임시 파일을 지우지 않고 살펴보라고 남긴다 — 있는 것만 보이는 이름(`<줄기>__mf.*`)으로 바꾸고 말(`msg`)의 임시 경로도 그
     // 이름으로 고친다. 바꾸지 못하면 임시 이름 그대로 남기고 그렇다고 말한다. 남긴 것 [(임시 이름, 남긴 이름)]을 돌려준다
