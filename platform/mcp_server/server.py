@@ -1088,6 +1088,13 @@ async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
 CAMPAIGN_STATES = ("pending", "received", "skipped", "rejected")
 CAMPAIGN_RUNS_MAX = 5000
 _A_CAMPAIGN_ID = "캠페인 id — create_campaign 응답의 campaign_id(같은 이름으로 다시 만들면 오류 글에 그 id 가 있다)."
+# 건강 판정 문턱(DF-03) — 열쇠 · 기본값은 백엔드 campaigns/health.py `DEFAULTS` 와 같아야 한다(test_mcp_tools_contract 가 대조한다)
+HEALTH_THRESHOLD_DEFAULTS = {"energy_ratio_max": 1.05, "hg_over_ie_max": 0.10, "added_mass_pct_max": 0.5, "ke0_rel_tol": 0.10,
+                             "contact_energy_min_mJ": -100.0}
+_A_THRESHOLDS = ("건강 판정 문턱(선택) — 바꿀 열쇠만: energy_ratio_max(1.05 — 에너지비가 넘으면 warn) · hg_over_ie_max(0.10 — "
+                 "HG/IE 비가 이 값 이상이면 warn) · added_mass_pct_max(0.5 — 추가 질량 % 기기 값, 없으면 전체 값) · "
+                 "ke0_rel_tol(0.10 — 첫 KE 와 ½mv² 의 상대 차이) · contact_energy_min_mJ(-100 — 자체 접촉 에너지가 이보다 낮으면 "
+                 "warn). 미끄럼 에너지는 문턱이 없다. 다른 열쇠는 거절된다.")
 
 
 @mcp.tool()
@@ -1106,6 +1113,7 @@ async def create_campaign(
     thickness_axis: Annotated[str | None, Field(description="두께 축(선택) — X · Y · Z.")] = None,
     impactor: Annotated[dict | None, Field(
         description="충격자(선택) — {mass_g, height_mm, ke_mj} 가운데 아는 것만(0 이상). 다른 열쇠는 거절된다.")] = None,
+    health_thresholds: Annotated[dict | None, Field(description=_A_THRESHOLDS)] = None,
 ) -> dict:
     """캠페인(한 과제 · 한 판의 런 묶음)을 만든다 — 응답의 `campaign_id` 로 런 목록을 올리고 리포트를 받는다.
 
@@ -1118,6 +1126,7 @@ async def create_campaign(
         "name": name, "project": project, "dev_rev": dev_rev, "analysis_method": analysis_method,
         "analysis_target": analysis_target, "doe_strategy": doe_strategy, "drop_height_mm": drop_height_mm,
         "duration_ms": duration_ms, "thickness_axis": thickness_axis, "impactor": impactor,
+        "health_thresholds": health_thresholds,
     }.items() if v is not None}
     return await _post(ctx, "/campaigns", body)
 
@@ -1127,13 +1136,19 @@ async def ingest_campaign_manifest(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     runs: Annotated[list[dict], Field(description=(
         f"런 목록(1~{CAMPAIGN_RUNS_MAX}건) — 항목마다 run_key(필수 · 빈칸 없는 글 128자까지 · `stcx:<잡 id>:<DOE>` 꼴을 권한다) · "
-        "doe · pitch · roll(선택). 다른 열쇠는 거절된다."))],
+        "doe · pitch · roll(선택) · provenance(출처 — wrapper_name · wrapper_version · prescription_set · scenario_sha256 · "
+        "runner_config_sha256 · deck_sha256 · include_sha256[] · solver{} · sif_version · deep_report_tool_commit · "
+        "deep_report_flags · submitted_at) · config_generation(설정 세대 이름표 64자) · superseded_by(이 런을 대체한 같은 캠페인 "
+        "런의 run_key) · health(건강 수치 — normal_termination · scheduler_state · energy_ratio_max · hg_over_ie_max(비) · "
+        "added_mass_pct_device · added_mass_pct_total · ke0_measured · ke0_expected · contact_energy_min_mJ · nan_onset_ms · "
+        "json_complete). 다른 열쇠는 거절된다."))],
     ctx: Context,
 ) -> dict:
     """캠페인의 런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
 
-    새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 **보낸 칸**(doe · pitch · roll)만 맞춘다 — 안 보낸 칸은
-    그대로고 null 을 보내면 비운다. 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고, 목록에서 런을 빼는 길은
+    새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 **보낸 칸**(doe · pitch · roll · provenance ·
+    config_generation · superseded_by · health)만 맞춘다 — 객체 칸은 통째로 바뀌고, 안 보낸 칸은 그대로고 null 을 보내면 비운다.
+    `superseded_by` 는 같은 캠페인의 다른 run_key 여야 한다(자기 자신 · 고리는 거절). 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고, 목록에서 런을 빼는 길은
     없다. 목록에 없는 `run_key` 로 온 리포트는 거절된다 — 목록을 먼저 올린다. 응답은 `added` · `updated` · `unchanged` · `listed`.
     Upload a campaign's run manifest (idempotent upsert; runs are never removed)."""
     return await _post(ctx, f"/campaigns/{_seg(campaign_id)}/runs", {"runs": runs})
@@ -1164,6 +1179,80 @@ async def campaign_ingest_status(
         params["state"] = state
     return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/ingest-status", params)
 
+
+
+@mcp.tool()
+async def set_campaign_health_thresholds(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    energy_ratio_max: Annotated[float | None, Field(description="에너지비 문턱(기본 1.05) — 넘으면 warn. 0 보다 커야 한다.")] = None,
+    hg_over_ie_max: Annotated[float | None, Field(description="HG/IE 비 문턱(기본 0.10 = 10 %) — 이 값 이상이면 warn. 0 보다 커야 한다.")] = None,
+    added_mass_pct_max: Annotated[float | None, Field(description="추가 질량 % 문턱(기본 0.5) — 기기 값(없으면 전체 값)이 넘으면 warn.")] = None,
+    ke0_rel_tol: Annotated[float | None, Field(description="첫 KE 와 ½mv² 의 상대 차이 문턱(기본 0.10) — 넘으면 warn.")] = None,
+    contact_energy_min_mJ: Annotated[float | None, Field(description="자체 접촉 에너지 문턱 mJ(기본 -100) — 이보다 낮으면 warn.")] = None,
+) -> dict:
+    """캠페인의 건강 판정 문턱을 바꾼다 — 안 준 열쇠는 기본값이다(아무것도 안 주면 모두 기본값으로 돌린다).
+
+    판정은 읽을 때 세므로 바꾼 문턱이 곧바로 `campaign_health_table` · `report_health` 에 든다. 응답의 `thresholds.ref` 가 그
+    묶음의 이름표(런의 `health.thresholds_ref`)다. 정상 종료 아님 · NaN · 잘린 JSON · 첫 KE 0 이하는 문턱 없이 invalid 다.
+    미끄럼 에너지는 문턱이 없다. 캠페인 주인만.
+    Set a campaign's health thresholds (omitted keys fall back to defaults)."""
+    body = {k: v for k, v in {
+        "energy_ratio_max": energy_ratio_max, "hg_over_ie_max": hg_over_ie_max, "added_mass_pct_max": added_mass_pct_max,
+        "ke0_rel_tol": ke0_rel_tol, "contact_energy_min_mJ": contact_energy_min_mJ,
+    }.items() if v is not None}
+    return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/health-thresholds", body)
+
+
+@mcp.tool()
+async def campaign_provenance(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    config_generation: Annotated[str | None, Field(description="이 설정 세대의 런만(선택 · 64자까지). 비우면 모두.")] = None,
+    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 분포 · 수는 이 값과 무관하게 전체다.")] = 200,
+    offset: Annotated[int, Field(description="건너뛸 런 수(목록 순서) — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """캠페인의 런 출처 — 설정 세대별 런 수(`generations` — 이름표 없는 런은 config_generation null) · `mixed_config`(이름표가
+    붙은 세대가 둘 이상이면 true) · 출처가 빈 런 수 · 대체된 런 수(`counts`) · 런마다 provenance · config_generation ·
+    superseded_by. 출처가 빈 런과 대체된 런은 기본 통계에서 빠진다(`campaign_health_table`).
+    Provenance of a campaign's runs: per-generation counts, mixed_config flag, missing/superseded counts."""
+    params: dict = {"limit": limit, "offset": offset}
+    if config_generation is not None:
+        params["config_generation"] = config_generation
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/provenance", params)
+
+
+@mcp.tool()
+async def campaign_health_table(
+    campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
+    ctx: Context,
+    include_invalid: Annotated[bool, Field(description="true 면 invalid · 대체된 런 · 출처가 빈 런도 싣는다(기본 false — "
+                                                       "통계에 넣는 런만).")] = False,
+    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 머리 줄은 이 값과 무관하게 전체다.")] = 200,
+    offset: Annotated[int, Field(description="건너뛸 런 수 — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
+) -> dict:
+    """캠페인의 런 건강 표 — 머리 줄(`header.line` — 「유효 n / 전체 N · 제외 까닭별 건수」) · 판정에 쓴 문턱 묶음(`thresholds`
+    — values · ref · changed) · 런마다 건강 수치 · 판정(`validity` {status: valid | warn | invalid, reasons}) · 제외 까닭
+    (`excluded_by`).
+
+    invalid 까닭 — no_report(리포트 없음) · health_missing(건강 수치 없음 — 스케줄러 상태만으로 valid 로 보지 않는다) ·
+    termination_unknown · abnormal_termination · json_incomplete · nan · ke0_zero. warn 까닭 — energy_ratio · hourglass ·
+    added_mass · ke0_mismatch · contact_energy. 기본 제외 — invalid · superseded(대체된 런) · provenance_missing. warn 은 넣는다.
+    Health table of a campaign: header line, thresholds bundle, per-run health/validity/exclusion."""
+    return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/health",
+                      {"include_invalid": "true" if include_invalid else "false", "limit": limit, "offset": offset})
+
+
+@mcp.tool()
+async def report_health(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+) -> dict:
+    """리포트 하나(런 하나)의 건강 수치 · 판정(`validity`) · 제외 까닭 · 판정에 쓴 문턱 묶음 — 캠페인 런에 묶인 리포트면 그
+    캠페인의 문턱으로 판정한다. 캠페인 주인이 아니면 `campaign` 을 비운다. 캠페인 밖 리포트는 `campaign: null` ·
+    health_missing(invalid) 이다.
+    Health and validity of one report's run (judged with its campaign's thresholds)."""
+    return await _get(ctx, f"/reports/{_seg(report_id)}/health")
 
 # ── 해석 온톨로지(cae_*) — 후처리 꾸러미를 리포트에 싣고 묻는다(사용자 결정 10-31 (가), 계획 cae-ontology-1031) ─────────────
 # 허용값은 백엔드 GET /cae/parts · /cae/load-paths 의 Query 패턴과 같아야 한다(test_mcp_tools_contract 가 대조한다).
@@ -1683,6 +1772,8 @@ async def find_reports(
                                                       "(get_session 의 files[].id).")] = None,
     external_job_key: Annotated[str | None, Field(description="외부 잡 키 — 후처리 예약이 반입한 리포트의 잡 키 "
                                                               "`stcx:<Slurm 잡 id>`(정확히 같음). get_job 의 external 과 짝.")] = None,
+    config_generation: Annotated[str | None, Field(description="설정 세대(64자까지) — 내 캠페인에서 이 세대 이름표가 붙은 "
+                                                               "런에 묶인 리포트만(campaign_provenance 의 generations).")] = None,
     sort: Annotated[str, Field(description=f"정렬 기준 — {_one_of(FIND_SORTS)} 중 하나.")] = "created_at",
     order: Annotated[str, Field(description=f"정렬 방향 — {_one_of(SORT_ORDERS)}.")] = "desc",
     limit: Annotated[int, Field(description=f"최대 건수(1~{FIND_LIMIT_MAX}). 결과가 이만큼이면 truncated:true — "
@@ -1697,6 +1788,7 @@ async def find_reports(
     - drop_height(특정 높이), severity(이 심각도 이상 소견 보유), min_worst_stress/min_worst_g
     - has_part(그 부품명 포함), q(라벨/과제 텍스트), since/until(ISO), session_id, kfile_id
     - external_job_key(후처리 예약이 반입한 리포트 — `stcx:<Slurm 잡 id>`)
+    - config_generation(내 캠페인에서 그 설정 세대의 런에 묶인 리포트 — DF-02)
     - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라.
     ★0 건이어도 **빈 봉투**를 준다(KR-08) — `{items:[], total:0, reason:'리포트 없음'}`. 빈 출력이 아니라
     「이 조건에 맞는 리포트가 없다」 는 뜻이다(도구 실패와 구분된다). `total==limit` 이면 더 있을 수 있다(truncated)."""
@@ -1708,6 +1800,7 @@ async def find_reports(
         "min_worst_stress": min_worst_stress, "min_worst_g": min_worst_g,
         "has_part": has_part, "q": q, "since": since, "until": until,
         "session_id": session_id, "kfile_id": kfile_id, "external_job_key": external_job_key,
+        "config_generation": config_generation,
     }.items():
         if v is not None:
             params[k] = v

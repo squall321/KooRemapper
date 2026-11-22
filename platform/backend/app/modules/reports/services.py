@@ -914,6 +914,7 @@ def _find_reports_query(
     since=None,
     until=None,
     external_job_key: str | None = None,
+    config_generation: str | None = None,
 ):
     """find_reports/facets 공용 WHERE 절 빌더 — 모든 필터를 서버(SQL)에서 건다."""
     from sqlalchemy import func as _f, or_
@@ -927,6 +928,13 @@ def _find_reports_query(
     if external_job_key:
         # 후처리 예약이 반입한 리포트의 잡 키 `stcx:<Slurm 잡 id>` — 정확히 같음(2026-11-12, 포털 낙하 파이프라인 (b))
         stmt = stmt.where(ImpactReport.external_job_key == external_job_key)
+    if config_generation:
+        # 설정 세대(DF-02) — 부른 사람이 만든 캠페인의 런 가운데 그 세대에 묶인 리포트만. 캠페인은 만든 사람만 보므로 남의 세대는 세지 않는다
+        from app.models import Campaign, CampaignRun
+        stmt = stmt.where(ImpactReport.id.in_(
+            select(CampaignRun.report_id).join(Campaign, Campaign.id == CampaignRun.campaign_id)
+            .where(CampaignRun.config_generation == config_generation, Campaign.created_by == user_id,
+                   CampaignRun.report_id.is_not(None))))
     if kfile_id is not None:
         stmt = stmt.where(ImpactReport.source_kfile_id == kfile_id)
     if focus:
@@ -990,7 +998,7 @@ async def find_reports(
 
     필터(kwargs): kind·project(eng_meta OR project_name)·dev_rev·variation·doe·
     kfile_id·focus·doe_strategy·scenario_type·drop_height(±height_tol)·severity·
-    min_worst_stress·min_worst_g·has_part·q_text·since·until·external_job_key.
+    min_worst_stress·min_worst_g·has_part·q_text·since·until·external_job_key·config_generation.
     """
     stmt = _find_reports_query(user_id, is_admin=is_admin, affiliation=affiliation, **filters)
     col = _REPORT_SORTS.get(sort, ImpactReport.created_at)

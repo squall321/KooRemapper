@@ -637,6 +637,8 @@ class Campaign(Base):
     duration_ms: Mapped[float | None] = mapped_column(Float)
     thickness_axis: Mapped[str | None] = mapped_column(String(1))  # X | Y | Z
     impactor: Mapped[dict | None] = mapped_column(JSONB)  # {mass_g, height_mm, ke_mj}
+    # 건강 판정 문턱 — 기본값에서 바꾼 열쇠만(null 이면 기본값 · campaigns/health.py `DEFAULTS`) · DF-03(2026-11-22)
+    health_thresholds: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -667,6 +669,11 @@ class CampaignRun(Base):
     ingest_state: Mapped[str] = mapped_column(String(12), default="pending", server_default="pending", nullable=False)
     reject_reason: Mapped[str | None] = mapped_column(Text)
     ingested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ② 출처 · 유효성(DF-02 · DF-03 · 2026-11-22) — 런 목록이 보낸 그대로 둔다. 판정은 저장하지 않고 읽을 때 캠페인 문턱으로 센다.
+    provenance: Mapped[dict | None] = mapped_column(JSONB)          # 래퍼 · 처방 · 설정 sha · SIF · tool_commit …
+    config_generation: Mapped[str | None] = mapped_column(String(64))   # 사람이 붙이는 설정 세대 이름표
+    superseded_by: Mapped[str | None] = mapped_column(String(128))      # 이 런을 대체한 같은 캠페인 런의 run_key
+    health: Mapped[dict | None] = mapped_column(JSONB)              # 정상 종료 · 에너지비 · HG/IE · 추가 질량 · KE · NaN …
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

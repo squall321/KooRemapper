@@ -102,8 +102,12 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 rejected(거절 — 까닭은 `reject_reason`)이고, `ingest_state` 는 그 런의 마지막 시도 결과 · `report_id` 는 그 런이 가진 리포트다.
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
-| `create_campaign` | name, project?, dev_rev?, analysis_method?, analysis_target?, doe_strategy?, drop_height_mm?, duration_ms?, thickness_axis?, impactor? | POST /campaigns | 캠페인을 만든다. 같은 이름을 이미 썼으면 오류(409) — 글에 있던 캠페인의 id 가 있다. 만든 사람만 본다(목록 · 고침 · 지우기는 없다) |
-| `ingest_campaign_manifest` | campaign_id, runs[]({run_key, doe?, pitch?, roll?}) | POST /campaigns/{id}/runs | 런 목록을 올린다 — 새 run_key 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 보낸 칸만 맞춘다. 한 요청 5,000 런까지 · 한 요청 안 겹친 run_key 는 거절 · 런을 빼는 길은 없다 |
+| `create_campaign` | name, project?, dev_rev?, analysis_method?, analysis_target?, doe_strategy?, drop_height_mm?, duration_ms?, thickness_axis?, impactor?, health_thresholds? | POST /campaigns | 캠페인을 만든다. 같은 이름을 이미 썼으면 오류(409) — 글에 있던 캠페인의 id 가 있다. 만든 사람만 본다(목록 · 고침 · 지우기는 없다) |
+| `ingest_campaign_manifest` | campaign_id, runs[]({run_key, doe?, pitch?, roll?, provenance?, config_generation?, superseded_by?, health?}) | POST /campaigns/{id}/runs | 런 목록을 올린다 — 새 run_key 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 보낸 칸만 맞춘다(객체 칸은 통째로 · null 은 비운다). 한 요청 5,000 런까지 · 한 요청 안 겹친 run_key 는 거절 · 런을 빼는 길은 없다 · superseded_by 는 같은 캠페인의 다른 run_key(자기 자신 · 고리는 거절) · provenance · health 안의 모르는 열쇠는 거절 |
+| `set_campaign_health_thresholds` | campaign_id, energy_ratio_max?, hg_over_ie_max?, added_mass_pct_max?, ke0_rel_tol?, contact_energy_min_mJ? | PUT /campaigns/{id}/health-thresholds | 건강 판정 문턱을 바꾼다 — 안 준 열쇠는 기본값(1.05 · 0.10 · 0.5 % · 0.10 · −100 mJ). 판정은 읽을 때 세므로 곧바로 든다 |
+| `campaign_provenance` | campaign_id, config_generation?, limit?, offset? | GET /campaigns/{id}/provenance | 설정 세대별 런 수 · `mixed_config` · 출처가 빈 런 수 · 대체된 런 수 · 런마다 출처 |
+| `campaign_health_table` | campaign_id, include_invalid?, limit?, offset? | GET /campaigns/{id}/health | 머리 줄(유효 n / 전체 N · 제외 까닭별 건수) · 문턱 묶음(`ref`) · 런마다 건강 수치 · 판정(valid · warn · invalid) · 제외 까닭. 기본은 통계에 넣는 런만 |
+| `report_health` | report_id | GET /reports/{id}/health | 리포트 하나(런 하나)의 건강 · 판정 — 캠페인 문턱으로. 캠페인 주인이 아니면 campaign 을 비운다 · 캠페인 밖 리포트는 health_missing |
 | `campaign_ingest_status` | campaign_id, state?, limit?, offset? | GET /campaigns/{id}/ingest-status | 목록 수 · 상태별 수(`listed = pending + received + skipped + rejected` · `with_report`) · 런마다 상태 · report_id · sha256 · 거절 까닭 |
 | — (REST 전용) | intake 폼 + campaign_id, run_key(둘 다) | POST /reports/intake | 리포트 하나를 그 런의 것으로 받는다 — 같은 내용이 다시 오면 건너뛰고(200 · skipped) 다른 내용이면 거절(409 · 가진 리포트는 그대로). 목록에 없는 run_key 는 400. 런을 찾은 뒤의 4xx 는 까닭이 런에 적힌다(401 · 429 · 요청 꼴 422 · 5xx 는 적히지 않는다). 올리기 길은 토큰 하나에 분당 한도가 있다(429 `Retry-After`) |
 
@@ -194,7 +198,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 ## 검증
 - `mcp_server/smoke.py` — 도구 노출 수 + 전체 op 파이프라인 + 에러 전파를 러닝 스택에 대고
   확인(스택 없으면 자동 skip). 기대 도구 수는 하드코딩하지 않고 `server.py` 의 `@mcp.tool(`
-  수에서 뽑는다 — 위 표의 도구 수(현재 93개)와 같아야 한다.
+  수에서 뽑는다 — 위 표의 도구 수(현재 97개)와 같아야 한다.
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.

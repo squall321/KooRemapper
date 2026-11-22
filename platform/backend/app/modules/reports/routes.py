@@ -518,6 +518,8 @@ async def find_reports(
     until: str | None = Query(default=None, description="created_at ≤ (ISO)"),
     external_job_key: str | None = Query(default=None, max_length=64,
                                          description="후처리 예약이 반입한 리포트의 잡 키(stcx:<Slurm 잡 id>) — 정확히 같음"),
+    config_generation: str | None = Query(default=None, max_length=64,
+                                          description="설정 세대(DF-02) — 부른 사람이 만든 캠페인에서 그 세대의 런에 묶인 리포트만"),
     sort: str = Query("created_at", pattern="^(created_at|worst_stress|worst_g|drop_height)$"),
     order: str = Query("desc", pattern="^(asc|desc)$"),
     limit: int = Query(100, ge=1, le=500),
@@ -541,9 +543,38 @@ async def find_reports(
         min_worst_stress=min_worst_stress, min_worst_g=min_worst_g,
         has_part=has_part, q_text=q,
         since=_parse_dt(since, "since"), until=_parse_dt(until, "until"),
-        external_job_key=external_job_key,
+        external_job_key=external_job_key, config_generation=config_generation,
     )
     return ok([ReportListItem.model_validate(r).model_dump() for r in rows])
+
+
+@router.get("/reports/{report_id}/health")
+async def report_health(
+    request: Request,
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """리포트 하나(런 하나)의 건강 수치 · 판정 · 판정에 쓴 문턱 묶음(DF-03).
+
+    캠페인 런에 묶인 리포트면 그 캠페인의 문턱으로 판정한다. 캠페인은 만든 사람만 보므로 다른 사람(같은 소속 공유로 읽는 사람)에게는
+    `campaign` 을 비우고 판정 · 수치만 준다. 캠페인 밖 리포트는 `campaign: null` · `health_missing`(invalid) 이다.
+    """
+    r = await _require_report(db, user, report_id, request)
+    got = await camp_svc.run_of_report(db, r.id)
+    if got is None:
+        return ok({"report_id": r.id, "campaign": None, "run_key": None,
+                   "validity": {"status": "invalid", "reasons": ["health_missing"]}, "health": None,
+                   "excluded_by": ["health_missing"], "thresholds": None, "environment": settings.environment})
+    run, camp = got
+    body = camp_svc.judged_run(run, camp)
+    mine = camp.created_by == user.id
+    return ok({"report_id": r.id,
+               "campaign": {"campaign_id": camp.id, "name": camp.name, "run_key": run.run_key} if mine else None,
+               "run_key": run.run_key if mine else None,
+               **{k: body[k] for k in ("validity", "health", "excluded_by", "config_generation", "superseded_by",
+                                       "thresholds")},
+               "environment": settings.environment})
 
 
 @router.get("/reports/{report_id}")

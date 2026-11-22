@@ -44,6 +44,11 @@ def test_capabilities_declares_intake(monkeypatch):
     assert it["batch"] is True and it["reports_per_call"] == 1, it
     assert it["campaign"] == {"create": "/api/v1/campaigns", "manifest": "/api/v1/campaigns/{campaign_id}/runs",
                               "status": "/api/v1/campaigns/{campaign_id}/ingest-status",
+                              # ② 출처 · 유효성(DF-02 · DF-03 · 11-22)
+                              "provenance": "/api/v1/campaigns/{campaign_id}/provenance",
+                              "health": "/api/v1/campaigns/{campaign_id}/health",
+                              "health_thresholds": "/api/v1/campaigns/{campaign_id}/health-thresholds",
+                              "report_health": "/api/v1/reports/{report_id}/health",
                               "form_fields": ["campaign_id", "run_key"],
                               "states": ["pending", "received", "skipped", "rejected"]}, it
     monkeypatch.setattr(settings, "ratelimit_enabled", True)

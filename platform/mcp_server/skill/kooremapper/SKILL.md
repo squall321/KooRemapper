@@ -208,6 +208,10 @@ impact 전위치 부분충격)을 인제스트해 구조화 분석한다.
    pitch, roll} …])` → 런마다 intake 에 `campaign_id` · `run_key` 를 붙여 보낸다(같은 내용이 다시 오면 건너뛰고 다른 내용이면 거절) →
    `campaign_ingest_status` 로 `listed = pending + received + skipped + rejected` 를 맞춘다. 다시 올릴 때는 pending · rejected 런만
    걸러 보낸다(건너뛰는 런도 파일을 통째로 보내야 건너뛴다 · 올리기 길에는 분당 한도가 있다 — 429 `Retry-After`).
+   런 목록에 출처(`provenance`) · 설정 세대(`config_generation`) · 대체(`superseded_by`) · 건강 수치(`health`)를 실으면
+   `campaign_provenance`(세대 분포 · `mixed_config`) · `campaign_health_table`(머리 줄 「유효 n / 전체 N」 · 판정) ·
+   `report_health` 로 본다. 기본 통계는 invalid(비정상 종료 · NaN · 잘린 JSON · 첫 KE 0 · 건강 수치 없음) · 대체된 런 · 출처가
+   빈 런을 뺀다 — 문턱은 `set_campaign_health_thresholds` 로 캠페인마다 바꾼다. 리포트 검색은 `find_reports(config_generation=…)`.
    SceneForge 가 그린 렌더 결과(mp4 · 정지 화면, C-11)는 `attach_render(report_id, path)` 로 **더한다** —
    결과 폴더나 zip 경로. 기존 그림을 지우지 않고, 같은 render_id 는 멱등, sha256 이 하나라도 다르면 통째로 거절.
    StepForge fe_cad 묶음(glb · 가중치)은 `attach_cad(report_id, path)` 로 리포트의 **형상**으로 붙인다 — 리포트 하나에

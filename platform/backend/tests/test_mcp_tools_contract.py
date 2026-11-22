@@ -69,7 +69,8 @@ def test_every_argument_of_the_requested_tools_is_described(schemas):
                if not str(spec.get("description") or "").strip()]
     n = sum(len(schemas["tools"][t].get("properties") or {}) for t in TOOLS)
     # 36 → 37: find_reports 에 external_job_key 를 덧붙였다(2026-11-12, 포털 낙하 파이프라인 (b))
-    assert n == 37 and not missing, (n, missing)
+    # 37 → 38: find_reports 에 config_generation 을 덧붙였다(2026-11-22, DF-02 설정 세대)
+    assert n == 38 and not missing, (n, missing)
 
 
 @needs_mcp
@@ -187,7 +188,9 @@ def test_the_cae_allowed_values_are_the_backend_constraints():
 
 # ── 캠페인 묶음 적재 도구(DF-01 · 11-20) ─────────────────────────────────────
 
-CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_ingest_status")
+CAMPAIGN_TOOLS = ("create_campaign", "ingest_campaign_manifest", "campaign_ingest_status",
+                  # ② 출처 · 유효성(DF-02 · DF-03 · 11-22)
+                  "set_campaign_health_thresholds", "campaign_provenance", "campaign_health_table", "report_health")
 
 
 @needs_mcp
@@ -205,6 +208,16 @@ def test_the_campaign_tools_describe_every_argument_and_mirror_the_rest_body():
     assert all(v in status["state"]["description"] for v in c["CAMPAIGN_STATES"])
     assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in status["limit"]["description"]
     assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in got["ingest_campaign_manifest"]["properties"]["runs"]["description"]
+    # 문턱 쓰기 도구의 인자 = REST 본문의 칸(+ campaign_id) · 런 목록 설명에 ② 칸 이름이 다 있다
+    from app.modules.campaigns.routes import HealthBody, ProvenanceBody, RunItem, ThresholdsBody
+    assert set(got["set_campaign_health_thresholds"]["properties"]) == set(ThresholdsBody.model_fields) | {"campaign_id"}
+    runs_desc = got["ingest_campaign_manifest"]["properties"]["runs"]["description"]
+    for name in [*RunItem.model_fields, *ProvenanceBody.model_fields, *HealthBody.model_fields]:
+        assert name in runs_desc, name
+    for t in ("campaign_provenance", "campaign_health_table"):
+        assert f"1~{c['CAMPAIGN_RUNS_MAX']}" in got[t]["properties"]["limit"]["description"], t
+    for k, v in c["HEALTH_THRESHOLD_DEFAULTS"].items():
+        assert k in got["create_campaign"]["properties"]["health_thresholds"]["description"], k
 
 
 def test_the_campaign_allowed_values_are_the_backend_constraints():
@@ -216,6 +229,11 @@ def test_the_campaign_allowed_values_are_the_backend_constraints():
     assert c["CAMPAIGN_RUNS_MAX"] == next(m.le for m in limit.metadata if hasattr(m, "le"))
     assert c["CAMPAIGN_RUNS_MAX"] == next(m.max_length for m in RunsBody.model_fields["runs"].metadata
                                           if hasattr(m, "max_length"))
+    from app.modules.campaigns.health import DEFAULTS
+    assert c["HEALTH_THRESHOLD_DEFAULTS"] == DEFAULTS
+    for path in ("/api/v1/campaigns/{campaign_id}/provenance", "/api/v1/campaigns/{campaign_id}/health"):
+        limit = _query(path, "limit")
+        assert c["CAMPAIGN_RUNS_MAX"] == next(m.le for m in limit.metadata if hasattr(m, "le")), path
 
 
 # ── 경로 칸 감싸기(검토 반영 11-11 · 재검토 11-12) ─────────────────────────────────────
