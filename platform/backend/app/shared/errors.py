@@ -12,6 +12,7 @@ contextvar 가 이미 `-` 로 돌아간 뒤에 이 핸들러가 로그를 찍었
 from __future__ import annotations
 
 import logging
+import math
 import re
 
 from fastapi import FastAPI, Request
@@ -40,6 +41,17 @@ def _with_corr(headers: dict | None, corr: str) -> dict:
     return out
 
 
+def _finite(obj):
+    """JSON 으로 쓸 수 없는 수(inf · nan)를 글로 — 오류 글에 되돌려 싣는 받은 값용."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    return obj
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http_exc(req: Request, exc: StarletteHTTPException):
@@ -51,7 +63,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _validation_exc(req: Request, exc: RequestValidationError):
         corr = correlator_of(req)
-        return fail("요청 형식이 올바르지 않습니다.", status_code=422, errors=exc.errors(),
+        # 오류 항목은 받은 값(`input`)을 되돌려 싣는다 — 본문의 Infinity · NaN 이 그대로 실리면 JSON 으로 못 써 422 대신 500 이
+        # 났다(2026-11-22 · 캠페인 건강 수치 시험). 유한하지 않은 수는 글로 바꿔 싣는다
+        return fail("요청 형식이 올바르지 않습니다.", status_code=422, errors=_finite(exc.errors()),
                     headers=_with_corr(None, corr))
 
     @app.exception_handler(Exception)
