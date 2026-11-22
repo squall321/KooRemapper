@@ -259,7 +259,8 @@ async def campaign_part_margin(
     무리는 `criterion_unset`(비 null)."""
     c = await _campaign(db, user, campaign_id)
     groups = await A.part_groups(db, c.id)
-    by_group = {g["group_key"]: g for g in groups}
+    # 무리를 정하지 않은 캠페인은 무리 하나 all(모든 파트) — 각도 표 · 지도 · 쌍 규칙과 같다(기준값도 all 에 걸 수 있다)
+    by_group = {g["group_key"]: g for g in groups} or {"all": {"group_key": "all", "label": "모든 파트", "part_ids": None}}
     crit = await A.criteria(db, c.id)
     axes = [metric_axis] if metric_axis else sorted({b["metric_axis"] for b in crit})
     rows, hd, _ = await _rows(db, c, metrics=[], groups=groups, thickness_axis=_axis(c, None), include_invalid=include_invalid,

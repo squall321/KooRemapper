@@ -356,6 +356,11 @@ async def test_sphere_map_json_svg_png(client, user):
     empty = await _campaign(client, h, [{"run_key": "x"}])
     r = await client.get(f"{API}/campaigns/{empty}/sphere-map", headers=h)
     assert r.status_code == 422, r.text
+    # 무리를 정하지 않은 캠페인 — 기준값을 무리 all(모든 파트)에 걸 수 있다(각도 표 · 지도 · 쌍 규칙과 같다)
+    r = await client.put(f"{API}/campaigns/{cid}/criteria", headers=h,
+                         json={"criteria": [{"group_key": "all", "metric_axis": "von_mises", "criterion_value": 100, "unit": "MPa"}]})
+    rows = (await client.get(f"{API}/campaigns/{cid}/part-margin", headers=h)).json()["data"]["rows"]
+    assert [(x["target"], x["status"]) for x in rows] == [({"group_key": "all"}, "ok")] and rows[0]["ratio"] is not None
 
 
 @needs_sphere
