@@ -817,10 +817,17 @@ struct Writer {
                                          : starts(kw, "*MAT")     ? &nd.mids
                                          : starts(kw, "*EOS")     ? &nd.eosids
                                                                   : &nd.hgids;
+            // PID 꼴 덧붙임(`*MAT_ADD_THERMAL_EXPANSION` · `_COHESIVE` · `_CHEM_SHRINKAGE` · `_SOC_EXPANSION` · `_EXTVAR_EXPANSION`)의 첫 칸은 PID 다 —
+            // 고른 파트와 견준다(3차 3판 L-15 · 예전엔 MID 와 견주어 고른 파트의 열팽창 카드를 버렸다)
+            const bool pidKeyed = starts(kw, "*MAT_ADD_") && !KooRemapper::matids::isMidKeyedAddOn(kw);
             bool hit = false;
             for (size_t i : cardIdx) {
                 int id = fieldInt(cardFields(buf[i], idW()), 0);
                 if (id <= 0) continue;
+                if (pidKeyed) {
+                    if (inSorted(sel, id)) { hit = true; break; }
+                    continue;
+                }
                 if (inSorted(*want, id)) { hit = true; break; }
                 if (starts(kw, "*MAT") && inSorted(nd.tmids, id)) { hit = true; break; }
             }

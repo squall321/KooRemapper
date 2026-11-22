@@ -77,18 +77,20 @@ inline bool toInt(const std::string& s, int& v) {
 inline bool starts(const std::string& kw, const char* p) { return kw.rfind(p, 0) == 0; }
 inline bool has(const std::string& kw, const char* p) { return kw.find(p) != std::string::npos; }
 
-// 열 재질 키워드인가 — `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T01`~`*MAT_T18`(번호 뒤는 끝 · `_` · 공백 · 폭 접미사). 대문자 키워드
+// 열 재질 키워드인가 — `*MAT_THERMAL_*` 과 그 번호 이름 `*MAT_T<숫자>`(번호 뒤는 끝 · `_` · 공백 · 폭 접미사 — 아래 ★). 대문자 키워드
 // (앞 `*` 포함 · 줄째 받아도 된다). 첫 칸이 **TMID** 다 — 구조 MID 와 독립된 번호이고 같은 수가 있어도 된다(Vol II *MAT_THERMAL ·
 // 2-9 의 번호 표). MID 를 세는 · 찾는 · 지우는 · 견주는 훑기는 다 이 한 판정으로 열 재질을 뺀다(2026-11-08 — 번호 이름을 빼먹은 훑기가
 // 여럿이었다: 참조 무결성 · matdb · merge · 조각 넣기 · hfdamp)
+// ★`*MAT_T` 뒤에 숫자가 오는 이름은 다 열 재질 번호 꼴로 본다(2026-11-22 · 3차 3판 L-15) — 구조 재질의 번호 이름은 `*MAT_0xx`(숫자 바로)이고
+//   이름 꼴은 `*MAT_T` + 글자(`_TABULATED` …)라 겹치지 않는다. 매뉴얼의 번호는 T01 ~ T18 둘째 자리지만, 예전엔 `*MAT_T1` · `T19` · `T001` 을
+//   구조 재질로 세어 그 TMID 를 MID 로 읽었다(MID 정의 · 커서 · 지우기가 열 카드를 건드렸다). LS-DYNA 가 그 철자를 받는지는 못 쟀다
 inline bool isThermalMaterialKeyword(const std::string& kw) {
     if (kw.rfind("*MAT_THERMAL_", 0) == 0) return true;
-    if (kw.size() < 8 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])) ||
-        !std::isdigit(static_cast<unsigned char>(kw[7])))
+    if (kw.size() < 7 || kw.compare(0, 6, "*MAT_T") != 0 || !std::isdigit(static_cast<unsigned char>(kw[6])))
         return false;
-    const int n = (kw[6] - '0') * 10 + (kw[7] - '0');
-    if (n < 1 || n > 18) return false;
-    const char next = kw.size() == 8 ? ' ' : kw[8];
+    size_t k = 6;
+    while (k < kw.size() && std::isdigit(static_cast<unsigned char>(kw[k]))) ++k;
+    const char next = k == kw.size() ? ' ' : kw[k];
     return next == '_' || next == ' ' || next == '\t' || next == '\r' || next == '%' || next == '+' || next == '-';
 }
 

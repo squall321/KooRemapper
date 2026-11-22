@@ -178,18 +178,22 @@ std::vector<CurCardSetBlock> cur_cardSetBlocks(const std::vector<std::string>& l
         const size_t g = l.find_first_not_of(" \t");
         if (g == std::string::npos || l[g] != '*') { ++i; continue; }
         const std::string kw = deckscan::kwBare(deckscan::keywordToken(l));
+        // 줄 목록은 고른 블록만 만든다(3차 3판 L-15 — 예전엔 `*NODE` 처럼 수백만 줄인 남의 블록도 줄 번호를 다 모은 뒤 버렸다 · 300 만 절점에서
+        // 한 번에 수십 MB)
+        const bool want = kw.rfind(prefix, 0) == 0;
         size_t j = i + 1;
         std::vector<size_t> rows;   // 블록의 데이터 줄(빈 줄 포함 · 주석 뺌)
         for (; j < lines.size(); ++j) {
             const size_t h = lines[j].find_first_not_of(" \t\r");
             if (h != std::string::npos && lines[j][h] == '*') break;
+            if (!want) continue;
             // 주석은 **1열의 `$`** 뿐이다(Vol_I 17862 「A dollar sign "$" in column one precedes a comment」 · 리더 `isCommentLine` 과 같다) —
             // 들여쓴 `$` 줄은 데이터다(제목 「  $5 tube」). 예전엔 그 줄을 주석으로 건너 묶음이 한 줄 밀렸고, 묶음의 SECID 칸이 실수 꼴을
             // 받게 되자(S8) 둘째 카드의 두께 `1.0` 을 SECID 1 로 읽어 진짜 SECID 2 를 놓쳤다(새 섹션이 2 를 다시 냈다 · 11-08 S8 의 퇴행)
             if (!lines[j].empty() && lines[j][0] == '$') continue;
             rows.push_back(j);
         }
-        if (kw.rfind(prefix, 0) != 0) { i = j; continue; }
+        if (!want) { i = j; continue; }
         CurCardSetBlock blk;
         blk.kwLine = i;
         blk.end = j;
@@ -2151,7 +2155,8 @@ std::map<int, int> ecBuildPidNodes(const std::vector<std::string>& rawLines) {
     }
     const int deckFw = deckFieldWidth(rawLines);
     for (const auto& b : rsCollectBlocks(rawLines)) {
-        if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+        const std::string bareKw = deckscan::kwBare(deckscan::keywordToken(rawLines[b.kwLine]));   // `*PART +` 도 맨 파트다(L-15)
+        if (bareKw == "*PART" || bareKw == "*PART_TITLE") {
             const size_t w = keywordFieldWidth(rawLines[b.kwLine], deckFw) >= 20 ? 20 : 10;
             // *PART 는 '제목 줄 + 카드 2' 가 반복된다 — 카드 2 의 칸 0 이 PID, 칸 1 이 SECID.
             // 제목 줄이 비어 있을 수 있으므로 'PID·SECID 가 모두 양수인 줄' 만 카드 2 로 본다.
@@ -19829,15 +19834,31 @@ bool epPartCard3(const std::string& line, int& pid, int& sec, int& mid) {
 
 // 그 카드가 10칸 자리에 맞지 않는가 — 맞지 않으면 LS-DYNA 는 우리와 다르게 읽는다.
 // (LS-DYNA 는 콤마가 없으면 고정폭으로 읽는다. 우리는 토큰으로 되돌려 의도대로 읽는다.)
-bool epPartCardMisaligned(const std::string& line) {
+bool epPartCardMisaligned(const std::string& line, size_t w = 10) {   // w — 블록 칸 폭(`*PART +` · LONG 이면 20)
     std::string body = line;
     size_t cm = body.find('$');
     if (cm != std::string::npos) body = body.substr(0, cm);
     while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
     if (body.find(',') != std::string::npos) return false;   // 콤마 자유형식은 LS-DYNA 도 자유형식이다
-    if (body.size() < 20) return false;                      // 칸이 하나뿐이면 어긋날 자리가 없다
-    const std::string sec = body.substr(10, 10);
+    if (body.size() < 2 * w) return false;                   // 칸이 하나뿐이면 어긋날 자리가 없다
+    const std::string sec = body.substr(w, w);
     return sec.find_first_not_of(" \t") == std::string::npos;   // SECID 칸이 비었다
+}
+
+// 그 줄이 w 칸 고정폭에 맞는가 — 칸마다 다듬은 값 안에 빈칸이 없다
+bool epCardAligned(const std::string& line, size_t w) {
+    std::string body = line;
+    size_t cm = body.find('$');
+    if (cm != std::string::npos) body = body.substr(0, cm);
+    while (!body.empty() && (body.back() == '\r' || body.back() == '\n')) body.pop_back();
+    for (size_t i = 0; i < body.size(); i += w) {
+        std::string f = body.substr(i, w);
+        size_t a = f.find_first_not_of(" \t");
+        if (a == std::string::npos) continue;
+        size_t e = f.find_last_not_of(" \t");
+        if (f.substr(a, e - a + 1).find_first_of(" \t") != std::string::npos) return false;
+    }
+    return true;
 }
 
 ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines) {
@@ -19856,8 +19877,8 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
     // ⚠ 칸 뜻이 확실한 것만 본다. `*PART` 변종(_INERTIA 등)은 Card 1 이 같다고 **단정하지
     // 않고** 세어만 둔다 — 애매한 것을 검사하면 오탐이 나고, 오탐이 한 번 나면 아무도 이
     // 보고를 믿지 않는다.
-    std::set<int> partIds, secIds, matIds;
-    std::vector<std::pair<size_t, std::array<int, 3>>> partCards;   // 줄, {pid, secid, mid}
+    std::set<int> partIds, secIds, matIds, tmatIds;   // tmatIds — 열 재질의 TMID(`*MAT_THERMAL_*` · `*MAT_T<번호>`)
+    std::vector<std::pair<size_t, std::array<int, 4>>> partCards;   // 줄, {pid, secid, mid, tmid}(tmid -1 = 못 읽음)
 
     // ⚠ `*SECTION_*`·`*MAT_*` 는 **한 키워드 아래 정의가 여러 장** 올 수 있다. 매뉴얼이 못
     // 박아 뒀다 — "Card Sets. For each … include one set of data cards. This input ends at the
@@ -19888,11 +19909,13 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             if (rsStarts(b.kw, "*MAT_ADD_")) { ++rep.notChecked; continue; }
             // 열 재질(`*MAT_THERMAL_*` · `*MAT_T01`~`T18`)의 첫 칸은 TMID 다 — 구조 MID 가 아니다(Vol II · 11-08 #3). 넣으면 `*MAT_T01 2` 가
             // 구조 재질이 없는 `*PART` MID 2 를 「정의됨」으로 지나보냈다
-            if (cards::isThermalMaterialKeyword(b.kw)) continue;
+            if (cards::isThermalMaterialKeyword(b.kw)) { collectFirstFields(b, tmatIds); continue; }
             collectFirstFields(b, matIds);
             continue;
         }
-        if (b.kw == "*PART" || b.kw == "*PART_TITLE") {
+        // 칸폭 표지(`*PART +` · `*PART_TITLE -`)를 떼고 견준다 — 예전엔 `*PART +` 를 변형으로 보아 섹션 · 재질을 안 봤다(3차 3판 L-15)
+        const std::string bareKw = deckscan::kwBare(deckscan::keywordToken(lines[b.kwLine]));
+        if (bareKw == "*PART" || bareKw == "*PART_TITLE") {
             // `*PART` 는 '제목 줄 + 데이터 카드' 가 반복된다. 제목이 비어 있을 수 있으므로
             // **PID·SECID 가 모두 양수인 줄**만 데이터 카드로 본다(`ecBuildPidNodes` 와 같은 규칙).
             for (size_t m = 0; m < b.data.size(); ++m) {
@@ -19902,9 +19925,13 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
                 if (!epPartCard3(ln, pid, sec, mid)) continue;
                 if (pid > 0 && sec > 0) {
                     // 제목 줄이 우연히 토큰 3개인 경우는 pid 가 0 이라 여기 오지 않는다.
-                    if (epPartCardMisaligned(ln)) ++rep.notChecked;
+                    const size_t bw = keywordFieldWidth(lines[b.kwLine], deckFwRef) >= 20 ? 20 : 10;
+                    if (epPartCardMisaligned(ln, bw)) ++rep.notChecked;
                     partIds.insert(pid);
-                    partCards.push_back({b.data[m], {pid, sec, mid}});
+                    // TMID(여덟째 칸)는 블록 칸 폭으로 읽는다 — 콤마 자유형식이거나 칸이 맞는 줄만(어긋난 줄의 토큰 차례는 빈 칸을 건너뛰어 뜻이 없다)
+                    int tmid = -1;
+                    if (ln.find(',') != std::string::npos || epCardAligned(ln, bw)) tmid = rsIntField(rsCardFields(ln, bw), 7);
+                    partCards.push_back({b.data[m], {pid, sec, mid, tmid}});
                 }
             }
             continue;
@@ -19927,6 +19954,9 @@ ReferenceReport checkElementPartReferences(const std::vector<std::string>& lines
             rep.dangling.push_back({(int)li + 1, "*PART", "재질", v[2]});
         else if (v[2] < 0)
             ++rep.notChecked;
+        // ★TMID(여덟째 칸) — 열 재질을 가리킨다(3차 3판 L-15 · 예전엔 보지 않아 없는 열 재질을 가리키는 파트가 `--strict` rc 0 이었다)
+        if (v[3] > 0 && !tmatIds.count(v[3]))
+            rep.dangling.push_back({(int)li + 1, "*PART", "열 재질", v[3]});
     }
 
     // ── ② 요소가 가리키는 파트 ─────────────────────────────────────────────
