@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include <cstring>
 #include "contact_helpers.h"
 #include "kw_util.h"
@@ -62,7 +63,7 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
     int idx = 0;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string tr = kw_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') continue;
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
         std::string up = kw_upper(tr);
         if (up.rfind("*CONTACT_", 0) != 0) continue;
         // Skip *CONTACT comment lines
@@ -117,11 +118,7 @@ std::vector<ContactDef> ct_parseContacts(const std::vector<std::string>& lines) 
         // Collect data lines until next keyword
         int j = i + 1;
         while (j < (int)lines.size()) {
-            std::string jt = kw_trim(lines[j]);
-            if (!jt.empty() && jt[0] == '*' && jt[0] != '$') {
-                // Check it's really a keyword, not $*comment
-                if (jt.size() >= 2 && jt[1] != '$') break;
-            }
+            if (KooRemapper::deckscan::isKeywordLine(lines[j])) break;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             ++j;
         }
         c.endLine = j;
@@ -289,7 +286,7 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
     std::vector<SetDef> result;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string tr = kw_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') continue;
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
         std::string up = kw_upper(tr);
         if (up.rfind("*SET_", 0) != 0) continue;
 
@@ -347,8 +344,7 @@ std::vector<SetDef> ct_parseSets(const std::vector<std::string>& lines) {
         // Collect data lines
         int j = i + 1;
         while (j < (int)lines.size()) {
-            std::string jt = kw_trim(lines[j]);
-            if (!jt.empty() && jt[0] == '*' && !(jt.size() >= 2 && jt[1] == '$')) break;
+            if (KooRemapper::deckscan::isKeywordLine(lines[j])) break;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             ++j;
         }
         s.endLine = j;
@@ -482,7 +478,7 @@ int ct_findMaxContactId(const std::vector<std::string>& lines) {
     int maxId = 0;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string tr = kw_trim(lines[i]);
-        if (tr.size() < 9 || tr[0] != '*') continue;
+        if (tr.size() < 9 || !KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
         std::string up = kw_upper(tr);
         if (up.compare(0, 9, "*CONTACT_") != 0) continue;
         const bool hasId = (up.size() >= 3 && up.compare(up.size() - 3, 3, "_ID") == 0)
@@ -492,7 +488,7 @@ int ct_findMaxContactId(const std::vector<std::string>& lines) {
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string d = kw_trim(lines[j]);
             if (d.empty() || d[0] == '$') continue;
-            if (d[0] == '*') break;
+            if (KooRemapper::deckscan::isKeywordLine(lines[j])) break;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             auto toks = kw_tok10(lines[j]);
             if (!toks.empty()) {
                 try { int v = std::stoi(kw_trim(toks[0])); if (v > maxId) maxId = v; }

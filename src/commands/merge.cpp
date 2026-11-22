@@ -413,7 +413,7 @@ static bool mg_parseKFile(const std::string& path, mg_KModel& mdl, ConsoleOutput
         if (trimmed[0] == '$') continue;
 
         // Keyword line
-        if (trimmed[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(line)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             // Finish previous VE material
             if (inMat && matType == "VE076") finishVE();
 

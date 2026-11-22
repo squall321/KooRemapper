@@ -12523,7 +12523,7 @@ static MwBundle mw_parseBundle(const std::string& path) {
         if (!ln.empty() && ln.back()=='\r') ln.pop_back();
         std::string tr = mw_trim(ln);
         if (tr.empty()) { if (sec==OTHER) bnd.cards.push_back(ln); continue; }
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = mw_upper(tr);
             if (up=="*PARAMETER" || up.rfind("*PARAMETER_",0)==0)
                 { sec=PARAM; continue; }
@@ -12579,7 +12579,7 @@ static int mw_scanMaxId(const std::vector<std::string>& lines, const std::string
     for (const auto& ln : lines) {
         std::string tr = mw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {
             std::string up = mw_upper(tr);
             if (up.rfind(mw_upper(prefix),0)==0) {
                 active=true;
@@ -12604,7 +12604,7 @@ static MwPartInfo mw_getPartInfo(const std::vector<std::string>& lines, int targ
     for (int i=0; i<(int)lines.size(); ++i) {
         std::string tr = mw_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(lines[i])) {
             std::string up=mw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }
@@ -12637,7 +12637,7 @@ static bool mw_isSharedExcludeSet(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = mw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {
             std::string up=mw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }
@@ -12692,7 +12692,7 @@ static std::vector<int> mw_getAllPartPids(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = mw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {
             std::string up=mw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }
@@ -12714,7 +12714,7 @@ static std::vector<int> mw_getPidsByMid(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = mw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {
             std::string up=mw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }

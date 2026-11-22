@@ -1,4 +1,5 @@
 // C-clip(스프링 접점) 생성 op 구현 — 박스 파트 치환·Castigliano 캘리브레이션·모멘트일치 눌림·INITIAL_STRESS_SHELL 출력.
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include "cclip.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/InitialStressCard.h"   // *INITIAL_STRESS_SOLID · _SHELL 카드 1 정본(I10×8)
@@ -656,7 +657,7 @@ int cc_scanMaxId(const std::vector<std::string>& lines, const std::string& prefi
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             if (up.rfind(prefix,0)==0) {
                 active = true;
@@ -707,7 +708,7 @@ int cc_scanMaxPartId(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') { inPart = (kw_upper(tr).rfind("*PART",0)==0); titleDone = false; continue; }
+        if (KooRemapper::deckscan::isKeywordLine(ln)) { inPart = (kw_upper(tr).rfind("*PART",0)==0); titleDone = false; continue; }
         if (!inPart || tr[0]=='$') continue;
         if (!titleDone) { titleDone = true; continue; }
         auto toks = kw_tok10(ln, cc_cw);
@@ -725,7 +726,7 @@ CcPartLine cc_findPartLine(const std::vector<std::string>& lines, int targetPid)
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string tr = kw_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(lines[i])) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             inPart = (up.rfind("*PART",0)==0);   // any *PART variant (TITLE/CONTACT/INERTIA...)
             titleDone = false; continue;
@@ -754,7 +755,7 @@ bool cc_idShared(const std::vector<std::string>& lines, int fieldIdx, int target
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             inPart = (up.rfind("*PART",0)==0);   // any *PART variant (TITLE/CONTACT/INERTIA...)
             titleDone = false; continue;
@@ -788,13 +789,13 @@ int cc_removeSolidElements(std::vector<std::string>& lines, const std::set<int>&
     };
     for (int i = 0; i < (int)lines.size(); ) {
         std::string tr = kw_trim(lines[i]);
-        if (tr.empty() || tr[0] != '*') { ++i; continue; }
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) { ++i; continue; }   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
         if (kw_upper(tr).rfind("*ELEMENT_SOLID",0) != 0) { ++i; continue; }
         int kwLine = i, end = i + 1, kept = 0, removedHere = 0;
         std::vector<int> data;   // data-line indices of this block
         while (end < (int)lines.size()) {
             std::string et = kw_trim(lines[end]);
-            if (!et.empty() && et[0]=='*') break;
+            if (KooRemapper::deckscan::isKeywordLine(lines[end])) break;
             if (!et.empty() && et[0] != '$') data.push_back(end);
             ++end;
         }

@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include "parser/DeckWriter.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
@@ -329,7 +330,7 @@ static std::string ale_customMaterial(const std::string& path, int mid, int eosi
     bool inEos = false, foundEos = false, eosIdDone = false;
     for (int i = 0; i < (int)blines.size(); ++i) {
         std::string up = kw_upper(kw_trim(blines[i]));
-        if (!up.empty() && up[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(blines[i])) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             inEos = (up.rfind("*EOS_", 0) == 0) && !foundEos;
             if (inEos) { foundEos = true; eosIdDone = false; }
         }

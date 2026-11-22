@@ -11,6 +11,7 @@
 //   - 솔리드 파트: 자유면(공유 1회 면) 기준 외부 표면적, 정사영 = sum(area*|n·e|)/2
 //     (닫힌 표면 왕복 상쇄). 부피 = 면-중심 피라미드 분해(와인딩 무관 |dot| 합).
 //   - 쉘 파트: 요소면 단면 기준(단측), 정사영 /2 없음, 부피 0.
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include "parser/IncludeClosure.h"   // 인클루드 닫힘 — 정본
 #include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
@@ -306,7 +307,7 @@ std::map<int, MmMatKfile> mm_scanMatCards(const std::vector<std::string>& lines)
     std::map<int, MmMatKfile> out;
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string s = mm_trim(lines[i]);
-        if (s.empty() || s[0] != '*') continue;
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
         std::string up = mm_lower(s);
         if (up.rfind("*mat_", 0) != 0) continue;
         if (up.rfind("*mat_add", 0) == 0 || up.rfind("*mat_thermal", 0) == 0) continue;
@@ -321,7 +322,7 @@ std::map<int, MmMatKfile> mm_scanMatCards(const std::vector<std::string>& lines)
                 std::string t = mm_trim(raw);
                 ++j;
                 if (t.empty() || t[0] == '$') continue;
-                if (t[0] == '*') return "";
+                if (KooRemapper::deckscan::isKeywordLine(raw)) return "";
                 return raw;
             }
             return "";

@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include "optimize.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
@@ -52,7 +53,7 @@ static int opt_patchControlField(std::vector<std::string>& lines,
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             inBlock = (up.rfind(keyword, 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -76,7 +77,7 @@ static int opt_patchControlField(std::vector<std::string>& lines,
 static bool opt_hasKeyword(const std::vector<std::string>& lines, const std::string& keyword) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
-        if (!tr.empty() && tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             if (kw_upper(tr).rfind(keyword, 0) == 0) return true;
         }
     }
@@ -90,7 +91,7 @@ static std::string opt_readControlField(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             inBlock = (up.rfind(keyword, 0) == 0);
             hasTitle = (up.find("_TITLE") != std::string::npos);
@@ -111,7 +112,7 @@ static std::string opt_readControlField(const std::vector<std::string>& lines,
 static bool opt_isImplicit(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
-        if (!tr.empty() && tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             if (kw_upper(tr).rfind("*CONTROL_IMPLICIT", 0) == 0) return true;
         }
     }

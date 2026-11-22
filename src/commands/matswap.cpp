@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 6판)
 #include "matswap.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/IdAllocator.h"   // 인클루드 닫힘까지 센 최대값 · 못 본 자리 경고
@@ -75,7 +76,7 @@ static MswBundle msw_parseBundle(const std::string& path) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) { if (sec==OTHER) bnd.cards.push_back(ln); continue; }
 
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             if (up=="*PARAMETER" || up.rfind("*PARAMETER_",0)==0 || up.rfind("*PARAMETER ",0)==0)
                 { sec=PARAM; continue; }
@@ -132,7 +133,7 @@ static int msw_scanMaxId(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up = kw_upper(tr);
             if (up.rfind(prefix,0)==0) {
                 active=true;
@@ -156,7 +157,7 @@ static MswPartInfo msw_getPartInfo(const std::vector<std::string>& lines, int ta
     for (int i=0; i<(int)lines.size(); ++i) {
         std::string tr = kw_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(lines[i])) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up=kw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }
@@ -186,7 +187,7 @@ static bool msw_isShared(const std::vector<std::string>& lines,
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0]=='*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
             std::string up=kw_upper(tr);
             inPart=(up=="*PART"||up=="*PART_TITLE"); titleDone=false; continue;
         }
