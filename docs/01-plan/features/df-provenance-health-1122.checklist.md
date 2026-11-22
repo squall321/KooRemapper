@@ -23,4 +23,4 @@
 
 ## D. 올리기
 - [x] D-1 main · dev DB 0022 · API · MCP 재기동 · 스모크(+ 캠페인 탐침) — 맥락 노트 4절
-- [ ] D-2 Drive · cae00 점검 문서 · 알림(포털 · smarttwinmcp · kooremapper-fd) — 3차 2판과 함께
+- [x] D-2 Drive · cae00 점검 문서 · 알림(포털 · smarttwinmcp · kooremapper-fd) — 3차 2판과 함께(`dist-20261122-042305Z` · 맥락 노트 5절)

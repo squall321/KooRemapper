@@ -223,3 +223,15 @@
   소비자는 보고만). 시험을 더하다 하나를 더 찾아 고쳤다 — 죽은 PID 옮기기의 열 꼴 세트 줄을 10 칸으로 고쳐 써 LONG 덱의 PID 칸이 어긋났다.
 - **전체 재기(dev 판 `1e73e714` · `bea26db`)** — 단위 246 / 246 · 백엔드 1078 통과 · 4 실패(작업 트리에 `.env` 가 없어 supervisor_log 넷 — 앞
   판과 같다) · MCP 계약 13 / 13 · 회귀 142 / 142(파일 크기 상한 없이 — 새 시험 일곱 포함).
+
+## 9. 올리기 기록(2판 — 2026-11-22)
+- **올리기(11-22 04:06 ~ 04:28Z — DF 2차 ② 와 같은 판)** — main `a50bcc3`(ff — 뒤에 cae00 문서 `cc480c7`) · 주 체크아웃 ff · 도는 잡 0(04:06 ·
+  04:15 두 번) · pykoocae-53 에 빌드 앞 알림 · 호환 빌드 (빌더 컨테이너 · -j8 · 프로세스 8 GB 상한) rc 0 · glibc 2.35 ·
+  `1106bef1d4ef0e4dca215f62247359962120dae9147f92e7901c75aba52ad62a`(9,095,464 바이트) · 호환 단위 246 / 246 · 호환 회귀 142 / 142 · 설치
+  04:15:46Z(`build/linux/bin` · `platform/backend/bin`) · migrate 0022 그대로(dev 는 ② 때 올렸다) · API 04:16:08 · MCP 04:16:17(`start.sh` —
+  `/data` 바인드 있음) · 스모크 MCP PASS(도구 97 · 연산 65) · deckops 29 / 29 · allops 64 / 64(건너뜀 1) · reports 59 / 59 · 주 체크아웃 백엔드
+  1094 통과 · 실패 0 · cli.sif 04:22:32(안 바이너리 `1106bef1`) · Drive `dist-20261122-042305Z`(게시 04:23:08Z · 다른 파일은 BUILD_INFO ·
+  koorm-bin.tar.gz · cli.sif 셋 — 나머지 SIF 와 콘솔 묶음은 sha256 같음 · 가장 오래된 `dist-20261115-093042Z` 정리 — 남은 판 11-17 · 11-21 낮 ·
+  11-21 밤 · 11-22) · 게시 뒤 health `revision` `a50bcc3` · `revision_matches_binary` true · cae00 문서 §1-9(`cc480c7`) · 알림 여섯(pykoocae-53
+  설치 뒤 · hwaxportal-71 전문 · hwaxportal-87 짧은 판 · smarttwinmcp-c8 · stepforge-d4 · kooremapper-fd). 되돌릴 판은
+  `dist-20261121-234834Z`(코드 `98f5ec6` · 바이너리 `d1e2ce96`).
