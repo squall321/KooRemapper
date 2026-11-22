@@ -26,7 +26,9 @@ sys.path.insert(0, HERE)
 import test_deck_bom as T  # noqa: E402  (카탈로그 사례를 차리는 도우미)
 
 OPS = ("generate", "cclip", "strain", "modelmeta", "foldsurface", "section", "surfview", "stackdiagram", "id_floor",
-       "cad_solid_merge_to_deck", "cleanup-nodes")
+       "cad_solid_merge_to_deck", "cleanup-nodes",
+       # 이미 rc 1 이던 자리도 회귀가 지킨다(3차 4판 L-19 — 잘린 map 산출 · 보고 파일 경로는 회귀가 못 쟀다)
+       "map", "extract-parts")
 FAILS, OKS = [], []
 
 
@@ -69,7 +71,7 @@ def main():
                     os.remove(p)
                 os.symlink("/dev/full", p)
                 rc, text = run(binary, case.run, case.cmd)
-                check("%s — %s 가 /dev/full 이면 rc 1 · 까닭" % (spec["name"], o), rc == 1 and "멈췄다" in text, (rc, text[-300:]))
+                check("%s — %s 가 /dev/full 이면 rc 1 · 까닭" % (spec["name"], o), rc == 1 and ("멈췄다" in text or "Cannot write" in text), (rc, text[-300:]))
             shutil.rmtree(root, ignore_errors=True)
     finally:
         shutil.rmtree(top, ignore_errors=True)
