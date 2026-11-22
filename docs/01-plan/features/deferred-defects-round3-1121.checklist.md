@@ -55,5 +55,5 @@
 - [x] F-2c 전체 재기 · 올리기 — 회귀 157 / 157 · 호환 157 / 157 · Drive `dist-20261122-085355Z` · 바이너리 `066e21a3`(맥락 노트 14절)
 
 ## G. 닫기
-- [ ] G-1 미룬 목록(`seatbelt-aux-walkers-1107.plan.md`) 줄마다 닫은 커밋 · 남긴 까닭
-- [ ] G-2 DF ② 계획을 연다(`df-request-1117.checklist.md` E-2)
+- [x] G-1 미룬 목록(`seatbelt-aux-walkers-1107.plan.md`) 줄마다 닫은 커밋 · 남긴 까닭 — 맥락 노트 15절 · 목록 끝 닫는 줄
+- [x] G-2 DF ② 계획을 연다(`df-request-1117.checklist.md` E-2) — ② ~ ⑥ 다 지었다(11-22)
