@@ -18393,12 +18393,9 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         errorMessage_ = "[battery] node_id_offset · elem_id_offset 은 0(저절로 — 겹칠 때만 옮긴다) 또는 양수다";
         return false;
     }
-    // ★펼치기(use_include: false)는 battery 카드(표준 8 · 10칸)를 주 덱에 그대로 넣는다 — 주 덱이 i10 · long 이면 다르게 읽힌다
-    if (!op.useInclude && deckFieldWidth(rawLines_) != 8) {
-        errorMessage_ = "[battery] use_include: false — 주 덱이 표준 칸 폭이 아니다(*KEYWORD 의 I10 · LONG) — battery 카드를 펼쳐 넣으면 "
-                        "칸이 다르게 읽힌다. use_include: true 로 끌어오라";
-        return false;
-    }
+    // battery 덱은 주 덱 폭으로 쓴다(2026-11-22 · 사용자 결정 「battery 덱을 주 덱 폭으로 쓴다」) — 예전엔 표준 폭으로 지어 use_include: true
+    // 면 맨 `*KEYWORD` 인클루드로 붙이고(LS-DYNA 는 주 덱 폭으로 읽을 수 있다), false 면 주 덱이 I10 · LONG 일 때 거절했다. 이제 번호를 옮긴
+    // 뒤 `toDeckWidth` 로 옮긴다(인클루드 · 펼침 모두).
     // ★배터리 덱은 루프 안에서 덱보다 먼저 쓴다 — 여기서 읽은 파일과 견준다(2026-11-07 · 쓰기 관문). 펼치면 쓰는 파일이 없다
     if (op.useInclude) {
         std::string why;
@@ -18459,11 +18456,19 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         return false;
     }
     std::string().swap(deckText);   // 옮기기 전 글자는 더 쓰지 않는다 — 바로 놓는다
+    std::string wide;   // 주 덱 폭(I10 · LONG)으로 옮긴 battery 덱 — 표준이면 shifted 그대로
+    {
+        std::string why;
+        if (!toDeckWidth(shifted, deckFieldWidth(rawLines_), wide, why)) {
+            errorMessage_ = "[battery] battery 덱을 주 덱 칸 폭으로 옮기지 못했다(" + why + ") — 아무 파일도 쓰지 않았다";
+            return false;
+        }
+    }
 
     std::string kPath;
     if (op.useInclude) {
         if (!guardDynainBeforeMidRun("[battery]")) return false;   // 앞 처리가 응력을 냈으면 그 dynain 을 먼저(R2)
-        if (!writeBatteryKFileText(deckPath, shifted, console)) {
+        if (!writeBatteryKFileText(deckPath, wide, console)) {
             errorMessage_ = "[battery] Cannot write output: " + deckPath;
             return false;
         }
@@ -18481,14 +18486,14 @@ bool ModelAssembler::applyBattery(const BatteryOperation& op, const std::string&
         //   ($ 주석 · *KEYWORD)와 *END 는 뺀다 — 주 덱의 것을 쓴다. battery 덱 파일은 쓰지 않는다
         std::string body;
         bool inBody = false;
-        std::istringstream in(shifted);
+        std::istringstream in(wide);
         for (std::string l; std::getline(in, l);) {
             const std::string kw = l.empty() || l[0] != '*' ? std::string() : deckscan::kwBare(deckscan::keywordToken(l));
             if (kw == "*KEYWORD") { inBody = true; continue; }
             if (kw == "*END") break;
             if (inBody) body += l + "\n";
         }
-        deckscan::insertBeforeFirstEnd(rawLines_, {body});
+        deckscan::insertBeforeFirstEnd(rawLines_, {body}, false);   // 이미 주 덱 폭이다(`toDeckWidth`) — 다시 넓히지 않는다
     }
     // 뒤 battery 의 겹침 판정이 이 덱의 번호(옮긴 뒤)를 센다 — 머리만 둔 `addedDecks_` 에 절점 · 요소가 없다
     batteryIds_.resize(bat::FAM_COUNT);

@@ -97,6 +97,13 @@ void widenGeneratedCards(std::vector<std::string>& lines, int deckFw);
 //   있어(Vol_I 「Long Format Input」 — 못 쟀다) 파일이 제 폭을 밝힌다(battery 덱을 주 덱 폭으로 쓰는 11-22 결정과 같은 꼴).
 std::string widenGeneratedDeck(const std::string& text, int deckFw);
 
+// op 이 표준 폭으로 지은 **덱 한 벌**(battery 덱처럼 `*NODE` · 격자 요소 줄까지 든 것)을 주 덱 폭으로 옮긴다(2026-11-22 · 사용자 결정
+//   「battery 덱을 주 덱 폭으로 쓴다」). I10(10) 은 8 칸 칸(절점 번호 · TC · RC · 격자 요소 줄)만 10 칸으로, LONG(20) 은 그것들과 좌표 ·
+//   10 칸 카드까지 20 칸으로(`widenGeneratedCards`). 맨 `*KEYWORD` 는 `I10=Y` · `LONG=Y` 로. 표준(8)이면 그대로. 아는 꼴은 맨 `*NODE` 와
+//   `*ELEMENT_SHELL` · `_SOLID` · `_TSHELL`(한 줄 꼴)뿐이다 — 다른 `*NODE_` · `*ELEMENT_` 이나 칸이 어긋난 줄을 만나면 false 와 까닭(짐작해
+//   넓히지 않는다).
+bool toDeckWidth(const std::string& text, int deckFw, std::string& out, std::string& why);
+
 // ── 보·질량·이산 족 — **격자 요소가 아닌** `*ELEMENT_*` ──────────────────────
 //
 // 왜 `ElemFamily` 를 넓히지 않고 **별도 축**인가 (2026-10-11).

@@ -220,6 +220,58 @@ std::string widenGeneratedDeck(const std::string& text, int deckFw) {
     return out;
 }
 
+bool toDeckWidth(const std::string& text, int deckFw, std::string& out, std::string& why) {
+    if (deckFw != 10 && deckFw < 20) { out = text; return true; }
+    const size_t iw = deckFw >= 20 ? 20 : 10, rw = deckFw >= 20 ? 20 : 16;
+    auto trim = [](const std::string& x) {
+        const size_t a = x.find_first_not_of(" \t\r"), b = x.find_last_not_of(" \t\r");
+        return a == std::string::npos ? std::string() : x.substr(a, b - a + 1);
+    };
+    auto pad = [](const std::string& v, size_t w) { return std::string(w > v.size() ? w - v.size() : 0, ' ') + v; };
+    std::vector<std::string> lines;
+    size_t a = 0;
+    while (a < text.size()) {
+        const size_t b = text.find('\n', a);
+        lines.push_back(text.substr(a, b == std::string::npos ? std::string::npos : b - a));
+        if (b == std::string::npos) break;
+        a = b + 1;
+    }
+    std::string kw;
+    bool header = false;
+    for (size_t i = 0; i < lines.size(); ++i) {
+        std::string& l = lines[i];
+        if (deckscan::isKeywordLine(l)) {
+            kw = deckscan::kwBare(deckscan::keywordToken(l));
+            if (!header && kw == "*KEYWORD") { l = deckFw >= 20 ? "*KEYWORD LONG=Y" : "*KEYWORD I10=Y"; header = true; }
+            continue;
+        }
+        const std::string tr = trim(l);
+        if (tr.empty() || tr[0] == '$') continue;
+        const bool node = kw.rfind("*NODE", 0) == 0, elem = kw.rfind("*ELEMENT_", 0) == 0;
+        if (!node && !elem) continue;
+        if (kw != "*NODE" && kw != "*ELEMENT_SHELL" && kw != "*ELEMENT_SOLID" && kw != "*ELEMENT_TSHELL") {
+            why = kw + " — 칸 폭을 옮길 줄 모르는 꼴이다";
+            return false;
+        }
+        static const size_t nodeCut[] = {0, 8, 24, 40, 56, 64, 72};
+        std::vector<std::string> f;
+        if (node) for (int k = 0; k < 6 && nodeCut[k] < l.size(); ++k) f.push_back(trim(l.substr(nodeCut[k], nodeCut[k + 1] - nodeCut[k])));
+        else for (size_t c = 0; c < l.size(); c += 8) f.push_back(trim(l.substr(c, 8)));
+        if ((node && l.size() > 72) || std::any_of(f.begin(), f.end(), [](const std::string& x) { return x.find_first_of(" \t") != std::string::npos; })) {
+            why = kw + " 의 " + std::to_string(i + 1) + " 째 줄 — 칸이 어긋났다";
+            return false;
+        }
+        std::string o;
+        for (size_t k = 0; k < f.size(); ++k) o += pad(f[k], node && k >= 1 && k <= 3 ? rw : iw);
+        while (!o.empty() && o.back() == ' ') o.pop_back();
+        l = o;
+    }
+    widenGeneratedCards(lines, deckFw);   // LONG 이면 10 칸 카드도(절점 · 요소 · 제목 · 곡선 점 줄은 건드리지 않는다)
+    out.clear();
+    for (size_t i = 0; i < lines.size(); ++i) out += lines[i] + (i + 1 < lines.size() || (!text.empty() && text.back() == '\n') ? "\n" : "");
+    return true;
+}
+
 std::string formatRealField(double value, int width, int precision) {
     std::string s;
     for (int p = std::max(precision, 0); p >= 0; --p) {
