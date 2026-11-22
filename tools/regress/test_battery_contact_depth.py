@@ -12,7 +12,7 @@
 무엇을 보나(적층 · 권취 dent — 자동 접촉 둘씩).
   depth 를 안 주면 DEPTH 5 · soft 경고 없음
   ★depth: 3 → 모든 자동 접촉 DEPTH 3 · `info --strict` rc 0 · depth: 0 → DEPTH 0(LS-DYNA 기본)
-  ★depth: -2 · 2.5 · abc → rc 1 · 덱 없음 · 정수 0 이상을 말한다
+  ★depth: -2 · 2.5 · abc · 1234567890 → rc 1 · 덱 없음 · 정수 0 이상을 말한다
   ★soft: 2 → rc 0 · [WARN] contact.soft · SOFT 칸은 그대로(면 대 면 1 · 자기 접촉 2)
 
 usage: test_battery_contact_depth.py <KooRemapper 바이너리>
@@ -83,7 +83,7 @@ def main():
                         q = subprocess.run([binary, "info", ks[0], "--strict"], capture_output=True, text=True, timeout=900,
                                            encoding="utf-8", errors="replace")
                         check("%s · depth: 3 → info --strict rc 0" % mt, q.returncode == 0, (q.stdout + q.stderr)[-300:])
-            for v in ("-2", "2.5", "abc"):
+            for v in ("-2", "2.5", "abc", "1234567890"):   # 열 자리는 int 를 넘을 수 있다 — 예전 읽기는 0
                 rc, out, ks = gen(mt, "contact:\n  depth: %s\n" % v)
                 check("★%s · depth: %s → rc 1 · 덱 없음 · 정수 0 이상을 말한다(예전엔 rc 0 · 늘 5)" % (mt, v),
                       rc == 1 and not ks and "contact.depth" in out and "0 이상" in out, (rc, ks, out[-300:]))

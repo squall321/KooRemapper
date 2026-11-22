@@ -17,7 +17,7 @@
     ★사슬 — phase 1 의 절점 번호가 phase 2 에 모두 같은 자리로 · 요소 번호가 모두 같은 내용으로 있다
     phase 2(dent) — 압입자 · 바닥판 · 탭 · PCM PART 있음 · 처방 운동 있음(dynain 파일이 없어 strict 는 아래 판에서)
   ★기본 mode swell + phase_modes [swell, dent] → phase 2 에 압입자 · 처방 운동이 있다 · 두 판 `info --strict` rc 0
-  no_fixture: true + phase_modes [swell, dent] → 두 판 모두 고정구 없음(사용자가 적은 값은 지킨다)
+  no_fixture: true + phase_modes [swell, dent] → 두 판 모두 고정구 없음(사용자가 적은 값은 지킨다) · no_impactor · no_pcm 도 그 값대로
   단독 mode: swell → 고정구 PART 없음(그대로)
 
 usage: test_battery_phase_modes.py <KooRemapper 바이너리>
@@ -124,6 +124,18 @@ def main():
                 both = read_deck(ks[0])[0] | read_deck(ks[1])[0]
                 check("%s · no_fixture + phase_modes → 두 판 모두 압입자 · 바닥판 · 탭 · PCM PART 없음(사용자가 적은 값)" % mt,
                       not (both & (imp | tp)), sorted(both))
+
+            # 사용자가 적은 no_impactor · no_pcm 은 phase_modes 판에서도 지킨다(다시 셈은 mode 에서 더할 뿐)
+            for key, gone, kept in (("no_impactor", imp, tp), ("no_pcm", tp, imp)):
+                rc, out, ks = gen("%s_%s" % (mt, key), "output: bt\nmodel_type: %s\ntier: -1\nmode: dent\n%s: true\nbatch:\n"
+                                  "  phases: [1, 2]\n  phase_modes: [swell, dent]\n" % (mt, key))
+                if check("%s · %s + phase_modes [swell, dent] → rc 0 · 덱 둘" % (mt, key), rc == 0 and len(ks) == 2, (rc, out[-300:])):
+                    p1, p2 = read_deck(ks[0])[0], read_deck(ks[1])[0]
+                    want_p2 = kept <= p2 and not (p2 & gone)
+                    want_p1 = not (p1 & gone) and (key == "no_pcm" or tp <= p1)
+                    check("%s · %s + phase_modes → 두 판 모두 %s 없음(사용자가 적은 값) · dent 판의 다른 고정구는 있다"
+                          % (mt, key, "압입자 · 바닥판" if key == "no_impactor" else "탭 · PCM"), want_p1 and want_p2,
+                          (sorted(p1 & (imp | tp)), sorted(p2 & (imp | tp))))
 
             rc, out, ks = gen("%s_single" % mt, "output: bt\nmodel_type: %s\ntier: -1\nmode: swell\n" % mt)
             if check("%s · 단독 mode: swell → rc 0 · 덱 하나" % mt, rc == 0 and len(ks) == 1, (rc, out[-300:])):
