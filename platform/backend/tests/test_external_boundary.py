@@ -119,7 +119,9 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   그대로(키트 폴더 diff 0). coreapi 는 바뀌었다 — 새 길 `GET /api/core/sp-definitions`(형제 SP 구독용 · 우리는 안 부른다) · 카탈로그의 최근
     #   수정 시각 질의(응답 꼴 그대로). 가져오기는 `scope` · `label_prefix` 칸을 더 받는다(우리 정의에는 없다). 받는 쪽은 그대로.
     #   StepForge main 은 38950d0(v0.4.89 · 그쪽 3404c449)이라 알렸다(11-20).
+    #   11-23 3196156 → 5753257(v0.4.99 · ls-remote 로 main 끝 확인) — 동기화의 참조(ADR 0089) · 검토함 시간 상한(ADR 0073). 키트 2026-11-06
+    #   그대로 · coreapi · ontology 는 diff 0 — 받는 쪽에 닿는 것이 없다. StepForge main 은 3196156(560ec255)이라 알렸다(11-23).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "31961561439c9475958c3c44aa20fa5fe23f50e4" in status, status
+    assert "5753257ee87ac0a1d6a20c9ff5dce807926a6ba4" in status, status
