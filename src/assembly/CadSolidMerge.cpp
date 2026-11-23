@@ -80,7 +80,7 @@ bool remapFragment(const std::vector<std::string>& in, const Shift& sh, int fw, 
         const std::string& l = in[i];
         const std::string where = "조각 " + std::to_string(i + 1) + "째 줄";
         const size_t g = l.find_first_not_of(" \t");
-        if (g != std::string::npos && l[g] == '*') {
+        if (deckscan::isKeywordLine(l)) {
             kw = deckscan::kwBare(deckscan::keywordToken(l));
             if (!contractKeyword(kw)) {
                 err = where + " — 계약(§3-3) 밖 키워드 " + kw + " — 옮기는 규칙을 모르는 카드는 받지 않는다";

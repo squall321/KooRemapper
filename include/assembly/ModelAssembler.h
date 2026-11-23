@@ -598,7 +598,6 @@ private:
     std::string nodeConstraintTail(int nodeId, int fw) const;
     std::string formatElementLine(const AddedElement& elem, int fw) const;
     std::string formatShellElementLine(const AddedShellElement& elem, int fw) const;
-    bool isKeywordLine(const std::string& line) const;
     bool isCommentLine(const std::string& line) const;
     std::string formatTet10ElementLine(int eid, int pid, const std::array<int, 10>& nodes, int fw) const;
     std::string formatHex20ElementLine(int eid, int pid, const std::array<int, 20>& nodes, int fw) const;

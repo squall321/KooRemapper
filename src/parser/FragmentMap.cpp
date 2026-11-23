@@ -78,7 +78,7 @@ void firstCardIds(const std::vector<std::string>& lines, std::vector<long long>&
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
             const size_t h = d.find_first_not_of(" \t");
-            if (h != std::string::npos && d[h] == '*') break;
+            if (deckscan::isKeywordLine(d)) break;
             if (h != std::string::npos && d[h] == '$') continue;
             if (needTitle) { needTitle = false; continue; }
             const auto f = deckscan::cardFields(d, 10);

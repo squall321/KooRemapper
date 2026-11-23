@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 7판)
 #include "standalone_ops.h"
 #include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "util/YamlComment.h"
@@ -265,7 +266,7 @@ static std::vector<std::string> writtenOutputs(const ModelAssembler& assembler, 
     while (std::getline(f, ln)) {
         if (!ln.empty() && ln.back() == '\r') ln.pop_back();
         std::string tr = StandaloneYamlBase::trim(ln);
-        if (!tr.empty() && tr[0] == '*') { afterInclude = (tr.compare(0, 8, "*INCLUDE") == 0); continue; }
+        if (KooRemapper::deckscan::isKeywordLine(ln)) { afterInclude = (tr.compare(0, 8, "*INCLUDE") == 0); continue; }
         if (!afterInclude || tr.empty() || tr[0] == '$') continue;
         afterInclude = false;
         if (tr.size() > stem.size() + 2 && tr.compare(0, stem.size(), stem) == 0 &&

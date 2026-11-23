@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 7판)
 #include "parser/KFileReader.h"
 #include "parser/DeckWriter.h"   // 쓰기 실패를 공용 기록에(3차 4판 L-18)
 #include "parser/ElementCardLayout.h"
@@ -140,7 +141,7 @@ Mesh KFileReader::readFileWithIncludes(const std::string& filename, std::string*
     auto changesWidth = [](const std::vector<std::string>& L) {
         for (const auto& l : L) {
             const size_t g = l.find_first_not_of(" \t");
-            if (g == std::string::npos || l[g] != '*') continue;
+            if (!deckscan::isKeywordLine(l)) continue;
             std::string up = l.substr(g);
             for (auto& c : up) c = (char)std::toupper((unsigned char)c);
             if (up.rfind("*INCLUDE", 0) != 0) continue;
@@ -340,7 +341,7 @@ void KFileReader::prescanPartSections(std::ifstream& file) {
         size_t g = line.find_first_not_of(" \t");
         if (g == std::string::npos) continue;
         if (line[g] == '$') continue;
-        if (line[g] == '*') {
+        if (deckscan::isKeywordLine(line)) {
             if (!kwSeen && isKeywordCardLine(line)) {   // 첫 `*KEYWORD` 카드만 덱 폭을 정한다(리더 · `deckFieldWidth` 와 같다)
                 kwSeen = true;
                 const int w = keywordCardDeckWidth(line);

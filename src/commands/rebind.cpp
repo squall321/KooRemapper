@@ -60,14 +60,9 @@ bool readLines(const std::string& path, std::vector<std::string>& L) {
     return true;
 }
 
-bool isKeywordLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] == '*';
-}
-bool isDataLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] != '*' && l[g] != '$';
-}
+// 키워드 · 데이터 줄 — 공용 1열 규칙(리더와 같다 · 2026-11-23 3차 7판). 예전엔 첫 비공백이 `*` 면 키워드로 보아 들여 쓴 `*` 제목에서 블록을 닫았다
+bool isKeywordLine(const std::string& l) { return deckscan::isKeywordLine(l); }
+bool isDataLine(const std::string& l) { return deckscan::isDataLine(l); }
 std::string kwOf(const std::string& line) { return deckscan::kwBare(deckscan::keywordToken(line)); }
 
 // 좌표 열쇠 — `coord_sha` 의 표기(`%16.9e`)와 같다. 그래야 「좌표가 그대로인가」를 저쪽과 같은 뜻으로 묻는다.

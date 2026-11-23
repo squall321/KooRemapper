@@ -2205,7 +2205,7 @@ void ecWalk(const std::vector<std::string>& rawLines, bool strict, int deckFw, O
     for (size_t i = 0; i < n; ++i) {
         const std::string& line = rawLines[i];
         size_t g = line.find_first_not_of(" \t");
-        if (g != std::string::npos && line[g] == '*') {
+        if (deckscan::isKeywordLine(line)) {
             info = parseElementKeyword(line);
             inElem = (info.family != ElemFamily::NONE);
             sectionFw = keywordFieldWidth(line, fw);
@@ -2416,10 +2416,11 @@ std::vector<PronyTerm> parsePronyShear(const std::string& matCard) {
             size_t i = 0; while (i < s.size() && std::isspace((unsigned char)s[i])) i++; return s.substr(i); };
         std::string upt = ltrim(up);
 
-        if (upt.rfind("*MAT_GENERAL_VISCOELASTIC", 0) == 0) { isGeneral = true; inData = false; dataLineIdx = 0; continue; }
-        if (upt.rfind("*MAT_VISCOELASTIC", 0) == 0 && upt.rfind("*MAT_VISCOELASTIC_HILL", 0) != 0) { isSimple = true; inData = false; dataLineIdx = 0; continue; }
+        const bool kwLine = deckscan::isKeywordLine(line);   // 1열 규칙(3차 7판) — 들여 쓴 `  *MAT_…` 글은 키워드가 아니다
+        if (kwLine && upt.rfind("*MAT_GENERAL_VISCOELASTIC", 0) == 0) { isGeneral = true; inData = false; dataLineIdx = 0; continue; }
+        if (kwLine && upt.rfind("*MAT_VISCOELASTIC", 0) == 0 && upt.rfind("*MAT_VISCOELASTIC_HILL", 0) != 0) { isSimple = true; inData = false; dataLineIdx = 0; continue; }
         if (!isGeneral && !isSimple) continue;
-        if (upt.empty() || upt[0] == '$' || upt[0] == '*') continue;  // comment / next keyword
+        if (upt.empty() || upt[0] == '$' || deckscan::isKeywordLine(line)) continue;  // comment / next keyword
 
         inData = true;
         dataLineIdx++;
@@ -5908,7 +5909,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
                         break;
                     }
                 }
-            } else if (inSectionSolid && upper[0] == '*') {
+            } else if (inSectionSolid && deckscan::isKeywordLine(line)) {
                 inSectionSolid = false;
                 skipSectionSolidPeri = false;
             }
@@ -5917,7 +5918,7 @@ bool ModelAssembler::writeOutput(const std::string& outputPrefix) {
             if (upper.find("*SECTION_SHELL") == 0 && upper.find("*SECTION_SHELL_") == std::string::npos) {
                 inSectionShell = true;
                 sectionShellDataLine = 0;
-            } else if (inSectionShell && upper[0] == '*') {
+            } else if (inSectionShell && deckscan::isKeywordLine(line)) {
                 inSectionShell = false;
             }
 
@@ -6964,12 +6965,6 @@ std::string ModelAssembler::formatShellElementLine(const AddedShellElement& elem
     return oss.str();
 }
 
-bool ModelAssembler::isKeywordLine(const std::string& line) const {
-    std::string trimmed = line;
-    size_t start = trimmed.find_first_not_of(" \t");
-    if (start == std::string::npos) return false;
-    return trimmed[start] == '*' && !isCommentLine(line);
-}
 
 bool ModelAssembler::isCommentLine(const std::string& line) const {
     size_t start = line.find_first_not_of(" \t");
@@ -8370,11 +8365,12 @@ bool ModelAssembler::applyElform(const ElformOperation& op) {
         if (start != std::string::npos) trimmed = trimmed.substr(start);
         else trimmed.clear();
 
-        if (trimmed.find("*ELEMENT_SOLID") == 0) {
+        const bool kwLine = deckscan::isKeywordLine(line);   // 1열 규칙(3차 7판) — 들여 쓴 `  *ELEMENT_…` 글은 블록을 열지 않는다
+        if (kwLine && trimmed.find("*ELEMENT_SOLID") == 0) {
             inSolidSection = true; inShellSection = false;
-        } else if (trimmed.find("*ELEMENT_SHELL") == 0) {
+        } else if (kwLine && trimmed.find("*ELEMENT_SHELL") == 0) {
             inShellSection = true; inSolidSection = false;
-        } else if (!trimmed.empty() && trimmed[0] == '*') {
+        } else if (kwLine) {
             inSolidSection = false; inShellSection = false;
         } else if ((inSolidSection || inShellSection) && !trimmed.empty() && trimmed[0] != '$') {
             int tokenCount = 0;
@@ -13359,7 +13355,7 @@ static std::vector<MdPartThermalRef> md_partThermalRefs(const std::vector<std::s
     for (const auto& ln : lines) {
         const std::string tr = mw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (deckscan::isKeywordLine(ln)) {
             const std::string up = mw_upper(tr);
             inPart = (up == "*PART" || up == "*PART_TITLE");
             titleDone = false;
@@ -13392,12 +13388,12 @@ static std::set<int> md_thermalTmids(const std::vector<std::string>& lines, int 
     std::set<int> out;
     for (size_t i = 0; i < lines.size(); ++i) {
         const std::string t = mw_trim(lines[i]);
-        if (t.empty() || t[0] != '*' || !cards::isThermalMaterialKeyword(mw_upper(t))) continue;
+        if (t.empty() || !deckscan::isKeywordLine(lines[i]) || !cards::isThermalMaterialKeyword(mw_upper(t))) continue;
         bool title = mw_upper(t).find("_TITLE") != std::string::npos;
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string lt = mw_trim(lines[j]);
             if (lt.empty() || lt[0] == '$') continue;
-            if (lt[0] == '*') break;
+            if (deckscan::isKeywordLine(lines[j])) break;
             if (title) { title = false; continue; }
             const auto toks = mw_tok10(lines[j], cw);
             try {
@@ -13435,7 +13431,7 @@ static std::vector<std::string> md_substituteCardMid(const std::string& cardText
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = mw_trim(lines[i]);
         if (!foundKeyword) {
-            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            if (deckscan::isKeywordLine(lines[i])) { foundKeyword = true; }
             continue;
         }
         if (t.empty() || t[0] == '$') continue;
@@ -13475,7 +13471,7 @@ static std::vector<std::string> md_substituteCardTmid(const std::string& cardTex
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = mw_trim(lines[i]);
         if (!foundKeyword) {
-            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            if (deckscan::isKeywordLine(lines[i])) { foundKeyword = true; }
             continue;
         }
         if (t.empty() || t[0] == '$') continue;
@@ -13494,7 +13490,7 @@ static std::vector<std::string> md_substituteCardPid(const std::string& cardText
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string t = mw_trim(lines[i]);
         if (!foundKeyword) {
-            if (!t.empty() && t[0] == '*') { foundKeyword = true; }
+            if (deckscan::isKeywordLine(lines[i])) { foundKeyword = true; }
             continue;
         }
         if (t.empty() || t[0] == '$') continue;
@@ -13534,7 +13530,7 @@ static std::vector<std::string> md_substituteDampingCard(const std::string& card
         if (t.empty()) continue;
 
         // Update keyword context.
-        if (t[0] == '*') {
+        if (deckscan::isKeywordLine(lines[i])) {
             std::string upperKw = mw_upper(t);
             nextDataIsMassSet = isDampMassKw(upperKw);
             continue;
@@ -13653,14 +13649,14 @@ static std::vector<int> md_enumerateAllPids(const std::vector<std::string>& line
             while (j < lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
             if (j >= lines.size()) break;
             std::string uj = mw_trim(lines[j]);
-            if (!uj.empty() && uj[0] == '*') break;       // next keyword: stop
+            if (deckscan::isKeywordLine(lines[j])) break;       // next keyword: stop
 
             if (hasTitle) {
                 ++j;                                       // consume title line
                 while (j < lines.size() && !lines[j].empty() && lines[j][0] == '$') ++j;
                 if (j >= lines.size()) break;
                 uj = mw_trim(lines[j]);
-                if (!uj.empty() && uj[0] == '*') break;
+                if (deckscan::isKeywordLine(lines[j])) break;
             }
             // PART data line: PID SID MID EOSID HGID GRAV ADPOPT TMID
             // First whitespace token is PID.
@@ -13867,7 +13863,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                 if (j >= rawLines_.size()) break;
                 // stop at next keyword
                 std::string uj = mw_trim(rawLines_[j]);
-                if (!uj.empty() && uj[0] == '*') break;
+                if (deckscan::isKeywordLine(rawLines_[j])) break;
                 // read title
                 std::string title;
                 if (hasTitle) {
@@ -13877,7 +13873,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                     while (j < rawLines_.size() && !rawLines_[j].empty() && rawLines_[j][0] == '$') ++j;
                     if (j >= rawLines_.size()) break;
                     uj = mw_trim(rawLines_[j]);
-                    if (!uj.empty() && uj[0] == '*') break;
+                    if (deckscan::isKeywordLine(rawLines_[j])) break;
                 }
                 // data line: PID SID MID ...  (fields 0,10,20)
                 std::string dataLine = rawLines_[j];
@@ -14118,7 +14114,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             rawLines_[j++] = DEL;
             while (j < (int)rawLines_.size()) {
                 std::string lt = mw_trim(rawLines_[j]);
-                if (!lt.empty() && lt[0] == '*') break;
+                if (deckscan::isKeywordLine(rawLines_[j])) break;
                 rawLines_[j++] = DEL;
             }
             ++strippedDampingBlocks;
@@ -14183,7 +14179,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
     }
     for (int i = 0; i < (int)rawLines_.size(); ++i) {
         std::string t = mw_trim(rawLines_[i]);
-        if (t.empty() || t[0] != '*') continue;
+        if (!deckscan::isKeywordLine(rawLines_[i])) continue;
         std::string u = mw_upper(t);
         bool isThermal = cards::isThermalMaterialKeyword(u);   // 번호 이름 *MAT_T01~T18 도(11-08 #3 — 남아 같은 TMID 가 둘이 됐다)
         bool isExpansion = (u.find("*MAT_ADD_THERMAL_EXPANSION") == 0);
@@ -14195,7 +14191,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         while (j < (int)rawLines_.size()) {
             std::string lt = mw_trim(rawLines_[j]);
             if (lt.empty() || lt[0] == '$') { ++j; continue; }
-            if (lt[0] == '*') break;
+            if (deckscan::isKeywordLine(rawLines_[j])) break;
             if (hasT && !st) { st = true; ++j; continue; }
             auto toks = mw_tok10(rawLines_[j], mw_cardW(rawLines_, 0));
             if (!toks.empty()) {
@@ -14229,7 +14225,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
                         int end = j + 1;
                         while (end < (int)rawLines_.size()) {
                             std::string et = mw_trim(rawLines_[end]);
-                            if (!et.empty() && et[0] == '*') break;
+                            if (deckscan::isKeywordLine(rawLines_[end])) break;
                             ++end;
                         }
                         for (int li = i; li < end; ++li) rawLines_[li] = DEL;
@@ -17031,7 +17027,7 @@ bool ModelAssembler::applyUpdate(const UpdateOperation& op) {
         while (!trimmed.empty() && std::isspace((unsigned char)trimmed.front())) trimmed.erase(trimmed.begin());
 
         // Detect keyword transitions
-        if (!trimmed.empty() && trimmed[0] == '*') {
+        if (deckscan::isKeywordLine(line)) {
             if (trimmed.substr(0, 5) == "*NODE") {
                 inNodeSection = true;
                 continue;
@@ -19101,7 +19097,7 @@ static std::map<int, mg_MatInfo> mg_parseMaterials(const std::vector<std::string
     for (auto& line : lines) {
         std::string tr = mg_ws_trim(line);
         if (tr.empty() || tr[0] == '$') continue;
-        if (tr[0] == '*') {
+        if (deckscan::isKeywordLine(line)) {
             if (inMat && matType == "VE076") finishVE();
             std::string up = mg_upper(tr);
             inMat = false; inCTE = false;

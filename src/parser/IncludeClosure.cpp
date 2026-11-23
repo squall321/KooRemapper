@@ -372,7 +372,7 @@ void inlineInto(std::vector<std::string>& out, const std::vector<std::string>& l
 
 void WidthMarks::feed(const std::string& l) {
     const size_t g = l.find_first_not_of(" \t");
-    if (g == std::string::npos || l[g] != '*') return;
+    if (!deckscan::isKeywordLine(l)) return;
     if (!widthSet_) {   // `deckFieldWidth` 와 같은 걸음 — 폭을 말한 첫 `*KEYWORD`, 말이 없으면 표준
         const int w = keywordCardDeckWidth(l);
         if (w > 0) { width = w; widthSet_ = true; }

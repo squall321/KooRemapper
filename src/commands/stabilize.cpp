@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 7판)
 #include "stabilize.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
@@ -28,7 +29,7 @@ static std::string stab_stripQuotes(const std::string& s) {
 static bool stab_hasShellElements(const std::vector<std::string>& lines) {
     for (const auto& ln : lines) {
         std::string tr = kw_trim(ln);
-        if (!tr.empty() && tr[0] == '*')
+        if (KooRemapper::deckscan::isKeywordLine(ln))
             if (kw_upper(tr).rfind("*ELEMENT_SHELL", 0) == 0) return true;
     }
     return false;
@@ -44,7 +45,7 @@ static int stab_patchControlFieldN(std::vector<std::string>& lines,
     for (auto& ln : lines) {
         std::string tr = kw_trim(ln);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(ln)) {
             std::string up = kw_upper(tr);
             inBlock    = (up.rfind(keyword, 0) == 0);
             hasTitle   = (up.find("_TITLE") != std::string::npos);
@@ -75,7 +76,7 @@ static bool stab_ensureControlContactCard2(std::vector<std::string>& lines, cons
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string tr = kw_trim(lines[i]);
         if (tr.empty()) continue;
-        if (tr[0] == '*') {
+        if (KooRemapper::deckscan::isKeywordLine(lines[i])) {
             std::string up = kw_upper(tr);
             bool isCC = (up.rfind("*CONTROL_CONTACT", 0) == 0);
             if (inBlock && card1Idx >= 0 && dataCardSeen == 1) {

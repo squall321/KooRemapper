@@ -16,11 +16,9 @@ namespace {
 
 bool blankLine(const std::string& l) { return l.find_first_not_of(" \t\r") == std::string::npos; }
 
-// 키워드 줄인가(첫 비공백 글자가 `*`) — 섹션 묶음 훑기 · 옛 첫 카드 훑기와 같은 판정
-bool keywordLine(const std::string& l) {
-    const size_t g = l.find_first_not_of(" \t");
-    return g != std::string::npos && l[g] == '*';
-}
+// 키워드 줄인가 — 공용 1열 규칙(리더와 같다 · 2026-11-23 3차 7판). 예전엔 첫 비공백 글자가 `*` 면 키워드로 보아, 들여 쓴 `*` 제목 · `*COMMENT`
+// 글 속의 `  *MAT_…` 에서 재질 블록을 닫거나 열었다
+bool keywordLine(const std::string& l) { return deckscan::isKeywordLine(l); }
 
 // 주석 줄인가 — **1열의 `$`** 뿐이다(Vol_I 17862 · 리더 `KFileReader::isCommentLine` · 섹션 묶음 훑기와 같다). 들여쓴 `$` 줄은 데이터다
 // (제목 「  $5 steel」) — 주석으로 건너면 묶음이 한 줄 밀려 다음 카드의 칸(`40.0`)을 MID 로 읽거나 제목 줄 다음부터 세는 넉넉한 셈이

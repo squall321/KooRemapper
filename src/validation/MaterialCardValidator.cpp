@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(들여 쓴 `*` 줄은 데이터 · 3차 7판)
 #include "validation/MaterialCardValidator.h"
 #include <sstream>
 #include <algorithm>
@@ -72,10 +73,12 @@ MaterialCardValidator::ValidationResult MaterialCardValidator::validate(
     return result;
 }
 
+// `*MAT` 키워드 줄 — 1열 `*MAT…`(공용 1열 규칙 · 2026-11-23 3차 7판). 예전엔 줄 어디든 「*MAT」 가 있으면(주석 · 제목 · 들여 쓴 줄) 키워드로 보았다
 bool MaterialCardValidator::isKeywordLine(const std::string& line) const {
+    if (!KooRemapper::deckscan::isKeywordLine(line)) return false;
     std::string upper = line;
     std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return (char)std::toupper(c); });
-    return upper.find("*MAT") != std::string::npos;
+    return upper.rfind("*MAT", 0) == 0;
 }
 
 std::string MaterialCardValidator::extractKeyword(const std::string& line) const {
@@ -258,7 +261,7 @@ int MaterialCardValidator::findFirstDataLine(const std::vector<std::string>& lin
         for (size_t j = i + 1; j < lines.size(); ++j) {
             if (isCommentLine(lines[j])) continue;
             size_t f = lines[j].find_first_not_of(" \t");
-            if (f != std::string::npos && lines[j][f] == '*') break;  // 다음 키워드 = 블록 끝
+            if (KooRemapper::deckscan::isKeywordLine(lines[j])) break;  // 다음 키워드 = 블록 끝
             content.push_back(static_cast<int>(j));
         }
         // 블록 끝의 빈 줄은 카드 끝 개행이라 내용 줄이 아니다
