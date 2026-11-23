@@ -134,3 +134,20 @@
   자리로 있는지 잰다.
 - **올리기의 두 멈춤** — pykoocae-53 이 SmartTwinPreprocessor v141 굽기 끝(SIF sha256 · 안 KooRemapper sha)을 알리기 전엔 바이너리를 설치하지
   않는다. hwaxportal-87 이 cae00 수신을 알리기 전엔 main push · Drive 게시를 하지 않는다. 짓기 · 시험 · `corelink-int` 가지 push 는 한다.
+
+## 6. 7판 — 6판에서 재다 나온 목록 밖 줄(2026-11-23 · 사용자 답)
+- **물음과 답**(고른 선택지의 설명 문장이 규격이다)
+  - `*` 나머지 — 「다음 판에서 다 쓸기」 · 「여섯 op 과 같은 방식 — 공용 1열 규칙으로 맞추고 op 마다 들여 쓴 * 제목 사례 시험 · 변이 · 회귀 ·
+    올리기. 쓰는 곳 없는 트림 규칙 함수(ModelAssembler::isKeywordLine)도 지운다.」 대상은 assemble 의 matdb 15 · elform · update · 점탄성 카드
+    읽기 · 묶음 셈 각 1 · stabilize 3 · standalone_ops 1 · strip 1(6판에서 변수가 어디서 왔는지로 센 어림 — 판을 열 때 다시 센다).
+  - 권취 강체 — 「절점 차례를 바로 고친다」 · 「두 고정구 솔리드의 절점 차례를 적층처럼 바로 놓는다 — 권취 고정구 덱의 그 요소 줄 바이트가
+    바뀐다(좌표 · 번호는 그대로). 회귀에 battery 덱 야코비안 부호 시험을 넣는다.」
+  - ale EOS — 「고친다」 · 「제목 줄을 건너 Card 1 의 EOSID 칸을 새 번호로 쓴다 — 재질 `_TITLE` 처리(3판 L-12)와 같게.」
+  - 작은 것 — 넷 다 · tied Card 3 실수꼴(「값은 같고 덱 바이트만 바뀐다」) · 적층 swell 빈 탭 PART(「적층 단독 swell · bare 덱에 요소 없는 탭
+    PART 카드 둘(20 · 21)을 쓰지 않는다」) · extract-parts 두 번 찍기(「한 번으로」) · 예제 two_cubes 칸(「재질 줄을 10 칸에 맞춘다(예제 결과
+    덱도 다시 만든다)」).
+- **줄 번호** — L-24 `*` 나머지 · L-25 권취 강체 뒤집힘 · L-26 ale EOS `_TITLE` · L-27 tied Card 3 · L-28 적층 swell 빈 탭 PART · L-29
+  extract-parts 두 번 찍기 · L-30 예제 two_cubes 칸.
+- **차례** — 판을 열 때 다시 잰다(자리 수 · 야코비안 · 빈 PART) → 실패하는 시험 먼저 → 고침 → 변이 → 전체 회귀 · 단위 · 백엔드 · 계약 →
+  올리기(main · Drive · cae00 문서 · 알림). battery 덱 바이트가 바뀌니 호환 빌드 앞에 pykoocae-53 에 알린다.
+- **하지 않는 것** — `exportStressDistribution` 죽은 코드(묻지 않았다 — 목록에 둔다) · 열 해석 덱의 없는 TMID(검증런).
