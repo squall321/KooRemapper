@@ -4,8 +4,8 @@
 **정본** DynaForge 쪽 결정 · 계약은 KooRemapper `platform/docs/REQUEST-postprocess-operation.md` §10, `docs/01-plan/features/{postprocess-reservation-1028,sphere-risk-map-1029}.plan.md`, 총괄 `drop-twin-1028.checklist.md`. KooSlurm 쪽은 KooSlurm `docs/sso_enable_20261029/{icn401_apply_check,sso_enable_procedure}.md`(origin `46c647e4`).
 
 ## 0. 순서 — 한 줄씩
-1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261122-085355Z` 를 받는다) →
-   §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 · §1-8 · §1-9 · §1-10 · §1-11 · §1-12 확인.
+1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261123-080850Z` 를 받는다) →
+   §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 · §1-8 · §1-9 · §1-10 · §1-11 · §1-12 · §1-13 확인.
 2. **icn401** — `git pull && sudo ./dashboard/start_production.sh` → §3 확인(KooSlurm 문서 §2).
 3. **비밀 하나를 두 곳에** — icn401 `HEAX_GATEWAY_SECRET`(backend_5010/.env) = cae00 `KOORM_KOOSLURM_SSO_SECRET`(KooRemapper platform/.env) → §2 · §3-3.
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
@@ -21,8 +21,8 @@ SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`87632b1`) · `revision_matches_binary` true |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `4cca82a` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. `4cca82a` 보다 앞이면 §1-12 의 캠페인 분석 · 핫스팟 자리 · 세션 판(REST 열여덟 · MCP 열일곱)이 없고(Drive 판은 §1-11 그대로다), `87632b1` 보다도 앞이면 §1-11 의 보고서용 묶음(REST 넷 · MCP 셋)이 없고(`2cbdc84` 판은 파이썬이 `9614bb8` 과 같다 — §1-10 은 판 · 바이너리 줄로 본다), `9614bb8` 보다도 앞이면 §1-10 의 추출 완전성 · 삭제 허가(REST 셋 · MCP 셋 · 피크 표지)가 없고(`a50bcc3` 판은 파이썬이 `53028a2` 과 같다 — §1-9 는 판 · 바이너리 줄로 본다), `53028a2` 보다도 앞이면 §1-9 의 캠페인 출처 · 건강 판정(REST 넷 · MCP 넷)과 받기 줄의 연결 놓기가 없고(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — §1-8 은 판 · 바이너리 줄로 본다), `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`f0cc07d`) · `revision_matches_binary` true |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `f0cc07d` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. `f0cc07d` 보다 앞이면 §1-13 의 바이너리(battery phase_modes · contact.depth · 나선 판 · 들여 쓴 `*` 줄)가 옛 판이고, `4cca82a` 보다 앞이면 §1-12 의 캠페인 분석 · 핫스팟 자리 · 세션 판(REST 열여덟 · MCP 열일곱)이 없고(Drive 판은 §1-11 그대로다), `87632b1` 보다도 앞이면 §1-11 의 보고서용 묶음(REST 넷 · MCP 셋)이 없고(`2cbdc84` 판은 파이썬이 `9614bb8` 과 같다 — §1-10 은 판 · 바이너리 줄로 본다), `9614bb8` 보다도 앞이면 §1-10 의 추출 완전성 · 삭제 허가(REST 셋 · MCP 셋 · 피크 표지)가 없고(`a50bcc3` 판은 파이썬이 `53028a2` 과 같다 — §1-9 는 판 · 바이너리 줄로 본다), `53028a2` 보다도 앞이면 §1-9 의 캠페인 출처 · 건강 판정(REST 넷 · MCP 넷)과 받기 줄의 연결 놓기가 없고(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — §1-8 은 판 · 바이너리 줄로 본다), `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0026 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020 · 0021 · 0022 · 0023 · 0024 · 0025 · 0026). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
 | MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 97개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` · `clear_report_unlink` · `create_campaign` · `ingest_campaign_manifest` · `campaign_ingest_status` · `set_campaign_health_thresholds` · `campaign_provenance` · `campaign_health_table` · `report_health` · `set_campaign_required_extractions` · `campaign_deletion_clearance` · `report_extraction` · `build_report_bundle` · `report_bundle` · `report_bundle_diff` · 캠페인 분석 열넷 · `set_campaign_frame_offset` · `campaign_hotspot_sites` · `rename_session_part` 가 새로 있다 — 120개) · `MCP SMOKE: PASS` |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
@@ -453,6 +453,33 @@ postgres SIF 와 콘솔 묶음은 sha256 이 같다(실측). MCP 도구 100 → 
 | 구면 지도 | 캠페인 하나로 `campaign_sphere_map(campaign_id)` | 글(격자 최소 · 최대 · 방향 점 · 출처 줄) + Mollweide 그림 이미지 블록 |
 | 되돌리기 | §8 | 코드만 `87632b1` 로 — 0025 · 0026 은 null 칸과 새 표라 옛 코드가 그대로 돈다 |
 
+## 1-13. cae00 — 11-22 밤 반영분(미룬 결함 3차 6판 — battery phase_modes · contact.depth · 권취 나선 판 · 들여 쓴 `*` 줄)
+**바이너리가 바뀐 판이다**(`c1a274c4ba6eabf0…` · glibc 요구 2.35). Drive 판 `dist-20261123-080850Z`(코드 `f0cc07d`)에서 §1-12 판과 다른 파일은 `BUILD_INFO.txt` · `koorm-bin.tar.gz` · `cli.sif` 셋(api · mcp · nginx · postgres SIF 와 콘솔 묶음은 sha256 이 같다 — 실측) · **마이그레이션 없음** · MCP 도구 120
+그대로. 사용자가 고른 넷(11-22 저녁) 가운데 셋을 지었다 — 열 해석 덱의 없는 TMID 는 고치지 않고 검증런에서 잰다.
+- **battery phase_modes** — `batch.phase_modes` 의 swell · bare 판은 압입자 · 바닥판만 빼고 탭 · PCM 은 둔다(phase 1 의 셀 · 탭 · PCM 절점 ·
+  요소 번호가 phase 2 에 같은 번호 · 같은 자리로 있다 — dynain 사슬). 단독 `mode: swell` · `bare` 는 그대로 넷 다 뺀다. 맨 위 `mode: swell` 의
+  dent 판은 이제 압입자 · 처방 운동을 짓는다(전엔 고정구 없는 dent 덱 · rc 0). **권취는 탭 · PCM 을 압입자 · 바닥판보다 먼저 짓는다** — 고정구가
+  있는 권취 덱(dent · side)은 그 넷의 번호가 바뀐다(좌표 · 세트 · 경계 · 접촉 카드는 좌표로 같다). 적층 단독 덱은 바이트가 같다.
+- **contact.depth · soft** — `contact.depth` 가 모든 자동 접촉 Card A 의 DEPTH 에 쓰인다(기본 5 — 안 준 덱은 같다). 정수 0 이상만 받는다(음수 ·
+  소수 · 글자 · 열 자리는 rc 1). `contact.soft` 는 읽기만 하고 적으면 [WARN].
+- **권취 나선 판(`wound.flat: false`)** — 전해질 채움 PART 의 섹션 33 을 쓴다(전엔 나선 판 48 덱 가운데 36 이 없는 섹션을 가리켜 LS-DYNA 가
+  키워드 단계에서 멈췄다 · rc 0). 적층 · 권취 평평 · 권취 나선 × mode 넷 × 선택 열둘 144 덱이 `info --strict` rc 0.
+- **들여 쓴 `*` 줄** — contact · cclip · matswap(YAML 꼴 · 옛 위치 인자 꼴) · merge · optimize · modelmeta · ale 이 제목 · `*COMMENT` 글 속의
+  `  *…` 를 키워드로 읽지 않는다(리더 · LS-DYNA 의 1열 규칙). 전엔 cclip · matswap · merge 가 rc 1 로 멈추거나 matswap 이 rc 0 으로 나눠 쓰는
+  모래시계를 지웠고, optimize 가 implicit 으로 잘못 보았다.
+- **알고 받을 것** — LS-DYNA(라이선스 만료)로 재지 못했다 — phase 2 가 phase 1 dynain 을 읽는지 · DEPTH 를 바꾼 접촉 · 나선 판 덱(검증런 §1).
+  여섯 op 밖(assemble 의 다른 연산 · stabilize · standalone_ops · strip)에 같은 `*` 꼴이 남았다 — 최종 보고의 물음.
+
+| 확인 | 명령 | 기대값 |
+|---|---|---|
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `f0cc07d` 이거나 그 뒤 |
+| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `f0cc07d` · `revision_matches_binary` true |
+| 바이너리 | `sha256sum build/linux/bin/KooRemapper` | `c1a274c4ba6eabf03b8948e6bc72712fe5b7a080870f40d9685ba9b1c47a4a51` |
+| battery 사슬 | `output: bt` · `model_type: wound` · `tier: -1` · `mode: dent` · `use_dynain: true` 에 `batch:` 아래 `phases: [1, 2]` · `phase_modes: [swell, dent]`(두 칸 들여 쓴 블록 꼴)로 `KooRemapper battery` | 덱 둘 · phase 1 에 PART 100 · 101(압입자 · 바닥판) 요소가 없고 2020 · 2021 · 2030(탭 · PCM)은 있다 |
+| MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 120개 · `MCP SMOKE: PASS`(API · MCP 를 재기동한 뒤 — 카탈로그 글이 바뀌었다) |
+| 되돌리기 | §8 | 바이너리 · 코드를 ``dist-20261122-085355Z`(코드 `87632b1` · 바이너리 `066e21a3`)` 로 — 마이그레이션이 없어 DB 는 그대로 |
+이 판을 게시하면서 Drive 의 가장 오래된 판 `dist-20261121-234834Z` 가 지워졌다(넷만 남긴다 — 11-22 새벽 · 11-22 낮 · 11-22 오후 · 11-23).
+
 ## 2. cae00 — 후처리 예약(7-1) 설정
 `platform/.env`(KooRemapper)에 둘. **값은 화면 · 로그 · 채팅에 붙이지 않는다.**
 ```
@@ -561,7 +588,7 @@ KooSlurm `docs/sso_enable_20261029/sso_enable_procedure.md`. 켜기 전에 설 �
 - 걸린 예약이 없을 때 켠다 — 켜는 순간 신원이 admin → 실제 사용자로 바뀌어 켜기 전 예약은 403 으로 닫힌다.
 
 ## 8. 되돌리기
-- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261122-062855Z` — 코드 `2cbdc84` · 바이너리 `4b8fe975` · Drive 에는 11-21 밤 · 11-22 새벽 · 11-22 낮 · 11-22 오후 넷이 있다) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나), 0021 은 새 표 둘(있던 표는 그대로 · 리포트를 가리키는 FK 는 SET NULL), 0022 는 캠페인 · 런 표의 null 허용 칸 다섯, 0023 은 같은 표의 null 허용 칸 둘, 0024 는 새 표 둘이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 11-17 판도 마이그레이션이 없고 새 칸은 응답에만 있다(DB 에 남는 것이 없다) — 되돌리면 겹친 덱을 쓰는 op 이 다시 그 요소가 빠진 덱을 낸다. 11-21 판을 되돌리면 캠페인 길(REST 셋 · MCP 셋)이 없어지고(표 둘과 그 행은 남는다 — 옛 코드를 0021 DB 에 돌려 재지는 않았다 · 표 꼴로 본 것이다) 이번에 고친 조용한 틀림(펼치기의 바꿔 끼운 요소 · 칸이 붙은 덱 · BOM 인클루드에서 지워진 절점 — §1-7)이 돌아온다. 11-21 밤 판을 되돌리면 마이그레이션 없이 바이너리만 바뀐다 — 덱 · 번들 BOM 이 다시 산출에 실리고 matswap BOM 번들 · ale 재료 파일 · 격자 첫 행의 조용한 틀림과 strain · squeeze 의 빈 산출(§1-8)이 돌아온다. 11-22 판을 되돌리면 캠페인 출처 · 건강 판정 길(REST 넷 · MCP 넷)이 없어지고(0022 칸과 값은 남는다 — 옛 코드는 그 칸을 읽지 않는다 · 표 꼴로 본 것이다) 동시 올리기의 500 이 돌아오며, 바이너리는 LONG=Y 덱에 10 칸 카드 · 넘친 음수 번호 · extract_surface 의 정의 안 된 파트로 돌아간다(§1-9 — extract_surface 의 두께 필수 계약도 풀린다). 11-22 낮 판을 되돌리면 추출 완전성 · 삭제 허가 길(REST 셋 · MCP 셋)과 피크 표지가 없어지고(0023 칸과 값은 남는다 — 옛 코드는 그 칸을 읽지 않는다 · 표 꼴로 본 것이다), 바이너리는 쌓인 카드 묶음을 블록째 지우거나 그 번호를 다시 내는 판 · 첫 정의만 보는 `--strict` 겹침으로 돌아간다(§1-10). 11-22 저녁 반영(파이썬만)을 되돌리면 캠페인 분석 · 핫스팟 · 세션 판 길이 없어진다(0025 · 0026 의 칸과 표는 남는다 — 옛 코드는 읽지 않는다). 11-22 오후 판을 되돌리면 보고서용 묶음 길(REST 넷 · MCP 셋)이 없어지고(0024 표와 행은 남는다 — 옛 코드는 그 표를 읽지 않는다), 바이너리는 없는 재질 · 세트를 가리키는 battery 덱 · 크기를 보지 않는 인클루드 펼치기 · 자기를 끌어오는 산출로 돌아간다(§1-11).
+- **DynaForge** — 아티팩트: `rclone copy ApptainerImages:KooRemapper/dist/dist-<이전 판>/ ApptainerImages:KooRemapper/dist/latest/`(이번 판 바로 앞은 `dist-20261122-085355Z` — 코드 `87632b1` · 바이너리 `066e21a3` · Drive 에는 11-22 새벽 · 11-22 낮 · 11-22 오후 · 11-23 넷이 있다) 뒤 `update-all`(또는 `dist-from-drive.sh --restart`). 코드: 이전 커밋으로. 마이그레이션 0015 · 0016 · 0017 은 null 허용 칸 · 유일 제약, 0018 은 새 표 셋과 null 허용 칸 둘, 0019 는 트리거, 0020 은 null 허용 칸 셋(FK 둘 · JSONB 하나), 0021 은 새 표 둘(있던 표는 그대로 · 리포트를 가리키는 FK 는 SET NULL), 0022 는 캠페인 · 런 표의 null 허용 칸 다섯, 0023 은 같은 표의 null 허용 칸 둘, 0024 는 새 표 둘이라 옛 코드가 그대로 돈다 — 되돌리지 않아도 된다(0019 가 지운 「지운 리포트의 선」 은 되살리지 않는다 — 리포트가 없다). 11-15 판은 마이그레이션이 없다 — 새 코드가 적은 다리 선 · 끊은 기록을 옛 코드로 읽는 것은 재지 않았다. 11-17 판도 마이그레이션이 없고 새 칸은 응답에만 있다(DB 에 남는 것이 없다) — 되돌리면 겹친 덱을 쓰는 op 이 다시 그 요소가 빠진 덱을 낸다. 11-21 판을 되돌리면 캠페인 길(REST 셋 · MCP 셋)이 없어지고(표 둘과 그 행은 남는다 — 옛 코드를 0021 DB 에 돌려 재지는 않았다 · 표 꼴로 본 것이다) 이번에 고친 조용한 틀림(펼치기의 바꿔 끼운 요소 · 칸이 붙은 덱 · BOM 인클루드에서 지워진 절점 — §1-7)이 돌아온다. 11-21 밤 판을 되돌리면 마이그레이션 없이 바이너리만 바뀐다 — 덱 · 번들 BOM 이 다시 산출에 실리고 matswap BOM 번들 · ale 재료 파일 · 격자 첫 행의 조용한 틀림과 strain · squeeze 의 빈 산출(§1-8)이 돌아온다. 11-22 판을 되돌리면 캠페인 출처 · 건강 판정 길(REST 넷 · MCP 넷)이 없어지고(0022 칸과 값은 남는다 — 옛 코드는 그 칸을 읽지 않는다 · 표 꼴로 본 것이다) 동시 올리기의 500 이 돌아오며, 바이너리는 LONG=Y 덱에 10 칸 카드 · 넘친 음수 번호 · extract_surface 의 정의 안 된 파트로 돌아간다(§1-9 — extract_surface 의 두께 필수 계약도 풀린다). 11-22 낮 판을 되돌리면 추출 완전성 · 삭제 허가 길(REST 셋 · MCP 셋)과 피크 표지가 없어지고(0023 칸과 값은 남는다 — 옛 코드는 그 칸을 읽지 않는다 · 표 꼴로 본 것이다), 바이너리는 쌓인 카드 묶음을 블록째 지우거나 그 번호를 다시 내는 판 · 첫 정의만 보는 `--strict` 겹침으로 돌아간다(§1-10). 11-22 저녁 반영(파이썬만)을 되돌리면 캠페인 분석 · 핫스팟 · 세션 판 길이 없어진다(0025 · 0026 의 칸과 표는 남는다 — 옛 코드는 읽지 않는다). 11-23 판을 되돌리면 마이그레이션 없이 바이너리만 바뀐다 — phase_modes swell 판의 고정구 · 맨 위 swell 의 dent 판 · 권취 탭 · PCM 차례 · contact.depth · 나선 판 섹션 33 · 들여 쓴 `*` 줄(§1-13)이 예전으로 돌아간다. 11-22 오후 판을 되돌리면 보고서용 묶음 길(REST 넷 · MCP 셋)이 없어지고(0024 표와 행은 남는다 — 옛 코드는 그 표를 읽지 않는다), 바이너리는 없는 재질 · 세트를 가리키는 battery 덱 · 크기를 보지 않는 인클루드 펼치기 · 자기를 끌어오는 산출로 돌아간다(§1-11).
 - **KooSlurm** — 그쪽 문서의 되돌리기 절.
 
 ## 9. 남은 사람 결정(참고)

@@ -5,7 +5,7 @@
 요청서 원문의 과제 이름 · 경로는 이 문서에 옮기지 않는다 — 각 줄의 「요청서 DF-xx 검증 방법」 이 가리키는 파일로 대조한다.
 
 ## 0. 받기
-1. `git pull && update-all` — Drive 판 `dist-20261122-085355Z`(바이너리 `066e21a3`)와 코드 `4cca82a` 이거나 그 뒤.
+1. `git pull && update-all` — Drive 판 `dist-20261123-080850Z`(바이너리 `c1a274c4`)와 코드 `f0cc07d` 이거나 그 뒤(3차 6판 — §1 의 6판 줄은 이 판이어야 잰다).
 2. `bash platform/infra/scripts/migrate.sh` — 0021 ~ 0026 가운데 빠진 것이 오른다.
 3. API · MCP 재기동(도는 잡 0 확인 뒤) → `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` 가 도구 120 · PASS.
 

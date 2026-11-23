@@ -464,5 +464,9 @@
   160 · matswap 이 드는 회귀 20 / 20(dev) · 도는 잡 0 · 설치 00:19:02Z · API 00:19:08 · MCP 00:19:12(`start.sh` · 바인드 확인) · 스모크 MCP
   PASS(도구 120 · op 65) · deckops 29 / 29 · allops 64 / 64(건너뜀 1) · reports 59 / 59 · 주 체크아웃 백엔드 1134 통과 · cli.sif 00:25Z(안
   바이너리 `c1a274c4`). health 는 `revision` `87632b12` · 바이너리 `c1a274c4` · false(Drive 게시 전).
-- **남은 것** — hwaxportal-87 의 cae00 수신 알림 뒤 main push · Drive 게시(`KOORM_DRIVE_RETAIN=4`) · cae00 문서 §1-13(초안
-  `$S/r3/e6/doc/cae00_113.md`) · 검증런 안내 「받기」 의 판 이름 · 알림(hwaxportal-87 · pykoocae-53).
+- **멈춤 풀림 · 올리기(11-23)** — hwaxportal-87 이 「cae00 이 11-22 라운드 판(main `5943fb3` · `dist-20261122-085355Z`)으로 update-all 을 마쳤다
+  — 동결을 푼다」 고 알렸다(사용자 지시 「다음 라운드에 실을 것은 다 푸시하고 cae00 이 반영하게 안내를 잘 써라」 를 함께 전함). main `5943fb3` →
+  `f0cc07d`(ff · 다른 세션의 `faf758b` 포함 — 그 세션은 따로 push 하지 않는다고 알림) · Drive `dist-20261123-080850Z`(게시 08:10Z · 바뀐 파일은
+  BUILD_INFO · koorm-bin.tar.gz · cli.sif 셋 · 가장 오래된 `dist-20261121-234834Z` 정리 — 남은 판 11-22 새벽 · 낮 · 오후 · 11-23) · 게시 뒤
+  health `revision` `f0cc07da` · 바이너리 `c1a274c4` · `revision_matches_binary` true · cae00 문서 §1-13 · 검증런 안내 「받기」. 되돌릴 판은
+  `dist-20261122-085355Z`(코드 `87632b1` · 바이너리 `066e21a3`).
