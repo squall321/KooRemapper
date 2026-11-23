@@ -134,10 +134,14 @@ static void writeTied(std::ostream& out, int cid, const std::string& title,
         << fldG(0.0) << fldG(0.0) << fldG(0.0) << fldG(0.0) << fldG(0.0)
         << iField(0) << fldG(0.0) << fldG(1.0e20) << "\n";
 
-    // Mandatory Card 3: SFS SFM SST MST SFST SFMT FSF VSF
-    out << "$#      sfs       sfm       sst       mst      sfst      sfmt       fsf       vsf\n"
-        << fldG(1.0) << fldG(1.0) << fldG(0.0) << fldG(0.0)
-        << fldG(1.0) << fldG(1.0) << fldG(1.0) << fldG(1.0) << "\n";
+    // Mandatory Card 3: SFS SFM SST MST SFST SFMT FSF VSF — 실수 칸 여덟이라 실수꼴로 쓴다(2026-11-23 · 3차 7판 L-27). 예전 「1 1 0 0 1 1 1 1」
+    //   은 값은 같지만 info 가 선택 카드 Card A 가 밀려 올라온 손상으로 의심했다(둘)
+    out << "$#      sfs       sfm       sst       mst      sfst      sfmt       fsf       vsf\n";
+    {
+        char c3[96];
+        snprintf(c3, sizeof(c3), "%10.3f%10.3f%10.4f%10.4f%10.3f%10.3f%10.3f%10.3f\n", 1.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0);
+        out << c3;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────

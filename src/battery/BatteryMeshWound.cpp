@@ -1082,14 +1082,16 @@ void WoundMeshGen::buildGroundPlate() {
     }
     (void)dz;
 
+    // ★아래 면(n1 ~ n4)은 판의 아래(zBot · grid[1]), 위 면은 위(zTop · grid[0])다(2026-11-23 · 3차 7판 L-25). 예전엔 두 면을 바꿔 써
+    //   솔리드가 모두 뒤집혔다(info 「Negative Jacobian」). 절점 좌표 · 번호는 그대로다
     out_ << "*ELEMENT_SOLID\n";
     for (int jy = 0; jy < ny2; ++jy) {
         for (int jx = 0; jx < nx; ++jx) {
             addSolid(PID_GROUND,
-                grid[0][jy  ][jx  ], grid[0][jy  ][jx+1],
-                grid[0][jy+1][jx+1], grid[0][jy+1][jx  ],
                 grid[1][jy  ][jx  ], grid[1][jy  ][jx+1],
-                grid[1][jy+1][jx+1], grid[1][jy+1][jx  ]);
+                grid[1][jy+1][jx+1], grid[1][jy+1][jx  ],
+                grid[0][jy  ][jx  ], grid[0][jy  ][jx+1],
+                grid[0][jy+1][jx+1], grid[0][jy+1][jx  ]);
         }
     }
 }
@@ -1221,15 +1223,17 @@ void WoundMeshGen::buildPcm(double meshSize) {
             }
         }
     }
+    // ★x · z 로 놓은 면의 법선은 −y 라 아래 면(n1 ~ n4)은 jy+1, 위 면은 jy 다(2026-11-23 · 3차 7판 L-25 — 예전엔 거꾸로 써 PCM 솔리드가
+    //   모두 뒤집혔다). 절점 좌표 · 번호는 그대로다
     out_ << "*ELEMENT_SOLID\n";
     for (int jy = 0; jy < nyP; ++jy)
         for (int jz = 0; jz < nzP; ++jz)
             for (int jx = 0; jx < nxP; ++jx)
                 addSolid(PID_W_PCM_POS,
-                    nids[jy  ][jz  ][jx  ], nids[jy  ][jz  ][jx+1],
-                    nids[jy  ][jz+1][jx+1], nids[jy  ][jz+1][jx  ],
                     nids[jy+1][jz  ][jx  ], nids[jy+1][jz  ][jx+1],
-                    nids[jy+1][jz+1][jx+1], nids[jy+1][jz+1][jx  ]);
+                    nids[jy+1][jz+1][jx+1], nids[jy+1][jz+1][jx  ],
+                    nids[jy  ][jz  ][jx  ], nids[jy  ][jz  ][jx+1],
+                    nids[jy  ][jz+1][jx+1], nids[jy  ][jz+1][jx  ]);
 }
 
 // ─────────────────────────────────────────────────────────────

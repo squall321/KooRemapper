@@ -4438,7 +4438,10 @@ KooRemapper battery <config.yaml>
 > 공기주머니에서만 쓰는 재질(MID 8)을, 적층 `side` 의 SPC 가 짓지 않은 바닥판 세트 3 을, `no_impactor: true` 의 SPC · 처방 운동이 없는 세트 2 ·
 > 3 을, 권취 `core_fill: true` 와 나선 판(전해질 채움 — 2026-11-22 3차 6판에 고쳤다 · 나선 판 48 덱 가운데 36)의 전해질 PART 가
 > `solid_electrode` 일 때만 적는 섹션 33 을 가리켜 LS-DYNA 가 키워드 단계에서 멈췄습니다(battery 는 종료 코드 0). 적층 `side` 는 이제 권취처럼
-> 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는 경계는 쓰는 쪽 몫입니다.
+> 바닥판도 짓고, `no_impactor: true` 면 압입자 · 바닥판 세트를 묶지 않습니다 — 셀을 묶는 경계는 쓰는 쪽 몫입니다. 2026-11-23(3차 7판)부터 권취
+> 바닥판 · PCM 솔리드는 바로 선 차례로 씁니다(전엔 16 + 9 개가 모두 뒤집혀 권취 dent · side 덱마다 `info` 가 「Negative Jacobian elements: 25」
+> 를 냈습니다 — 절점 좌표 · 번호는 그대로), tied 접촉의 Card 3 은 실수꼴로 씁니다(`info` 가 밀려 올라온 Card A 로 의심하던 줄), 탭을 짓지 않는
+> 적층 덱(`no_pcm` · 단독 `swell` · `bare`)은 탭 PART 카드도 셀 파트 세트 칸도 쓰지 않습니다.
 >
 > **`batch.phase_modes` 판의 고정구(2026-11-22 · 사용자 결정)**: 단독 `mode: swell` · `bare` 는 고정구 넷(압입자 · 바닥판 · PCM · 탭)을
 > 다 뺍니다(그대로). `batch.phase_modes` 가 mode 를 정한 판은 그 판의 mode 와 설정에 **적은** `no_fixture` · `no_pcm` · `no_impactor` 로

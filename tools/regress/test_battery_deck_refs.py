@@ -18,6 +18,7 @@
   ★side 덱에 바닥판 PART 가 있고 SPC 가 묶는 절점 세트가 다 덱에 있다
   ★적층 · 권취 no_impactor: true(dent · side) · 권취 core_fill: true(dent) — `info --strict` rc 0 · no_impactor 면 SPC_SET 이 없다
   ★mode: nail → rc 1 · 허용값을 말한다 · 덱 없음
+  ★적층 탭을 짓지 않는 덱(no_pcm · 단독 swell · bare)은 탭 PART 20 · 21 을 PART 카드에도 파트 세트에도 쓰지 않는다(3차 7판)
   ★권취 나선 판(wound.flat: false) dent · swell — `info --strict` rc 0(3차 6판 — 전해질 채움 PART 의 섹션 33 을 쓴다)
 
 usage: test_battery_deck_refs.py <KooRemapper 바이너리>
@@ -82,6 +83,17 @@ def main():
                 bad = [l.strip() for l in qo.splitlines() if "정의되지 않" in l or "미정의" in l and "0건" not in l]
                 check("★%s · no_pcm %s → info --strict rc 0 · 참조 무결성 OK(예전엔 MID 8 · 세트 3 이 없었다)"
                       % (mode, no_pcm), q.returncode == 0 and "참조 무결성 OK" in qo, (q.returncode, bad[:4]))
+                # 탭을 짓지 않는 덱(no_pcm — 단독 swell · bare 는 저절로)은 탭 PART 카드 · 세트 칸도 쓰지 않는다(3차 7판 L-28)
+                pids = {int(bl[1][0:10]) for bl in kw_blocks(ks[0], "*PART") if len(bl) > 1 and bl[1][0:10].strip().isdigit()}
+                in_sets = set()
+                for bl in kw_blocks(ks[0], "*SET_PART_LIST"):
+                    for row in bl[2:]:
+                        in_sets |= {int(row[i:i + 10]) for i in range(0, len(row.rstrip()), 10) if row[i:i + 10].strip().isdigit()}
+                no_tabs = no_pcm == "true" or mode in ("bare", "swell")
+                has = {20, 21} & (pids | in_sets)
+                check("★%s · no_pcm %s → 탭 PART 20 · 21 이 %s(PART 카드 · 파트 세트 — 예전엔 요소 없이도 썼다)"
+                      % (mode, no_pcm, "없다" if no_tabs else "있다"), (not has) if no_tabs else has == {20, 21},
+                      (sorted(has), sorted(pids)[:12]))
                 if mode != "side":
                     continue
                 parts = kw_blocks(ks[0], "*PART")

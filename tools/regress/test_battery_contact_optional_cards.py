@@ -16,6 +16,7 @@
   · 우리 리더(`contact analyze`)도 같은 뜻으로 읽는다 — 「Card B:」 에 PENMAX 가 없고 「Card C: IGNORE=1」
   · 권취 dent 의 압입자 접촉(Card A 만)은 그대로
   · Card A 의 SBOPT 는 정수 칸에 정수 3 으로 쓴다(2026-11-22 · 3차 5판 L-17 — 예전엔 「     3.000」)
+  · tied 접촉 Card 3(실수 칸 여덟)은 실수꼴로 쓰고 info 가 「손상이 의심되는 카드」 를 내지 않는다(2026-11-23 · 3차 7판 L-27)
 
 usage: test_battery_contact_optional_cards.py <KooRemapper 바이너리>
 """
@@ -44,6 +45,21 @@ def contacts(path):
         if l.startswith("*"):
             cur = None
             if l.upper().startswith("*CONTACT_AUTOMATIC"):
+                cur = (l.split()[0].upper(), [])
+                out.append(cur)
+            continue
+        if cur is not None and not l.startswith("$"):
+            cur[1].append(l)
+    return out
+
+
+def tied_contacts(path):
+    """덱의 `*CONTACT_TIED_*` 마다 (키워드, 데이터 줄들[주석 뺌]) — ID · Card 1 · 2 · 3 차례."""
+    out, cur = [], None
+    for l in open(path, encoding="utf-8", errors="replace").read().splitlines():
+        if l.startswith("*"):
+            cur = None
+            if l.upper().startswith("*CONTACT_TIED"):
                 cur = (l.split()[0].upper(), [])
                 out.append(cur)
             continue
@@ -99,6 +115,13 @@ def main():
                   bool(sb) and all(x.strip() == "3" for x in sb), sb)
             check("★%s — Card B 의 PENMAX(1~10열) 0 · Card C 의 IGNORE(11~20열) 1(예전엔 Card B 자리에 IGNORE 1 → PENMAX 1)" % name,
                   ok, got)
+            tied = [ls for kw, ls in tied_contacts(deck)]
+            q = subprocess.run([binary, "info", deck], capture_output=True, text=True, timeout=900, encoding="utf-8", errors="replace")
+            sus = [l.strip() for l in (q.stdout + q.stderr).splitlines() if "손상이 의심" in l or l.strip().startswith("의심 line")]
+            card3 = [ls[3] for ls in tied if len(ls) > 3]
+            check("★%s — tied 접촉 %d 의 Card 3 은 실수꼴(칸마다 소수점) · info 에 「손상이 의심되는 카드」 없음(3차 7판 L-27 — 예전엔 정수꼴로 둘)"
+                  % (name, len(card3)), all(all("." in c[i:i + 10] for i in range(0, 80, 10)) for c in card3) and not sus,
+                  (card3[:1], sus[:2]))
             with open(os.path.join(d, "c.yaml"), "w", encoding="utf-8") as f:
                 f.write("model: %s\noutput: c_out.k\ncontacts:\n  - action: analyze\n" % decks[0])
             p = subprocess.run([binary, "contact", "c.yaml"], cwd=d, capture_output=True, text=True, timeout=900)

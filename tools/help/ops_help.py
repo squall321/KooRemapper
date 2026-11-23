@@ -138,6 +138,8 @@ op("battery", "메시 생성", "배터리 셀(적층·권취) 모델 + 스웰링
           "(stacked) 탭(tabs.pos_x_center · neg_x_center — 기본 17.5 · 52.5 는 폭 70 셀 기준)이 셀과 겹치지 않으면 rc 1",
           "  (2026-11-08 전엔 탭 줄이 격자 밖을 읽어 덱에 없는 절점을 가리키고 rc 0). no_pcm 이면 탭을 짓지 않는다",
           "(stacked) 탭이 셀 끝을 넘으면 셀 안 격자 열로 좁혀 짓고 [WARN] 이 지은 범위를 댄다(2026-11-22 — 전엔 말없이 좁혔다)",
+          "(stacked) 탭을 짓지 않으면(no_pcm · 단독 swell · bare) 탭 PART 카드 · 셀 파트 세트 칸도 쓰지 않는다(2026-11-23 — 전엔 요소 없이 썼다)",
+          "(wound) 바닥판 · PCM 솔리드는 바로 선 차례(2026-11-23 — 전엔 모두 뒤집혀 info 가 Negative Jacobian 25) · tied 접촉 Card 3 은 실수꼴",
           "mode 는 dent(기본) · side · bare · swell 가운데 하나 — 다른 값(batch.phase_modes 도)이면 덱을 쓰지 않고 rc 1(2026-11-22 ·",
           "  못 압입자는 mode: side 에 indenter.type: nail). 전엔 적층은 압입자 없이 없는 세트를 묶고 권취는 움직이지 않는 압입자를 지었다",
           "단독 mode: swell · bare 는 고정구 넷(압입자 · 바닥판 · PCM · 탭)을 다 뺀다. batch.phase_modes 의 swell · bare 판은 압입자 · 바닥판만",

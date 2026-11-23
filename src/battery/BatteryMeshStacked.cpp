@@ -1182,9 +1182,12 @@ public:
 
         // ---- Part sets ----
         psetPouch    = {PID_POUCH_TOP, PID_POUCH_BOTTOM, PID_POUCH_SIDE};
-        psetAllCell  = {PID_POUCH_TOP, PID_POUCH_BOTTOM, PID_POUCH_SIDE,
-                        PID_TAB_POS, PID_TAB_NEG};
+        // ★탭은 noPcm 이면 짓지 않는다 — 그때는 탭 PART 카드도 세트 칸도 쓰지 않는다(2026-11-23 · 3차 7판 L-28 · 예전엔 요소 없는 탭 PART 둘을
+        //   늘 썼다 — 단독 swell · bare 와 no_pcm 덱)
+        psetAllCell  = {PID_POUCH_TOP, PID_POUCH_BOTTOM, PID_POUCH_SIDE};
         if (!cfg.noPcm) {
+            psetAllCell.push_back(PID_TAB_POS);
+            psetAllCell.push_back(PID_TAB_NEG);
             psetAllCell.push_back(PID_PCM_POS);
             psetAllCell.push_back(PID_PCM_NEG);
         }
@@ -1252,9 +1255,9 @@ public:
                 cfg.solidElectrode ? SID_SOLID_ELEC_STACK : SID_SOLID_ELEC,
                 MID_ELYTE_SOLID, HGID_SOLID);   // 공기주머니가 아닌 채움은 Electrolyte_Solid(MAT_ELASTIC · 권취와 같다) — 예전엔
                                                 // 공기주머니일 때만 쓰는 MID 8 을 가리켜 없는 재질이었다(3차 5판 L-07)
-        writePart(out,"Tab_Pos",     PID_TAB_POS,     SID_SHELL_AL,   MID_AL,   HGID_SHELL, ph2?TMID_AL:0);
-        writePart(out,"Tab_Neg",     PID_TAB_NEG,     SID_SHELL_CU,   MID_CU,   HGID_SHELL, ph2?TMID_CU:0);
         if (!cfg.noPcm) {
+            writePart(out,"Tab_Pos",     PID_TAB_POS,     SID_SHELL_AL,   MID_AL,   HGID_SHELL, ph2?TMID_AL:0);
+            writePart(out,"Tab_Neg",     PID_TAB_NEG,     SID_SHELL_CU,   MID_CU,   HGID_SHELL, ph2?TMID_CU:0);
             writePart(out,"PCM_Pos",     PID_PCM_POS,     SID_SOLID_RIGID,MID_RIGID,0);
             writePart(out,"PCM_Neg",     PID_PCM_NEG,     SID_SOLID_RIGID,MID_RIGID,0);
         }
