@@ -257,6 +257,13 @@ def sec_e(binary):
     check("E-5 apply_carryover_plan 산출 302 바이트 · 보고 r.json — rc 1 · 보고 ok false · 임시 파일 없음",
           rc == 1 and isinstance(rep, dict) and rep.get("ok") is False and rep.get("output_written") is False and not tmp_left(d),
           (rc, rep if not isinstance(rep, dict) else rep.get("problems"), out[-300:]))
+    # 보고 자리의 폴더가 없다 — 보고를 임시로 못 써 멈출 때 같은 실패를 거절 보고 다시 쓰기에서 또 찍지 않는다(3차 7판 L-29)
+    d = ep_dir("E_rep_nodir")
+    write(os.path.join(d, "e.yaml"), "model: in.k\noutput: out.k\nparts: [1]\nreport: nodir/r.json\n")
+    rc, out = run(binary, d, "extract-parts", "e.yaml")
+    n = out.count("Cannot write report")
+    check("E-6 extract-parts 보고 자리의 폴더가 없다 — rc 1 · 「Cannot write report」 한 번(예전엔 두 번) · 산출 없음 · 임시 파일 없음",
+          rc == 1 and n == 1 and not os.path.exists(os.path.join(d, "out.k")) and not tmp_left(d), (rc, n, out[-300:]))
 
 
 # ── K 죽은 실행 ──────────────────────────────────────────────────────────────

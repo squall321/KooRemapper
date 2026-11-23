@@ -1629,8 +1629,9 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     };
     // 바꿔 넣는 동안 쥐는 잠금(같은 산출의 동시 실행과 겹치지 않게) — 거절 보고를 쓸 때도 쥔다(아직 안 쥐었으면 그때만)
     std::unique_ptr<KooRemapper::staged_write::CommitLock> commitHeld;
+    bool reportFailed = false;   // 보고를 임시로 못 썼다 — 거절 보고를 다시 써 같은 실패를 두 번 찍지 않는다(3차 7판 L-29)
     auto reportWritable = [&]() {
-        if (o.reportPath.empty() || isDirectory(o.reportPath)) return false;
+        if (reportFailed || o.reportPath.empty() || isDirectory(o.reportPath)) return false;
         using KooRemapper::include_closure::sameFile;
         using KooRemapper::staged_write::physicalTarget;
         const std::string rp = physicalTarget(o.reportPath);   // 매달린 링크면 물리로 따라간 자리(여섯째 검토 S3)
@@ -2124,8 +2125,10 @@ int runExtractParts(const std::string& yamlFile, ConsoleOutput& console) {
     //    다른 실행의 번호 지도와 짝을 이뤘다). 바꿔 넣는 사이에 읽는 쪽이 반쯤 바뀐 묶음을 볼 수는 있다(파일마다만 원자적이다)
     const bool writeReport = reportWritable();
     if (writeReport) {
-        if (!staged.writeText(o.reportPath, reportJson(true, true, rm.on), stageWhy))
+        if (!staged.writeText(o.reportPath, reportJson(true, true, rm.on), stageWhy)) {
+            reportFailed = true;
             return fail("write", "Cannot write report: " + o.reportPath + " (" + stageWhy + ")");
+        }
         stagedNotes();
     }
     commitHeld = std::make_unique<KooRemapper::staged_write::CommitLock>(o.output);
