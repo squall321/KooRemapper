@@ -961,7 +961,7 @@ ale_parts:
 )KRH"}},
      {"KooRemapper generate box box.yaml", "KooRemapper ale ale.yaml"},
      {},
-     {"fsi_pids: [..] 로 구조 파트와 커플링. 폭발은 detonation: {pid, x, y, z, lt}"}},
+     {"fsi_pids: [..] 로 구조 파트와 커플링. 폭발은 detonation: {pid, x, y, z, lt}", "사용자 재질 파일의 *EOS_…_TITLE 은 제목 줄을 그대로 두고 Card 1 의 EOSID 칸을 새 번호로 쓴다(2026-11-23 — 전엔 제목 줄에 썼다)"}},
     {"optimize", "솔버 설정", "재질별(현재 rubber) 전역 컨트롤 카드 최적화", "고무 rubber 최적화", "KooRemapper optimize <config.yaml>",
      {{"box.yaml", R"KRH(output: box.k
 lx: 20.0

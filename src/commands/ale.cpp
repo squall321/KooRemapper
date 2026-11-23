@@ -327,16 +327,31 @@ static std::string ale_customMaterial(const std::string& path, int mid, int eosi
         result = KooRemapper::matids::copyDefinition(blines, first, mid);
         others = static_cast<int>(total) - 1;
     }
-    bool inEos = false, foundEos = false, eosIdDone = false;
+    // ★`*EOS_…_TITLE` 이면 첫 데이터 줄(주석 뺀)은 제목이다 — 그대로 두고 Card 1 의 EOSID 칸을 바꾼다(2026-11-23 · 3차 7판 L-26 · 재질 `_TITLE`
+    //   처리와 같다). 예전엔 제목 줄에 새 EOSID 를 쓰고 Card 1 의 옛 번호를 그대로 두어 PART 가 없는 EOS 를 가리킬 수 있었다(rc 0)
+    bool inEos = false, foundEos = false, eosIdDone = false, eosTitlePending = false;
     for (int i = 0; i < (int)blines.size(); ++i) {
         std::string up = kw_upper(kw_trim(blines[i]));
-        if (KooRemapper::deckscan::isKeywordLine(blines[i])) {   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
+        const bool isKw = KooRemapper::deckscan::isKeywordLine(blines[i]);   // 1열 규칙(리더와 같다 — 들여 쓴 `*` 줄은 데이터 · 3차 6판)
+        if (isKw) {
             inEos = (up.rfind("*EOS_", 0) == 0) && !foundEos;
-            if (inEos) { foundEos = true; eosIdDone = false; }
+            if (inEos) {
+                foundEos = true; eosIdDone = false;
+                eosTitlePending = up.size() >= 6 && up.compare(up.size() - 6, 6, "_TITLE") == 0;
+            }
         }
         if (!inEos) continue;
         std::string line = blines[i];
-        if (line.empty() || line[0] == '*' || line[0] == '$') {
+        if (isKw || (!line.empty() && line[0] == '$')) {
+            result += line + "\n";
+            continue;
+        }
+        if (eosTitlePending) {   // 제목 줄(빈 줄이어도) — 그대로
+            eosTitlePending = false;
+            result += line + "\n";
+            continue;
+        }
+        if (line.empty()) {
             result += line + "\n";
             continue;
         }
