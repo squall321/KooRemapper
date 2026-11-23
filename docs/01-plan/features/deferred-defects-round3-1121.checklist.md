@@ -71,10 +71,11 @@
 ## I. 7판 — 6판에서 재다 나온 목록 밖 줄(11-23 · L-24 ~ L-30)
 - [x] I-0 사용자 답(넷 다 권한 쪽 · 작은 것 넷 다) · 계획 6절 · 6판 올리기 끝(main `f0cc07d` · Drive `dist-20261123-080850Z`) ·
       SP 5753257(`6d17b83`)
-- [ ] I-1 다시 재기 — `*` 자리 수 · 권취 강체 야코비안 · ale EOS `_TITLE` · tied Card 3 · 적층 swell 빈 탭 PART · extract-parts 두 번 찍기 ·
+- [x] I-1 다시 재기 — `*` 자리 수 · 권취 강체 야코비안 · ale EOS `_TITLE` · tied Card 3 · 적층 swell 빈 탭 PART · extract-parts 두 번 찍기 ·
       예제 칸
-- [ ] I-2a L-24 `*` 나머지(op 마다 사례) · 죽은 트림 규칙 함수 지우기
-- [ ] I-2b L-25 권취 강체 절점 차례 · battery 야코비안 부호 시험
-- [ ] I-2c L-26 ale EOS `_TITLE` · L-27 tied Card 3 · L-28 적층 swell 빈 탭 PART · L-29 두 번 찍기 · L-30 예제 two_cubes 칸(결과 덱 다시)
-- [ ] I-3 변이 · 전체 회귀 · 단위 · 백엔드 · 계약
+- [x] I-2a L-24 `*` 나머지(op 마다 사례) · 죽은 트림 규칙 함수 지우기 `723f6f3`(자리 서른여섯 — 맥락 노트 18절)
+- [x] I-2b L-25 권취 강체 절점 차례 · battery 야코비안 부호 시험 `faaca3b`
+- [x] I-2c L-26 ale EOS `_TITLE` · L-27 tied Card 3 · L-28 적층 swell 빈 탭 PART · L-29 두 번 찍기 · L-30 예제 two_cubes 칸(결과 덱 다시)
+- [x] I-3 변이 24 / 66(`*` 살아남은 42 — 사용자 「지금 판으로 올리기」 · 맥락 노트 18절) · 전체 회귀 163 / 163 · 단위 246 · 백엔드 1118 ·
+      계약 13 / 13 · 둘째 쓸기 `cd33152`
 - [ ] I-4 올리기(pykoocae-53 에 빌드 앞 알림 · main · Drive · cae00 §1-14 · 검증런 · 알림 · 기억)
