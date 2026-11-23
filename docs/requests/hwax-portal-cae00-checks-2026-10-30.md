@@ -19,12 +19,20 @@ SSO 켜기는 **이번에 하지 않는다**(§7 — 조건이 안 섰다).
 10-30 판에 든 것 — 반입 속도(raw_decode `288afb7` · sphere 블록 분리 `c7970dc`) · 후처리 예약 `postprocess`(`4ff9a79` → 위임 창구 `e62f601` · rc 3 경고) · 구면 위험도 맵(3D · 허용비 · 상위 N, `f366816`) · 렌더 결과 반입 C-11(`85ba2f0`) · postprocess 의 비운 선택 칸 null 을 없는 칸으로(`07679d7`) · `dev_rev` 를 예약 때 반입 규칙으로(`3574342`) · **변형 뷰어 1단계** — 리포트에 StepForge fe_cad 묶음 붙이기(REST `POST /reports/{id}/cad` · MCP `attach_cad`, `aa63e2a`) · 맵에서 각도를 고르면 「형상 보기」(`d37fcbb`). 그 판의 **마이그레이션 셋**(0015 · 0016 · 0017 — 모두 null 허용 칸 · 유일 제약, 옛 코드에 영향 없음) — 그 뒤 0018 · 0019 · 0020 · 0021 이 더해져
 지금은 0015 ~ 0026 열둘이다(아래 표 · §8). 바이너리는 그 판까지 그대로(`8c7c4f87`)였고 **11-07 판에서 바뀌었고**(`15d013ec` — §1-3) **11-08 판에서 또 바뀌었다**(`c5f74c18` — §1-4). 11-15 판에서는 그대로였고(§1-5) **11-17 판에서 다시 바뀌었다**(`248ec9bc` — §1-6). **11-21 판에서 또 바뀌었다**(`f20d5d5b` — §1-7). **11-21 밤 판에서 다시 바뀌었다**(`d1e2ce96` — §1-8). **11-22 판에서 또 바뀌었다**(`1106bef1` — §1-9). **11-22 낮 판에서 다시 바뀌었다**(`4b8fe975` — §1-10). **11-22 오후 판에서 또 바뀌었다**(`066e21a3` — §1-11).
 
+**어디서 재나(11-24 바로잡음 — cae00 넘김)** — cae00 은 DynaForge 를 운영 노드로 넘겨 띄운다. 이 문서 표들의 `curl -s
+http://127.0.0.1:8700/api/health` 는 **DynaForge API 가 도는 자리**의 health 다 — cae00 에서는 운영 노드의 것을 보고, cae00 박스의 8700 은
+update-all §1b 사전 백업의 되돌림 사본(일부러 멈춰 둔다)이라 그 자리가 아니다(그 사본으로는 늘 「못 봄」 이 된다).
+`platform/mcp_server/smoke.py` 는 세션을 만들고 지우는 쓰기 시험이라 운영에서는 돌리지 않는다 — 대신 읽기 전용으로 둘을 본다. (1) health 본문의
+`revision` · `revision_matches_binary` · `binary_sha256` · `database.ok`(로그인 없이 읽힌다) (2) 게이트웨이 `curl -s --noproxy '*'
+localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp` 의 `tool_count` · `reachable`(그 줄의 description 은 허브 매니페스트 글이라 op
+수가 옛 값일 수 있다 — 허브에 고쳐 달라고 청했다). 옛 절(§1-1 ~ §1-12)의 표도 같은 뜻으로 읽는다.
+
 | 확인 | 명령 | 기대값 |
 |---|---|---|
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`6ac0f7e`) · `revision_matches_binary` true |
+| 판 | 운영 노드의 DynaForge `/api/health`(위 「어디서 재나」) | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`6ac0f7e`) · `revision_matches_binary` true · `binary_sha256` `139036f2…` |
 | 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `6ac0f7e` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. `6ac0f7e` 보다 앞이면 §1-14 의 바이너리(권취 강체 방향 · battery 카드 꼴 · ale EOS 제목 · 들여 쓴 `*` 줄 나머지)가 옛 판이고, `f0cc07d` 보다 앞이면 §1-13 의 바이너리(battery phase_modes · contact.depth · 나선 판 · 들여 쓴 `*` 줄)가 옛 판이고, `4cca82a` 보다 앞이면 §1-12 의 캠페인 분석 · 핫스팟 자리 · 세션 판(REST 열여덟 · MCP 열일곱)이 없고(Drive 판은 §1-11 그대로다), `87632b1` 보다도 앞이면 §1-11 의 보고서용 묶음(REST 넷 · MCP 셋)이 없고(`2cbdc84` 판은 파이썬이 `9614bb8` 과 같다 — §1-10 은 판 · 바이너리 줄로 본다), `9614bb8` 보다도 앞이면 §1-10 의 추출 완전성 · 삭제 허가(REST 셋 · MCP 셋 · 피크 표지)가 없고(`a50bcc3` 판은 파이썬이 `53028a2` 과 같다 — §1-9 는 판 · 바이너리 줄로 본다), `53028a2` 보다도 앞이면 §1-9 의 캠페인 출처 · 건강 판정(REST 넷 · MCP 넷)과 받기 줄의 연결 놓기가 없고(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — §1-8 은 판 · 바이너리 줄로 본다), `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0026 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020 · 0021 · 0022 · 0023 · 0024 · 0025 · 0026). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
-| MCP 도구 | 게이트웨이 tools/list 에서 kooremapper 도구 수, 또는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 97개(`attach_render` · `attach_cad` · `ontology_types` · `ontology_find` · `ontology_object` · `attach_cae_package` · `report_cae` · `find_cae_parts` · `find_cae_load_paths` · `clear_report_unlink` · `create_campaign` · `ingest_campaign_manifest` · `campaign_ingest_status` · `set_campaign_health_thresholds` · `campaign_provenance` · `campaign_health_table` · `report_health` · `set_campaign_required_extractions` · `campaign_deletion_clearance` · `report_extraction` · `build_report_bundle` · `report_bundle` · `report_bundle_diff` · 캠페인 분석 열넷 · `set_campaign_frame_offset` · `campaign_hotspot_sites` · `rename_session_part` 가 새로 있다 — 120개) · `MCP SMOKE: PASS` |
+| MCP 도구 | 게이트웨이 `curl -s --noproxy '*' localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp`(읽기 전용 — 운영에서 smoke.py 는 돌리지 않는다) · 개발 박스에서는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | `tool_count` 120 · `reachable` true(smoke 는 120 · `MCP SMOKE: PASS` — 판마다 늘어난 도구 이름은 그 판의 §1-x 표) |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
 | 형상 보기 | 같은 맵의 상위 표에서 각도 한 줄을 누른다 | 「고른 각도 …」 줄이 생긴다. CAD 묶음을 붙인 리포트면 「형상 보기」 로 glb 가 열리고 파트가 칠해진다(「속 보기」 로 속 파트). 안 붙였으면 붙이는 길(MCP `attach_cad` · REST)이 적힌다 — 운영에서 누가 붙일지는 §9 |
 
@@ -454,6 +462,8 @@ postgres SIF 와 콘솔 묶음은 sha256 이 같다(실측). MCP 도구 100 → 
 | 되돌리기 | §8 | 코드만 `87632b1` 로 — 0025 · 0026 은 null 칸과 새 표라 옛 코드가 그대로 돈다 |
 
 ## 1-13. cae00 — 11-22 밤 반영분(미룬 결함 3차 6판 — battery phase_modes · contact.depth · 권취 나선 판 · 들여 쓴 `*` 줄)
+**지금 판은 §1-14(7판)다** — 이 절 표의 소스 · 판 · 바이너리 값은 6판(`f0cc07d` · `c1a274c4`)을 받았을 때의 것이다. 7판을 받았으면 그 셋은 §1-14
+표로 보고, battery 사슬 줄은 7판에서도 그대로 맞다(11-24 바로잡음 — cae00 넘김).
 **바이너리가 바뀐 판이다**(`c1a274c4ba6eabf0…` · glibc 요구 2.35). Drive 판 `dist-20261123-080850Z`(코드 `f0cc07d`)에서 §1-12 판과 다른 파일은 `BUILD_INFO.txt` · `koorm-bin.tar.gz` · `cli.sif` 셋(api · mcp · nginx · postgres SIF 와 콘솔 묶음은 sha256 이 같다 — 실측) · **마이그레이션 없음** · MCP 도구 120
 그대로. 사용자가 고른 넷(11-22 저녁) 가운데 셋을 지었다 — 열 해석 덱의 없는 TMID 는 고치지 않고 검증런에서 잰다.
 - **battery phase_modes** — `batch.phase_modes` 의 swell · bare 판은 압입자 · 바닥판만 빼고 탭 · PCM 은 둔다(phase 1 의 셀 · 탭 · PCM 절점 ·
@@ -473,11 +483,11 @@ postgres SIF 와 콘솔 묶음은 sha256 이 같다(실측). MCP 도구 100 → 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
 | 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `f0cc07d` 이거나 그 뒤 |
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `f0cc07d` · `revision_matches_binary` true |
+| 판 | 운영 노드의 DynaForge `/api/health`(위 「어디서 재나」) | `revision` `f0cc07d` · `revision_matches_binary` true(6판 — 7판이면 §1-14) |
 | 바이너리 | `sha256sum build/linux/bin/KooRemapper` | `c1a274c4ba6eabf03b8948e6bc72712fe5b7a080870f40d9685ba9b1c47a4a51` |
 | battery 사슬 | `output: bt` · `model_type: wound` · `tier: -1` · `mode: dent` · `use_dynain: true` 에 `batch:` 아래 `phases: [1, 2]` · `phase_modes: [swell, dent]`(두 칸 들여 쓴 블록 꼴)로 `KooRemapper battery` | 덱 둘 · phase 1 에 PART 100 · 101(압입자 · 바닥판) 요소가 없고 2020 · 2021 · 2030(탭 · PCM)은 있다 |
-| MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 120개 · `MCP SMOKE: PASS`(API · MCP 를 재기동한 뒤 — 카탈로그 글이 바뀌었다) |
-| 되돌리기 | §8 | 바이너리 · 코드를 ``dist-20261122-085355Z`(코드 `87632b1` · 바이너리 `066e21a3`)` 로 — 마이그레이션이 없어 DB 는 그대로 |
+| MCP 도구 | 게이트웨이 `curl -s --noproxy '*' localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp`(읽기 전용 — 운영에서 smoke.py 는 돌리지 않는다) | `tool_count` 120 · `reachable` true(API · MCP 를 재기동한 뒤 — 카탈로그 글이 바뀌었다) |
+| 되돌리기 | §8 | 바이너리 · 코드를 `dist-20261122-085355Z`(코드 `87632b1` · 바이너리 `066e21a3`)로 — 마이그레이션이 없어 DB 는 그대로 |
 이 판을 게시하면서 Drive 의 가장 오래된 판 `dist-20261121-234834Z` 가 지워졌다(넷만 남긴다 — 11-22 새벽 · 11-22 낮 · 11-22 오후 · 11-23).
 
 ## 1-14. cae00 — 11-23 반영분(미룬 결함 3차 7판 — 권취 강체 방향 · battery 카드 꼴 · ale EOS 제목 · 들여 쓴 `*` 줄 나머지)
@@ -500,10 +510,10 @@ postgres SIF 와 콘솔 묶음은 sha256 이 같다(실측). MCP 도구 100 → 
 | 확인 | 명령 | 기대값 |
 |---|---|---|
 | 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `6ac0f7e` 이거나 그 뒤 |
-| 판 | `curl -s http://127.0.0.1:8700/api/health` | `revision` `6ac0f7e` · `revision_matches_binary` true |
+| 판 | 운영 노드의 DynaForge `/api/health`(위 「어디서 재나」) | `revision` `6ac0f7e` · `revision_matches_binary` true · `binary_sha256` `139036f2…` |
 | 바이너리 | `sha256sum build/linux/bin/KooRemapper` | `139036f27a554c87443af96af7fe3e4180ae241c0a1e135ca758aa477175aebd` |
 | 권취 강체 | `output: bw` · `model_type: wound` · `tier: -1` · `mode: dent` 로 `KooRemapper battery` 뒤 `KooRemapper info bw_tier-1_phase1.k` | 「Negative Jacobian」 줄이 없다 |
-| MCP 도구 | `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | 120개 · `MCP SMOKE: PASS`(API · MCP 를 재기동한 뒤 — 카탈로그 글이 바뀌었다) |
+| MCP 도구 | 게이트웨이 `curl -s --noproxy '*' localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp`(읽기 전용 — 운영에서 smoke.py 는 돌리지 않는다) | `tool_count` 120 · `reachable` true(API · MCP 를 재기동한 뒤 — 카탈로그 글이 바뀌었다) |
 | 되돌리기 | §8 | 바이너리 · 코드를 `dist-20261123-080850Z`(코드 `f0cc07d` · 바이너리 `c1a274c4`)로 — 마이그레이션이 없어 DB 는 그대로 |
 이 판을 게시하면서 Drive 의 가장 오래된 판 `dist-20261122-042305Z` 가 지워졌다(넷만 남긴다 — 11-22 낮 · 11-22 오후 · 11-23 아침 · 11-23).
 

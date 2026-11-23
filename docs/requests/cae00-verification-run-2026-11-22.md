@@ -7,7 +7,9 @@
 ## 0. 받기
 1. `git pull && update-all` — Drive 판 `dist-20261123-094507Z`(바이너리 `139036f2`)와 코드 `6ac0f7e` 이거나 그 뒤(3차 7판 — §1 의 6 · 7판 줄은 이 판이어야 잰다).
 2. `bash platform/infra/scripts/migrate.sh` — 0021 ~ 0026 가운데 빠진 것이 오른다.
-3. API · MCP 재기동(도는 잡 0 확인 뒤) → `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` 가 도구 120 · PASS.
+3. 운영 노드의 API · MCP 재기동(도는 잡 0 확인 뒤) → 운영 노드 `/api/health` 의 `revision` · `revision_matches_binary` 와 게이트웨이 `curl -s
+   --noproxy '*' localhost:9110/tools-map` 의 `heax-kooremapper_mcp` `tool_count` 120 · `reachable` true(운영에서 smoke.py 는 돌리지 않는다 —
+   쓰기 시험 · cae00 박스의 8700 은 멈춘 되돌림 사본이다).
 
 ## 1. 덱 연산(미룬 결함 3차) — LS-DYNA 로 돌려 볼 것
 | 무엇 | 어떻게 | 볼 것 |
