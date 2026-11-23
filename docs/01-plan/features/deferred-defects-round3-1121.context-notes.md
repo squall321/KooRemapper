@@ -422,13 +422,19 @@
 - **L-23 `*` 꼴(`a4150f6`)** — contact 여섯 · cclip 여섯 · matswap 넷(옛 위치 인자 꼴 msw_*) + 여섯(YAML 꼴은 ModelAssembler::applyMatswap 의
   mw_* 를 쓴다 — 처음엔 matswap.cpp 만 고쳐 시험이 빨갛게 남아 찾았다) · merge 하나 · optimize 넷 · modelmeta 둘 · ale 하나(여섯 밖 · 같은 꼴).
   implicit 의 자리는 원래 줄 1열을 본다(그대로). 시험 `test_indented_star_ops.py` 12 항(고치기 전 판 빨강 11 — 대조 하나만 초록).
-- **목록 밖(이 판에서 재다 나온 것 · 고치지 않음)** — ① 같은 `*` 꼴이 여섯 밖에 남았다 — ModelAssembler 의 다른 연산 약 21 자리 + 앞 공백을
-  지우는 `ModelAssembler::isKeywordLine`(18 곳에서 쓴다) · stabilize 3 · standalone_ops 1 · strip 1(변수 이름으로 센 어림). ② ale 사용자 재질의
-  `*EOS_…_TITLE` 은 제목 줄에 새 EOSID 를 쓰고 진짜 EOSID 줄은 그대로 둔다(rc 0 — 모델에 EOS 가 있어 새 번호가 1 이 아니면 PART 가 없는 EOS 를
-  가리킨다). ③ 적층 단독 swell 덱은 요소 없는 탭 PART 카드 둘(20 · 21)을 쓴다(strict 는 통과). ④ 예제 `examples/matswap/two_cubes.k` 의 재질
-  줄은 10 칸에 안 맞게 써 있다(modelmeta 가 E 9 · rho 7.85 로 읽는다).
+- **목록 밖(이 판에서 재다 나온 것 · 고치지 않음)** — ① 같은 `*` 꼴이 여섯 밖에 남았다 — ModelAssembler 의 다른 연산 약 19 자리(matdb 15 ·
+  elform · update · 점탄성 카드 읽기 · 묶음 셈 하나씩 — 변수가 어디서 왔는지로 센 어림) · stabilize 3 · standalone_ops 1 · strip 1. 앞 공백을
+  지우는 `ModelAssembler::isKeywordLine` 은 정의만 있고 쓰는 곳이 없다(처음에 「18 곳에서 쓴다」 로 잘못 셌다 — `deckscan::isKeywordLine` 을
+  같이 셌다). 세다 matswap mids 꼴의 한 자리를 더 찾아 고쳤다(`70272ed` — 번들 섹션 제목이 `  *…` 면 자료 줄이 키워드 없이 남았다 · rc 0). ② ale
+  사용자 재질의 `*EOS_…_TITLE` 은 제목 줄에 새 EOSID 를 쓰고 진짜 EOSID 줄은 그대로 둔다(rc 0 — 모델에 EOS 가 있어 새 번호가 1 이 아니면 PART 가
+  없는 EOS 를 가리킨다). ③ 적층 단독 swell 덱은 요소 없는 탭 PART 카드 둘(20 · 21)을 쓴다(strict 는 통과). ④ 예제 `examples/matswap/two_cubes.k`
+  의 재질 줄은 10 칸에 안 맞게 써 있다(modelmeta 가 E 9 · rho 7.85 로 읽는다). ⑤ 권취 덱(평평 · 나선 × dent · side 모두)의 바닥판(PID 101 ·
+  솔리드 16)과 PCM(2030 · 9)이 통째로 뒤집혀 있다 — `info` 의 「Negative Jacobian elements: 25」 · 가운데 야코비안 음수(`$S/r3/e6/negjac.py`).
+  적층은 괜찮다. 옛 판이 지은 덱도 같고 둘 다 강체라 솔버가 받는지는 못 쟀다(/data 의 실행은 옛 파이썬 생성기 덱이라 견줄 수 없다). ⑥ battery
+  tied 접촉 Card 3 을 정수꼴로 써 `info` 가 「손상 의심」 둘을 낸다(5판에서 적은 줄 · 그대로).
 - **범위 추세(6판)** — 고른 넷 가운데 셋을 짓고(TMID 는 검증런), 같은 판에 들인 것 둘(기본 mode swell 의 dent 판 고정구 · 나선 판 섹션 33) ·
-  남긴 것 넷(위 줄). `*` 꼴은 「여섯」 을 고르면서 matswap 의 YAML 길이 ModelAssembler 안에 있다는 것이 드러났다.
+  남긴 것 여섯(위 줄 — ⑤ 권취 강체 뒤집힘은 설치 뒤 재다 나왔다 · ⑥ 은 5판에서 넘어온 줄). `*` 꼴은 「여섯」 을 고르면서 matswap 의 YAML 길이
+  ModelAssembler 안에 있다는 것이 드러났다.
 - **변이(6판 · `$S/r3/e6/mut/mutate8.py`)** — 고친 자리 마흔여섯(battery 열여섯 · `*` 꼴 서른)을 하나씩 옛 꼴로. 1차 26 / 46 — 살아남은 스물에
   사례를 더해(`8ee8bc1` — 사용자가 적은 no_impactor · no_pcm · depth 열 자리 · contact 의 *COMMENT 속 `  *SET_…` · create 의 새 CID · cclip 의
   나눠 쓰는 파트 · *COMMENT 속 요소 블록 · matswap 의 나눠 쓰는 모래시계 · 곡선 제목 · swap_all · mids · optimize 의 `  *CONTROL_ENERGY` ·
@@ -453,5 +459,10 @@
   `revision_matches_binary` false — Drive BUILD_INFO 가 옛 판이라 그렇다(게시하면 바뀐다).
 - **스모크 · 백엔드 · cli.sif** — MCP PASS(도구 120 · op 65) · deckops 29 / 29 · allops 64 / 64(건너뜀 1) · reports 59 / 59 · 주 체크아웃 백엔드
   1134 통과 · 실패 0 · cli.sif 00:05Z(안 바이너리 `366a4162`).
+- **다시 설치(00:19Z — matswap mids 한 자리 `70272ed`)** — 설치 뒤 여섯 밖 자리를 세다 applyMatswap 안의 한 자리를 더 찾아 고쳤다. 호환 빌드 rc
+  0 · `c1a274c4ba6eabf03b8948e6bc72712fe5b7a080870f40d9685ba9b1c47a4a51`(9,189,848 바이트 · glibc 2.35) · 호환 단위 246 / 246 · 호환 회귀 160 /
+  160 · matswap 이 드는 회귀 20 / 20(dev) · 도는 잡 0 · 설치 00:19:02Z · API 00:19:08 · MCP 00:19:12(`start.sh` · 바인드 확인) · 스모크 MCP
+  PASS(도구 120 · op 65) · deckops 29 / 29 · allops 64 / 64(건너뜀 1) · reports 59 / 59 · 주 체크아웃 백엔드 1134 통과 · cli.sif 00:25Z(안
+  바이너리 `c1a274c4`). health 는 `revision` `87632b12` · 바이너리 `c1a274c4` · false(Drive 게시 전).
 - **남은 것** — hwaxportal-87 의 cae00 수신 알림 뒤 main push · Drive 게시(`KOORM_DRIVE_RETAIN=4`) · cae00 문서 §1-13(초안
   `$S/r3/e6/doc/cae00_113.md`) · 검증런 안내 「받기」 의 판 이름 · 알림(hwaxportal-87 · pykoocae-53).
