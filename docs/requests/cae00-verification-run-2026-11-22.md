@@ -1,11 +1,11 @@
-# cae00 검증런 안내 — 미룬 결함 3차(1 ~ 6판) · DF 2차(① ~ ⑥) · 2026-11-22
+# cae00 검증런 안내 — 미룬 결함 3차(1 ~ 7판) · DF 2차(① ~ ⑥) · 2026-11-22
 
 **누가 · 어디서** 사용자가 cae00(실사용 서버)에서 돌린다. 이 박스(dev)에서는 합성 사례 · 표본으로만 쟀고, 요청서의 대조 파일과 LS-DYNA(라이선스
-만료)로는 재지 못했다 — 그 대조가 이 검증런의 몫이다. 받는 절차 · 확인 표는 `hwax-portal-cae00-checks-2026-10-30.md` §1-7 ~ §1-13.
+만료)로는 재지 못했다 — 그 대조가 이 검증런의 몫이다. 받는 절차 · 확인 표는 `hwax-portal-cae00-checks-2026-10-30.md` §1-7 ~ §1-14.
 요청서 원문의 과제 이름 · 경로는 이 문서에 옮기지 않는다 — 각 줄의 「요청서 DF-xx 검증 방법」 이 가리키는 파일로 대조한다.
 
 ## 0. 받기
-1. `git pull && update-all` — Drive 판 `dist-20261123-080850Z`(바이너리 `c1a274c4`)와 코드 `f0cc07d` 이거나 그 뒤(3차 6판 — §1 의 6판 줄은 이 판이어야 잰다).
+1. `git pull && update-all` — Drive 판 `dist-20261123-094507Z`(바이너리 `139036f2`)와 코드 `6ac0f7e` 이거나 그 뒤(3차 7판 — §1 의 6 · 7판 줄은 이 판이어야 잰다).
 2. `bash platform/infra/scripts/migrate.sh` — 0021 ~ 0026 가운데 빠진 것이 오른다.
 3. API · MCP 재기동(도는 잡 0 확인 뒤) → `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` 가 도구 120 · PASS.
 
@@ -20,7 +20,9 @@
 | battery phase_modes 사슬(6판) | `use_dynain: true` 에 `batch:` 아래 `phases: [1, 2]` · `phase_modes: [swell, dent]`(블록 꼴)로 적층 · 권취를 짓고 phase 1 을 LS-DYNA 로 돌려 dynain 을 낸 뒤 phase 2 | phase 1 덱에 압입자 · 바닥판이 없고 탭 · PCM 은 있다 · phase 2 가 phase 1 dynain 을 읽어 셀 · 탭 · PCM 이 제자리에서 시작하는가(이 박스는 번호 · 좌표 대조만 했다) |
 | contact.depth(6판) | `contact:` 아래 `depth: 2`(블록 꼴)로 battery 덱 | 자동 접촉 Card A 의 DEPTH 2 · 솔버가 받는가 · 기본 5 와 접촉력 차이 |
 | 권취 나선 판(6판) | `wound:` 아래 `flat: false`(블록 꼴)로 battery 덱 · `info --strict` | rc 0 · LS-DYNA 가 키워드 단계를 넘는가(전엔 전해질 PART 의 섹션 33 이 없어 멈췄다) |
-| 들여 쓴 `*` 제목(6판) | 제목이 `*` 로 시작하는 실물 덱이 있으면 contact · cclip · matswap · merge · optimize · modelmeta 에 | 산출이 제목만 바꾼 대조 덱의 산출과 같다(합성 사례로만 쟀다) |
+| 들여 쓴 `*` 제목(6판) | 제목이 `*` 로 시작하는 실물 덱이 있으면 contact · cclip · matswap · merge · optimize · modelmeta(7판부터 matdb · elform · update · stabilize · ale · rebind · carryover 등)에 | 산출이 제목만 바꾼 대조 덱의 산출과 같다(합성 사례로만 쟀다) |
+| 권취 강체 방향(7판) | 권취 dent · side 기본 설정 battery 덱을 LS-DYNA 로 | 초기화에서 음의 부피 · 음의 질량 없이 넘어가는가(전 판 덱과 바닥판 · PCM 요소 줄 25 개만 다르다 — 바로 선 차례) |
+| ale EOS 제목(7판) | `*EOS_…_TITLE` 인 사용자 재질 파일로 ale | 산출 EOS 의 Card 1 EOSID 가 PART 의 EOSID 와 같고 제목 줄이 그대로 · 솔버가 받는가 |
 
 ## 2. 캠페인(DF ① ~ ③) — 실제 KooChainRun 귀환 목록으로
 | 무엇 | 어떻게 | 볼 것 |
