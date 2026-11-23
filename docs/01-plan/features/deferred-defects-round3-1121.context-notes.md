@@ -437,3 +437,21 @@
   목록이 같은 값을 낸다 · `*SET` 은 attach: cnrb 에서만 쓰인다).
 - **재기(6판)** — dev 판으로 단위 246 / 246 · 작업 트리 백엔드 1118 통과 · 4 실패(`.env` 없는 supervisor_log — 환경 탓) · MCP 계약 13 / 13 ·
   전체 회귀 160 / 160(새 셋 포함).
+
+## 17. 올리기 기록(6판 — 2026-11-22 밤 · dev 설치까지)
+- **두 멈춤** — 설치 멈춤은 pykoocae-53 의 v141 끝 알림(SIF 9b81405b · 안 KooRemapper 066e21a3)으로 풀렸다. main push · Drive 게시는
+  hwaxportal-87 의 cae00 수신 알림까지 멈춘다 — 그래서 이 판은 로컬 main 까지만 앞섰다.
+- **로컬 main** — 주 체크아웃 main 에 다른 세션의 로컬 커밋 `faf758b`(dropline 체크리스트의 판 고정 줄)이 있어 가지에 먼저 합치고(`2b2ff1b`)
+  로컬 main 을 그리로 ff 했다. origin/main 은 `5943fb3` 그대로.
+- **빌드 · 관문** — 호환 빌드(빌더 컨테이너 · -j8 · 프로세스 8 GB 상한) rc 0 · glibc 2.35 ·
+  `366a4162aeeda711f4c036d5bfbf1dfcfe0c12ae28ab1e1db5e94dfd27c1f218`(9,189,848 바이트) · 호환 단위 246 / 246 · 호환 회귀 159 / 160 —
+  `test_staged_write.py` K-1 apply_carryover_plan SIGINT 가 rc 0(시험이 임시 파일을 본 뒤 신호를 보내는 틈에 실행이 끝까지 갔다 · 박스가 바빴다
+  · 이 판이 건드리지 않은 op)이라 그 파일만 다시 3 / 3 통과.
+- **설치 · 재기동** — 도는 잡 0 · 설치 23:56:55Z(`build/linux/bin` · `platform/backend/bin`) · 마이그레이션 할 것 없음 · API 23:57:08. MCP 는
+  처음에 start.sh 경로를 잘못 써(`platform/mcp_server/start.sh`) 멈춘 채가 되어 감독자가 23:58:00 에 되살렸다 — 23:58:24 창에서 멈추고
+  `platform/infra/scripts/start.sh` 로 다시 띄웠다(바인드 `/data/svc/kooremapper` 확인). health 는 `revision` `87632b12` · 바이너리 `366a4162` ·
+  `revision_matches_binary` false — Drive BUILD_INFO 가 옛 판이라 그렇다(게시하면 바뀐다).
+- **스모크 · 백엔드 · cli.sif** — MCP PASS(도구 120 · op 65) · deckops 29 / 29 · allops 64 / 64(건너뜀 1) · reports 59 / 59 · 주 체크아웃 백엔드
+  1134 통과 · 실패 0 · cli.sif 00:05Z(안 바이너리 `366a4162`).
+- **남은 것** — hwaxportal-87 의 cae00 수신 알림 뒤 main push · Drive 게시(`KOORM_DRIVE_RETAIN=4`) · cae00 문서 §1-13(초안
+  `$S/r3/e6/doc/cae00_113.md`) · 검증런 안내 「받기」 의 판 이름 · 알림(hwaxportal-87 · pykoocae-53).
