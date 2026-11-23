@@ -12943,7 +12943,7 @@ bool ModelAssembler::applyMatswap(const MatswapOperation& op, const std::string&
         bool inSection = false;
         for (const auto& c : resolvedCards) {
             std::string up = mw_upper(mw_trim(c));
-            if (!up.empty() && up[0]=='*') inSection = (up.rfind("*SECTION",0)==0);
+            if (deckscan::isKeywordLine(c)) inSection = (up.rfind("*SECTION",0)==0);   // 1열 규칙(들여 쓴 `*` 제목은 그 블록의 데이터 · 3차 6판)
             if (!inSection) filtered.push_back(c);
         }
         resolvedCards = std::move(filtered);

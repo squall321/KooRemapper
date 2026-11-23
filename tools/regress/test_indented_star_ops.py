@@ -189,6 +189,15 @@ def main():
             check("★matswap(%s) — 제목 `  *Cube_2` 인 파트도 고른다(산출이 대조와 같다)" % ("swap_all" if tag == "all" else "mids: [2]"),
                   rc0 == 0 and rc1 == 0 and a is not None and a == b, (rc0, rc1, o1[-300:]))
 
+        # mids 꼴은 번들의 *SECTION 블록을 걸러 낸다(ELFORM 은 모델 그대로) — 번들 섹션 제목이 `  *Rubber_Section` 이어도 그 블록을 통째로
+        yml = "model: two_cubes.k\noutput: r.k\nswaps:\n  - bundle: rubber.k\n    mids: [2]\n"
+        d0, rc0, o0 = run("ms_midsec_plain", {"two_cubes.k": cubes, "rubber.k": rubber, "s.yaml": yml}, ["matswap", "s.yaml"])
+        d1, rc1, o1 = run("ms_midsec_star", {"two_cubes.k": cubes, "rubber.k": sub1(rubber, "\nRubber_Section\n", "\n  *Rubber_Section\n"),
+                                             "s.yaml": yml}, ["matswap", "s.yaml"])
+        a, b = body(read(os.path.join(d0, "r.k"))), body(read(os.path.join(d1, "r.k")))
+        check("★matswap(mids) — 번들 섹션 제목이 `  *Rubber_Section` 이어도 그 *SECTION 블록을 통째로 걸러 낸다(산출이 대조와 같다)",
+              rc0 == 0 and rc1 == 0 and a is not None and a == b, (rc1, [l for l in (b or "").splitlines() if "Rubber_Section" in l or "        13" in l][:3]))
+
         # ── merge ──
         layers, cfg = ex("merge", "three_layer.k"), ex("merge", "merge_test.yaml")
         d0, rc0, o0 = run("mg_plain", {"three_layer.k": layers, "m.yaml": cfg}, ["merge", "m.yaml"])
