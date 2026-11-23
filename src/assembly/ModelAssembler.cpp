@@ -362,7 +362,7 @@ std::map<int, std::string> cur_scanPartVariantIds(const std::vector<std::string>
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
             size_t h = d.find_first_not_of(" \t");
-            if (h != std::string::npos && d[h] == '*') break;
+            if (deckscan::isKeywordLine(d)) break;   // 1열 규칙(3차 7판)
             if (h != std::string::npos && d[h] == '$') continue;
             if (heading) { heading = false; continue; }          // Card 1 제목(비어 있을 수 있다)
             if (form == Form::Composite && first && d.rfind("OPTCARD", 0) == 0) continue;   // 선택 Card 2
@@ -619,7 +619,7 @@ static void ma_definedIdsIn(const std::vector<std::string>& lines, int fam, std:
         for (size_t j = i + 1; j < lines.size(); ++j) {
             const std::string& d = lines[j];
             const size_t h = d.find_first_not_of(" \t");
-            if (h != std::string::npos && d[h] == '*') break;
+            if (deckscan::isKeywordLine(d)) break;   // 1열 규칙(3차 7판)
             if (h != std::string::npos && d[h] == '$') continue;
             const size_t k = pos++;
             if (titled && k % 2 == 0) continue;   // 제목 줄은 비어 있을 수 있다
@@ -1697,7 +1697,7 @@ std::vector<MatCardBlock> matFindDataLines(const std::vector<MatCardLine>& lines
     std::vector<MatCardBlock> out;
     for (size_t i = 0; i < lines.size(); ++i) {
         size_t first = lines[i].text.find_first_not_of(" \t");
-        if (first == std::string::npos || lines[i].text[first] != '*') continue;
+        if (!deckscan::isKeywordLine(lines[i].text)) continue;   // 1열 규칙(3차 7판)
         std::string up = lines[i].text.substr(first);
         for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         if (up.rfind("*MAT", 0) != 0) continue;
@@ -1706,7 +1706,7 @@ std::vector<MatCardBlock> matFindDataLines(const std::vector<MatCardLine>& lines
         for (size_t j = i + 1; j < lines.size(); ++j) {
             size_t f = lines[j].text.find_first_not_of(" \t");
             if (f != std::string::npos && lines[j].text[f] == '$') continue;
-            if (f != std::string::npos && lines[j].text[f] == '*') break;
+            if (deckscan::isKeywordLine(lines[j].text)) break;   // 1열 규칙(3차 7판)
             content.push_back(j);
         }
         while (!content.empty() && isBlank(lines[content.back()].text)) content.pop_back();
@@ -1775,7 +1775,7 @@ MatCardTitleFix matCardFillMissingTitles(const std::string& card, const std::str
     auto lines = matCardSplitLines(card);
     for (const auto& l : lines) {
         size_t f = l.text.find_first_not_of(" \t");
-        if (f == std::string::npos || l.text[f] != '*') continue;
+        if (!deckscan::isKeywordLine(l.text)) continue;   // 1열 규칙(3차 7판)
         std::string up = l.text.substr(f, 4);
         for (auto& c : up) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         if (up == "*MAT") { out.hasMatKeyword = true; break; }
@@ -2133,7 +2133,7 @@ bool ecPlausibleCard1(const std::vector<std::string>& f) {
 bool ecIsData(const std::string& l) {
     size_t g = l.find_first_not_of(" \t");
     if (g == std::string::npos) return false;
-    return l[g] != '$' && l[g] != '*';
+    return l[g] != '$' && !deckscan::isKeywordLine(l);   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
 }
 
 // 연결 카드(Card 2, Card 3 …)를 셀 때만 쓰는 판정 — 빈 줄도 카드 한 장으로 센다.
@@ -2143,7 +2143,7 @@ bool ecIsData(const std::string& l) {
 bool ecIsCardLine(const std::string& l) {
     size_t g = l.find_first_not_of(" \t");
     if (g == std::string::npos) return true;          // 빈 줄 = 비워 둔 카드
-    return l[g] != '$' && l[g] != '*';
+    return l[g] != '$' && !deckscan::isKeywordLine(l);   // 1열 규칙(3차 7판)
 }
 
 // PID → 그 파트 요소의 절점 수(고차 정식일 때만 > 0). *PART 카드 2 의 SECID 를 풀어
@@ -2204,7 +2204,6 @@ void ecWalk(const std::vector<std::string>& rawLines, bool strict, int deckFw, O
     std::vector<size_t> own;
     for (size_t i = 0; i < n; ++i) {
         const std::string& line = rawLines[i];
-        size_t g = line.find_first_not_of(" \t");
         if (deckscan::isKeywordLine(line)) {
             info = parseElementKeyword(line);
             inElem = (info.family != ElemFamily::NONE);
@@ -2233,8 +2232,7 @@ void ecWalk(const std::vector<std::string>& rawLines, bool strict, int deckFw, O
         own.push_back(i);
         size_t j = i + 1;
         while ((int)own.size() < lines && j < n) {
-            size_t h = rawLines[j].find_first_not_of(" \t");
-            if (h != std::string::npos && rawLines[j][h] == '*') break;   // 섹션이 끝났다
+            if (deckscan::isKeywordLine(rawLines[j])) break;   // 섹션이 끝났다(1열 규칙 · 3차 7판)
             if (ecIsCardLine(rawLines[j])) own.push_back(j);              // 빈 줄도 카드다
             ++j;
         }
@@ -2242,8 +2240,7 @@ void ecWalk(const std::vector<std::string>& rawLines, bool strict, int deckFw, O
         // 이어지면 같은 카드로 삼킨다. 옵션·ELFORM 이 아무것도 말해 주지 않을 때만 여기 온다.
         if (info.family == ElemFamily::SOLID && info.optionNodes == 0 && !pidNodes.count(pid)) {
             while (j < n) {
-                size_t h = rawLines[j].find_first_not_of(" \t");
-                if (h != std::string::npos && rawLines[j][h] == '*') break;
+                if (deckscan::isKeywordLine(rawLines[j])) break;
                 if (!ecIsData(rawLines[j])) { ++j; continue; }
                 auto nf = ecFields(rawLines[j], sectionFw, strict);
                 if (ecPlausibleCard1(nf)) break;
@@ -13635,7 +13632,7 @@ static std::vector<int> md_enumerateAllPids(const std::vector<std::string>& line
     for (size_t i = 0; i < lines.size(); ++i) {
         std::string u = mw_upper(mw_trim(lines[i]));
         // *PART, *PART_TITLE: yes. *PART_CONTACT / *PART_COMPOSITE / etc: no.
-        if (u.find("*PART") != 0) continue;
+        if (!deckscan::isKeywordLine(lines[i]) || u.find("*PART") != 0) continue;   // 1열 규칙(3차 7판)
         if (u.find("*PART_CONTACT") == 0) continue;
         if (u.find("*PART_COMPOSITE") == 0) continue;
         if (u.find("*PART_INERTIA") == 0) continue;
@@ -13853,7 +13850,7 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
         std::map<int, std::vector<std::string>> midPartNames;
         for (size_t i = 0; i < rawLines_.size(); ++i) {
             std::string u = mw_upper(mw_trim(rawLines_[i]));
-            if (u.find("*PART") != 0 || u.find("*PART_CONTACT") == 0) continue;
+            if (!deckscan::isKeywordLine(rawLines_[i]) || u.find("*PART") != 0 || u.find("*PART_CONTACT") == 0) continue;   // 1열 규칙(3차 7판)
             bool hasTitle = (u.find("_TITLE") != std::string::npos) || (u == "*PART");
             // *PART always has title line — parse consecutive part entries
             size_t j = i + 1;
@@ -14106,8 +14103,8 @@ bool ModelAssembler::applyMatdb(const MatdbOperation& op, const std::string& con
             // ANSA / etc. mix these freely, and missing one means stale
             // VALDMP values survive into the new model.
             bool isDamp =
-                (up.rfind("*DAMPING_PART_MASS", 0) == 0) ||
-                (up.rfind("*DAMPING_PART_STIFFNESS", 0) == 0);
+                deckscan::isKeywordLine(rawLines_[i]) && ((up.rfind("*DAMPING_PART_MASS", 0) == 0) ||
+                (up.rfind("*DAMPING_PART_STIFFNESS", 0) == 0));   // 1열 규칙(3차 7판)
             if (!isDamp) { ++i; continue; }
             // mark this keyword + all data/comment lines until next *KEYWORD
             int j = i;

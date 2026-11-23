@@ -764,7 +764,6 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
         size_t kwl = 0;
         for (size_t i = 0; i < S.size(); ++i) {
             const std::string& l = S[i];
-            const size_t g = l.find_first_not_of(" \t");
             if (deckscan::isKeywordLine(l)) {
                 in = gridTitleBlock(l);
                 fw = keywordFieldWidth(l, deckFw);
@@ -1268,7 +1267,6 @@ bool ModelAssembler::applyCarryoverPlan(const std::string& planPath, const std::
             std::vector<std::string> auxOnly;
             bool inAux = false;
             for (const auto& l : S) {
-                const size_t g = l.find_first_not_of(" \t");
                 if (deckscan::isKeywordLine(l)) {
                     const AuxElementCard a = auxElementCard(l);
                     // 질량 얹기(`*ELEMENT_MASS_PART(_SET)` — 요소가 아니다 · 걸음이 넘긴다)는 ⑥이 세지 않으니 빼지 않는다(그 PID 는 아래 표가 본다)

@@ -1,3 +1,4 @@
+#include "parser/DeckScan.h"   // isKeywordLine — 리더와 같은 1열 키워드 규칙(3차 7판)
 #include "modal.h"
 #include "parser/OutputGuard.h"   // 쓸 파일이 읽는 파일을 덮는지(2026-11-07)
 #include "parser/DeckWriter.h"
@@ -221,7 +222,7 @@ int runModal(const std::string& yamlFile, ConsoleOutput& console) {
         bool hadImplicit = false;
         for (const auto& ln : lines) {
             std::string up = kw_upper(kw_trim(ln));
-            if (up.rfind("*CONTROL_IMPLICIT_", 0) == 0) { hadImplicit = true; break; }
+            if (KooRemapper::deckscan::isKeywordLine(ln) && up.rfind("*CONTROL_IMPLICIT_", 0) == 0) { hadImplicit = true; break; }
         }
         if (hadImplicit) {
             console.println("[WARNING]  *CONTROL_IMPLICIT_* already exists. Replacing...");

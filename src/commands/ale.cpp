@@ -53,6 +53,7 @@ static std::map<int, AlePartInfo> ale_buildPartMap(
     std::map<int, AlePartInfo> pm;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
         if (up.rfind("*PART", 0) != 0) continue;
         if (up.rfind("*PART_", 0) == 0 && up.find("*PART_TITLE") != 0) continue;
         int j = i + 1;
@@ -80,6 +81,7 @@ static void ale_findMaxIds(const std::vector<std::string>& lines,
     maxMid = 0; maxEosid = 0; maxSecid = 0; maxHgid = 0;
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
         bool isEos  = (up.rfind("*EOS_", 0) == 0);
         bool isSec  = (up.rfind("*SECTION_", 0) == 0);
         bool isHg   = (up.rfind("*HOURGLASS", 0) == 0);
@@ -119,6 +121,7 @@ static int ale_modifySectionElform(std::vector<std::string>& lines,
     int secid, int newElform) {
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
         if (up.rfind("*SECTION_SOLID", 0) != 0) continue;
         bool hasTitle = (up.find("_TITLE") != std::string::npos);
         int j = i + 1;
@@ -145,6 +148,7 @@ static std::string ale_duplicateSection(const std::vector<std::string>& lines,
     int oldSecid, int newSecid, int newElform) {
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
         if (up.rfind("*SECTION_SOLID", 0) != 0) continue;
         bool hasTitle = (up.find("_TITLE") != std::string::npos);
         int j = i + 1;
@@ -175,6 +179,7 @@ static bool ale_updatePartField(std::vector<std::string>& lines,
     int pid, int fieldPos, int newValue) {
     for (int i = 0; i < (int)lines.size(); ++i) {
         std::string up = kw_upper(kw_trim(lines[i]));
+        if (!KooRemapper::deckscan::isKeywordLine(lines[i])) continue;   // 1열 규칙(3차 7판 — 들여 쓴 `*` 줄은 데이터)
         if (up.rfind("*PART", 0) != 0) continue;
         if (up.rfind("*PART_", 0) == 0 && up.find("*PART_TITLE") != 0) continue;
         int j = i + 1;

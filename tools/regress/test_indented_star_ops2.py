@@ -15,7 +15,8 @@
   ★독 — 입력 덱의 맨 앞 `*KEYWORD` 뒤(없으면 맨 앞)에 들여 쓴 키워드 줄과 숫자 줄을 담은 `*COMMENT` 를 끼워도 rc 0 이고 산출에서 그
     블록을 빼면 그대로 판의 산출과 바이트까지 같다(쓴 시각 머리줄만 뺀다)
   ★제목 — `_TITLE` · `*PART` 의 제목 줄을 「  *제목」 으로 바꿔도 rc 0 이고 산출의 그 줄을 되돌리면 그대로 판과 같다
-  ★재질 카드 — assemble restack 의 material_card 글에 「$ … *MAT_024 …」 주석 줄을 더해도 rc 0 · 산출이 같다
+  ★재질 카드 — assemble restack 의 material_card 글에 「$ … *MAT_024 …」 주석 줄을 더해도 · `_TITLE` 제목이 「… *MAT_001 …」 · 「  *…」
+    여도 rc 0 · 산출이 같다(제목만 되돌려)
 
 usage: test_indented_star_ops2.py <KooRemapper 바이너리>
 """
@@ -38,8 +39,12 @@ FAILS, OKS = [], []
 BLOCK = ["*COMMENT",
          "  *KEYWORD LONG=Y",
          "  *INCLUDE +",
+         "  *INCLUDE",
+         "  ghost_include_not_here.k",
          "  *MAT_ELASTIC",
          "        99 7.850E-09  210000.0       0.3",
+         "  *MAT_THERMAL_ISOTROPIC",
+         "        55       0.0         0       0.0       0.0",
          "  *SECTION_SOLID",
          "         1        23",
          "  *SECTION_SHELL",
@@ -51,14 +56,21 @@ BLOCK = ["*COMMENT",
          "        66",
          "         1         2",
          "  *CONTROL_CONTACT",
+         "       0.5       0.0         1         0         1         0         1         0",
          "  *CONTROL_ENERGY",
+         "         1         1         1         1",
          "  *CONTROL_TIMESTEP",
+         "       0.0      0.33         0       0.0  -1.0E-07         0         0         0",
+         "  *CONTROL_IMPLICIT_GENERAL",
+         "         1      0.01",
+         "  *DAMPING_PART_MASS",
+         "         1        11       0.1",
          "  *ELEMENT_SOLID",
          "       999         1         1         2         3         4         5         6         7         8",
          "  *NODE",
          "         2             9.9             9.9             9.9",
          "  *HOURGLASS",
-         "        33",
+         "        33         5       0.1",
          "  *DEFINE_CURVE",
          "        22"]
 BOX = "output: box.k\nlx: 20.0\nly: 10.0\nlz: 2.0\nnx: 10\nny: 5\nnz: 2\nrho: 7.85e-9\nE: 210000.0\nnu: 0.3\nmid: 1\nsecid: 1\npid: 1\npart_title: PLATE\n"
@@ -140,7 +152,7 @@ def strip_block(data):
 def unstar(data, titles):
     text = data.decode("utf-8", errors="replace")
     for t in titles:
-        text = text.replace("  *" + t, t)
+        text = text.replace("  *" + t, t).replace('"*%s"' % t, '"%s"' % t)   # JSON 산출은 앞 공백 없이 「*제목」 을 싣는다
     return text.encode("utf-8")
 
 
@@ -171,6 +183,15 @@ def main():
         with open(noinc, "w") as f:
             f.write("".join(l for l in open(os.path.join(EX, "extract-parts", "part2_include.k"), encoding="utf-8")
                             if not l.upper().startswith("*KEYWORD")))
+        mdb = os.path.join(base, "cubes_mdb.k")   # 감쇠 · 열 재질 카드가 있는 두 큐브(matdb 가 걷어내고 · 가리키는 것을 본다)
+        with open(mdb, "w") as f:
+            f.write(open(cubes, encoding="utf-8").read().replace(
+                "*END", "*MAT_THERMAL_ISOTROPIC_TITLE\nSteel_Thermal\n         1       0.0         0       0.0       0.0\n"
+                        "    0.0006      45.0\n*DAMPING_PART_MASS\n         1        11       0.1\n*END"))
+        ours = os.path.join(base, "ours_title.k")   # rebind 의 세트에 제목을 붙인 판(데이터 줄 판정이 제목을 지나는지)
+        with open(ours, "w") as f:
+            f.write(open(os.path.join(EX, "rebind_entities_after_remesh", "ours.k"), encoding="utf-8").read().replace(
+                "*SET_NODE_LIST\n        50", "*SET_NODE_LIST_TITLE\nA_nodes\n        50"))
         dirs = lambda name: {n: os.path.join(EX, name, n) for n in os.listdir(os.path.join(EX, name))
                              if os.path.isfile(os.path.join(EX, name, n)) and not n.endswith(("_result.k", ".docx", ".md", ".py"))}
         # (이름, 깔 파일, 독 · 제목을 넣을 파일, 명령, 산출, 설정)
@@ -192,12 +213,26 @@ def main():
                                   "    direction: z\n    method: vrh\n"}),
             ("assemble split", {"box.k": box}, ["box.k"], ["assemble", "c.yaml"], ["sp.k"],
              {"c.yaml": "base_model: box.k\noutput: sp\noperations:\n  - type: split\n    pid: 1\n    direction: x\n    divisions: 2\n"}),
-            ("rebind", dirs("rebind_entities_after_remesh"), ["v1.k", "v2.k", "ours.k"], ["rebind_entities_after_remesh", "rebind.yaml"],
-             ["ours_rebound.k"], {}),
+            ("rebind", dict(dirs("rebind_entities_after_remesh"), **{"ours.k": ours}), ["v1.k", "v2.k", "ours.k"],
+             ["rebind_entities_after_remesh", "rebind.yaml"], ["ours_rebound.k"], {}),
             ("apply_carryover_plan", dirs("apply_carryover_plan"), ["deck.k"], ["apply_carryover_plan", "c.yaml"], ["out.k"],
              {"c.yaml": "model: deck.k\nplan: plan.json\noutput: out.k\n"}),
             ("cad_solid_merge_to_deck", dirs("cad_solid_merge_to_deck"), ["deck.k"], ["cad_solid_merge_to_deck", "merge.yaml"],
-             ["merged.k"], {}),
+             ["merged.k"], {}, ["stepforge_fragment.k"]),
+            ("matdb(제목 · thermal · 감쇠)", {"cubes_mdb.k": mdb, "materials/material_db.json": os.path.join(REPO, "materials", "material_db.json")},
+             ["cubes_mdb.k"], ["matdb", "c.yaml"], ["md.k"],
+             {"c.yaml": "model: cubes_mdb.k\noutput: md.k\nmat_type: MAT_ELASTIC\nthermal: true\ndamping_preset: smartphone_drop\n"
+                        "damping_apply_to_all_parts: true\nmaterials:\n  - match_part: \"*Cube_1\"\n    match: \"SUS304\"\n"}),
+            ("assemble elform(제목 있는 섹션)", {"two_cubes.k": cubes}, ["two_cubes.k"], ["assemble", "c.yaml"], ["ae.k"],
+             {"c.yaml": "base_model: two_cubes.k\noutput: ae\noperations:\n  - type: elform\n    target_elform: 2\n"}),
+            ("assemble elform hex 올리기", dirs("elform"), ["simple_hex.k"], ["assemble", "elform_hex_upgrade.yaml"], ["elform_hex_upgraded.k"], {}),
+            ("ale", {"explicit.k": os.path.join(EX, "ale", "explicit.k")}, ["explicit.k"], ["ale", "c.yaml"], ["a.k"],
+             {"c.yaml": "model: explicit.k\noutput: a.k\nale_parts:\n  - pid: 3\n    material: air\n"}),
+            ("modal", {"box.k": box}, ["box.k"], ["modal", "c.yaml"], ["box_modal.k"],
+             {"c.yaml": "model: box.k\noutput: box_modal.k\nnmode: 10\nfmax: 2000.0\n"}),
+            ("modelmeta(인클루드 읽기)", {"assembly.k": os.path.join(EX, "extract-parts", "assembly.k"),
+                                       "part2_include.k": os.path.join(EX, "extract-parts", "part2_include.k")}, ["assembly.k"],
+             ["modelmeta", "c.yaml"], ["mm_modelmeta.json"], {"c.yaml": "model: assembly.k\noutput: mm\n"}),
             ("assemble iga", {"block_2x2x1.k": os.path.join(EX, "iga", "block_2x2x1.k"), "iga_single.yaml": os.path.join(EX, "iga", "iga_single.yaml")},
              ["block_2x2x1.k"], ["assemble", "iga_single.yaml"], ["iga_single_result.k", "iga_single_result_iga_p1.k"], {}),
             ("extract-parts(폭 표지 없는 인클루드)", {"assembly.k": os.path.join(EX, "extract-parts", "assembly.k"), "part2_include.k": noinc},
@@ -223,7 +258,9 @@ def main():
                         f.write(json.dumps(plan, ensure_ascii=False, indent=1))
 
         print("[op 마다 — 독 *COMMENT · 제목 「  *…」 판의 산출이 그대로 판과 같다]")
-        for name, files, targets, argv, outs, cfg in cases:
+        for case in cases:
+            name, files, targets, argv, outs, cfg = case[:6]
+            title_only = case[6] if len(case) > 6 else []
             res, titles = {}, set()
             for variant in ("plain", "poison", "title"):
                 d = os.path.join(top, re.sub(r"\W+", "_", name), variant)
@@ -233,7 +270,7 @@ def main():
                     for t in targets:
                         poison(os.path.join(d, t))
                 elif variant == "title":
-                    for t in targets:
+                    for t in targets + title_only:
                         if t.endswith(".k"):
                             titles |= title_star(os.path.join(d, t))
                     for j in os.listdir(d):   # 제목으로 파트를 가리키는 표(rebind 구간 표)도 리더가 읽을 제목 「*…」 로
@@ -259,13 +296,16 @@ def main():
         # 재질 카드 — YAML material_card 글의 `$` 주석에 「*MAT」 이 있어도 키워드가 아니다(재질 카드 검사기)
         rs = os.path.join(EX, "replace_test")
         res = {}
-        for variant in ("plain", "card"):
+        for variant in ("plain", "card", "titled", "titled_mat", "titled_star"):
             d = os.path.join(top, "restack", variant)
             os.makedirs(d)
             shutil.copy(os.path.join(rs, "restack_base.k"), d)
             y = open(os.path.join(rs, "assemble_restack_test.yaml"), encoding="utf-8").read()
             if variant == "card":
                 y = y.replace("          *MAT_ELASTIC\n", "          *MAT_ELASTIC\n          $ note — a *MAT_024 card also works here\n")
+            elif variant != "plain":
+                title = {"titled": "Steel_card", "titled_mat": "Steel_card *MAT_001 copy", "titled_star": "  *Steel_card"}[variant]
+                y = y.replace("          *MAT_ELASTIC\n", "          *MAT_ELASTIC_TITLE\n          %s\n" % title)
             open(os.path.join(d, "r.yaml"), "w", encoding="utf-8").write(y)
             rc, out = run(binary, d, "assemble", "r.yaml")
             res[variant] = (rc, out, read(os.path.join(d, "restack_result.k")) if os.path.exists(os.path.join(d, "restack_result.k")) else None)
@@ -273,6 +313,13 @@ def main():
         b2 = b.replace(b"$ note \xe2\x80\x94 a *MAT_024 card also works here\n", b"") if b else b
         check("★assemble restack · material_card 의 `$ … *MAT_024 …` 주석 — rc 0 · 산출(주석 줄 뺀)이 그대로 판과 같다",
               rc0 == 0 and rc1 == 0 and a is not None and b2 is not None and undated(b2) == undated(a), (rc0, rc1, out1[-400:]))
+        rcT, outT, t0 = res["titled"]
+        for v, title in (("titled_mat", b"Steel_card *MAT_001 copy"), ("titled_star", b"  *Steel_card")):
+            rcV, outV, tv = res[v]
+            tv2 = tv.replace(title, b"Steel_card") if tv else tv
+            check("★assemble restack · material_card 제목 「%s」 — rc 0 · 산출(제목만 되돌린)이 제목 「Steel_card」 판과 같다(재질 카드 검사기)"
+                  % title.decode().strip(), rcT == 0 and rcV == 0 and t0 is not None and tv2 is not None and undated(tv2) == undated(t0),
+                  (rcT, rcV, outV[-300:]))
     finally:
         shutil.rmtree(top, ignore_errors=True)
     print()
