@@ -13,8 +13,8 @@
 
 ## 1. 받은 꼴(KooSlurm `dashboard/backend_5010/return_manifest.py` 의 `collect_images` · `build`)
 - `images.manifest_node` = `{node, pre: {path, present, size, sha256, version, kooremapper_commit}, post: {path, present, size, sha256,
-  version}}` — 매니페스트를 쓴 노드(드라이버 잡의 노드)에 있는 `/opt/apptainers` 의 SIF. SIF 가 없으면 `{path, present: false}`, apptainer 가
-  없으면 판 글자가 null, 수집이 깨지면 `{node, error}`.
+  version}}` — 매니페스트를 쓴 노드(드라이버 노드, C 면 후처리 잡 노드)에 있는 `/opt/apptainers` 의 SIF. SIF 가 없으면 `{path, present: false}`,
+  apptainer 가 없으면 판 글자가 null, 수집이 깨지면 `{node, error}`.
 - `images.report_node` — 리포트 잡이면 sacct NodeList, 드라이버 · C 가 직접 만들었으면 매니페스트 노드, 그 밖에는 null.
 - `images.report_images` — 리포트 노드가 곁에 쓴 `<kind>_report.images.json`(같은 꼴 · 선택 · 64 KB 이하의 아무 사전). 없으면 null.
 - 고르는 순서(KooSlurm) — ① `report_images.<kind>` 가 있으면 그것 ② 없고 `report_node == manifest_node.node` 면 `manifest_node` ③ 다르면
@@ -27,12 +27,14 @@
   없거나 사전이 아니면 칸째 뺀다(모르는 것을 없다고 하지 않는다).
 - (가) 관측 — 같은 자리에서 `images_observed` 를 셈한다. `post`(리포트를 만든 노드의 후처리 SIF)는 KooSlurm 의 고르는 순서대로 `{from:
   report_images | manifest_node, node, present, size, sha256, version}` 이고, 고를 것이 없으면 `{from: null, node: report_node, why: "리포트
-  노드 출처 없음"}` 이다. `pre`(전처리 SIF)는 리포트 노드와 상관없이 매니페스트 노드 것 `{node, present, size, sha256, version,
-  kooremapper_commit}` 이다(수집이 깨졌으면 `{node, error}`). 둘 다 잡 원장(`external_ref.manifest`)과 리포트 `reservation.manifest`(get_report
-  가 내보낸다)에 남는다.
-- (나) API 셋 옆 — get_job `external.images` 는 `images_observed`(문자열은 같은 `redact`) · system_status `observed_images` 는 `{pre: […], post:
-  […]}` — 최근 90일 7-1 반입 리포트의 `images_observed` 에서 서로 다른 `{sha256, version(, kooremapper_commit)}` · 리포트 수 · 노드 수 · 마지막
-  시각이다. 역할마다 10줄 · 못 세면 None(`postprocess_versions` 와 같은 기간 · 상한).
+  노드 출처 없음"}` 이다. `manifest_node_pre` 는 매니페스트를 쓴 노드(드라이버 노드, C 면 후처리 잡 노드)에 그 시각 깔려 있던 전처리 SIF `{node,
+  present, size, sha256, version, kooremapper_commit}` 이다(수집이 깨졌으면 `{node, error}`) — **배포 상태**이고 전처리가 실제로 쓴 판의 증거가
+  아니다. 전처리는 KooChainRun 의 자식 런 잡들이 여러 노드에서 먼저 돌렸고, 런마다 쓴 판은 런별 provenance.json 이 정본이다(KooSlurm 11-24 —
+  맥락 4절). 그래서 `pre` 라 부르지 않는다. 둘 다 잡 원장(`external_ref.manifest`)과 리포트 `reservation.manifest`(report_summary 가 내보낸다)에
+  남는다.
+- (나) API 셋 옆 — get_job `external.images` 는 `images_observed`(문자열은 같은 `redact`) · system_status `observed_images` 는 `{post: […],
+  manifest_node_pre: […]}` — 최근 90일 7-1 반입 리포트의 `images_observed` 에서 서로 다른 `{sha256, version(, kooremapper_commit)}` · 리포트 수
+  · 노드 수 · 마지막 시각이다. 칸마다 10줄 · 못 세면 None(`postprocess_versions` 와 같은 기간 · 상한).
 - find_reports 항목에는 싣지 않는다 — 목록은 가벼운 칸만 내고, `external_job_key` 로 찾은 리포트를 get_report 로 열면 `reservation.manifest` 에
   다 있다. 목록에도 필요하면 포털이 말한다(알림에 적는다).
 - (다) MCP 설명(get_job · report_summary · system_status) · `TOOLS.md` — 같은 커밋. cae00 점검 문서는 운영에 깔린 판을 적으니 올릴 때(동결 해제
@@ -48,4 +50,5 @@
 
 ## 4. 올리기
 - 가지 `corelink-int` 에 커밋 · push. main · Drive 는 5차 동결 해제 알림 뒤.
-- 알림 — KooSlurm -35(꼴을 받았고 이렇게 읽는다 — pre · post 를 나눈 읽기가 맞는지) · hwaxportal-87(가지 끝 · 칸 이름 · find_reports 는 뺐다).
+- 알림 — KooSlurm -35(꼴을 받았고 이렇게 읽는다 — post 순서는 맞고 pre 는 배포 상태라는 답, 맥락 4절) · hwaxportal-87(가지 끝 · 칸 이름 ·
+  find_reports 는 뺐다 · pre 칸 이름 바꿈).

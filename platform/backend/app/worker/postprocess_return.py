@@ -238,7 +238,10 @@ def _images(raw) -> dict | None:
 def _observed(images: dict, kind: str) -> dict:
     """리포트에 대해 관측된 이미지 — `post` 는 리포트를 만든 노드의 후처리 SIF 를 KooSlurm 의 순서로 고른다
     (① `report_images.<kind>` ② 없고 `report_node` 가 매니페스트 노드면 그 노드 ③ 아니면 「리포트 노드 출처 없음」).
-    `pre` 는 드라이버 잡이 돈 매니페스트 노드의 전처리 SIF 다 — 리포트 노드와 상관없다."""
+
+    `manifest_node_pre` 는 매니페스트를 쓴 노드(드라이버 노드, C 면 후처리 잡 노드)에 그 시각 깔려 있던 전처리 SIF —
+    **배포 상태**다. 전처리는 KooChainRun 의 자식 런 잡들이 여러 노드에서 매니페스트보다 먼저 돌렸으므로 그것이 실제로
+    쓴 판의 증거가 아니다(런마다 쓴 판은 런별 provenance.json 이 정본 — KooSlurm 11-24). 그래서 `pre` 라 부르지 않는다."""
     node = images.get("manifest_node") or {}
     side = (images.get("report_images") or {}).get(kind)
     if side is not None:
@@ -253,7 +256,7 @@ def _observed(images: dict, kind: str) -> dict:
     else:
         out["post"] = _observed_role(block, "post", source)
     if node:
-        out["pre"] = _observed_role(node, "pre", None)
+        out["manifest_node_pre"] = _observed_role(node, "pre", None)
     return out
 
 
