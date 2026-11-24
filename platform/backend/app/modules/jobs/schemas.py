@@ -34,7 +34,8 @@ def external_summary(kind: str | None, ref: dict | None) -> dict | None:
     외부 잡이 아니면 None.
 
     `images` — 7-1 매니페스트가 이미지 출처를 실어 왔을 때만 있다(⑥, 2026-11-24). 반입이 고른 관측
-    `{post: {from, node, present, size, sha256, version} | {from: null, node, why}, pre?: {node, …, kooremapper_commit}}`.
+    `{post: {from, node, present, size, sha256, version} | {from: null, node, why}, manifest_node_pre?: {node, …,
+    kooremapper_commit}}` — `manifest_node_pre` 는 매니페스트 노드의 배포 상태다(전처리가 쓴 판의 증거가 아니다).
     """
     if not kind:
         return None

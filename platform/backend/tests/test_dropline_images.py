@@ -74,28 +74,30 @@ def _digest(images) -> dict:
 
 # ── (가) 원장 · 관측 ─────────────────────────────────────────────
 
-def test_a_driver_on_the_same_node_observes_its_own_post_and_pre():
+def test_a_driver_on_the_same_node_observes_its_own_post_and_the_deployed_pre():
     d = _digest(A)
     assert d["images"] == A, "아는 칸은 받은 그대로 옮긴다"
     assert d["images_observed"] == {
         "post": {"from": "manifest_node", "node": "cn-a01", "present": True, "size": 4, "sha256": POST_SHA,
                  "version": "226eca7"},
-        "pre": {"node": "cn-a01", "present": True, "size": 9, "sha256": PRE_SHA, "version": "v137",
-                "kooremapper_commit": COMMIT}}
+        "manifest_node_pre": {"node": "cn-a01", "present": True, "size": 9, "sha256": PRE_SHA, "version": "v137",
+                              "kooremapper_commit": COMMIT}}
 
 
 def test_without_a_report_node_the_post_has_no_source_and_a_missing_pre_stays_unknown():
     obs = _digest(B)["images_observed"]
     assert obs["post"] == {"from": None, "node": None, "why": pr.NO_REPORT_NODE}, "매니페스트 노드 것을 리포트 것으로 짐작하지 않는다"
-    assert obs["pre"] == {"node": "cn-a01", "present": False, "size": None, "sha256": None, "version": None,
-                          "kooremapper_commit": None}
+    assert obs["manifest_node_pre"] == {"node": "cn-a01", "present": False, "size": None, "sha256": None, "version": None,
+                                        "kooremapper_commit": None}
 
 
 def test_a_report_jobs_sidecar_wins_over_the_manifest_node():
     obs = _digest(C)["images_observed"]
     assert obs["post"] == {"from": "report_images", "node": "cn-b07", "present": True, "size": None,
                            "sha256": "ab" * 32, "version": "226eca7"}
-    assert obs["pre"]["node"] == "cn-a01" and obs["pre"]["present"] is False, "전처리는 드라이버 노드 것이다"
+    pre = obs["manifest_node_pre"]
+    assert pre["node"] == "cn-a01" and pre["present"] is False, "pre 는 매니페스트 노드의 배포 상태다 — 곁 파일 노드와 묶지 않는다"
+    assert "pre" not in obs, "전처리가 쓴 판으로 읽히는 이름을 쓰지 않는다(KooSlurm 11-24)"
 
 
 def test_another_report_node_without_a_sidecar_has_no_source():
@@ -108,7 +110,7 @@ def test_a_collection_failure_is_kept_as_its_error():
     d = _digest({"manifest_node": {"node": "cn-a01", "error": err}, "report_node": "cn-a01", "report_images": None})
     assert d["images"]["manifest_node"] == {"node": "cn-a01", "error": err}
     assert d["images_observed"] == {"post": {"from": "manifest_node", "node": "cn-a01", "error": err},
-                                    "pre": {"node": "cn-a01", "error": err}}
+                                    "manifest_node_pre": {"node": "cn-a01", "error": err}}
 
 
 @pytest.mark.parametrize("images", [A, B, C, C2])
@@ -173,7 +175,7 @@ def test_get_job_carries_the_observed_images_redacted_like_the_rest():
     digest = _digest({"manifest_node": {"node": "cn-a01", "error": err}, "report_node": "cn-a01"})
     ext = JobRead.model_validate(_job(external_ref={"cluster_state": "COMPLETED", "manifest": digest})).model_dump()["external"]
     assert ext["images"]["post"]["from"] == "manifest_node"
-    for e in (ext["images"]["post"]["error"], ext["images"]["pre"]["error"]):
+    for e in (ext["images"]["post"]["error"], ext["images"]["manifest_node_pre"]["error"]):
         assert str(Path.home()) not in e and "<home>" in e and "<email>" in e
     ext = JobRead.model_validate(_job(external_ref={"manifest": _digest(A)})).model_dump()["external"]
     assert ext["images"] == _digest(A)["images_observed"]
@@ -229,7 +231,7 @@ async def test_system_status_counts_observed_images_from_recent_7_1_reports(db):
         await report(tagged(A), keyed=False)                  # 7-1 이 아니다 — 세지 않는다
         await report({"manifest": pr._digest(_manifest(), "sphere")})   # 이미지 칸이 없다 — 세지 않는다
         got = await _observed_images(db)
-        pre = [r for r in got["pre"] if r["version"] == f"p{tag}"]
+        pre = [r for r in got["manifest_node_pre"] if r["version"] == f"p{tag}"]
         post = {r["version"]: r for r in got["post"] if (r["version"] or "").endswith(tag)}
         assert pre == [{"sha256": PRE_SHA, "version": f"p{tag}", "kooremapper_commit": COMMIT, "n": 3, "nodes": 2,
                         "last_at": pre[0]["last_at"]}], pre
@@ -237,7 +239,8 @@ async def test_system_status_counts_observed_images_from_recent_7_1_reports(db):
         assert (post[f"q{tag}"]["sha256"], post[f"q{tag}"]["n"], post[f"q{tag}"]["nodes"]) == (POST_SHA, 3, 2)
         assert (post[f"r{tag}"]["sha256"], post[f"r{tag}"]["n"], post[f"r{tag}"]["nodes"]) == ("ab" * 32, 1, 1)
         assert all(r["last_at"] for r in pre + list(post.values()))
-        assert len(got["pre"]) <= 10 and len(got["post"]) <= 10
+        assert set(got) == {"post", "manifest_node_pre"}
+        assert len(got["manifest_node_pre"]) <= 10 and len(got["post"]) <= 10
     finally:
         await db.execute(delete(ImpactReport).where(ImpactReport.user_id == u.id))
         await db.execute(delete(Session).where(Session.id == s.id))

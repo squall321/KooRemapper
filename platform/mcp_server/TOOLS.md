@@ -38,7 +38,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `run_operation` | session_id, operation, args | POST /sessions/{id}/jobs | 오퍼레이션 실행(비동기 Job) → job_id |
-| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그. 외부 잡(stcx · 후처리 예약)이면 `external` 요약 — `{kind, cluster_state, ontology: {state, why?}}`(가린 꼴 · 원본 external_ref 는 안 나간다) · 매니페스트가 이미지 출처를 실어 왔으면 `images`(관측된 post · pre SIF) |
+| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그. 외부 잡(stcx · 후처리 예약)이면 `external` 요약 — `{kind, cluster_state, ontology: {state, why?}}`(가린 꼴 · 원본 external_ref 는 안 나간다) · 매니페스트가 이미지 출처를 실어 왔으면 `images`(리포트를 만든 노드의 post SIF · 매니페스트 노드에 깔려 있던 pre SIF — 배포 상태) |
 | `list_session_jobs` | session_id | GET /sessions/{id}/jobs | 세션의 Job 이력 |
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
@@ -205,7 +205,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |
-| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 7-1 반입 리포트가 실어 온 후처리 판 — name(tool) · adapter · version · 수 · 마지막 시각) + `observed_images`(같은 기간 매니페스트가 관측한 SIF — 역할 pre · post 마다 sha256 · version · 수 · 노드 수 · 마지막 시각) |
+| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 7-1 반입 리포트가 실어 온 후처리 판 — name(tool) · adapter · version · 수 · 마지막 시각) + `observed_images`(같은 기간 매니페스트가 관측한 SIF — post · manifest_node_pre(배포 상태) 칸마다 sha256 · version · 수 · 노드 수 · 마지막 시각) |
 | `system_capabilities` | — | GET /system/capabilities | 기능 카탈로그 + 웹/MCP 패리티 + 연결 힌트 |
 
 > 표준 워크플로: `create_session` → `upload_*` → `describe_operation` → `run_operation`

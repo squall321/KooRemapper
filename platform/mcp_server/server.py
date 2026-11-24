@@ -235,9 +235,10 @@ async def system_status(ctx: Context) -> dict:
     """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수) + `postprocess_versions` — 최근 90일 **7-1 반입** 리포트가 실어 온
     후처리 판([{name(producer.tool), adapter, version, n, last_at}] — 어댑터가 다르면 다른 줄, 빈 판은 안 센다, 글은 한 줄 80자).
     stcx 에 닿지 않고도 운영에서 어느 후처리 판이 도는지 본다(None = 못 셌다, [] = 그 기간에 7-1 반입 리포트가 없다).
-    `observed_images` — 같은 기간 7-1 반입 리포트의 매니페스트가 관측한 SIF(역할마다 10줄) `{pre: [{sha256, version,
-    kooremapper_commit, n, nodes, last_at}], post: [{sha256, version, n, nodes, last_at}]}` — post 는 리포트를 만든 노드,
-    pre 는 드라이버 잡 노드의 것이다. 같은 역할에 sha256 이 여럿이면 노드마다 SIF 사본이 다르다(None = 못 셌다).
+    `observed_images` — 같은 기간 7-1 반입 리포트의 매니페스트가 관측한 SIF(칸마다 10줄) `{post: [{sha256, version, n,
+    nodes, last_at}], manifest_node_pre: [{sha256, version, kooremapper_commit, n, nodes, last_at}]}` — post 는 리포트를
+    만든 노드의 후처리 SIF, manifest_node_pre 는 매니페스트를 쓴 노드에 깔려 있던 전처리 SIF(배포 상태 — 전처리가 실제로
+    쓴 판의 증거가 아니다). 같은 칸에 sha256 이 여럿이면 노드마다 SIF 사본이 다르다(None = 못 셌다).
     / Platform health + worker queue."""
     return await _get(ctx, "/system/status")
 
@@ -387,8 +388,9 @@ async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict
     외부 잡(stcx 제출 · 후처리 예약)이면 `external` 에 요약이 온다 — `{kind, cluster_state, ontology: {state, why?}}`
     (경로·토큰은 가린 꼴). 반입된 리포트는 `find_reports(external_job_key='stcx:<Slurm 잡 id>')` 로 찾는다.
     매니페스트가 이미지 출처를 실어 온 후처리 예약이면 `external.images` 도 온다 — `post`(리포트를 만든 노드의 후처리 SIF
-    `{from, node, present, size, sha256, version}` · 리포트 노드를 모르면 `{from: null, node, why}`) · `pre`(드라이버 잡 노드의
-    전처리 SIF `{node, present, size, sha256, version, kooremapper_commit}`). 없으면 칸이 없다(모르는 것 ≠ 없음).
+    `{from, node, present, size, sha256, version}` · 리포트 노드를 모르면 `{from: null, node, why}`) · `manifest_node_pre`
+    (매니페스트를 쓴 노드에 깔려 있던 전처리 SIF `{node, present, size, sha256, version, kooremapper_commit}` — 배포 상태이고
+    전처리가 실제로 쓴 판의 증거가 아니다). 없으면 칸이 없다(모르는 것 ≠ 없음).
     `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는 경고 등이다
     (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
     job = await _get(ctx, f"/jobs/{_seg(job_id)}")
