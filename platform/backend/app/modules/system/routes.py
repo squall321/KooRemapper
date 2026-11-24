@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import MCP_PUBLIC_URL_ENV, settings
@@ -18,6 +18,7 @@ from app.shared.features import ontology_state
 from app.modules.campaigns.services import STATES as CAMPAIGN_STATES
 from app.modules.users.routes import mcp_add_command, mcp_public_url
 from app.shared.responses import ok
+from app.shared.text import one_line
 
 router = APIRouter(tags=["system"])
 
@@ -58,13 +59,8 @@ POSTPROCESS_TEXT_MAX = 80
 
 
 def _one_line(v, cap: int = POSTPROCESS_TEXT_MAX) -> str | None:
-    """찍히는 글자 한 줄 · 상한 — 줄바꿈 · 제어 문자는 빈칸으로 접는다. 비면 None."""
-    if v is None:
-        return None
-    # 훑기 전에 먼저 자른다 — 긴 글 전체를 글자마다 훑지 않게(11-15 검토). 빈칸 접기로 줄어들 몫을 넉넉히 둔다.
-    raw = str(v)[: cap * 4]
-    s = " ".join("".join(ch if ch.isprintable() else " " for ch in raw).split())
-    return s[:cap] or None
+    """찍히는 글자 한 줄 · 상한 — 줄바꿈 · 제어 문자는 빈칸으로 접는다. 비면 None(`app.shared.text.one_line`)."""
+    return one_line(v, cap)
 
 
 async def _postprocess_versions(db: AsyncSession) -> list[dict]:
@@ -108,6 +104,41 @@ async def _postprocess_versions(db: AsyncSession) -> list[dict]:
              "last_at": m["last"].isoformat() if m["last"] else None} for m in out[:POSTPROCESS_VERSION_MAX]]
 
 
+async def _observed_images(db: AsyncSession) -> dict:
+    """최근 7-1 반입 리포트가 관측한 이미지(⑥, 2026-11-24) — 역할(pre · post)마다 서로 다른 {sha256, version(,
+    kooremapper_commit)} · 리포트 수 · 노드 수 · 마지막 시각. 기간 · 줄 수는 `postprocess_versions` 와 같다.
+
+    반입(`postprocess_return._digest`)이 고른 `reservation.manifest.images_observed` 를 센다 — `post` 는 리포트를 만든 노드의
+    후처리 SIF, `pre` 는 드라이버 잡 노드의 전처리 SIF 다. SIF 가 없던(present 가 true 가 아닌) 관측 · sha256 과 판을 둘 다
+    모르는 관측은 세지 않는다. sha256 · 커밋은 반입이 hex 만 남기고 판 · 노드는 한 줄 80자로 접어 두어 접은 뒤 합칠 일이
+    없다 — 그래도 남이 지은 글이라 낼 때 한 번 더 접는다.
+    """
+    from datetime import datetime, timedelta, timezone
+    since = datetime.now(timezone.utc) - timedelta(days=POSTPROCESS_VERSION_DAYS)
+    head = POSTPROCESS_TEXT_MAX * 4
+    last = func.max(ImpactReport.created_at)
+    out: dict[str, list[dict]] = {}
+    for role in ("pre", "post"):
+        obs = ImpactReport.reservation["manifest"]["images_observed"][role]
+        sha = func.substr(obs["sha256"].astext, 1, 64)
+        ver = func.substr(obs["version"].astext, 1, head)
+        node = func.substr(obs["node"].astext, 1, head)
+        keys = [sha, ver] + ([func.substr(obs["kooremapper_commit"].astext, 1, 40)] if role == "pre" else [])
+        rows = (await db.execute(
+            select(*keys, func.count(), func.count(func.distinct(node)), last)
+            .where(ImpactReport.external_job_key.is_not(None), ImpactReport.created_at >= since,
+                   obs["present"].astext == "true", or_(sha.is_not(None), ver.is_not(None)))
+            .group_by(*keys).order_by(last.desc()).limit(POSTPROCESS_VERSION_MAX))).all()
+        out[role] = []
+        for row in rows:
+            n, nodes, t = row[-3:]
+            line = {"sha256": _one_line(row[0], 64), "version": _one_line(row[1])}
+            if role == "pre":
+                line["kooremapper_commit"] = _one_line(row[2], 40)
+            out[role].append({**line, "n": n, "nodes": nodes, "last_at": t.isoformat() if t else None})
+    return out
+
+
 @router.get("/system/status")
 async def system_status(request: Request, _user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     _mcp_url = mcp_public_url(request)
@@ -123,6 +154,10 @@ async def system_status(request: Request, _user: User = Depends(get_current_user
         pp_versions = await _postprocess_versions(db) if db_ok else None
     except Exception:          # 덧붙인 칸이 상태 응답 전체를 깨지 않게 — 못 셌다는 것은 None 으로 말한다
         pp_versions = None
+    try:
+        observed_images = await _observed_images(db) if db_ok else None
+    except Exception:          # 같은 까닭 — 못 셌으면 None
+        observed_images = None
     return ok({
         "version": APP_VERSION,
         "env": settings.app_env,
@@ -145,6 +180,7 @@ async def system_status(request: Request, _user: User = Depends(get_current_user
         # 최근 리포트가 실어 온 후처리 판 — None 이면 못 셌다, [] 이면 그 기간에 꾸러미 실린 리포트가 없다
         "postprocess_versions": pp_versions,
         "postprocess_versions_window_days": POSTPROCESS_VERSION_DAYS,
+        "observed_images": observed_images,
     })
 
 

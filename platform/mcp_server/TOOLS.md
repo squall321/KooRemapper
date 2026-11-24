@@ -38,7 +38,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `run_operation` | session_id, operation, args | POST /sessions/{id}/jobs | 오퍼레이션 실행(비동기 Job) → job_id |
-| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그. 외부 잡(stcx · 후처리 예약)이면 `external` 요약 — `{kind, cluster_state, ontology: {state, why?}}`(가린 꼴 · 원본 external_ref 는 안 나간다) |
+| `get_job` | job_id, include_logs? | GET /jobs/{id} (+/logs) | Job 상태/exit_code/산출, 옵션으로 로그. 외부 잡(stcx · 후처리 예약)이면 `external` 요약 — `{kind, cluster_state, ontology: {state, why?}}`(가린 꼴 · 원본 external_ref 는 안 나간다) · 매니페스트가 이미지 출처를 실어 왔으면 `images`(관측된 post · pre SIF) |
 | `list_session_jobs` | session_id | GET /sessions/{id}/jobs | 세션의 Job 이력 |
 | `cancel_job` | job_id | POST /jobs/{id}/cancel | 대기/실행 중 Job 취소 |
 | `get_job_outputs` | job_id | GET /jobs/{id}/outputs | Job이 만든 산출 파일 목록 |
@@ -81,7 +81,7 @@ SmartTwin 파이프라인이 만든 deep(단건 심층)·sphere(전각도 낙하
 | `attach_report_scenario` | report_id, scenario_content | POST /reports/{id}/scenario | 시뮬 조건 scenario.json 첨부 — 요약 캐시 + K파일 자동매칭 |
 | `attach_render` | report_id, path(결과 폴더 또는 zip) | POST /reports/{id}/renders | SceneForge 렌더 결과(C-11)를 리포트 미디어에 **더한다** — render_id 멱등 · sha256 · 크기 전부 맞아야(전부 아니면 전무) · 실패한 렌더는 기록만 · 소유자만 |
 | `attach_cad` | report_id, path(fe_cad 묶음 폴더 또는 zip) | POST /reports/{id}/cad | StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 리포트 하나에 하나 · 같은 묶음 멱등 · 다른 열쇠면 갈아 끼움 · sha256 · 크기 · 열쇠 · 가중치 배열 · glb 정점 · 파트 겹침 전부 맞아야(전부 아니면 전무) · 소유자만. 붙이면 맵에서 「형상 보기」 |
-| `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 |
+| `report_summary` | report_id | GET /reports/{id} | kind·과제메타·scenario·sim_params·parts·findings·전역 최악·검색축 · 7-1 반입이면 `reservation`(예약 원장 · 매니페스트 요약 · 이미지 출처) |
 | `report_worst_cases` | report_id, metric?, top_n? | GET /reports/{id}/cases | 최악 케이스 랭킹(sphere=방향, impact=위치, deep=단건) |
 | `report_part_risk` | report_id, part_id? | GET /reports/{id}/parts | 파트별 최악값·발생 케이스·최소 안전율 |
 | `report_case` | report_id, case_key | GET /reports/{id}/cases/{key} | 한 케이스 상세(파트별 메트릭) |
@@ -205,7 +205,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `whoami` | — | GET /me | 현재 토큰의 사용자 정보 |
-| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 7-1 반입 리포트가 실어 온 후처리 판 — name(tool) · adapter · version · 수 · 마지막 시각) |
+| `system_status` | — | GET /system/status | 플랫폼 헬스(api/db/worker/gmsh/op수) + `postprocess_versions`(최근 90일 7-1 반입 리포트가 실어 온 후처리 판 — name(tool) · adapter · version · 수 · 마지막 시각) + `observed_images`(같은 기간 매니페스트가 관측한 SIF — 역할 pre · post 마다 sha256 · version · 수 · 노드 수 · 마지막 시각) |
 | `system_capabilities` | — | GET /system/capabilities | 기능 카탈로그 + 웹/MCP 패리티 + 연결 힌트 |
 
 > 표준 워크플로: `create_session` → `upload_*` → `describe_operation` → `run_operation`

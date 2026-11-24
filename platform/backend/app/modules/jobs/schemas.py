@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field, field_serializer
 
-from app.shared.diagnostics import redact
+from app.shared.diagnostics import _redact_deep, redact
 
 
 class JobCreate(BaseModel):
@@ -29,9 +29,12 @@ class JobCreate(BaseModel):
 def external_summary(kind: str | None, ref: dict | None) -> dict | None:
     """외부 잡(stcx · 후처리 예약)의 요약 — 원본 `external_ref` 대신 응답에 싣는다(2026-11-12, 포털 낙하 파이프라인 (a)).
 
-    가이드 §4 · §5-1 이 보라는 두 칸(`cluster_state` · `ontology.state`)만 낸다. 원본에는 결과 폴더 경로 · 레지스트리 id ·
+    가이드 §4 · §5-1 이 보라는 두 칸(`cluster_state` · `ontology.state`)과 아래 `images` 만 낸다. 원본에는 결과 폴더 경로 · 레지스트리 id ·
     업로드 id 가 있어 그대로 내보내지 않고, 문자열은 진단 번들과 **같은** `redact`(경로 접기 · 이메일 · 토큰)를 거친다.
     외부 잡이 아니면 None.
+
+    `images` — 7-1 매니페스트가 이미지 출처를 실어 왔을 때만 있다(⑥, 2026-11-24). 반입이 고른 관측
+    `{post: {from, node, present, size, sha256, version} | {from: null, node, why}, pre?: {node, …, kooremapper_commit}}`.
     """
     if not kind:
         return None
@@ -45,6 +48,9 @@ def external_summary(kind: str | None, ref: dict | None) -> dict | None:
         out["ontology"] = {"state": r(onto.get("state"))}
         if onto.get("why"):
             out["ontology"]["why"] = r(onto.get("why"))
+    manifest = ref.get("manifest") if isinstance(ref.get("manifest"), dict) else {}
+    if isinstance(manifest.get("images_observed"), dict):
+        out["images"] = _redact_deep(manifest["images_observed"])
     return out
 
 

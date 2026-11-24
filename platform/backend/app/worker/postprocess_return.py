@@ -20,6 +20,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from itertools import islice
 from pathlib import PurePosixPath
 
 from sqlalchemy import select
@@ -33,6 +34,7 @@ from app.modules.reports.bridges import short_error
 from app.reports.onto_package import OntoPackageError
 from app.runner.kooslurm_client import MANIFEST_PATH, SSO_PATH, KooSlurmClient, mint_user_token
 from app.runner.stcx_client import STATES_BAD, STATES_OK
+from app.shared.text import one_line
 from app.worker.runner_loop import _POLL_BATCH, _next_poll_delay
 
 logger = logging.getLogger("koorm.worker")
@@ -57,6 +59,16 @@ _TERMINAL = STATES_OK | STATES_BAD
 # 같은 꼴이다(만료 2분 전까지, 만료를 안 주면 10분).
 _TOKEN_TTL_S = 600
 _TOKENS: dict[str, tuple[str, float, str | None]] = {}
+
+# 귀환 매니페스트의 이미지 출처(⑥, 계획 docs/01-plan/features/dropline-images-1124.plan.md). 남이 쓴 칸이고 리포트 노드의
+# 곁 파일은 아무 사전이라(KooSlurm `_report_images` — 64 KB 이하) 아는 칸만 꼴을 보고 옮긴다. 판정 · `ok` 에는 닿지 않는다.
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_COMMIT = re.compile(r"[0-9a-f]{7,40}")
+_IMAGE_KIND = re.compile(r"[a-z][a-z0-9_]{0,31}")
+IMAGE_TEXT_MAX = 80        # 노드 · 판 글자
+IMAGE_LONG_MAX = 160       # SIF 경로 · 수집 실패 글
+IMAGE_KINDS_MAX = 4        # 곁 파일 종류(sphere · impact …)
+NO_REPORT_NODE = "리포트 노드 출처 없음"
 
 
 def _missing_config() -> list[str]:
@@ -177,16 +189,98 @@ def judge(manifest: dict, *, sim_type: str) -> dict:
     return {"ok": True, "entry": entry, "kind": kind, "warnings": warnings}
 
 
-def _digest(manifest: dict) -> dict:
-    """매니페스트에서 원장에 남길 것만 — 판정을 다시 짚을 때 필요한 칸."""
+def _match(v, pattern: re.Pattern) -> str | None:
+    return v if isinstance(v, str) and pattern.fullmatch(v) else None   # `$` 는 끝 줄바꿈 앞에서도 맞는다
+
+
+def _sif(v, *, pre: bool) -> dict | None:
+    """SIF 한 개의 출처 — 아는 칸만 꼴을 보고 옮긴다. 꼴이 틀린 값은 null(지어내지 않는다)."""
+    if not isinstance(v, dict):
+        return None
+    out = {"path": one_line(v.get("path"), IMAGE_LONG_MAX),
+           "present": v["present"] if isinstance(v.get("present"), bool) else None,
+           "size": v["size"] if type(v.get("size")) is int and v["size"] >= 0 else None,
+           "sha256": _match(v.get("sha256"), _SHA256),
+           "version": one_line(v.get("version"), IMAGE_TEXT_MAX)}
+    if pre:
+        out["kooremapper_commit"] = _match(v.get("kooremapper_commit"), _COMMIT)
+    return out
+
+
+def _node_images(v) -> dict | None:
+    """한 노드의 이미지 출처 `{node, pre?, post?, error?}` — 받은 칸만 둔다(곁 파일은 post 만 실을 수 있다)."""
+    if not isinstance(v, dict):
+        return None
+    out = {"node": one_line(v.get("node"), IMAGE_TEXT_MAX)}
+    for role in ("pre", "post"):
+        if role in v:
+            out[role] = _sif(v[role], pre=role == "pre")
+    if "error" in v:
+        out["error"] = one_line(v.get("error"), IMAGE_LONG_MAX)
+    return out
+
+
+def _images(raw) -> dict | None:
+    """매니페스트 `images` 를 상한 안의 원장 꼴로. 사전이 아니면 None — 칸째 뺀다(모르는 것을 없다고 하지 않는다)."""
+    if not isinstance(raw, dict):
+        return None
+    side = raw.get("report_images")
+    kinds = {}
+    if isinstance(side, dict):
+        picked = ((k, v) for k, v in side.items()
+                  if isinstance(k, str) and _IMAGE_KIND.fullmatch(k) and isinstance(v, dict))
+        kinds = {k: _node_images(v) for k, v in islice(picked, IMAGE_KINDS_MAX)}
+    return {"manifest_node": _node_images(raw.get("manifest_node")),
+            "report_node": one_line(raw.get("report_node"), IMAGE_TEXT_MAX),
+            "report_images": kinds or None}
+
+
+def _observed(images: dict, kind: str) -> dict:
+    """리포트에 대해 관측된 이미지 — `post` 는 리포트를 만든 노드의 후처리 SIF 를 KooSlurm 의 순서로 고른다
+    (① `report_images.<kind>` ② 없고 `report_node` 가 매니페스트 노드면 그 노드 ③ 아니면 「리포트 노드 출처 없음」).
+    `pre` 는 드라이버 잡이 돈 매니페스트 노드의 전처리 SIF 다 — 리포트 노드와 상관없다."""
+    node = images.get("manifest_node") or {}
+    side = (images.get("report_images") or {}).get(kind)
+    if side is not None:
+        source, block = "report_images", side
+    elif images.get("report_node") and images["report_node"] == node.get("node"):
+        source, block = "manifest_node", node
+    else:
+        source, block = None, None
+    out: dict = {}
+    if block is None:
+        out["post"] = {"from": None, "node": images.get("report_node"), "why": NO_REPORT_NODE}
+    else:
+        out["post"] = _observed_role(block, "post", source)
+    if node:
+        out["pre"] = _observed_role(node, "pre", None)
+    return out
+
+
+def _observed_role(block: dict, role: str, source: str | None) -> dict:
+    out = {"from": source} if role == "post" else {}
+    out["node"] = block.get("node")
+    out.update({k: v for k, v in (block.get(role) or {}).items() if k != "path"})
+    if block.get("error"):
+        out["error"] = block["error"]
+    return out
+
+
+def _digest(manifest: dict, kind: str) -> dict:
+    """매니페스트에서 원장에 남길 것만 — 판정을 다시 짚을 때 필요한 칸. 이미지 출처는 실려 왔을 때만(⑥)."""
     job = manifest.get("job") if isinstance(manifest.get("job"), dict) else {}
     pp = manifest.get("postprocess") if isinstance(manifest.get("postprocess"), dict) else {}
-    return {"written_at": manifest.get("written_at"), "stage": manifest.get("stage"),
-            "driver_rc": manifest.get("driver_rc"), "ok": manifest.get("ok"),
-            "slurm_job_id": job.get("slurm_job_id"), "job_name": job.get("job_name"),
-            "web_user": job.get("web_user"), "result_dir": job.get("result_dir"),
-            "postprocess_by": pp.get("by"), "postprocess_rc": pp.get("rc"),
-            "postprocess_job_id": pp.get("postprocess_job_id")}
+    out = {"written_at": manifest.get("written_at"), "stage": manifest.get("stage"),
+           "driver_rc": manifest.get("driver_rc"), "ok": manifest.get("ok"),
+           "slurm_job_id": job.get("slurm_job_id"), "job_name": job.get("job_name"),
+           "web_user": job.get("web_user"), "result_dir": job.get("result_dir"),
+           "postprocess_by": pp.get("by"), "postprocess_rc": pp.get("rc"),
+           "postprocess_job_id": pp.get("postprocess_job_id")}
+    images = _images(manifest.get("images"))
+    if images is not None:
+        out["images"] = images
+        out["images_observed"] = _observed(images, kind)
+    return out
 
 
 async def start(db, job: Job, now: datetime | None = None) -> None:
@@ -348,7 +442,7 @@ async def _step(db, job: Job, ref: dict, client: KooSlurmClient, now: datetime, 
         return
 
     manifest = got["manifest"]
-    ref["manifest"] = _digest(manifest)
+    ref["manifest"] = _digest(manifest, REPORT_KIND[ref["sim_type"]])
     verdict = judge(manifest, sim_type=ref["sim_type"])
     if not verdict["ok"]:
         job.external_ref = ref
