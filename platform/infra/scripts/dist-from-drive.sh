@@ -52,9 +52,27 @@ if [ "$_have_bin" = "0" ]; then
 fi
 echo "→ source: $SRC"
 
-# 같은 내용이면 손대지 않는다 — 살아 있는 apptainer 인스턴스 밑의 SIF 를 덮어쓰면 squashfs 가 깨지고, cp 는 mtime 을 리셋해 포털 update-all 의
-# 재기동 판정(지문: 이름·크기·mtime)이 매번 달라진다. 영구 캐시(rclone 이 안 바뀐 파일을 건너뛴다)와 짝이다. HWAXPortal docs/update-all-skip-unchanged.
-_install_if_changed() { if [ -f "$2" ] && cmp -s "$1" "$2"; then echo "  · $(basename "$2") 같음 — 그대로"; return 0; fi; cp -p "$1" "$2" || { echo "  ✗ $(basename "$2") 설치 실패 — $2 에 쓸 수 없다(권한·소유자·디스크). 옛 파일이 그대로다" >&2; return 2; }; }
+# 같은 내용이면 손대지 않는다 — cp 는 mtime 을 리셋해 포털 update-all 의 재기동 판정(지문: 이름·크기·mtime)이 매번 달라진다. 영구
+# 캐시(rclone 이 안 바뀐 파일을 건너뛴다)와 짝이다. HWAXPortal docs/update-all-skip-unchanged.
+# 다른 내용도 **제자리에 덮어쓰지 않는다**(R-04, 2026-11-25 — 포털 11874eb9 와 같은 꼴). 포털 deploy-all 은 이 반입을 stop 보다 먼저
+# 부르는데, cp -p 는 대상을 열어 덮으므로 그 SIF 로 도는 인스턴스 밑에서 squashfs 가 바뀐다. 대상 옆 임시 파일에 cp -p 로 받고 이름을
+# 바꾸면 도는 인스턴스는 옛 inode 를 쥔 채 돌고 다음 기동이 새 파일을 연다. 대상이 심링크면 링크는 두고 가리키는 파일을 바꾼다.
+# 쓸 수 없는 대상(권한·다른 소유자)은 종전처럼 실패(rc 2)다 — 이름 바꾸기는 디렉터리 권한만 보므로 먼저 본다.
+# (바이너리 · 화면 묶음의 `tar -x` 는 그대로 둔다 — GNU tar 는 먼저 지우고 새로 만든다, 실측.)
+_install_if_changed() {
+  if [ -f "$2" ] && cmp -s "$1" "$2"; then echo "  · $(basename "$2") 같음 — 그대로"; return 0; fi
+  local real tmp=""
+  real="$(readlink -f -- "$2" 2>/dev/null)" || real=""
+  [ -n "$real" ] || real="$2"
+  if { [ ! -e "$real" ] || [ -w "$real" ]; } \
+     && tmp="$(mktemp "$(dirname -- "$real")/.$(basename -- "$real").XXXXXX" 2>/dev/null)" \
+     && cp -p "$1" "$tmp" && mv -fT "$tmp" "$real"; then
+    return 0
+  fi
+  [ -n "$tmp" ] && rm -f "$tmp"
+  echo "  ✗ $(basename "$2") 설치 실패 — $2 에 쓸 수 없다(권한·소유자·디스크). 옛 파일이 그대로다" >&2
+  return 2
+}
 # 영구 캐시 — 임시 디렉터리면 rclone 이 비교할 것이 없어 매번 전량 전송이다. 캐시에 받으면 안 바뀐 파일은 전송 0.
 STAGE="${KOORM_DRIVE_CACHE:-platform/infra/apptainer/.drive-cache}"; mkdir -p "$STAGE"
 rclone sync --progress "$SRC/" "$STAGE/"    # sync — 원격에서 뺀 파일이 캐시에 남지 않게

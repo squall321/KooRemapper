@@ -402,7 +402,8 @@ def test_restart_api_only_stops_when_it_cannot_tell(tmp_path):
     (root / "platform" / "infra" / "apptainer" / "api.sif").write_text("")
     log = tmp_path / "s.log"
     appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
-    _run_script(root, scripts, "restart-api-only.sh", appt, STUB_LOG=str(log))
+    _run_script(root, scripts, "restart-api-only.sh", appt, STUB_LOG=str(log),
+                KOORM_STOP_WAIT_S="1")   # stop 뒤 사라지기를 기다린다(R-04) — 모름은 끝내 사라지지 않으니 상한을 짧게
     assert "instance stop koorm_api" in log.read_text(encoding="utf-8"), "모른다고 stop 을 건너뛰었다"
 
 
@@ -429,7 +430,7 @@ def test_stop_does_not_report_false_success_when_it_cannot_tell(tmp_path):
     root, scripts = _script_tree(tmp_path, "stop.sh")
     log = tmp_path / "s.log"
     appt = _stub(tmp_path / "apptainer", _LIST_FAILS)
-    r = _run_script(root, scripts, "stop.sh", appt, STUB_LOG=str(log))
+    r = _run_script(root, scripts, "stop.sh", appt, STUB_LOG=str(log), KOORM_STOP_WAIT_S="1")
     assert "not running" not in r.stdout, f"모르는 것을 '안 돌고 있다'고 단정했다 — {r.stdout!r}"
     assert "instance stop" in log.read_text(encoding="utf-8"), "모르는데 stop 도 안 해 봤다"
 

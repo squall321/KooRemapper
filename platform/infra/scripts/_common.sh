@@ -166,3 +166,20 @@ instance_absent_for_sure() {
   instance_running "$1"; rc=$?
   [ "$rc" -eq 1 ]
 }
+
+# stop 을 보낸 인스턴스가 **정말 사라질 때까지** 기다린다 — 0 사라졌다 · 1 상한을 넘겼다(아직 있거나 모른다).
+#
+# `instance stop` 이 돌아와도 인스턴스가 목록에서 바로 빠지지 않을 수 있다. 예전엔 기다리지 않고(stop.sh) 1초만 쉬고(restart-api-only.sh)
+# 다음 걸음으로 넘어가, 내려가는 중인 인스턴스를 start 가 `already running` 으로 보거나 `already exists` 로 실패했다(10-28 52분 멈춤 — 포털
+# 요청 R-04, 2026-11-25). 모름(목록 조회 실패)도 사라졌다고 보지 않는다 — `instance_absent_for_sure` 의 규율 그대로다.
+# 상한은 KOORM_STOP_WAIT_S(초, 기본 60).
+wait_instance_gone() {
+  local limit="${KOORM_STOP_WAIT_S:-60}" start=$SECONDS   # 횟수가 아니라 시각으로 잰다 — 모름은 조회마다 0.5초를 더 쉰다
+  while ! instance_absent_for_sure "$1"; do
+    if [ $((SECONDS - start)) -ge "$limit" ]; then
+      echo "✗ $1 이 stop 뒤 ${limit}초 안에 사라지지 않았다(아직 있거나 목록을 못 읽는다) — 다음 걸음으로 넘어가지 않는다" >&2
+      return 1
+    fi
+    sleep 1
+  done
+}

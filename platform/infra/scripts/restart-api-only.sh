@@ -10,10 +10,11 @@ require_apptainer
 # ⚠ 감독자가 API 를 되살리는 **유일한 경로**다. 모름을 "없음" 으로 읽어 stop 을 건너뛰면 곧바로
 # `instance koorm_api already exists` 로 실패한다 — 09-18 의 실패 62회가 그것이다.
 # stop 은 없는 인스턴스에 대해 무해하므로(이미 `|| true`), 모를 때는 시도하는 쪽으로 기운다.
+# 내려가는 중인 인스턴스 위에 start 를 걸지 않는다 — 정말 사라질 때까지 기다리고, 상한을 넘기면 띄우지 않고 rc 1(R-04).
 if ! instance_absent_for_sure "$INST_API"; then
   echo "→ stop $INST_API"
   "$APPTAINER" instance stop "$INST_API" || true
-  sleep 1
+  wait_instance_gone "$INST_API" || exit 1
 fi
 
 KOORM_SPA_DIST=""
