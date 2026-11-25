@@ -75,3 +75,11 @@
   dev 인스턴스에 돌리는 시험이라 작업 트리에서 억지로 돌리지 않는다(예시 .env 로 돌리면 dev API 를 작업 트리 코드로 재기동할 수 있다) — 올릴 때
   주 체크아웃에서 8 ~ 30 초 창에 돌린다. 바꾼 갈래(postgres 무응답)는 가짜 apptainer 시험(`test_supervisor_pg_liveness`)이 잰다. MCP 계약 13 /
   13.
+
+## 7. C-1 운영 반영(2026-11-25)
+- smarttwinmcp-c8 — job_status `runs: true` 가 운영(:5013)에 반영됐다(KooSlurm main `e5cb6f41` · 반영 기록 `0b46313f` — 리포 로컬 참조로 확인 ·
+  smarttwin-mcp 11-25 02:50 UTC 재시작 · 실제 MCP 클라이언트로 스키마 통과 확인).
+- ★부르는 꼴 — job_status 는 직접 도구라 MCP inputSchema 가 일반 `args` 객체 하나다. `runs` 는 그 `args` 안에 넣는다(게이트웨이를 거쳐도 같다).
+  KR-19 결과 회수를 지을 때 이 꼴로 부른다.
+- 읽는 법(우리가 적어 보낸 것과 그쪽 뜻이 같다고 답함) — status 는 KooChainRun 값 그대로 · d3plot null 은 「아직 없음 · 못 찾음」 · 재시도
+  각도는 마지막 Run 만 · 각도 DOE 가 아니면 `runs: []` + `runs_note`.
