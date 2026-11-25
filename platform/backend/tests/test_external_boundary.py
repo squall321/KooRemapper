@@ -121,7 +121,11 @@ def test_submodule_is_pinned_and_declared() -> None:
     #   StepForge main 은 38950d0(v0.4.89 · 그쪽 3404c449)이라 알렸다(11-20).
     #   11-23 3196156 → 5753257(v0.4.99 · ls-remote 로 main 끝 확인) — 동기화의 참조(ADR 0089) · 검토함 시간 상한(ADR 0073). 키트 2026-11-06
     #   그대로 · coreapi · ontology 는 diff 0 — 받는 쪽에 닿는 것이 없다. StepForge main 은 3196156(560ec255)이라 알렸다(11-23).
+    #   11-25 5753257 → a6feab5(v0.4.105 · fetch 로 main 끝 확인) — 정의 관리(키 · slug 변경 · 다른 타입으로 옮기기 · 정의 제안 · 정의 점검 ·
+    #   원천 삭제 표식, ADR 0090 ~ 0096) · 포털 뒤 MCP 주소. 키트 2026-11-06 그대로 · coreapi diff 0 · ontology 는 새 길 · 새 응답 꼴만 더했고
+    #   정의 가져오기(importer.py)는 diff 0 — 받는 쪽에 닿는 것이 없다. StepForge 가 먼저 같은 커밋으로 올렸다(그쪽 main d7be049c — 서브모듈
+    #   가리킴 a6feab5 확인).
     #   StepForge 도 10-31 같은 커밋으로 올렸다(그쪽 525be5c — 확인함). 올릴 때마다 서로 알린다(리포 CLAUDE.md).
     status = subprocess.run(["git", "-C", str(ROOT), "submodule", "status"],
                             capture_output=True, text=True, check=True).stdout
-    assert "5753257ee87ac0a1d6a20c9ff5dce807926a6ba4" in status, status
+    assert "a6feab568f2ac611b00f2daa88e2601f5fbd4193" in status, status
