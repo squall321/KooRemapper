@@ -47,7 +47,7 @@ async def lifespan(app: FastAPI):
         )
     from app.worker.runner_loop import start_worker, stop_worker
 
-    # git 으로 들어온 등록 레시피(platform/recipes/*)를 DB 에 없으면 넣는다 — 배포 없이 다른 박스에서도 뜬다.
+    # git 으로 들어온 씨앗(platform/recipes/*)과 데이터 뿌리에 내보낸 등록 레시피를 DB 에 없으면 넣는다 — 배포 없이 다른 박스에서도 뜬다.
     # 실패해도 기동은 막지 않는다(표가 아직 없거나 DB 가 늦게 뜰 수 있다).
     try:
         from app.database import SessionLocal
@@ -56,7 +56,8 @@ async def lifespan(app: FastAPI):
         async with SessionLocal() as _db:
             n = await recipe_svc.load_exported(_db)
         if n:
-            logger.info("loaded %d recipe version(s) from %s", n, settings.recipe_export_path)
+            logger.info("loaded %d recipe version(s) from %s · %s", n, settings.recipe_seed_path,
+                        settings.recipe_export_path)
     except Exception:  # noqa: BLE001
         logger.warning("recipe export load skipped", exc_info=True)
 

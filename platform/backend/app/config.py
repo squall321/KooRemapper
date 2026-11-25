@@ -6,6 +6,7 @@ infra/.env (rendered into the api instance by start.sh).
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -103,8 +104,10 @@ class Settings(BaseSettings):
     recipe_selftest_concurrency: int = 2       # API 안에서 동시에 도는 자기 시험 수
     recipe_result_cap_kb: int = 256            # DB 에 담는 결과 상한(넘으면 앞부분 + 산출 파일)
     recipe_stdout_cap_kb: int = 32             # 실행 기록에 담는 stdout 꼬리 상한
-    # 등록된 레시피를 파일로 내보내는 자리(기동 때 여기서 읽어 들인다). 상대값이면 platform/ 기준.
-    recipe_export_dir: str = "recipes"
+    # 등록된 레시피를 파일로 내보내는 자리(기동 때 리포 씨앗 platform/recipes 와 함께 읽어 들인다). 비우면 데이터 뿌리 아래 —
+    # `recipe_export_path`. 상대값이면 platform/ 기준. ★리포의 추적 폴더(platform/recipes)에 쓰지 않는다 — 추적 밖 새 폴더를
+    # 포털 update 의 `git stash -u` 가 쓸어 갔다(포털 요청 R-09 · 사용자 「데이터 뿌리 아래로」, 2026-11-25).
+    recipe_export_dir: str = ""
 
     # --- stcx(356대 클러스터) 전각도 낙하 — 게이트웨이 MCP 경유 ---
     # **파일을 나른다.** cae00 `/data` 와 stcx `/data` 는 다른 저장소다 — 같은 경로를 보지
@@ -203,9 +206,22 @@ class Settings(BaseSettings):
 
     @property
     def recipe_export_path(self) -> Path:
-        """등록된 레시피를 파일로 내보내는 절대 경로. 상대값이면 platform/ 기준으로 푼다."""
-        p = Path(self.recipe_export_dir)
-        return p if p.is_absolute() else (_PLATFORM_ROOT / p)
+        """등록된 레시피를 파일로 내보내는 절대 경로. 적었으면 그것(상대값이면 platform/ 기준), 비우면 데이터 뿌리
+        `<HWAX_DATA_ROOT|/data>/svc/kooremapper/recipes`(storage 와 같은 부모 — 기동 스크립트가 그 폴더를 컨테이너에 바인드한다).
+        그 자리가 없는 박스는 `platform/infra/data/recipes`(postgres 데이터와 같은 git 밖 자리)."""
+        if self.recipe_export_dir:
+            p = Path(self.recipe_export_dir)
+            return p if p.is_absolute() else (_PLATFORM_ROOT / p)
+        root = Path(os.environ.get("HWAX_DATA_ROOT") or "/data")
+        if not root.is_absolute():
+            root = Path("/data")          # 기동 스크립트와 같은 규칙(start.sh — 상대값이면 /data)
+        svc = root / "svc" / "kooremapper"
+        return svc / "recipes" if svc.is_dir() else _PLATFORM_ROOT / "infra" / "data" / "recipes"
+
+    @property
+    def recipe_seed_path(self) -> Path:
+        """리포에 추적되는 씨앗 레시피(platform/recipes) — 기동 때 내보낸 것과 함께 읽는다. 여기에는 쓰지 않는다."""
+        return _PLATFORM_ROOT / "recipes"
 
     def model_post_init(self, _ctx) -> None:
         # In production, refuse to run with the dev placeholder secrets.

@@ -3,7 +3,8 @@
 
 A recipe accumulates without rebuilds: an LLM proposes a Python function, the
 sandbox self-tests it, a real run gathers evidence, and if a positive evaluation
-lands, the automatic gate registers it and exports it to git.
+lands, the automatic gate registers it and exports it to the data root (git is a
+human step — copy into platform/recipes/ and commit).
 """
 from __future__ import annotations
 
@@ -501,7 +502,8 @@ async def register(db: AsyncSession, user, *, name: str, version: int | None) ->
     return {
         "name": name, "version": v.version, "status": "registered",
         "superseded": prev_v, "exported": exported,
-        "message": "등록했다. git 반영은 tools/recipes_publish.sh 로(서버는 커밋·푸시하지 않는다).",
+        "message": "등록했다. 파일은 데이터 뿌리에 내보냈다 — git 반영은 사람이 그 폴더를 platform/recipes/ 로 옮겨 커밋한다"
+                   "(서버는 커밋·푸시하지 않는다).",
     }
 
 
@@ -518,12 +520,21 @@ async def deprecate(db: AsyncSession, user, *, name: str, reason: str) -> dict:
     return {"name": name, "deprecated": True, "reason": r.deprecated_reason}
 
 
-# ── 기동 때 git 에서 읽어 들이기 ──────────────────────────────────────
+# ── 기동 때 리포 씨앗 · 데이터 뿌리에서 읽어 들이기 ──────────────────────────
+def _load_roots() -> list:
+    """씨앗(platform/recipes, git) 먼저, 그다음 내보낸 자리(데이터 뿌리) — 같은 폴더면 한 번(R-09, 2026-11-25)."""
+    roots = []
+    for p in (settings.recipe_seed_path, settings.recipe_export_path):
+        if all(p.resolve() != q.resolve() for q in roots):
+            roots.append(p)
+    return roots
+
+
 async def load_exported(db: AsyncSession) -> int:
-    """platform/recipes/*/ 의 등록 판을 DB 에 없으면 넣는다(origin=git). 넣은 수 반환."""
+    """리포 씨앗(platform/recipes/*/)과 데이터 뿌리에 내보낸 등록 판을 DB 에 없으면 넣는다(origin=git). 넣은 수 반환."""
     from datetime import datetime, timezone
     added = 0
-    for doc in registry.iter_exported():
+    for doc in [d for root in _load_roots() for d in registry.iter_exported(root)]:
         name, version, code = doc["name"], int(doc["version"]), doc["code"]
         sha = registry.sha256_text(code)
         r = await get_recipe(db, name)

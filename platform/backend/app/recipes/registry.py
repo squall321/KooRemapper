@@ -1,14 +1,17 @@
-# 등록된 레시피를 파일로 내보내고(platform/recipes/<이름>/) 기동 때 다시 읽어 들이는 자리.
-"""Export registered recipe versions to ``platform/recipes/<name>/`` and load them
-back at startup, so a recipe that moved to git runs on other boxes (prod) too.
+# 등록된 레시피를 파일로 내보내고(데이터 뿌리 …/recipes/<이름>/) 기동 때 리포 씨앗과 함께 다시 읽어 들이는 자리.
+"""Export registered recipe versions to ``settings.recipe_export_path/<name>/`` (the data
+root, outside git — R-09 2026-11-25) and load them back at startup together with the
+seeds tracked in ``platform/recipes/``, so a recipe copied into git runs on other boxes too.
 
 Export writes ``recipe.py`` (the code) and ``recipe.json`` (meta + code sha256 +
 gate result). Load upserts any version not already in the DB, matching by
 ``(name, code_sha256)``; a sha mismatch is skipped with a warning (the file was
 edited by hand — we do not silently trust it).
 
-★ We never commit/push here. A separate tool (tools/recipes_publish.sh) does that,
-so an LLM registration can't push to GitHub without a human (context-notes §3).
+★ We never commit/push here. Publishing to git is a human step: copy the exported
+folder into ``platform/recipes/`` and commit it — so an LLM registration can't push to
+GitHub without a human (context-notes §3). The exports used to land in that tracked
+folder, where the portal update's ``git stash -u`` swept away the untracked ones.
 """
 from __future__ import annotations
 
@@ -43,9 +46,9 @@ def export_version(name: str, version: int, code: str, meta: dict, gate: dict | 
     return p
 
 
-def iter_exported() -> list[dict]:
-    """platform/recipes/*/recipe.json 을 읽어 목록으로. 코드 sha 가 안 맞으면 건너뛰고 경고."""
-    root = settings.recipe_export_path
+def iter_exported(root: Path | None = None) -> list[dict]:
+    """`root`(기본은 내보내는 자리)/*/recipe.json 을 읽어 목록으로. 코드 sha 가 안 맞으면 건너뛰고 경고."""
+    root = settings.recipe_export_path if root is None else root
     out: list[dict] = []
     if not root.is_dir():
         return out

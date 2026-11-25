@@ -148,7 +148,7 @@ async def register_recipe(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """자동 관문을 통과하면 등록한다(LLM 자동 + 자동 관문). 등록 시 platform/recipes/ 로 내보낸다."""
+    """자동 관문을 통과하면 등록한다(LLM 자동 + 자동 관문). 등록 시 데이터 뿌리(…/recipes/)로 내보낸다."""
     try:
         return ok(await svc.register(db, user, name=name, version=body.version))
     except svc.RecipeServiceError as exc:
