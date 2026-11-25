@@ -471,3 +471,19 @@ async def test_without_a_token_nothing_is_called(db, slug):
     got = await sync_all(db, _client(hub, token=""), types=[slug])
     assert got["result"] == "failed" and got["error"].startswith("unavailable")
     assert hub.asked == []
+
+
+async def test_an_unreplaced_placeholder_address_stops_plainly_without_calling(db, slug):
+    """예시 .env 의 자리표시를 바꾸지 않은 주소(HP-71, 11-25) — httpx 는 보내기 전에 InvalidURL 을 던지는데 그것은 HTTPError 가
+    아니라 받기 밖으로 예외가 샜다. 결과 사전으로 멈추고, 다시 하지 않고, 아무것도 부르지 않는다."""
+    hub = _Hub(slug, pages=[_page([_row("A")])])
+    sleeps: list[float] = []
+
+    async def _sleep(sec):
+        sleeps.append(sec)
+    client = SpCoreClient("https://<포털 도메인>/rootdesign/rootdesign/api", "tok", sleep=_sleep,
+                          client=httpx.AsyncClient(transport=httpx.MockTransport(hub.handler)))
+    got = await sync_all(db, client, types=[slug])
+    await db.commit()
+    assert got["result"] == "failed" and got["error"].startswith("bad_url"), got
+    assert "자리표시" in str(got) and hub.asked == [] and sleeps == []

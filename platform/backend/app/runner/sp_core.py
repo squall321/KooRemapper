@@ -122,7 +122,8 @@ class SpCoreClient:
 
         종류 — unavailable · auth(401 · 403, 즉시 멈춤) · not_published(`-CORE-0001`) · cursor_lost(`-CORE-0002`) ·
         not_found(그 밖 404 — 주소 오류) · server(429 · 5xx 가 세 번 계속) · transport(연결 오류 세 번) ·
-        http_<n>(그 밖 4xx) · unparsable_reply.
+        http_<n>(그 밖 4xx) · unparsable_reply · bad_url(주소가 URL 이 아니다 — 예시 .env 의 자리표시 `<…>` 를 그대로 둔 것,
+        다시 하지 않는다).
         """
         if not self.available:
             return {"ok": False, "error": "unavailable",
@@ -135,6 +136,11 @@ class SpCoreClient:
                     self.base + path,
                     headers={"Authorization": f"Bearer {self.token}", "Accept": "application/json"},
                     params=dict(params or {}), timeout=self._timeout)
+            except httpx.InvalidURL as exc:
+                # HTTPError 가 아니다 — 잡지 않으면 「예외로 올리지 않는다」 를 깨고 받기가 통째로 터진다(HP-71, 2026-11-25).
+                #   보내기 전에 막힌 것이라 아무 데도 닿지 않았다.
+                return {"ok": False, "error": "bad_url",
+                        "detail": f"허브 주소가 URL 이 아니다 — KOORM_SP_CORE_URL 의 자리표시(<…>)를 바꿨는지 본다: {exc}"}
             except httpx.HTTPError as exc:
                 if not last:
                     await self._sleep(self.retry_waits[attempt])
