@@ -5,7 +5,8 @@
 요청서 원문의 과제 이름 · 경로는 이 문서에 옮기지 않는다 — 각 줄의 「요청서 DF-xx 검증 방법」 이 가리키는 파일로 대조한다.
 
 ## 0. 받기
-1. `git pull && update-all` — Drive 판 `dist-20261123-094507Z`(바이너리 `139036f2`)와 코드 `6ac0f7e` 이거나 그 뒤(3차 7판 — §1 의 6 · 7판 줄은 이 판이어야 잰다).
+1. `git pull && update-all` — Drive 판 `dist-20261125-161932Z`(바이너리 `139036f2` — 7판 `dist-20261123-094507Z` 와 같다)와 코드 `6a90a41` 이거나
+   그 뒤(3차 7판 바이너리 — §1 의 6 · 7판 줄은 이 바이너리여야 잰다).
 2. `bash platform/infra/scripts/migrate.sh` — 0021 ~ 0026 가운데 빠진 것이 오른다.
 3. 운영 노드의 API · MCP 재기동(도는 잡 0 확인 뒤) → 운영 노드 `/api/health` 의 `revision` · `revision_matches_binary` 와 게이트웨이 `curl -s
    --noproxy '*' localhost:9110/tools-map` 의 `heax-kooremapper_mcp` `tool_count` 120 · `reachable` true(운영에서 smoke.py 는 돌리지 않는다 —
