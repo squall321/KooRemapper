@@ -36,3 +36,42 @@
 - HP-71 — 예시는 포털 경로 꼴(`https://<포털 도메인>/rootdesign/rootdesign/api`)을 쓰고 허브 직결 꼴은 괄호로 남겼다. `/core` 경고 줄은
   그대로다. NO_PROXY 자리표시에 루프백을 같이 적고 그 까닭(.env 가 스크립트의 루프백을 덮는다)과 코어 받기는 프록시를 안 따른다는 것(KR-14)을
   적었다.
+
+## 4. 사용자 결정(2026-11-25) — 고른 선택지의 설명 문장이 규격이다
+- R-04 범위 「다섯도 기다리게」 — restart.sh · start.sh 두 자리(postgres 재기동) · reset-db.sh(pgdata 지우기 전) · supervisor.sh(postgres
+  재기동)에도 같은 wait_instance_gone 을 넣는다. 상한을 넘기면 그 걸음을 멈추고 rc≠0(감독자는 실패를 로그에 남기고 다음 회차에 다시 본다).
+  자리마다 시험과 변이로 잰다.
+- R-09 (가) 「풀고, 안 풀리면 거절」 — 확정 입력을 자동 잇기와 같은 규칙으로 풀어 그 과제명으로 잇는다. 없음 · 둘 이상이면 400 으로 거절하고
+  후보를 보인다(허브 과제에 안 붙는 판을 만들지 않는다). 단 허브 거울에 과제가 하나도 없는 박스(코어 받기 꺼짐)는 지금처럼 글자 그대로 잇는다.
+  자리표시는 「과제명 · 과제코드」.
+- R-09 (나) 「데이터 뿌리 아래로」 — 내보내기를 데이터 뿌리(/data/svc/kooremapper/recipes — storage 와 같은 부모)로 옮긴다. 기동 때는 리포
+  씨앗(platform/recipes, 추적)과 데이터 뿌리 둘 다 읽는다(DB 에 없는 것만 넣는 지금 규칙 그대로). 없는 publish 도구를 가리키는 문장 셋은 고쳐
+  쓴다(git 반영은 사람이 데이터 뿌리에서 복사해 커밋). update 의 stash 와 무관해진다.
+
+## 5. 함께 온 것(2026-11-25)
+- hwaxportal-71 — 이번 묶음(R-04 · HP-71 · R-09 · ST-25-KR)은 로컬 커밋까지만 · 원격 가지에도 올리지 않는다. ⑥ 의 `origin/corelink-int` 는
+  그대로 둬도 된다(main 아님 · 87 지시대로). 해제 뒤 main 에는 R-04 를 먼저.
+- hwaxportal-71(SignalForge 가 찾음) — `_common.sh` 가 .env 를 bash 로 source 하므로 따옴표 없는 `<포털 도메인>` 은 리다이렉션으로 읽힌다.
+  자리표시가 든 값은 따옴표로 감싼다(SignalForge `157a2e6`). 바꾸지 않은 자리표시 주소가 요청 전에 걸러지는지도 본다.
+- smarttwinmcp-c8 — KooSlurm `feat/c1-job-status-runs` `e5cb6f41` 에 job_status `runs: true`(각도마다 doe · step · case_key · angle · run_dir ·
+  d3plot(있을 때만) · status — KooChainRun 값 그대로 running/completed/failed/pending). 운영 반영은 그쪽 사용자 승인 대기. KR-19 결과 회수 때 쓸
+  칸이다 — 지금은 받기만.
+
+## 6. 결정 뒤 짓기(2026-11-25) — 모두 로컬 커밋
+- HP-71 따옴표(`0c08172`) — 예시의 자리표시 값(코어 주소 · NO_PROXY)을 따옴표로. 실측 — 따옴표 있으면 source 되고, 없으면 rc 1. 바꾸지 않은
+  자리표시 주소는 httpx 가 보내기 전에 InvalidURL 을 던지는데 HTTPError 가 아니라 층 1(`SpCoreClient.get`) 밖으로 예외가 샜다 — `bad_url` 결과로
+  멈추게 했다(다시 하지 않는다 · 아무 데도 안 닿았다). 키트(requests)는 `except Exception` 으로 잡아 이 틈이 없다.
+- R-04 다섯(`3a7393d`) — restart.sh · start.sh 두 자리 · reset-db.sh · supervisor.sh. 감독자 pg 시험의 가짜 apptainer 는 stop 뒤에도 목록에 남게
+  짜여 있어(기다리기가 없을 때는 상관없었다) 실물처럼 빠지게 고치고, 안 빠지는 경우 한 항을 더했다. start.sh 두 자리는 통째로 돌리기 어려워
+  「모든 스크립트의 instance stop 뒤에 기다리기가 있는지」 훑는 항으로 지킨다(예외는 감독자 mcp 하나 — 까닭을 시험에 적었다). 변이 5 / 5.
+- R-09 (가)(`654079d`) — `resolve_confirm_task`. 허브 거울은 `source=hub` 과제만 센다(우리가 만든 과제 행은 거울이 아니다). 처음 변이에서 그
+  거르기가 살아남았다 — 시험 DB 에 과제 행이 하나도 없어 구분을 안 잰 것이라 우리 과제 행을 넣어 잰다. 거절은 400 `task_unresolved` — 후보를
+  `data` 와 글 둘 다에 싣는다(화면 · MCP 는 글을 보인다).
+- R-09 (나)(`1334095`) — 기본 내보내기는 `/data/svc/kooremapper/recipes`(dev 는 koopark 소유라 쓸 수 있음 확인). 그 자리가 없는 박스는
+  `platform/infra/data/recipes` — 선택지 문장에 없는 자리라 보고에 적는다(git 밖 · postgres 데이터와 같은 자리). 운영 노드의
+  `/data/svc/kooremapper` 에 API 사용자가 못 쓰면 등록은 되고 파일 내보내기만 경고(`exported: null`)다. 옛 자리(platform/recipes)에 쌓인 추적 밖
+  폴더는 기동 때 씨앗으로 계속 읽힌다(DB 에도 있다).
+- 백엔드 전체 1166 통과 · 4 실패는 작업 트리에 `.env` 가 없는 supervisor_log 넷(앞 판과 같다). 그 넷은 진짜 `supervisor.sh --once` 를 떠 있는
+  dev 인스턴스에 돌리는 시험이라 작업 트리에서 억지로 돌리지 않는다(예시 .env 로 돌리면 dev API 를 작업 트리 코드로 재기동할 수 있다) — 올릴 때
+  주 체크아웃에서 8 ~ 30 초 창에 돌린다. 바꾼 갈래(postgres 무응답)는 가짜 apptainer 시험(`test_supervisor_pg_liveness`)이 잰다. MCP 계약 13 /
+  13.
