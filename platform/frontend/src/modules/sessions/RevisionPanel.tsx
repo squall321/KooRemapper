@@ -206,7 +206,7 @@ export function RevisionPanel({ reportId }: { reportId: string }) {
       {open && (
         <div className="flex items-center gap-2 flex-wrap rounded border border-border px-2 py-1.5">
           <Input value={task} onChange={(e) => setTask(e.target.value)}
-                 placeholder="과제코드" className="w-40 text-xs" />
+                 placeholder="과제명 · 과제코드" className="w-40 text-xs" />
           <Input value={code} onChange={(e) => setCode(e.target.value)}
                  placeholder="dv1 · pv2 · pre · mp" className="w-32 text-xs" />
           <Button size="sm" variant="primary" disabled={!task.trim() || !code.trim() || save.isPending}

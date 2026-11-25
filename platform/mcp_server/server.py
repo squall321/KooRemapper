@@ -2596,6 +2596,9 @@ async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Con
                               note: str = "") -> dict:
     """리포트를 과제의 한 개정에 **확정한다**(사람의 판정으로 기록된다).
 
+    `task_key` 는 과제명 · 과제코드 · 옛 과제명 · 별칭 어느 것이든 된다 — 자동 잇기와 같은 규칙으로 과제 하나로 풀리면 그 과제명으로
+    잇고(응답 `task_resolved`), 없음 · 둘 이상이면 `task_unresolved` 로 거절한다(HTTP 400 · 후보를 함께 준다 — 아무것도 바꾸지 않았다).
+    허브 거울에 과제가 하나도 없는 박스는 글자 그대로 잇는다.
     `code` 는 `pre|dv1..dvr|pv1..pvr|pra|mp` — dv/pv 는 차수 필수, pre/pra/mp 는 차수 금지.
     `supersedes` 는 앞 판의 개정 키(`<과제 key(과제명)>@<code>`)다 — 순환은 거절된다.
     ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —

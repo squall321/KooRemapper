@@ -666,6 +666,31 @@ async def exact_matches(db, free: str) -> list[tuple[str, str]]:
     return alive if any(how != "alias_missing" for _, how in alive) else out
 
 
+async def resolve_confirm_task(db, free: str) -> dict:
+    """사람이 판을 확정할 때 적은 과제 이름 → `{"ok": True, "key", "how"}` 또는 `{"ok": False, "error": "task_unresolved", "detail",
+    "candidates", "ambiguous"}`.
+
+    포털 요청 R-09(사용자 결정 2026-11-25 「풀고, 안 풀리면 거절」) — 화면은 과제코드를 적으라 해 두고 확정은 글자 그대로 과제 열쇠
+    (과제명)로 써서, 과제코드를 치면 허브 과제에 안 붙는 판이 생겼다. 자동 잇기와 같은 규칙(`exact_matches` · `_pick` — 과제명 ·
+    과제코드 · 옛 과제명 · 별칭이 과제 하나로 모일 때만)으로 풀어 그 과제명을 쓰고, 없음 · 둘 이상(끝이 거울에 없는 별칭 포함)이면
+    거절하고 후보를 낸다. 허브 거울에 과제가 하나도 없는 박스(코어 받기 꺼짐)는 풀 거울이 없으니 예전처럼 글자 그대로다(`verbatim`)
+    — 그때 막으면 개정을 아예 못 붙인다(`set_revision` 머리의 규칙과 같은 까닭).
+    """
+    free = (free or "").strip()
+    mirror = (await db.execute(select(OntoObject.key).where(
+        OntoObject.type_slug == TYPE_TASK, OntoObject.source == SOURCE_HUB).limit(1))).first()
+    if mirror is None:
+        return {"ok": True, "key": free, "how": "verbatim"}
+    found = await exact_matches(db, free)
+    key, how = _pick(found)
+    if key:
+        return {"ok": True, "key": key, "how": how}
+    cands, ambiguous = await candidates_for(db, free, found=found)
+    why = "둘 이상의 과제에 걸린다" if ambiguous or missing_alias(found) else "허브 과제에서 찾지 못했다"
+    return {"ok": False, "error": "task_unresolved", "ambiguous": ambiguous, "candidates": cands[:5],
+            "detail": f"{free!r} — {why}(과제명 · 과제코드 · 옛 과제명 · 별칭으로 푼다). 후보에서 골라 다시 확정한다"}
+
+
 def missing_alias(found: list[tuple[str, str]]) -> str | None:
     """끝이 거울에 없는 사람의 별칭이 가리키는 key — 있으면 엇갈림이라 그 이름을 허브 과제에 잇지 않는다(그 끝은 후보로도 안 낸다)."""
     return next((k for k, how in found if how == "alias_missing"), None)

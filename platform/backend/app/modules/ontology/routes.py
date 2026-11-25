@@ -27,7 +27,7 @@ from app.modules.reports import services as rsvc
 from app.shared.affiliation import verified_affiliation
 from app.shared.auth import get_current_user, require_system_admin
 from app.shared.features import ontology_state
-from app.shared.responses import ok
+from app.shared.responses import fail, ok
 
 logger = logging.getLogger("koorm.ontology")
 
@@ -209,12 +209,22 @@ async def set_report_revision(
 ):
     """사람이 확정한다. **이 확정은 재인제스트에 지워지지 않는다**(`rev_source=manual`). 끊은 기록이 있으면 지운다(11-11).
 
+    `task_key` 는 과제명 · 과제코드 · 옛 과제명 · 별칭 어느 것이든 된다 — 자동 잇기와 같은 규칙으로 과제 하나로 풀리면 그 과제명으로
+    잇고, 없음 · 둘 이상이면 400 `task_unresolved`(후보를 `data.candidates` 와 글에 싣는다)로 거절한다. 허브 거울에 과제가 하나도
+    없는 박스는 글자 그대로다(R-09, 2026-11-25 — `svc.resolve_confirm_task`). 푼 결과는 응답 `task_resolved` 에 있다.
+
     기계 판에 확정하면 그 판에 얹힌 다른 리포트의 옛 선(누가 이었는지 안 적힌 선)에 기계가 이었다고 먼저 적는다 — 그 리포트를 누가
     고치는 중이면 409 `busy` 다(기다리지 않고 아무것도 바꾸지 않는다 — 잠시 뒤 다시 한다, 11-15)."""
     rep = await rsvc.get_owned_report(db, user.id, report_id)
     if rep is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "리포트를 찾을 수 없습니다.")
-    got = await svc.set_revision(db, rep, task_key=body.task_key, code=body.code,
+    task = await svc.resolve_confirm_task(db, body.task_key)
+    if not task["ok"]:
+        names = " · ".join(f"{c['key']}" + (f"({c['label']})" if c.get("label") and c["label"] != c["key"] else "")
+                           for c in task["candidates"]) or "없음"
+        return fail(f"task_unresolved: {task['detail']} — 후보: {names}", status_code=status.HTTP_400_BAD_REQUEST,
+                    data={"error": "task_unresolved", "ambiguous": task["ambiguous"], "candidates": task["candidates"]})
+    got = await svc.set_revision(db, rep, task_key=task["key"], code=body.code,
                                  model_key=body.model_key, supersedes=body.supersedes,
                                  decided_by=user.email, note=body.note, source="manual")
     if not got.get("ok"):
@@ -224,7 +234,8 @@ async def set_report_revision(
                 "busy": status.HTTP_409_CONFLICT}.get(got.get("error"), status.HTTP_400_BAD_REQUEST)
         raise HTTPException(code, f"{got.get('error')}: {got.get('detail') or ''}")
     await db.commit()
-    return ok(got, message="개정을 확정했습니다.")
+    return ok({**got, "task_resolved": {"input": body.task_key.strip(), "key": task["key"], "how": task["how"]}},
+              message="개정을 확정했습니다.")
 
 
 @router.delete("/reports/{report_id}/revision")
