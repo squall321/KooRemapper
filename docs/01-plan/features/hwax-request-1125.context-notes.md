@@ -83,3 +83,20 @@
   KR-19 결과 회수를 지을 때 이 꼴로 부른다.
 - 읽는 법(우리가 적어 보낸 것과 그쪽 뜻이 같다고 답함) — status 는 KooChainRun 값 그대로 · d3plot null 은 「아직 없음 · 못 찾음」 · 재시도
   각도는 마지막 Run 만 · 각도 DOE 가 아니면 `runs: []` + `runs_note`.
+
+## 8. 올리기(2026-11-25) — ⑥ 과 포털 1125 몫을 한 판으로
+- 5차 동결 해제(hwaxportal-71 · hwaxportal-87 — 11-25 사용자 결정 · cae00 update-all 끝 0 · ✗ 0). 정한 차례대로 다시 얹어(R-04 둘 → HP-71 둘 →
+  R-09 둘 → ⑥ 셋 → 문서 셋) 시험한 가지와 나무가 같은지 보고(`git diff` 0) main 에 밀었다 — `76067368..6a90a416`. 가지 corelink-int 를 그 역사로
+  옮겼다(origin/corelink-int 의 옛 ⑥ 커밋 셋은 같은 내용의 옛 이름이라 둔다).
+- C++ 가 안 바뀌어 호환 빌드는 하지 않았다 — 바이너리 `139036f2` 그대로. 콘솔은 R-09 자리표시 때문에 다시 지었다(두 묶음 모두 새 글 확인).
+- 돌던 잡 0 확인 → API 재기동(새 restart-api-only 의 기다리기를 실물에서 처음 지남 · health ok · matches true) → MCP 는 stop 뒤 목록에서 빠진
+  것(1초)을 보고 start.sh → 두 인스턴스 모두 데이터 뿌리 바인드 있음 → 스모크 넷 통과(MCP · 덱 op 29/29 · op 64/64 건너뜀 1 · 리포트 59/59) → 주
+  체크아웃 supervisor_log 4/4(8 ~ 30 초 창) → 읽기 탐침(dev DB 에서 observed_images 빈 목록 · 판 확정은 허브 과제가 없어 글자 그대로 · 레시피
+  자리 /data/svc/kooremapper/recipes).
+- Drive `dist-20261125-161932Z`(코드 `6a90a41` · 바이너리 `139036f2`) — 7판과 다른 파일은 BUILD_INFO.txt · koorm-frontend-dist.tar.gz 둘(SIF 넷
+  · cli.sif · 바이너리 묶음 sha256 같음). 가장 오래된 `dist-20261122-062855Z` 가 지워졌다. 되돌릴 판 `dist-20261123-094507Z`. health `revision`
+  이 재기동 없이 `6a90a416` 이 됐다.
+- KooSlurm -35 — 이미지 출처 칸이 KooSlurm main 에 올랐다(73475f2d · ⑥ 커밋 016a6109 → 19eecafe, `return_manifest.py` 차이 0 확인). 운영 반영은
+  icn401 start_production 뒤 제출한 잡부터.
+- cae00 점검 문서 §1-15 · 검증런 안내 1번(Drive 판 · 코드)을 고쳤다(`99eba022` — 그 커밋 글이 말한 이 기록은 다음 커밋으로 들어갔다). 사람 몫 —
+  운영 노드에서 API 사용자가 데이터 뿌리 `svc/kooremapper` 에 쓸 수 있어야 한다(레시피 내보내기).
