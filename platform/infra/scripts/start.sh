@@ -92,6 +92,7 @@ if [ "$_tcp_id" != "$_sock_id" ] && [ -z "$_tcp_id" ] \
    && ! (exec 3<>"/dev/tcp/127.0.0.1/${POSTGRES_PORT}") 2>/dev/null; then
   echo "  · 포트 ${POSTGRES_PORT} 는 지금 비어 있다 — 기동 순간에만 막혔던 것이다. 재기동한다."
   "$APPTAINER" instance stop "$INST_POSTGRES" >/dev/null 2>&1 || true
+  wait_instance_gone "$INST_POSTGRES" || exit 1   # 내려가는 중인 postgres 위에 다시 띄우지 않는다(R-04)
   start_instance "$INST_POSTGRES" "$POSTGRES_SIF" \
     --bind "$DATA_DIR/postgres:/var/lib/postgresql/data" \
     --bind "$DATA_DIR/postgres-run:/var/run/postgresql" \
@@ -155,6 +156,7 @@ if [ -f "$PGCONF" ] && ! grep -qE '^[[:space:]]*dynamic_shared_memory_type[[:spa
   sed -i -E 's/^[[:space:]]*#?[[:space:]]*dynamic_shared_memory_type[[:space:]]*=.*/dynamic_shared_memory_type = mmap/' "$PGCONF"
   grep -q '^dynamic_shared_memory_type = mmap' "$PGCONF" || echo 'dynamic_shared_memory_type = mmap' >> "$PGCONF"
   "$APPTAINER" instance stop "$INST_POSTGRES" 2>/dev/null || true
+  wait_instance_gone "$INST_POSTGRES" || exit 1   # 내려가는 중인 postgres 위에 다시 띄우지 않는다(R-04)
   start_instance "$INST_POSTGRES" "$POSTGRES_SIF" \
     --bind "$DATA_DIR/postgres:/var/lib/postgresql/data" \
     --bind "$DATA_DIR/postgres-run:/var/run/postgresql" \

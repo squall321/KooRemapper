@@ -148,23 +148,28 @@ def stack(tmp_path):
     (root / "platform" / "infra" / "data").mkdir(parents=True)
     (root / "platform" / "infra" / "apptainer").mkdir(parents=True)
     (root / "platform" / "infra" / "apptainer" / "api.sif").write_text("")
+    pgdata = root / "platform" / "infra" / "data" / "postgres" / "pgdata"
+    pgdata.mkdir(parents=True)
+    (pgdata / "PG_VERSION").write_text("16\n")
+    (root / "platform" / "infra" / "data" / "postgres-run").mkdir(parents=True)
     shutil.copy(PLATFORM / ".env.example", root / "platform" / ".env")
-    for n in ("_common.sh", "stop.sh", "restart-api-only.sh"):
+    for n in ("_common.sh", "stop.sh", "restart-api-only.sh", "restart.sh", "reset-db.sh"):
         shutil.copy(SCRIPTS / n, scripts / n)
+    _stub(scripts / "start.sh", f'echo start.sh >> "{tmp_path / "s.log"}"\n')   # restart.sh 가 부르는 것 — 불렸는지만 본다
     state = tmp_path / "state"
     state.mkdir()
     appt = _stub(tmp_path / "apptainer", _APPT)
     return root, scripts, state, appt, tmp_path / "s.log"
 
 
-def _run(stack, name, *running, **extra):
+def _run(stack, name, *running, stdin="", **extra):
     root, scripts, state, appt, log = stack
     for inst in running:
         (state / inst).write_text("run")
     env = {"PATH": "/usr/bin:/bin", "APPTAINER": str(appt), "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root),
            "STUB_LOG": str(log), "STATE": str(state), "KOORM_STOP_WAIT_S": "5", **extra}
-    r = subprocess.run(["bash", str(scripts / name)], capture_output=True, text=True, cwd=str(root), env=env,
-                       timeout=60)
+    r = subprocess.run(["bash", str(scripts / name)], input=stdin, capture_output=True, text=True, cwd=str(root),
+                       env=env, timeout=60)
     return r, (log.read_text(encoding="utf-8").splitlines() if log.exists() else [])
 
 
@@ -220,3 +225,52 @@ def test_stop_skips_what_is_surely_absent(stack):
     r, calls = _run(stack, "stop.sh")
     assert r.returncode == 0 and r.stdout.count("not running") == 4
     assert not any(c.startswith("instance stop") for c in calls)
+
+
+# ── ③ 같은 뿌리 다섯(사용자 「다섯도 기다리게」, 11-25) ─────────────────────────────
+
+def test_restart_sh_does_not_call_start_over_a_lingering_api(stack):
+    r, calls = _run(stack, "restart.sh", "koorm_api", LINGER="run", KOORM_STOP_WAIT_S="1")
+    assert r.returncode != 0 and "사라지지 않았다" in r.stderr
+    assert "start.sh" not in calls, "안 사라진 인스턴스 위에 start.sh 를 불렀다"
+
+
+def test_restart_sh_calls_start_once_the_api_is_gone(stack):
+    r, calls = _run(stack, "restart.sh", "koorm_api", LINGER="2")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert calls.index("start.sh") > _first(calls, "instance stop koorm_api")
+
+
+def test_reset_db_does_not_wipe_under_a_postgres_that_is_still_going(stack):
+    root = stack[0]
+    pg = root / "platform" / "infra" / "data" / "postgres" / "pgdata" / "PG_VERSION"
+    r, _ = _run(stack, "reset-db.sh", "koorm_postgres", stdin="yes\n", LINGER="run", KOORM_STOP_WAIT_S="1")
+    assert r.returncode != 0 and "지우지 않는다" in r.stdout, r.stdout + r.stderr
+    assert pg.exists(), "내려가는 중인 postmaster 밑의 데이터를 지웠다"
+
+
+def test_reset_db_wipes_once_postgres_is_gone(stack):
+    root = stack[0]
+    r, _ = _run(stack, "reset-db.sh", "koorm_postgres", stdin="yes\n", LINGER="2")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert not (root / "platform" / "infra" / "data" / "postgres" / "pgdata").exists()
+
+
+# stop 바로 뒤 기다리지 않아도 되는 자리 — 까닭이 있는 것만. 감독자의 mcp 는 사라진 것을 확인한 뒤에만 띄운다(`gone_for_sure`).
+_NO_WAIT_NEEDED = {("supervisor.sh", "INST_MCP")}
+
+
+def test_every_instance_stop_in_the_scripts_is_followed_by_a_wait():
+    """start.sh 의 postgres 재기동 두 자리처럼 통째로 돌리기 어려운 자리를 같이 지킨다 — 새 stop 자리가 생겨도 여기서 걸린다."""
+    missing = []
+    for path in sorted(SCRIPTS.glob("*.sh")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for i, line in enumerate(lines):
+            if "instance stop" not in line or line.lstrip().startswith("#") or "echo" in line.split("instance stop")[0]:
+                continue
+            if any(path.name == name and tag in line for name, tag in _NO_WAIT_NEEDED):
+                continue
+            if not any("wait_instance_gone" in l for l in lines[i:i + 5]):
+                missing.append(f"{path.name}:{i + 1}: {line.strip()}")
+    assert not missing, "stop 뒤 기다리지 않는 자리:\n" + "\n".join(missing)
+

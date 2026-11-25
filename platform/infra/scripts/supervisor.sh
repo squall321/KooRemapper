@@ -199,7 +199,12 @@ check_once() {
       1) echo "[$(date '+%F %T')] postgres 기동·종료 중(pg_isready 1) — 다음 회차에 다시 본다" ;;
       2) echo "[$(date '+%F %T')] postgres 무응답(인스턴스는 있다 — ${KOORM_PG_RECHECK_S}초 간격 두 번) → stop → start.sh"
          "$APPTAINER" instance stop "$INST_POSTGRES" >/tmp/koorm-supervise-pgstop.log 2>&1 \
-           || echo "[$(date '+%F %T')] postgres 인스턴스 stop 실패 — /tmp/koorm-supervise-pgstop.log(그래도 start.sh 를 부른다)"
+           || echo "[$(date '+%F %T')] postgres 인스턴스 stop 실패 — /tmp/koorm-supervise-pgstop.log(사라졌는지 본 뒤 start.sh 를 부른다)"
+         # 내려가는 중인 postgres 위에 start.sh 를 걸지 않는다(R-04) — 상한을 넘기면 이번 회차는 띄우지 않고 다음 회차에 다시 본다
+         if ! wait_instance_gone "$INST_POSTGRES" 2>>/tmp/koorm-supervise-pgstop.log; then
+           echo "[$(date '+%F %T')] postgres 가 stop 뒤 ${KOORM_STOP_WAIT_S:-60}초 안에 사라지지 않았다 — 이번 회차는 띄우지 않는다(다음 회차에 다시 본다)"
+           return
+         fi
          pg_start "인스턴스는 있는데 무응답"
          return ;;
       *) echo "[$(date '+%F %T')] postgres 판정 보류 — 인스턴스 안에서 pg_isready 를 못 돌렸다(이번 회차 건너뜀)" ;;

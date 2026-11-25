@@ -8,6 +8,6 @@ require_apptainer
 if ! instance_absent_for_sure "$INST_API"; then
   echo "→ stop $INST_API"
   "$APPTAINER" instance stop "$INST_API" || true
-  sleep 1
+  wait_instance_gone "$INST_API" || exit 1   # 내려가는 중인 인스턴스 위에 start.sh 를 걸지 않는다(R-04)
 fi
 "$SCRIPT_DIR/start.sh"

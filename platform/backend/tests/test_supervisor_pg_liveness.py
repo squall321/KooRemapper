@@ -55,7 +55,8 @@ def stack(tmp_path):
   instance)
     case "$2" in
       list) {{ if [ -f "{tmp_path}/no_pg" ]; then {_LIST_NO_PG}; else {_LIST}; fi; }} ;;
-      stop) echo "stop $3" >> "{calls}" ;;
+      stop) echo "stop $3" >> "{calls}"   # 실물처럼 stop 뒤 목록에서 빠진다 — STOP_STICKS 면 끝내 안 빠진다(R-04)
+            [ "$3" = koorm_postgres ] && [ -z "${{STOP_STICKS:-}}" ] && touch "{tmp_path}/no_pg" ;;
     esac ;;
   exec)
     read -r -a s < "{seq}" 2>/dev/null || s=()
@@ -85,6 +86,14 @@ def test_인스턴스는_있는데_두_번_응답_없음이면_내리고_다시_
     r, calls = run("2 2 0")
     assert calls[:3] == ["stop", "koorm_postgres", "start.sh"], (calls, r.stdout)
     assert "postgres 무응답(인스턴스는 있다" in r.stdout and "postgres 복구 성공(인스턴스는 있는데 무응답 — 접속 확인)" in r.stdout
+
+
+def test_stop_뒤_안_사라지면_이번_회차는_띄우지_않는다(stack):
+    """내려가는 중인 postgres 위에 start.sh 를 걸면 already running · already exists 로 꼬인다(R-04, 2026-11-25)."""
+    run, _ = stack
+    r, calls = run("2 2 0", STOP_STICKS="1", KOORM_STOP_WAIT_S="1")
+    assert calls[:2] == ["stop", "koorm_postgres"] and "start.sh" not in calls, (calls, r.stdout)
+    assert "사라지지 않았다 — 이번 회차는 띄우지 않는다" in r.stdout, r.stdout
 
 
 def test_한_번의_깜박임으로는_내리지_않는다(stack):

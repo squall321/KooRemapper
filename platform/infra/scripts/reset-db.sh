@@ -12,7 +12,9 @@ read -rp "This deletes ALL postgres data in $DATA_DIR/postgres. Type 'yes' to co
 # 겉보기엔 멀쩡한데 내용이 없는 DB 가 된다. 그래서 여기만은 **확실할 때만** 진행한다.
 _rc=0; instance_running "$INST_POSTGRES" || _rc=$?   # `; _rc=$?` 는 set -e 아래서 여기서 끝난다
 case "$_rc" in
-  0) echo "→ stop $INST_POSTGRES"; "$APPTAINER" instance stop "$INST_POSTGRES" || true ;;
+  0) echo "→ stop $INST_POSTGRES"; "$APPTAINER" instance stop "$INST_POSTGRES" || true
+     # 내려가는 중인 postmaster 밑의 데이터를 지우지 않는다(R-04) — 정말 사라진 것을 본 뒤에만 지운다
+     wait_instance_gone "$INST_POSTGRES" || { echo "✗ postgres 가 아직 사라지지 않았다 — 지우지 않는다."; exit 1; } ;;
   1) ;;  # 확실히 없다 — 그대로 진행
   *) echo "✗ 인스턴스 목록을 못 읽었다 — 살아 있는지 알 수 없어 지우지 않는다."
      echo "  apptainer instance list 가 되는지 확인한 뒤 다시 실행하라."; exit 1 ;;
