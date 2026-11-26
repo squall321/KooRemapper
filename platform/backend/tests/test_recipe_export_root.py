@@ -2,10 +2,12 @@
 """사용자 결정 2026-11-25 「데이터 뿌리 아래로」 — 계획 docs/01-plan/features/hwax-request-1125.plan.md · 맥락 4절.
 
 예전에는 리포의 추적 폴더 platform/recipes 에 내보내서, 추적 밖 새 폴더를 포털 update 의 `git stash -u` 가 쓸어 갔다(DB 에는
-남았다). 이제 비워 두면 `<HWAX_DATA_ROOT|/data>/svc/kooremapper/recipes`(그 자리가 없으면 git 밖 platform/infra/data/recipes)다.
+남았다). 이제 비워 두면 `<HWAX_DATA_ROOT|/data>/svc/kooremapper/recipes`(그 자리가 없거나 못 쓰면 storage 아래 `.recipes` — 11-26 운영
+노드에서 예전 마지막 자리 platform/infra/data/recipes 가 읽기 전용 묶음이라 실패했다)다.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -41,15 +43,37 @@ def test_by_default_it_exports_under_the_data_root(monkeypatch, tmp_path):
         "기본값(아무것도 적지 않음)이 데이터 뿌리가 아니다"
 
 
-def test_without_a_data_root_it_falls_back_outside_git(monkeypatch, tmp_path):
+def _storage_fallback():
+    return Path(Settings(_env_file=None).storage_dir) / ".recipes"
+
+
+def test_without_a_data_root_it_falls_back_under_storage(monkeypatch, tmp_path):
+    """11-26 운영 노드 — 컨테이너에 데이터 뿌리가 없고 리포 묶음이 읽기 전용이었다. 쓸 수 있는 묶음은 storage 하나다."""
     got = _path(monkeypatch, data_root=tmp_path)          # svc/kooremapper 가 없다
-    assert got == PLATFORM / "infra" / "data" / "recipes"
-    assert got != PLATFORM / "recipes", "리포의 추적 폴더에 내보냈다 — update 의 stash 가 쓸어 간다"
+    assert got == _storage_fallback()
+    assert PLATFORM / "recipes" != got and not str(got).startswith(str(PLATFORM / "infra")), \
+        "리포 묶음 안에 내보냈다 — 추적 폴더면 update 의 stash 가, 읽기 전용 묶음이면 쓰기가 막는다"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root 는 권한을 무시한다")
+def test_a_data_root_it_cannot_write_also_falls_back_under_storage(monkeypatch, tmp_path):
+    svc = tmp_path / "svc" / "kooremapper"
+    svc.mkdir(parents=True)
+    svc.chmod(0o555)
+    try:
+        assert _path(monkeypatch, data_root=tmp_path) == _storage_fallback(), "못 쓰는 데이터 뿌리를 골랐다"
+        svc.chmod(0o755)
+        (svc / "recipes").mkdir()
+        svc.chmod(0o555)
+        assert _path(monkeypatch, data_root=tmp_path) == svc / "recipes", "이미 있는 쓸 수 있는 recipes 폴더는 부모를 못 써도 쓴다"
+    finally:
+        svc.chmod(0o755)
 
 
 def test_a_relative_data_root_follows_the_start_script_rule(monkeypatch):
-    want = (Path("/data/svc/kooremapper/recipes") if Path("/data/svc/kooremapper").is_dir()
-            else PLATFORM / "infra" / "data" / "recipes")
+    d = Path("/data/svc/kooremapper")
+    here = d / "recipes" if (d / "recipes").exists() else d
+    want = d / "recipes" if here.is_dir() and os.access(here, os.W_OK) else _storage_fallback()
     assert _path(monkeypatch, data_root="rel/path") == want, "상대값이면 /data(start.sh 와 같다)"
 
 

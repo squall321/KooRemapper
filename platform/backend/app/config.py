@@ -207,8 +207,10 @@ class Settings(BaseSettings):
     @property
     def recipe_export_path(self) -> Path:
         """등록된 레시피를 파일로 내보내는 절대 경로. 적었으면 그것(상대값이면 platform/ 기준), 비우면 데이터 뿌리
-        `<HWAX_DATA_ROOT|/data>/svc/kooremapper/recipes`(storage 와 같은 부모 — 기동 스크립트가 그 폴더를 컨테이너에 바인드한다).
-        그 자리가 없는 박스는 `platform/infra/data/recipes`(postgres 데이터와 같은 git 밖 자리)."""
+        `<HWAX_DATA_ROOT|/data>/svc/kooremapper/recipes`(storage 와 같은 부모 — 기동 스크립트가 그 폴더를 컨테이너에 바인드한다) —
+        **쓸 수 있을 때만**. 그 자리가 없거나 못 쓰면 storage 아래 `.recipes` 다.
+        (11-26 운영 노드 — 컨테이너에 데이터 뿌리가 없고 리포 묶음은 읽기 전용이라 예전 마지막 자리 `platform/infra/data/recipes` 를
+        못 만들어 내보내기가 실패했다. 쓸 수 있는 묶음은 storage 하나였고, 운영은 같은 자리를 KOORM_RECIPE_EXPORT_DIR 로 주었다.)"""
         if self.recipe_export_dir:
             p = Path(self.recipe_export_dir)
             return p if p.is_absolute() else (_PLATFORM_ROOT / p)
@@ -216,7 +218,11 @@ class Settings(BaseSettings):
         if not root.is_absolute():
             root = Path("/data")          # 기동 스크립트와 같은 규칙(start.sh — 상대값이면 /data)
         svc = root / "svc" / "kooremapper"
-        return svc / "recipes" if svc.is_dir() else _PLATFORM_ROOT / "infra" / "data" / "recipes"
+        recipes = svc / "recipes"
+        here = recipes if recipes.exists() else svc      # 있으면 그 폴더에, 없으면 만들 부모에 쓸 수 있어야 한다
+        if here.is_dir() and os.access(here, os.W_OK):
+            return recipes
+        return Path(self.storage_dir) / ".recipes"
 
     @property
     def recipe_seed_path(self) -> Path:
