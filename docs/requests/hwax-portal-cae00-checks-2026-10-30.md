@@ -5,7 +5,7 @@
 
 ## 0. 순서 — 한 줄씩
 1. **cae00** — `git pull && update-all`(kooremapper 가 Drive 판 `dist-20261125-161932Z` 를 받는다) →
-   §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 · §1-8 · §1-9 · §1-10 · §1-11 · §1-12 · §1-13 · §1-14 · §1-15 확인.
+   §1 · §1-1 · §1-2 · §1-3 · §1-4 · §1-5 · §1-6 · §1-7 · §1-8 · §1-9 · §1-10 · §1-11 · §1-12 · §1-13 · §1-14 · §1-15 · §1-16 확인.
 2. **icn401** — `git pull && sudo ./dashboard/start_production.sh` → §3 확인(KooSlurm 문서 §2).
 3. **비밀 하나를 두 곳에** — icn401 `HEAX_GATEWAY_SECRET`(backend_5010/.env) = cae00 `KOORM_KOOSLURM_SSO_SECRET`(KooRemapper platform/.env) → §2 · §3-3.
 4. **cae00** — `KOORM_STCX_BACKEND_URL` 확인 → DynaForge 재기동 → §2 확인.
@@ -30,7 +30,7 @@ localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp` 의 `tool_
 | 확인 | 명령 | 기대값 |
 |---|---|---|
 | 판 | 운영 노드의 DynaForge `/api/health`(위 「어디서 재나」) | `"status":"ok"` · `revision` 이 이번 게시 BUILD_INFO 의 커밋(`6a90a41`) · `revision_matches_binary` true · `binary_sha256` `139036f2…` |
-| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `6a90a41` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. `6a90a41` 보다 앞이면 §1-15 의 것(낙하 ⑥ 이미지 출처 · 배포 기다리기 · 판 확정 풀기 · 레시피 자리)이 없고, `6ac0f7e` 보다 앞이면 §1-14 의 바이너리(권취 강체 방향 · battery 카드 꼴 · ale EOS 제목 · 들여 쓴 `*` 줄 나머지)가 옛 판이고, `f0cc07d` 보다 앞이면 §1-13 의 바이너리(battery phase_modes · contact.depth · 나선 판 · 들여 쓴 `*` 줄)가 옛 판이고, `4cca82a` 보다 앞이면 §1-12 의 캠페인 분석 · 핫스팟 자리 · 세션 판(REST 열여덟 · MCP 열일곱)이 없고(Drive 판은 §1-11 그대로다), `87632b1` 보다도 앞이면 §1-11 의 보고서용 묶음(REST 넷 · MCP 셋)이 없고(`2cbdc84` 판은 파이썬이 `9614bb8` 과 같다 — §1-10 은 판 · 바이너리 줄로 본다), `9614bb8` 보다도 앞이면 §1-10 의 추출 완전성 · 삭제 허가(REST 셋 · MCP 셋 · 피크 표지)가 없고(`a50bcc3` 판은 파이썬이 `53028a2` 과 같다 — §1-9 는 판 · 바이너리 줄로 본다), `53028a2` 보다도 앞이면 §1-9 의 캠페인 출처 · 건강 판정(REST 넷 · MCP 넷)과 받기 줄의 연결 놓기가 없고(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — §1-8 은 판 · 바이너리 줄로 본다), `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `664a2f2` 이거나 그 뒤 — 위 `revision` 은 Drive 판의 커밋이라 그 뒤에 파이썬만 바뀐 커밋은 여기서만 보인다. `664a2f2` 보다 앞이면 §1-16 의 것(진행 중 올리기를 기다리는 재기동 · 레시피 마지막 자리)이 없고, `6a90a41` 보다 앞이면 §1-15 의 것(낙하 ⑥ 이미지 출처 · 배포 기다리기 · 판 확정 풀기 · 레시피 자리)이 없고, `6ac0f7e` 보다 앞이면 §1-14 의 바이너리(권취 강체 방향 · battery 카드 꼴 · ale EOS 제목 · 들여 쓴 `*` 줄 나머지)가 옛 판이고, `f0cc07d` 보다 앞이면 §1-13 의 바이너리(battery phase_modes · contact.depth · 나선 판 · 들여 쓴 `*` 줄)가 옛 판이고, `4cca82a` 보다 앞이면 §1-12 의 캠페인 분석 · 핫스팟 자리 · 세션 판(REST 열여덟 · MCP 열일곱)이 없고(Drive 판은 §1-11 그대로다), `87632b1` 보다도 앞이면 §1-11 의 보고서용 묶음(REST 넷 · MCP 셋)이 없고(`2cbdc84` 판은 파이썬이 `9614bb8` 과 같다 — §1-10 은 판 · 바이너리 줄로 본다), `9614bb8` 보다도 앞이면 §1-10 의 추출 완전성 · 삭제 허가(REST 셋 · MCP 셋 · 피크 표지)가 없고(`a50bcc3` 판은 파이썬이 `53028a2` 과 같다 — §1-9 는 판 · 바이너리 줄로 본다), `53028a2` 보다도 앞이면 §1-9 의 캠페인 출처 · 건강 판정(REST 넷 · MCP 넷)과 받기 줄의 연결 놓기가 없고(`98f5ec6` 판은 파이썬 · 콘솔이 `e7a6ef7` 과 같다 — §1-8 은 판 · 바이너리 줄로 본다), `e7a6ef7` 보다 앞이면 §1-7 의 것(캠페인 묶음 적재 · 리포트 받기 한 줄)이 없고, `c37bd03` 보다도 앞이면 §1-6 의 것(적재 공식 답 `intake` · `environment` · inspect `sha256`)이 없고, `8b49d2a` 보다도 앞이면 §1-5 의 것(MCP 도구 90 · 낙하 파이프라인 API 셋 · 핵심 잇기)이 없다. `3574342` 보다도 앞이면 null 을 보내는 손님(MCP 직접 호출 — Claude 등)이 비운 선택 칸에서 422 를 받고(포털 R2a 는 칸째 빼고 보내 영향 없음), 틀린 `dev_rev` 가 예약은 되고 잡이 끝난 뒤 반입에서야 실패한다 |
 | 마이그레이션 | KooRemapper 리포 루트에서 `bash platform/infra/scripts/migrate.sh` | 「Running upgrade」 줄 없이 「✓ migrations applied」 = 이미 0026 까지 올라 있다(빠졌으면 이 명령이 그 자리에서 올린다 — 0015 · 0016 · 0017 · 0018 · 0019 · 0020 · 0021 · 0022 · 0023 · 0024 · 0025 · 0026). ★0019 는 **지운 리포트의 개정 선**을 한 번 지운다 — 개정 비교의 「리포트」 수가 지운 리포트만큼 줄 수 있다(정상, 사용자 결정 10-30) |
 | MCP 도구 | 게이트웨이 `curl -s --noproxy '*' localhost:9110/tools-map` 의 `apps` 가운데 `heax-kooremapper_mcp`(읽기 전용 — 운영에서 smoke.py 는 돌리지 않는다) · 개발 박스에서는 `platform/mcp_server/venv/bin/python platform/mcp_server/smoke.py` | `tool_count` 120 · `reachable` true(smoke 는 120 · `MCP SMOKE: PASS` — 판마다 늘어난 도구 이름은 그 판의 §1-x 표) |
 | 화면 | 세션 → 전각도 리포트 펼치기 → 「부품 위치·방향 시각화」 → 보기 「구(3D)」 | 3D 구가 뜬다(three.js 는 묶음 안에 있다 — 망 밖에 안 나간다) · 허용값을 넣으면 「초과 · 경고」 수가 보인다 |
@@ -550,13 +550,36 @@ postgres SIF 와 콘솔 묶음은 sha256 이 같다(실측). MCP 도구 100 → 
 | 되돌리기 | §8 | 코드를 `6ac0f7e`(Drive 판 `dist-20261123-094507Z`)로 — 바이너리 · 마이그레이션이 같아 DB · 바이너리는 그대로 |
 이 판을 게시하면서 Drive 의 가장 오래된 판 `dist-20261122-062855Z` 가 지워졌다(넷만 남긴다 — 11-22 오후 · 11-23 아침 · 11-23 · 11-25).
 
+## 1-16. cae00 — 11-26 덧붙임(파이썬 · 스크립트만 — 레시피 마지막 자리 · 진행 중 올리기를 기다리는 재기동)
+**새 Drive 판이 없다** — 바이너리 · SIF · 콘솔은 §1-15 그대로(`dist-20261125-161932Z`)이고 `git pull` 로만 간다. health `revision` 은 Drive 판
+커밋이라 `6a90a41` 그대로다(소스 줄로 본다). 마이그레이션 없음 · MCP 도구 120 그대로.
+- **레시피 마지막 자리**(`804a7acb`) — 데이터 뿌리 자리를 쓸 수 없으면 storage 아래 `.recipes` 에 내보낸다(예전 마지막 자리
+  `platform/infra/data/recipes` 는 리포 묶음을 읽기 전용으로 띄우는 운영 노드에서 실패했다 — 11-26). 운영이 넣은 `KOORM_RECIPE_EXPORT_DIR`(같은
+  자리)은 그대로 이기고, 빼도 같은 곳으로 간다.
+- **진행 중 올리기를 기다리는 재기동**(`664a2f28`) — API 가 진행 중 올리기 수를 `/api/health` 의 `uploads_in_flight` 로 낸다. `stop.sh` ·
+  `restart-api-only.sh` · `restart.sh` 는 그 수가 0 이 될 때까지 기다린 뒤 내리고, 상한을 넘기면 **내리지 않고 rc 1** 로 멈춘다(「진행 중 올리기
+  N건이 …초 안에 끝나지 않았다」). 헬스가 안 닿으면(API 가 죽었다) 기다리지 않는다. 앞단 프록시가 본문을 다 받은 뒤 넘기는 전송 구간은 API 가
+  모른다.
+  - 환경값 — `KOORM_UPLOAD_DRAIN_S`(초, 기본 300 · 0 = 기다리지 않음) · `KOORM_STOP_WAIT_S`(초, 기본 60 — stop 뒤 인스턴스가 사라지기를 기다림).
+    둘 다 비워 두면 기본값이다. `.env` 에 적으면 명령줄 값을 덮는다.
+  - 멈췄을 때 — 올리기가 끝난 뒤 같은 명령을 다시 한다. 끊어도 되면 `KOORM_UPLOAD_DRAIN_S=0 bash
+    platform/infra/scripts/restart-api-only.sh`(`.env` 에 그 값을 적어 두지 않았을 때).
+  - ★포털 deploy-all 의 `_stop` 이 rc 를 삼키면 이 멈춤이 안 보인다(포털 몫 — R-04 와 같다).
+
+| 확인 | 명령 | 기대값 |
+|---|---|---|
+| 소스 | KooRemapper 리포 루트에서 `git log -1 --oneline` | `664a2f2` 이거나 그 뒤 |
+| 판 | 운영 노드의 DynaForge `/api/health`(위 「어디서 재나」) | `revision` `6a90a41` 그대로 · `matches` true · `uploads_in_flight` 칸이 있다(API 를 재기동한 뒤 — 평소 0) |
+| 레시피 자리 | `KOORM_RECIPE_EXPORT_DIR` 을 빼고 재기동했다면 등록 하나 뒤 storage 아래 `.recipes/<이름>/` | `recipe.py` · `recipe.json` 이 있다(뺄 필요는 없다 — 같은 자리) |
+| 되돌리기 | §8 | 코드를 `6a90a41` 로 — Drive · DB 는 그대로 |
+
 ## 2. cae00 — 후처리 예약(7-1) 설정
 `platform/.env`(KooRemapper)에 둘. **값은 화면 · 로그 · 채팅에 붙이지 않는다.**
 ```
 KOORM_STCX_BACKEND_URL=<cae00 에서 닿는 stcx 대시보드 주소 — 덱 업로드에 쓰는 것과 같은 값>
 KOORM_KOOSLURM_SSO_SECRET=<icn401 backend_5010/.env 의 HEAX_GATEWAY_SECRET 과 같은 값>
 ```
-선택 — `KOORM_POSTPROCESS_WAIT_DAYS`(기본 7) · `KOORM_KOOSLURM_TIMEOUT_SEC`(기본 30). 넣은 뒤 재기동(도는 잡 0 확인 → `restart-api-only.sh`, 또는 다음 `update-all` 이 .env 지문으로 재기동).
+선택 — `KOORM_POSTPROCESS_WAIT_DAYS`(기본 7) · `KOORM_KOOSLURM_TIMEOUT_SEC`(기본 30). 넣은 뒤 재기동(도는 잡 0 확인 → `restart-api-only.sh` — 11-26 부터 진행 중 올리기가 끝나기도 스스로 기다린다(§1-16), 또는 다음 `update-all` 이 .env 지문으로 재기동).
 
 (11-15 덧붙임) 칸과 위임 창구만 먼저 보려면 `python3 platform/infra/scripts/check-postprocess.py`(§1-5) — 칸 이름 · 있음/비었음 · HTTP 상태만 나오고 값은 나오지 않는다. `--email <주소>` 를 주면 그 사람 명의로 토큰을 실제로 받아 본다(토큰은 출력하지 않는다).
 
