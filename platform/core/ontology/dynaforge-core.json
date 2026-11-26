@@ -115,12 +115,13 @@
     {
       "slug": "maps_to",
       "label": "코어 부품",
-      "inverse_label": "부품 역할 · 해석 파트",
-      "description": "앱 쪽 객체가 허브(코어)의 어느 부품(part)인가 — StepForge 의 부품 역할(part_role)과 DynaForge 의 해석 파트(cae_part — 덱의 *PART)가 같은 정의를 쓴다(core-link SRC-02 · SRC-08). 두 앱은 이 블록을 바이트 그대로 싣는다 — 한 허브가 둘 다 받아도 서로 덮지 않고, 한 질의(maps_to → part)로 두 앱을 함께 묻는다. 한 출발 객체에 부품 하나(many_to_one). 사람이 이은 선(근거 층 human)이 기계가 그은 선(other · rule)을 이기고, 다음 판 · 다시 붙이기가 사람 선을 덮지 않는다. 빈 칸 · 맞는 부품이 없음은 선이 아니다. part 는 허브가 정본이다(받은 거울 — 거울에 없는 key 로는 선이 서지 않는다). 앱마다 선을 짓는 자세한 규칙은 그 앱의 문서에 있다.",
+      "inverse_label": "부품 역할 · 해석 파트 · CAD 파트",
+      "description": "앱 쪽 객체가 허브(코어)의 어느 부품(part)인가 — StepForge 의 부품 역할(part_role) · CAD 파트(cad_part — 개정 안의 인스턴스)와 DynaForge 의 해석 파트(cae_part — 덱의 *PART)가 같은 정의를 쓴다(core-link SRC-02 · SRC-08 · 운영 1125 ST-25). 두 앱은 이 블록을 바이트 그대로 싣는다 — 한 허브가 둘 다 받아도 서로 덮지 않고, 한 질의(maps_to → part)로 두 앱을 함께 묻는다. 한 출발 객체에 부품 하나(many_to_one). 사람이 이은 선(근거 층 human)이 기계가 그은 선(other · rule)을 이기고, 다음 판 · 다시 붙이기가 사람 선을 덮지 않는다. 빈 칸 · 맞는 부품이 없음은 선이 아니다. part 는 허브가 정본이다(받은 거울 — 거울에 없는 key 로는 선이 서지 않는다). 앱마다 선을 짓는 자세한 규칙은 그 앱의 문서에 있다.",
       "cardinality": "many_to_one",
       "src_type_slugs": [
         "part_role",
-        "cae_part"
+        "cae_part",
+        "cad_part"
       ],
       "dst_type_slugs": [
         "part"
@@ -136,7 +137,7 @@
             "other",
             "rule"
           ],
-          "help": "선이 어디서 왔나 — human 사람이 이은 선(두 앱 모두) · other StepForge 대응표 칸(개발 쪽 초안) · rule DynaForge 가 꾸러미를 붙일 때 정확 일치로 그은 선"
+          "help": "선이 어디서 왔나 — human 사람이 이은 선(두 앱 모두) · other StepForge 대응표 칸(개발 쪽 초안) · rule 앱이 규칙으로 그은 선(DynaForge 는 꾸러미를 붙일 때 정확 일치 · StepForge 는 CAD 파트 이름 규칙)"
         },
         {
           "key": "matched_by",
@@ -145,11 +146,12 @@
           "enum_options": [
             "key",
             "label",
+            "label_en",
             "hub_alias",
             "previous_key",
             "alias"
           ],
-          "help": "rule 선이 코어 부품의 어느 칸과 글자 그대로 맞았나 — key · 이름(label) · 허브 별칭(properties.aliases) · 허브가 바꾼 옛 key · 앱의 별칭 표. 다른 근거 층에서는 비운다."
+          "help": "rule 선이 코어 부품의 어느 칸에 맞았나 — key · 이름(label) · 영문 이름(properties.label_en) · 허브 별칭(properties.aliases) · 허브가 바꾼 옛 key · 앱의 별칭 표(DynaForge 는 글자 그대로 일치 · StepForge 는 CAD 파트 이름의 낱말 구). 다른 근거 층에서는 비운다."
         },
         {
           "key": "matched_text",

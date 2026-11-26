@@ -113,6 +113,20 @@
   진행 중 요청을 5초만 기다리고, apptainer stop 은 10초 뒤 강제로 끝낸다 — 5초 넘는 올리기는 재기동 때 늘 끊긴다. 고칠 길이 여럿이라 사용자에게
   묻는다.
 
+## 10. ST-25-KR 받기(2026-11-26 · stepforge-d4)
+- StepForge 가 maps_to 공통 블록 새 판의 바이트 · sha 를 직접 보냈다(포털 R25-13 요청대로). 받은 바이트를 그대로 저장해 키 정렬 압축으로 다시
+  쟀다 — `8cc5a705…dc171`(2613 바이트) · 보낸 글과 같다. 앞 판은 우리 파일에서도 `e5749ad4…6d07` 이었다.
+- 바뀐 것 다섯 — 출발 끝에 `cad_part`(차례 part_role · cae_part · cad_part) · matched_by 에 `label_en`(label 뒤) · 설명 · inverse_label · 도움말
+  둘(basis 의 rule · matched_by).
+- 우리 파일(`dynaforge-core.json`)은 그 다섯 값만 글로 바꿔 손 꼴 · 칸 차례를 지켰고, 바꾼 블록이 받은 블록과 **같은 객체**다(sha `8cc5a705…`).
+  `EXTERNAL_TYPES` 에 `cad_part`(StepForge 타입), 시험 셋(출발 목록 · 그쪽 타입 둘 · 지문).
+- 우리 코드는 그대로 — 다리는 우리 해석 타입(`NAME_PROP`)에서만 생겨 `cad_part` 출발은 내지도 받지도 않는다. 우리가 쓰는 맞은 칸은 그대로(alias
+  · key · label · hub_alias · previous_key) — `label_en` 은 그쪽 규칙 선의 값이다.
+- ★허브 노출 — SP 코어 API `_open_end`(a6feab5 에서도 그대로)는 적힌 끝 타입이 하나라도 코어 공개가 아니면 그 관계를 안 연다. 새 블록을 가져온
+  허브는 **cad_part 도 코어 공개여야** maps_to 가 열린다(아니면 part_role · cae_part 선까지 함께 닫힌다). StepForge · 포털에 알린다.
+- 착지 — 두 앱 블록이 한 글자라도 갈리면 허브가 둘째 것을 거절한다(D-689). 그래서 **로컬 커밋까지** 두고 StepForge(갈래 feat-1125 6eb72bd6 —
+  push 전)와 착지 날을 맞춘다.
+
 ## 11. 진행 중 올리기를 기다리는 재기동(2026-11-26 · 사용자 「수를 보이고 재기동이 기다린다」)
 - 고른 선택지 문장(규격) — API 가 진행 중 올리기 수를 세어 /api/health 에 내고, stop · 재기동 스크립트는 그 수가 0 이 될 때까지 기다린 뒤
   내린다. 상한(기본 5분, 환경값으로 바꿈)을 넘기면 내리지 않고 rc≠0 으로 멈춘다(운영이 보고 다시 하거나 강제로). api.sif 를 다시 굽지 않는다.

@@ -75,16 +75,18 @@ def test_the_three_bridges_and_their_cardinalities():
         assert r["description"] and r["inverse_label"], slug
         basis = next(p for p in r["properties"] if p["key"] == "basis")
         assert {"rule", "human"} <= set(basis["enum_options"]) and basis["required"] is True, slug
-    assert rels["maps_to"]["src_type_slugs"] == ["part_role", "cae_part"]
+    assert rels["maps_to"]["src_type_slugs"] == ["part_role", "cae_part", "cad_part"], "차례도 StepForge 와 같다(ST-25 — 그쪽은 첫 끝을 기본 출발로 본다)"
     assert [r["src_type_slugs"] for s, r in rels.items() if s in ("indicates", "follows_method")] == [["cae_finding"], ["cae_campaign"]]
     for end in ("part", "failure_mode", "analysis_method"):
         assert end in EXTERNAL_TYPES, f"{end} 는 허브 거울이다 — 우리 정의 파일에 타입을 만들지 않는다"
         assert end not in {t["slug"] for t in doc["types"]}
-    assert "part_role" in EXTERNAL_TYPES and "part_role" not in {t["slug"] for t in doc["types"]}, "StepForge 의 타입이다"
+    for theirs in ("part_role", "cad_part"):
+        assert theirs in EXTERNAL_TYPES and theirs not in {t["slug"] for t in doc["types"]}, f"{theirs} 는 StepForge 의 타입이다"
 
 
 # ★StepForge 도 이 블록을 **바이트 그대로**(같은 칸 · 같은 차례) 싣는다(사용자 결정 11-11). 고칠 때는 두 앱이 함께 고치고 이 지문을 같이 바꾼다.
-MAPS_TO_SHA256 = "e5749ad481197908248576dd11c82eef6c2962545e9bf58a9247fd7568b96d07"
+# 11-26 ST-25(StepForge 가 보낸 바이트 그대로 — cad_part 출발 · matched_by 의 label_en · 설명 · 도움말 둘). 앞 판 e5749ad4…6d07.
+MAPS_TO_SHA256 = "8cc5a705b0a0536f283fb1e2c023ebfd489523c5aa097cda5997148b437dc171"
 
 
 def test_maps_to_is_the_block_stepforge_carries_unchanged():
