@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.modules import register_routers
 from app.shared.errors import register_exception_handlers
+from app.shared.inflight import UploadCounter, uploads_in_flight
 from app.shared.logctx import reset_correlator, sanitize, set_correlator, setup_logging
 
 # ⚠ `basicConfig(level=INFO)` 이던 자리다. 그 포맷에는 **시각이 없어서** "14:30 에 실패했다" 를
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
 
     _configure_cors(app)
     _install_correlator(app)
+    app.add_middleware(UploadCounter)          # 진행 중 올리기 수 — /api/health 의 uploads_in_flight(재기동이 기다린다)
     register_exception_handlers(app)
     register_routers(app)
 
@@ -117,6 +119,8 @@ def create_app() -> FastAPI:
                 "binary_present": settings.kooremapper_bin.exists(),
                 **info,
                 "gmsh": {"available": _g["available"], "version": _g["version"]},
+                # 진행 중 올리기 — stop · 재기동 스크립트가 0 이 될 때까지 기다린다(운영 11-26 · `app.shared.inflight`)
+                "uploads_in_flight": uploads_in_flight(),
             },
             "message": None if db["ok"] else "database 가 응답하지 않는다",
             "errors": None,

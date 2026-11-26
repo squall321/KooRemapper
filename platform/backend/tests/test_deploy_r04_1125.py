@@ -162,12 +162,13 @@ def stack(tmp_path):
     return root, scripts, state, appt, tmp_path / "s.log"
 
 
-def _run(stack, name, *running, stdin="", **extra):
+def _run(stack, name, *running, stdin="", path="/usr/bin:/bin", **extra):
     root, scripts, state, appt, log = stack
     for inst in running:
         (state / inst).write_text("run")
-    env = {"PATH": "/usr/bin:/bin", "APPTAINER": str(appt), "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root),
-           "STUB_LOG": str(log), "STATE": str(state), "KOORM_STOP_WAIT_S": "5", **extra}
+    # 진행 중 올리기 기다리기는 기본으로 끈다(이 박스의 진짜 dev API 에 닿지 않게) — 아래 ④ 가 가짜 curl 로 잰다
+    env = {"PATH": path, "APPTAINER": str(appt), "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root),
+           "STUB_LOG": str(log), "STATE": str(state), "KOORM_STOP_WAIT_S": "5", "KOORM_UPLOAD_DRAIN_S": "0", **extra}
     r = subprocess.run(["bash", str(scripts / name)], input=stdin, capture_output=True, text=True, cwd=str(root),
                        env=env, timeout=60)
     return r, (log.read_text(encoding="utf-8").splitlines() if log.exists() else [])
@@ -273,4 +274,68 @@ def test_every_instance_stop_in_the_scripts_is_followed_by_a_wait():
             if not any("wait_instance_gone" in l for l in lines[i:i + 5]):
                 missing.append(f"{path.name}:{i + 1}: {line.strip()}")
     assert not missing, "stop 뒤 기다리지 않는 자리:\n" + "\n".join(missing)
+
+
+# ── ④ 진행 중 올리기가 끝난 뒤에 내린다(운영 11-26 · 사용자 「수를 보이고 재기동이 기다린다」) ──────────────────
+
+def _curl(tmp_path, seq=None, *, fail=False, body=None):
+    """가짜 curl — 부를 때마다 `seq` 의 다음 수를 uploads_in_flight 로 낸다(끝 수에서 멈춘다). 불린 수는 curl.log 에."""
+    bin_dir = tmp_path / "curlbin"
+    bin_dir.mkdir(exist_ok=True)
+    (tmp_path / "seq").write_text(" ".join(map(str, seq or [])) + "\n")
+    if fail:
+        script = 'echo curl >> "{d}/curl.log"; exit 7\n'
+    elif body is not None:
+        _stub(bin_dir / "curl", f'echo curl >> "{tmp_path}/curl.log"; printf \'%s\' \'{body}\'\n')   # 중괄호가 든 글 — format 을 안 지난다
+        return f"{bin_dir}:/usr/bin:/bin"
+    else:
+        script = ('echo curl >> "{d}/curl.log"\n'
+                  'read -r -a s < "{d}/seq"; n="${{s[0]}}"; [ "${{#s[@]}}" -gt 1 ] && printf \'%s\\n\' "${{s[*]:1}}" > "{d}/seq"\n'
+                  'printf \'{{"success":true,"data":{{"uploads_in_flight":%s}}}}\' "$n"\n')
+    _stub(bin_dir / "curl", script.format(d=tmp_path))
+    return f"{bin_dir}:/usr/bin:/bin"
+
+
+def _curls(tmp_path):
+    f = tmp_path / "curl.log"
+    return len(f.read_text().splitlines()) if f.exists() else 0
+
+
+def test_restart_waits_for_uploads_to_finish_before_stopping(stack, tmp_path):
+    r, calls = _run(stack, "restart-api-only.sh", "koorm_api", LINGER="1", path=_curl(tmp_path, [1, 0]),
+                    KOORM_UPLOAD_DRAIN_S="60")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "진행 중 올리기 1건" in r.stdout and _curls(tmp_path) == 2, "끝나기를 기다리지 않았다"
+    assert "instance stop koorm_api" in calls
+
+
+def test_restart_does_not_stop_while_uploads_keep_going(stack, tmp_path):
+    r, calls = _run(stack, "restart-api-only.sh", "koorm_api", path=_curl(tmp_path, [3]), KOORM_UPLOAD_DRAIN_S="1")
+    assert r.returncode != 0 and "끝나지 않았다 — 내리지 않는다" in r.stderr, r.stdout + r.stderr
+    assert not any(c.startswith("instance stop") or c.startswith("instance start") for c in calls), "올리기를 끊었다"
+
+
+def test_stop_stops_nothing_while_uploads_keep_going(stack, tmp_path):
+    r, calls = _run(stack, "stop.sh", "koorm_nginx", "koorm_api", path=_curl(tmp_path, [2]), KOORM_UPLOAD_DRAIN_S="1")
+    assert r.returncode != 0
+    assert not any(c.startswith("instance stop") for c in calls), "nginx 부터 내려 올리기를 끊었다"
+
+
+def test_restart_sh_also_waits(stack, tmp_path):
+    r, calls = _run(stack, "restart.sh", "koorm_api", path=_curl(tmp_path, [4]), KOORM_UPLOAD_DRAIN_S="1")
+    assert r.returncode != 0 and "start.sh" not in calls and not any(c.startswith("instance stop") for c in calls)
+
+
+@pytest.mark.parametrize("kind", ["unreachable", "old_api"])
+def test_an_api_that_cannot_say_does_not_block_the_restart(stack, tmp_path, kind):
+    """헬스가 안 닿으면(API 가 죽었다 — 감독자가 되살리는 자리) · 칸이 없으면(옛 판) 지킬 올리기가 없다고 보고 내린다."""
+    path = _curl(tmp_path, fail=True) if kind == "unreachable" else _curl(tmp_path, body='{"success":true,"data":{}}')
+    r, calls = _run(stack, "restart-api-only.sh", "koorm_api", LINGER="1", path=path, KOORM_UPLOAD_DRAIN_S="60")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "instance stop koorm_api" in calls and _curls(tmp_path) == 1
+
+
+def test_zero_means_do_not_wait(stack, tmp_path):
+    r, calls = _run(stack, "restart-api-only.sh", "koorm_api", LINGER="1", path=_curl(tmp_path, [5]), KOORM_UPLOAD_DRAIN_S="0")
+    assert r.returncode == 0 and _curls(tmp_path) == 0 and "instance stop koorm_api" in calls
 

@@ -6,6 +6,8 @@ require_apptainer
 
 # 인스턴스마다 정말 사라질 때까지 기다린 뒤 다음으로 간다(R-04) — api 가 사라진 뒤에 postgres 를 내린다. 하나라도 상한을 넘기면 나머지도
 # 끝까지 시도하고 rc 1 로 끝낸다 — 「멈췄다」 를 믿고 SIF 를 바꾸거나 start 로 넘어가는 쪽이 멈추게.
+# 진행 중 올리기가 끝난 뒤에 내린다(운영 11-26) — 상한을 넘기면 아무것도 내리지 않고 rc 1.
+wait_uploads_drained || exit 1
 rc=0
 for inst in "$INST_NGINX" "$INST_MCP" "$INST_API" "$INST_POSTGRES"; do
   # 확실히 없을 때만 건너뛴다. 모르면 stop 을 시도한다 — 없는 인스턴스에 대한 stop 은 무해하지만,

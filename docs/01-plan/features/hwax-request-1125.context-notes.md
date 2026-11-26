@@ -112,3 +112,17 @@
 - 진행 중 업로드 — 20:54 재기동 때 올리던 파일 1건이 끊겼다(500). API 는 uvicorn `--timeout-graceful-shutdown 5`(api.sif 에 구워짐)라 내려갈 때
   진행 중 요청을 5초만 기다리고, apptainer stop 은 10초 뒤 강제로 끝낸다 — 5초 넘는 올리기는 재기동 때 늘 끊긴다. 고칠 길이 여럿이라 사용자에게
   묻는다.
+
+## 11. 진행 중 올리기를 기다리는 재기동(2026-11-26 · 사용자 「수를 보이고 재기동이 기다린다」)
+- 고른 선택지 문장(규격) — API 가 진행 중 올리기 수를 세어 /api/health 에 내고, stop · 재기동 스크립트는 그 수가 0 이 될 때까지 기다린 뒤
+  내린다. 상한(기본 5분, 환경값으로 바꿈)을 넘기면 내리지 않고 rc≠0 으로 멈춘다(운영이 보고 다시 하거나 강제로). api.sif 를 다시 굽지 않는다.
+- API — `app/shared/inflight.py` 의 ASGI 미들웨어가 multipart 본문의 POST · PUT · PATCH 가 도는 동안 센다(예외로 끝나도 줄인다 — 안 줄면
+  재기동이 영영 기다린다). `/api/health` 의 `uploads_in_flight`(인증 없이 읽힌다 — 수뿐이다). uvicorn 일꾼이 하나라 프로세스 안의 수로 충분하다.
+- 스크립트 — `_common.sh` 의 `wait_uploads_drained`(5초마다 health 를 본다). `stop.sh` 는 무엇이든 내리기 전에(nginx 를 먼저 내리면 그 길의
+  올리기가 끊긴다), `restart-api-only.sh` · `restart.sh` 는 API 를 내리기 전에 부른다. 헬스가 안 닿거나 칸이 없으면(API 가 죽음 — 감독자가
+  되살리는 자리 · 옛 판) 기다리지 않는다. 상한 `KOORM_UPLOAD_DRAIN_S`(기본 300, 0 = 기다리지 않음). 예시 .env 에 둘(이 값과
+  `KOORM_STOP_WAIT_S`)과 「.env 에 적으면 명령줄 값을 덮는다」 를 적었다.
+- 한계 — 앞단 프록시가 본문을 다 받은 뒤 넘기면(앱 nginx 는 `proxy_request_buffering` 을 안 적어 기본 on) 그 전송 구간은 API 가 모른다. 그
+  구간의 올리기는 이 수에 안 잡힌다.
+- 시험 — test_upload_inflight.py 4 · test_deploy_r04_1125.py ④ 7(기다림 · 안 끝남 · stop.sh · restart.sh · 헬스 안 닿음 · 옛 판 · 0) · 기존
+  스크립트 시험은 진짜 dev API 에 닿지 않게 기본 0 · 변이 8 / 8 · 백엔드 전체 1178(환경 탓 넷).

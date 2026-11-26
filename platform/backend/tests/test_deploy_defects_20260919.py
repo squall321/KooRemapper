@@ -368,7 +368,8 @@ def _script_tree(tmp_path, *names):
 
 
 def _run_script(root, scripts, name, appt, stdin="", **extra):
-    env = {"PATH": "/usr/bin:/bin", "APPTAINER": str(appt),
+    # 진행 중 올리기 기다리기(11-26)는 /api/health 를 curl 로 본다 — 이 박스의 진짜 dev API 에 닿지 않게 끈다(test_deploy_r04_1125 가 잰다)
+    env = {"PATH": "/usr/bin:/bin", "APPTAINER": str(appt), "KOORM_UPLOAD_DRAIN_S": "0",
            "ALLOW_PLACEHOLDER_SECRETS": "1", "HOME": str(root), **extra}
     return subprocess.run(["bash", str(scripts / name)], input=stdin,
                           capture_output=True, text=True, cwd=str(root), env=env)

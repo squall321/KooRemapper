@@ -183,3 +183,35 @@ wait_instance_gone() {
     sleep 1
   done
 }
+
+# 진행 중 올리기가 끝날 때까지 기다린다 — 0 끝났다(또는 셀 수 없다) · 1 상한을 넘겼다(부르는 쪽은 내리지 않는다).
+#
+# API 는 내려갈 때 진행 중 요청을 5초만 기다려(api.sif 의 uvicorn `--timeout-graceful-shutdown 5`) 그보다 긴 올리기가 끊겼다(운영 11-26 ·
+# 사용자 결정 「수를 보이고 재기동이 기다린다」). `/api/health` 의 `uploads_in_flight` 를 5초마다 보고 0 이면 넘어간다. 헬스가 안 닿거나
+# 그 칸이 없으면(API 가 죽었거나 옛 판) 지킬 올리기가 없다고 보고 넘어간다 — 죽은 API 를 되살리는 감독자를 막지 않는다.
+# 상한은 KOORM_UPLOAD_DRAIN_S(초, 기본 300). 0 이면 기다리지 않는다(사람이 알고 끊을 때).
+wait_uploads_drained() {
+  local limit="${KOORM_UPLOAD_DRAIN_S:-300}" start=$SECONDS n
+  [ "$limit" = "0" ] && return 0
+  while :; do
+    n="$(uploads_in_flight_now)"
+    if [ -z "$n" ] || [ "$n" = "0" ]; then return 0; fi
+    if [ $((SECONDS - start)) -ge "$limit" ]; then
+      echo "✗ 진행 중 올리기 ${n}건이 ${limit}초 안에 끝나지 않았다 — 내리지 않는다(끝난 뒤 다시 하거나, 끊어도 되면 KOORM_UPLOAD_DRAIN_S=0 으로 다시)" >&2
+      return 1
+    fi
+    echo "  · 진행 중 올리기 ${n}건 — 끝나기를 기다린다"
+    sleep 5
+  done
+}
+
+# /api/health 의 uploads_in_flight — 닿지 않거나 그 칸이 없으면 빈 글이다.
+uploads_in_flight_now() {
+  local body
+  body="$(curl -s --noproxy '*' -m 5 "http://127.0.0.1:${KOORM_API_PORT:-8700}/api/health" 2>/dev/null)" || return 0
+  printf '%s' "$body" | python3 -I -c 'import json, sys
+try:
+    print(int(json.load(sys.stdin)["data"]["uploads_in_flight"]))
+except Exception:
+    pass' 2>/dev/null || true
+}

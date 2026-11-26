@@ -12,6 +12,7 @@ require_apptainer
 # stop 은 없는 인스턴스에 대해 무해하므로(이미 `|| true`), 모를 때는 시도하는 쪽으로 기운다.
 # 내려가는 중인 인스턴스 위에 start 를 걸지 않는다 — 정말 사라질 때까지 기다리고, 상한을 넘기면 띄우지 않고 rc 1(R-04).
 if ! instance_absent_for_sure "$INST_API"; then
+  wait_uploads_drained || exit 1              # 진행 중 올리기가 끝난 뒤에 내린다(운영 11-26) — 넘기면 내리지 않고 rc 1
   echo "→ stop $INST_API"
   "$APPTAINER" instance stop "$INST_API" || true
   wait_instance_gone "$INST_API" || exit 1
