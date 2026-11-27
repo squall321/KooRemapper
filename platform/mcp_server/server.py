@@ -1814,32 +1814,217 @@ CAE_SEVERITIES = ("CRITICAL", "WARNING", "UNKNOWN", "OK")         # 높은 것�
 CAE_PATH_SORTS = ("impulse_max", "engage_ratio", "peak_force_max", "work_max")
 CAE_LIMIT_MAX = 500
 
+# ── 리포트 조회 · 해석 온톨로지 도구의 허용값 · 경계 · 결과 꼴(공통 계약 C3 · C4 · C7) ─────────────────────────────────────────
+# 경계 · 허용값은 백엔드 GET /reports/{id}/contact_profile · hotspots · blocks/{name} 의 Query 제약과 같아야 한다. 정렬 칸 · 분석 블록 이름은
+# 백엔드가 모르는 값을 거절하지 않고 받으므로(정렬은 stress_max 로 · 블록은 available=false) enum 으로 두지 않고 설명에만 쓴다(파서 상수와 같다).
+CONTACT_METRICS = ("pf", "ti", "tw")              # peak_force · total_impulse · total_work
+CONTACT_TOP_MAX = 1000
+CONTACT_AXIS_TOP_MAX = 5000
+HOTSPOT_TOP_MAX = 500
+BLOCK_MAX_BYTES_MIN = 1_000
+BLOCK_MAX_BYTES_MAX = 4_000_000
+HOTSPOT_ORDERS_DEEP = ("stress_max", "stress_mean", "volume", "element_count", "radius_enclosing", "rank")
+HOTSPOT_ORDERS_SPHERE = ("stress_max", "element_count", "radius_enclosing", "rank", "strain_max", "energy_total", "energy_max")
+REPORT_ANALYTICS_BLOCKS = ("doe_analysis", "deep_analytics", "insights", "physics", "solver_quality", "contact_profile", "set_report")
+_A_CAE_PROJECT = "과제 — 수동 메타의 과제 또는 리포트에 박힌 project_name. " + _A_FACET + " 비우면 모두."
+_A_CAE_KIND = f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나. 비우면 모두."
 
-@mcp.tool()
+AttachCaePackageOut = _shape("AttachCaePackageOut", {
+    "already": "true 면 같은 꾸러미(sha256 같음)라 행은 그대로 두고 코어 다리만 다시 지었다",
+    "vocabulary": "받아들인 어휘 판 {version, sha256}",
+    "sha256": "꾸러미 바이트의 sha256",
+    "file_id": "리포트 세션에 저장한 꾸러미 파일 id",
+    "file": "그 파일 이름",
+    "producer": "꾸러미를 낸 후처리(꾸러미의 producer 그대로)",
+    "source_html": "꾸러미가 적은 짝 HTML",
+    "units": "단위계 이름",
+    "counts": "건수 {objects: 꾸러미 타입별, loaded: 실은 타입별, edges: 관계 수}",
+    "runs": "런 키 대조 {package, matched, missing(앞 20 개)}",
+    "warnings": "받는 쪽 경고 글 목록",
+    "loaded_at": "실은 시각(UTC ISO 꼴)",
+    "bridges": "코어 다리 셈 {rule, human, stale, renamed, candidates, unmatched, unnamed, by_type, mirror, notes, computed_at} — "
+               "다리 짓기만 깨지면 {error}",
+})
+ReportCaeOut = _shape("ReportCaeOut", {
+    "report_id": "리포트 id",
+    "loaded": "꾸러미를 실었나 — false 면 why 만 온다",
+    "why": "실은 적이 없을 때 까닭과 붙이는 길",
+    "summary": "적재 요약(어휘 판 · sha256 · 파일 · 단위계 · counts · runs · warnings · loaded_at · 다리 셈)",
+    "campaign": "캠페인 {key, label, 단위계 · 낙하 높이 · 충돌 속도 · scenario_kind …} — 없으면 null",
+    "parts": "파트 판정, 위험한 것부터 — key · label · severity · min_safety_factor · worst_von_mises(MPa) · worst_*_run_case · "
+             "worst_*_run_identity …",
+    "load_paths": "하중 경로, 충격량 큰 것부터 — part_a · part_b(+ _name) · engage_ratio · impulse_max(N·s) · peak_force_max(N) · work_max(mJ) …",
+    "contacts": "접촉 — 칸들과 sides[{part, name …}]",
+    "findings": "소견, 심각한 것부터 — 칸들과 about[파트 key]",
+    "hotspots": "응력 집중 행",
+    "bridges": "코어 다리 {rule, counts, lines, stale, candidates, unmatched, unnamed, drift(있을 때)} — 보기만 깨지면 {error}",
+})
+FindCaePartsOut = _shape("FindCaePartsOut", {
+    "items": "파트 판정, 위험한 것부터 — report_id · report_label · kind · project · key · label · part_id · name · material_name · "
+             "severity · min_safety_factor · worst_von_mises(MPa) · worst_von_mises_run_case · worst_g · worst_g_run_case …",
+    "total": "돌려준 건수(items 길이) — 전체 건수가 아니다",
+    "truncated": "limit 만큼 찼으면 true — 더 있을 수 있다(limit 을 올리거나 거름을 좁힌다)",
+})
+FindCaeLoadPathsOut = _shape("FindCaeLoadPathsOut", {
+    "items": "하중 경로, sort 가 큰 것부터 — report_id · report_label · kind · project · key · label · part_a · part_b · n_runs_engaged · "
+             "engage_ratio · impulse_max(N·s) · impulse_max_run_case · impulse_median · impulse_p90 · peak_force_max(N) · work_max(mJ)",
+    "total": "돌려준 건수(items 길이) — 전체 건수가 아니다",
+    "truncated": "limit 만큼 찼으면 true — 더 있을 수 있다(limit 을 올리거나 거름을 좁힌다)",
+})
+AttachCadOut = _shape("AttachCadOut", {
+    "key": "묶음 열쇠",
+    "already": "true 면 같은 묶음이 이미 붙어 있어 바꾼 것이 없다",
+    "stored": "이번에 저장한 파일 수(already 면 0)",
+    "n_parts": "묶음의 파트 수",
+    "replaced": "갈아 끼운 옛 묶음 열쇠 — 처음 붙였으면 null(already 면 칸이 없다)",
+    "warnings": "받는 쪽 경고 글 목록",
+})
+AttachReportScenarioOut = _shape("AttachReportScenarioOut", {
+    "id": "리포트 id",
+    "kind": "리포트 종류",
+    "label": "라벨",
+    "scenario": "조건 요약 {project_name, sim_params{drop_height, t_final, dt}, scenarios[name · template · source_type · angle_source · "
+                "tolerance · n_base_directions · expected_runs …], templates}",
+    "scenario_type": "방향 조건 종류(첫 시나리오의 source_type)",
+    "scenario_file_id": "이번에 저장한 scenario.json 세션 파일 id",
+    "source_kfile_id": "이어진 원본 K파일 id — 이번에 template 로 찾아 이었을 수 있다",
+    "n_cases": "케이스 수",
+    "environment": "응답을 낸 서버 환경(dev · prod · unknown)",
+})
+ReportListRow = _shape("ReportListRow", {
+    "id": "리포트 id",
+    "kind": "리포트 종류(deep · sphere · impact)",
+    "label": "라벨",
+    "focus": "초점 라벨",
+    "project_name": "리포트에 박힌 과제 이름",
+    "doe_strategy": "방향 컨셉(cuboid_26 등)",
+    "scenario_type": "방향 조건 종류",
+    "drop_height": "낙하 높이(mm)",
+    "worst_stress": "전역 최악 응력(MPa)",
+    "max_severity": "가장 높은 소견 심각도",
+    "source_kfile_id": "이어진 원본 K파일 id",
+    "eng_meta": "과제 · rev · 설계안 수동 메타",
+    "n_cases": "케이스 수",
+    "created_at": "반입 시각",
+    "environment": "응답을 낸 서버 환경(dev · prod · unknown)",
+})
+ReportBlocksOut = _shape("ReportBlocksOut", {
+    "n_blocks": "블록 수",
+    "n_unread": "read_by_parser=false 인 블록 수",
+    "blocks": "블록마다 {name, type(object · array · …), count, sub_keys(앞 40 개), item_type, bytes(직렬화 크기 어림), read_by_parser}",
+})
+ReportBlockOut = _shape("ReportBlockOut", {
+    "name": "블록 이름",
+    "found": "블록 · 경로를 찾았나 — false 면 note 가 쓸 수 있는 키 · 인덱스를 말한다",
+    "path": "준 하위 경로",
+    "value": "꺼낸 값(잘렸으면 앞부분, too_big 이면 null)",
+    "shape": "값의 형태 {type, count, sub_keys}",
+    "bytes": "값의 직렬화 크기 어림(바이트)",
+    "read_by_parser": "전용 도구가 이 블록을 읽나",
+    "truncated": "잘랐으면 {kind: limit · bytes · too_big, returned, total, bytes, max_bytes} — 안 잘랐으면 칸이 없다",
+    "note": "잘림 · 끊긴 경로 · 없는 블록의 안내 글",
+    "available": "없는 블록일 때 블록 이름 목록(앞 80 개)",
+    "walked": "경로가 끊겼을 때 거기까지 지난 경로",
+})
+ReportHotspotsOut = _shape("ReportHotspotsOut", {
+    "available": "군집이 실렸나 — false 면 note 가 까닭",
+    "kind": "sphere 일 때만 온다",
+    "n_records": "파트 × 기준 레코드 수",
+    "n_clusters": "거른 뒤 군집 수(top 으로 자르기 전)",
+    "n_clusters_all": "sphere — 거르기 전 전 각도 군집 수",
+    "criteria": "이 리포트의 판정 기준 목록",
+    "parts": "군집이 있는 파트 id 목록",
+    "order": "실제로 쓴 정렬 칸",
+    "filter": "적용한 거름",
+    "clusters": "군집 — part_id · part_name · criterion · center(mm) · radius_enclosing · element_count · stress_max(MPa) · peak_time … "
+                "(sphere 는 case_key · angle, deep 은 uniform · volume · stress_mean · peak_element_id 까지)",
+    "truncated": "top 에서 잘랐으면 {returned, total}",
+    "envelope": "sphere — 파트 × 기준마다 전 각도에서 가장 센 군집(worst_case_key · worst_angle · stress_max · n_angles …)",
+    "envelope_truncated": "sphere — envelope 를 top 에서 잘랐으면 {returned, total}",
+    "n_angles_total": "sphere — 각도 런 수",
+    "n_angles_with_clusters": "sphere — 군집이 실린 각도 런 수",
+    "uniform_records": "deep — 값이 고른 레코드 수(uniform_note 참고)",
+    "cap_note": "생성기 군집 상한에 걸렸을 때의 글",
+    "compact_note": "sphere 압축본에 없는 칸 안내",
+    "note": "군집이 없을 때 까닭",
+    "peak_provenance": "피크 출처 표지 — 캠페인 런의 추출에서, 모르면 known=false",
+})
+ReportContactProfileOut = _shape("ReportContactProfileOut", {
+    "available": "프로파일이 있나 — false 면 note(또는 error)가 까닭",
+    "kind": "리포트 종류",
+    "metric": "쓴 지표",
+    "metric_name": "지표 이름(peak_force · total_impulse · total_work)",
+    "axis_kind": "축 — angle(sphere) · position(impact)",
+    "n_pairs": "파트쌍 수",
+    "n_resolved": "파트로 분해된 쌍 수",
+    "n_axis": "축(각도 · 위치) 수",
+    "pairs": "쌍마다 key · src · dst · src_name · dst_name · contact_id · name · resolved · n_engaged · peak(최대 |값|) · peak_case_key · "
+             "peak_label",
+    "pairs_truncated": "top 에서 잘랐으면 {returned, total}",
+    "axis_summary": "축마다 case_key · label · 각도(위치) · n_engaged · top_pair · top_value — 가장 센 것부터 axis_top 개",
+    "axis_summary_note": "「상위 n/N」 글",
+    "at": "case_key 를 줬을 때 — {case_key, found, 축 칸, edges[쌍마다 peak_force · total_impulse · total_work]}",
+    "trust": "전 각도 Newton-3 접촉력 신뢰 요약(있을 때)",
+    "note": "None · resolved 뜻 안내, 또는 프로파일이 없을 때 까닭",
+})
+ReportBehaviorClustersOut = _shape("ReportBehaviorClustersOut", {
+    "available": "군집이 있나 — false 면 note",
+    "n_clusters": "선언한 군집 수",
+    "archetypes": "아키타입 이름 목록",
+    "features_used": "군집에 쓴 특징",
+    "n_positions_labeled": "라벨이 붙은 위치 수",
+    "groups": "아키타입마다 {archetype, index, n_positions, positions}, 큰 것부터",
+    "n_archetypes_used": "실제로 쓰인 아키타입 수",
+    "degenerate": "true 면 선언 수보다 적게 쓰였다 — 거동이 갈리지 않았다(degenerate_note)",
+    "is_mock": "true 면 합성 군집이다 — 근거로 쓰지 말 것(mock_note)",
+    "note": "군집이 없을 때 까닭",
+})
+ReportAnalyticsOut = _shape("ReportAnalyticsOut", {
+    "requested": "준 block(없으면 null)",
+    "n_blocks": "요약한 블록 수",
+    "blocks": "블록마다 {name, available, bytes, n_subs, subs[{name, summary, values, detail_shape, not_computed, not_computed_note}]} — "
+              "없는 블록은 available=false 와 note",
+    "raw_access_note": "원본을 꺼내는 길 안내",
+})
+ReportMediaOut = _shape("ReportMediaOut", {
+    "report_id": "리포트 id",
+    "kind": "리포트 종류",
+    "n_total": "거르기 전 전체 수",
+    "n_returned": "돌려준 수",
+    "n_images": "돌려준 것 중 볼 수 있는 그림 수",
+    "n_videos": "돌려준 것 중 볼 수 없는 것(영상) 수",
+    "cases_with_media": "그림이 붙은 case_key 목록",
+    "filter": "적용한 거름",
+    "media": "항목마다 path · stored_as · file_id · bytes · kind(image · video) · can_llm_view · case_key · set_name · set_title · role · "
+             "face · declared",
+    "note": "붙은 그림이 없을 때 까닭과 올리는 길",
+})
+
+
+@mcp.tool(annotations=_SET_OUT)
 async def attach_cae_package(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     path: Annotated[str, Field(description="꾸러미 파일 경로(<리포트 이름>.ontology.json — 후처리가 리포트 HTML 옆에 낸다). "
                                            "MCP 서버가 읽을 수 있는 같은 머신 경로.")],
     ctx: Context,
-) -> dict:
-    """후처리 해석 온톨로지 꾸러미(`dynaforge.onto_package`)를 리포트에 싣는다 — **캠페인 수준만 행으로**(캠페인 · 파트 판정 · 접촉 ·
-    하중 경로 · 소견 · 응력 집중). 런 · 파트 응답은 리포트의 케이스(impact_cases)가 정본이라 행으로 싣지 않는다. 소유자만.
+) -> AttachCaePackageOut:
+    """후처리 해석 온톨로지 꾸러미(`dynaforge.onto_package`, <리포트 이름>.ontology.json)를 리포트에 싣는다 — 캠페인 수준만 행으로.
 
-    받아들인 어휘 판 · 짝 HTML 지문(꾸러미의 source.html 이 이 리포트 원본 HTML 과 같아야 한다) · 종류 · 런 키가 맞아야 한다 —
-    하나라도 어긋나면 아무것도 바뀌지 않는다. 같은 관계(이름 · 양 끝)가 두 번 나오는 꾸러미도 받지 않는다(오류 글에
-    `duplicate_relation`). 같은 꾸러미는 행을 그대로 두고(멱등), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다.
-    붙일 때마다(같은 꾸러미여도) **코어 다리**를 지금 거울로 다시 짓는다 — 해석 파트 → 코어 부품(maps_to) · 소견 → 고장모드(indicates) ·
-    캠페인 → 해석 방법(follows_method). 부르는 칸의 글이 코어 객체 하나와 글자 그대로 맞을 때만 선(rule)이고(살아 있는 객체가 먼저다)
-    나머지는 후보이거나 못 붙임이다 — 규칙 전문은 report_cae. 사람이 이은 선은
-    다시 붙여도 남는다. 결과 `bridges` 에 규칙 선 · 사람 선 · 끊긴 사람 선(stale) · 이름 바뀐 사람 선(renamed) 수와 후보 · 못 붙인 객체
-    수(코어 거울에 그 타입이 없으면 notes 가 까닭을 말한다). 다리 짓기만 깨지면 꾸러미는 실리고 `bridges` 는
-    `{"error": "<클래스: 한 줄>"}` 이다 — 같은 꾸러미를 다시 붙이면 다시 짓는다.
-    리포트를 번들(.zip)로 올리면 같은 폴더 · 같은 이름 줄기의 꾸러미는 저절로 실린다. 후처리 예약(postprocess)
-    반입도 귀환 매니페스트에 꾸러미가 있으면 저절로 싣는다(get_job 의 `external.ontology.state` — `ontology` 가 null 인 성공
-    잡도 있다, 그때 실렸는지는 report_cae 로 본다).
-    리포트가 그사이 지워졌으면 「찾을 수 없습니다」 오류, 싣는 쓰기가 깨지면 짧은 까닭과 함께 오류이고 아무것도 바뀌지 않는다 — 다만
-    오류 글이 「실렸는지 모른다」 고 하면 실렸을 수 있다(report_cae 로 확인하거나 같은 꾸러미를 다시 붙인다).
-    Load a postprocess ontology package into a report (campaign-level rows only); all-or-nothing, idempotent rows; rebuilds core bridges."""
+    리포트를 꾸러미 없이 올렸거나 후처리를 다시 돌려 새 꾸러미가 생겼을 때 쓴다. 리포트를 번들(.zip)로 올리면 같은 폴더 · 같은 이름 줄기의
+    꾸러미가, 후처리 예약 반입은 귀환 매니페스트에 꾸러미가 있으면 저절로 실린다(get_job 의 `external.ontology.state` — null 인 성공 잡도
+    있다). 실렸는지 · 내용은 report_cae, 리포트를 건너 찾기는 find_cae_parts · find_cae_load_paths. MCP 서버가 `path` 를 읽을 수 있는
+    같은 머신에서만 된다. 리포트 소유자만.
+
+    싣는 것은 캠페인 · 파트 판정 · 접촉 · 하중 경로 · 소견 · 응력 집중이다(런 · 파트 응답은 리포트의 케이스가 정본이라 행으로 싣지 않는다).
+    어휘 판 · 짝 HTML 지문(꾸러미의 source.html 이 이 리포트 원본 HTML 과 같아야 한다) · 종류 · 런 키 중 하나라도 어긋나거나 같은
+    관계(이름 · 양 끝)가 두 번 나오면(`duplicate_relation`) 통째로 거절하고 아무것도 바꾸지 않는다. 같은 꾸러미는 행을 그대로 두고
+    (already=true), 다른 꾸러미면 그 리포트의 행을 통째로 바꾼다. 어느 쪽이든 코어 다리(해석 파트 → 코어 부품 maps_to · 소견 → 고장모드
+    indicates · 캠페인 → 해석 방법 follows_method)를 지금 거울로 다시 짓는다 — 사람이 이은 선은 남는다(규칙은 report_cae 의 bridges.rule).
+
+    돌려주는 것 — already · vocabulary · counts · runs · warnings · bridges(선 · 후보 · 못 붙인 객체 수, 거울에 타입이 없으면 notes).
+    다리 짓기만 깨지면 꾸러미는 실리고 bridges 는 {"error": …} — 같은 꾸러미를 다시 붙이면 다시 짓는다. 리포트가 그사이 지워졌으면
+    「찾을 수 없습니다」, 쓰기가 깨지면 까닭과 함께 오류이고 바뀐 것이 없다 — 다만 오류 글이 「실렸는지 모른다」 고 하면 실렸을 수 있다
+    (report_cae 로 확인하거나 같은 꾸러미를 다시 붙인다)."""
     import os as _os
     if not _os.path.isfile(path):
         raise RuntimeError(f"path not found on the MCP host: {path}")
@@ -1850,45 +2035,52 @@ async def attach_cae_package(
         return _unwrap(await c.post(f"/reports/{_seg(report_id)}/cae", files=files, headers=_forward_headers(ctx)))
 
 
-@mcp.tool()
-async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
-    """리포트 하나의 해석 온톨로지 — 캠페인(단위계 · 낙하 높이 · 충돌 속도 …) · **파트 판정 위험한 것부터**(최소 안전율 · 최악 응력과
-    그 런의 각도 · 위치 identity) · **하중 경로 충격량 큰 것부터**(파트 쌍 · 맞닿은 비율) · 접촉(양쪽 파트) · 소견 · 응력 집중 ·
-    **코어 다리**(`bridges` — 파트 → 코어 부품 maps_to(StepForge 와 같은 정의) · 소견 → 고장모드 indicates · 캠페인 → 해석 방법
-    follows_method). 규칙 — 부르는 칸(파트 name · 소견 title · 캠페인 scenario_kind)의 글이 코어 객체의 key · 이름 · 허브 별칭 · 옛 key ·
-    우리 별칭과 글자 그대로(앞뒤 공백만 걷고) 같고 그 칸들이 모두 객체 하나를 가리킬 때만 규칙 선을 긋는다. 나머지는 후보이거나(여럿 ·
-    엇갈림 · 구분기호와 대소문자만 다름 · 한쪽이 다른 쪽을 품음) 못 붙임이다. 끝이 거울에 없는 우리 별칭(허브에서 지워짐 · 허브가
-    key 를 바꿈)도 엇갈림이다 — 살아 있는 객체가 글자 그대로 맞으면 그 객체를 후보로 내고 까닭에 적는다. 그 밖에는 그 별칭이 응답에
-    보이지 않는다 — 그만 쓴 객체 하나만 글자 그대로 맞을 때도 선을 긋지 않아 못 붙임이다.
-    살아 있는 객체가 정한다 — 그만 쓴(deprecated) 객체는 살아 있는 것이 하나도 안 맞을 때만 센다(글자 그대로 하나면 선을 긋고 그 끝에
-    `dst_deprecated: true`, 여럿이면 못 붙임) · 후보로는 안 낸다 · 우리 별칭이 그만 쓴 객체를 가리키는데 살아 있는 객체가 글자로 맞으면
-    후보(까닭에 그 말). 사람 선은
-    꾸러미를 다시 붙여도 남고 다대일(파트 · 캠페인)에서는 규칙을 이긴다. bridges 는
-    `lines`(규칙 선 rule · 사람 선 human — 코어 끝의 key · 이름 · 살아 있나(dst_active) · 그만 씀(dst_deprecated), 부르는 칸의 글이 확정
-    때와 달라진 사람 선은 `renamed_from` — 확정 때 그 칸이 비어 있었으면 빈 글이다) ·
-    `stale`(가리키던 해석 객체가 다시 반입에서 사라진 사람 선 — 지우지 않는다) · `candidates`(정확히 하나로 안 맞은 것 — 후보 key ·
-    까닭, 선이 아니다) · `unmatched` · `unnamed`(타입별 key) · `counts` · `rule`(맞추는 규칙 글) · `drift`(있을 때만 — 붙인 뒤 거울이
-    바뀌어 저장된 규칙 선이 지금 셈과 다르면 add · drop, 사람 선의 해석 객체를 부르는 칸의 글이 바뀌었으면 renamed — 캠페인 이름만
-    바뀐 것은 아니다 · 사람 선은 그대로 이기고 같은 짝을 다시 확정하면 지금 글로 맞춰 풀린다). 후보를 사람 선으로
-    확정하거나 사람 선을 지우는 것은 MCP 도구가 아니라 REST 다 — POST · DELETE /reports/{id}/cae/bridges(리포트 주인 · 시스템 관리자).
-    실은 적이 없으면 `loaded:false` 와 붙이는 길을 준다. 런마다의 값은 report_case · report_part_series 가 준다.
-    One report's analysis ontology — part judgments (worst first), load paths (largest impulse first), contacts, findings, core bridges."""
+@mcp.tool(annotations=_READ)
+async def report_cae(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> ReportCaeOut:
+    """리포트 하나에 실린 해석 온톨로지(캠페인 · 파트 판정 · 하중 경로 · 접촉 · 소견 · 응력 집중)와 코어 다리를 본다.
+
+    한 리포트를 캠페인 수준으로 볼 때, 꾸러미가 실렸는지 확인할 때 쓴다. 여러 리포트를 건너 찾기는 find_cae_parts · find_cae_load_paths,
+    런마다의 값은 report_case · report_part_series, 꾸러미 싣기는 attach_cae_package. 리포트를 읽을 수 있는 사람(소유 · 같은 소속)만.
+
+    돌려주는 것 — campaign(단위계 · 낙하 높이 · 충돌 속도 …) · parts(위험한 것부터 — 판정 · 최소 안전율 · 최악 응력과 그 런의 case_key ·
+    identity) · load_paths(충격량 큰 것부터 — 파트 쌍 · 맞닿은 비율) · contacts(sides — 양쪽 파트) · findings(about) · hotspots · summary
+    · bridges. 키는 꾸러미의 상대 키(part/3 · finding/2 · campaign)다. 실은 적이 없으면 loaded=false 와 붙이는 길(why).
+
+    bridges — 해석 파트 → 코어 부품(maps_to) · 소견 → 고장모드(indicates) · 캠페인 → 해석 방법(follows_method). lines(basis 가 rule ·
+    human — 코어 끝 key · 이름 · dst_active · dst_deprecated, 부르는 글이 확정 때와 달라진 사람 선은 renamed_from) · stale(가리키던 해석
+    객체가 다시 반입에서 사라진 사람 선 — 지우지 않는다) · candidates(정확히 하나로 안 맞은 것 — 후보 key · 까닭, 선이 아니다) · unmatched
+    · unnamed(타입별 key) · counts · rule(맞추는 규칙 전문) · drift(있을 때만 — 붙인 뒤 거울이 바뀌어 저장된 규칙 선이 지금 셈과 다르면
+    add · drop, 사람 선 객체를 부르는 글이 바뀌었으면 renamed). 규칙 선은 부르는 칸(파트 name · 소견 title · 캠페인 scenario_kind)의 글이
+    살아 있는 코어 객체 하나와 글자 그대로 맞을 때만 선다. 사람 선은 다시 붙여도 남고 다대일(파트 · 캠페인)에서는 규칙을 이긴다. 후보를
+    사람 선으로 확정하거나 지우는 것은 MCP 도구가 아니라 REST POST · DELETE /reports/{id}/cae/bridges 다(리포트 주인 · 시스템 관리자).
+    다리 보기만 깨지면 bridges 는 {"error": …} 이고 나머지는 그대로 온다."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/cae")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def find_cae_parts(
     ctx: Context,
-    min_severity: Annotated[str | None, Field(description=f"판정 하한 — {_one_of(CAE_SEVERITIES)} 중 하나. 이 판정 **이상**"
-                                                          "(CRITICAL 이면 CRITICAL 만, WARNING 이면 CRITICAL 도).")] = None,
-    max_safety_factor: Annotated[float | None, Field(description="최소 안전율 상한(무차원) — 이 값 이하인 파트. 1 미만이면 항복이다.")] = None,
-    project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제 또는 리포트에 박힌 project_name 과 같은 것.")] = None,
-    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나. 비우면 모두.")] = None,
-    limit: Annotated[int, Field(description=f"최대 건수(1~{CAE_LIMIT_MAX}). 위험한 순으로 매긴 뒤 자른다.")] = 100,
-) -> dict:
-    """리포트를 건너 **파트 판정**을 찾는다 — 판정 · 최소 안전율 · 최악 응력 순으로 위험한 것부터. 읽을 수 있는 리포트(소유 · 같은 소속,
-    관리자는 전사)의 것만. 항목마다 리포트 id · 라벨 · 과제와 파트 칸(재질 · 최악 런 case_key)이 온다.
-    Find part judgments across readable reports, most dangerous first."""
+    min_severity: Annotated[Literal[CAE_SEVERITIES] | None,
+                            Field(description=f"판정 하한 — {_one_of(CAE_SEVERITIES)} 중 하나(높은 것부터). 이 판정 **이상**"
+                                              "(CRITICAL 이면 CRITICAL 만, WARNING 이면 CRITICAL 도). 비우면 거르지 않는다.")] = None,
+    max_safety_factor: Annotated[float | None, Field(ge=0, description="최소 안전율 상한(무차원, 0 이상) — 최소 안전율이 이 값 이하인 "
+                                                                       "파트만(안전율이 없는 파트는 빠진다). 1 미만이면 항복이다. "
+                                                                       "비우면 거르지 않는다.")] = None,
+    project: Annotated[str | None, Field(description=_A_CAE_PROJECT)] = None,
+    kind: Annotated[Literal[REPORT_KINDS] | None, Field(description=_A_CAE_KIND)] = None,
+    limit: Annotated[int, Field(ge=1, le=CAE_LIMIT_MAX,
+                                description=f"최대 건수(1~{CAE_LIMIT_MAX}) — 위험한 순으로 매긴 뒤 자른다. 기본 100.")] = 100,
+) -> FindCaePartsOut:
+    """리포트를 건너 파트 판정(cae_part)을 위험한 것부터 찾는다 — 판정 · 최소 안전율 · 최악 응력 순으로 매긴 뒤 limit 에서 자른다.
+
+    「어느 리포트의 어느 파트가 항복에 가깝나」 처럼 여러 캠페인을 견줄 때 쓴다. 한 리포트 안을 다 볼 때는 report_cae, 리포트 자체를
+    조건으로 거르기는 find_reports. 해석 온톨로지 꾸러미를 실은 리포트만 나온다(attach_cae_package). 읽을 수 있는 리포트(소유 · 같은
+    소속, 관리자는 전사)의 것만. 거름은 모두 함께 걸린다(AND).
+
+    돌려주는 것 — items(항목마다 report_id · report_label · kind · project · key(part/3 꼴) · label 과 파트 칸 — part_id · name ·
+    material_name · yield_limit · severity · min_safety_factor · worst_von_mises(MPa) · worst_von_mises_run_case · worst_g ·
+    worst_g_run_case …) · total(돌려준 건수 — 전체 건수가 아니다) · truncated(limit 만큼 찼으면 true — 더 있을 수 있으니 limit 을
+    올리거나 거름을 좁힌다)."""
     params: dict = {"limit": limit}
     for k, v in {"min_severity": min_severity, "max_safety_factor": max_safety_factor,
                  "project": project, "kind": kind}.items():
@@ -1897,19 +2089,29 @@ async def find_cae_parts(
     return await _get(ctx, "/cae/parts", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def find_cae_load_paths(
     ctx: Context,
-    sort: Annotated[str, Field(description=f"정렬 기준(큰 것부터) — {_one_of(CAE_PATH_SORTS)} 중 하나"
-                                           "(충격량 N·s · 맞닿은 비율 · 최대 힘 N · 일 mJ).")] = "impulse_max",
-    min_engage_ratio: Annotated[float | None, Field(description="맞닿은 런의 비율 하한(0~1) — 이 쌍이 맞닿은 런 수 ÷ 런 수.")] = None,
-    project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제 또는 리포트에 박힌 project_name 과 같은 것.")] = None,
-    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나. 비우면 모두.")] = None,
-    limit: Annotated[int, Field(description=f"최대 건수(1~{CAE_LIMIT_MAX}). 정렬 기준으로 매긴 뒤 자른다.")] = 100,
-) -> dict:
-    """리포트를 건너 **하중 경로**(하중을 주고받은 파트 쌍)를 찾는다 — sort 가 큰 것부터. 읽을 수 있는 리포트의 것만.
-    「충격이 어디로 흘렀나」 를 캠페인끼리 견줄 때 쓴다. 런마다의 하중 전달은 리포트의 report_contact_profile 이 준다.
-    Find load paths (part pairs) across readable reports, ranked by the chosen measure."""
+    sort: Annotated[Literal[CAE_PATH_SORTS],
+                    Field(description=f"정렬 기준(큰 것부터) — {_one_of(CAE_PATH_SORTS)} 중 하나"
+                                      "(충격량 N·s · 맞닿은 비율 · 최대 힘 N · 일 mJ). 기본 impulse_max.")] = "impulse_max",
+    min_engage_ratio: Annotated[float | None, Field(ge=0, le=1, description="맞닿은 런의 비율 하한(0~1) — 이 쌍이 맞닿은 런 수 ÷ 런 수가 "
+                                                                            "이 값 이상인 경로만. 비우면 거르지 않는다.")] = None,
+    project: Annotated[str | None, Field(description=_A_CAE_PROJECT)] = None,
+    kind: Annotated[Literal[REPORT_KINDS] | None, Field(description=_A_CAE_KIND)] = None,
+    limit: Annotated[int, Field(ge=1, le=CAE_LIMIT_MAX,
+                                description=f"최대 건수(1~{CAE_LIMIT_MAX}) — 정렬 기준으로 매긴 뒤 자른다. 기본 100.")] = 100,
+) -> FindCaeLoadPathsOut:
+    """리포트를 건너 하중 경로(하중을 주고받은 파트 쌍, cae_load_path)를 sort 칸이 큰 것부터 찾는다.
+
+    「충격이 어디로 흘렀나」 를 캠페인끼리 견줄 때 쓴다. 한 리포트의 경로 전부는 report_cae 의 load_paths, 각도(위치)마다의 접촉 스칼라는
+    report_contact_profile, 하중경로 그래프 상세는 report_energy_flow. 해석 온톨로지 꾸러미를 실은 리포트만 나온다(attach_cae_package).
+    읽을 수 있는 리포트(소유 · 같은 소속, 관리자는 전사)의 것만. 거름은 모두 함께 걸린다(AND).
+
+    돌려주는 것 — items(항목마다 report_id · report_label · kind · project · key · label 과 경로 칸 — part_a · part_b(파트 key) ·
+    n_runs_engaged · engage_ratio · impulse_max(N·s) · impulse_max_run_case · impulse_median · impulse_p90 · peak_force_max(N) ·
+    work_max(mJ)) · total(돌려준 건수 — 전체 건수가 아니다) · truncated(limit 만큼 찼으면 true — 더 있을 수 있다). sort 칸이 빈 경로는
+    뒤로 간다."""
     params: dict = {"sort": sort, "limit": limit}
     for k, v in {"min_engage_ratio": min_engage_ratio, "project": project, "kind": kind}.items():
         if v is not None:
@@ -1917,17 +2119,25 @@ async def find_cae_load_paths(
     return await _get(ctx, "/cae/load-paths", params)
 
 
-@mcp.tool()
-async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
-    """StepForge fe_cad 묶음(C-6 가중치 · C-7 glb)을 리포트의 형상으로 붙인다 — 묶음 폴더(`manifest.json` · glb ·
-    weights.json · weights.bin · parts.json · pairs.json) 또는 그 폴더를 묶은 zip 의 경로. MCP 서버가 그 경로를 읽을 수
-    있는 같은 머신에서만 된다(`upload_local_path` 와 같다).
+@mcp.tool(annotations=_SET_OUT)
+async def attach_cad(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    path: Annotated[str, Field(description="fe_cad 묶음 폴더 또는 그 폴더를 묶은 zip 의 경로 — MCP 서버가 도는 머신에서 읽을 수 있는 "
+                                           "경로. 폴더면 맨 위 파일만 싣는다(하위 폴더는 뺀다).")],
+    ctx: Context,
+) -> AttachCadOut:
+    """StepForge fe_cad 묶음(가중치 · glb — 묶음 폴더 또는 그 폴더를 묶은 zip)을 리포트의 기기 형상으로 붙인다.
 
-    리포트 하나에 묶음 하나다. 같은 묶음을 다시 붙이면 바꾸는 것이 없고(멱등), 다른 열쇠의 묶음이면 갈아 끼운다.
-    받는 쪽 검사(파일마다 sha256 · 크기, 열쇠, 가중치 배열, glb 정점 수, 묶음 파트가 리포트 파트와 겹치는가)에 하나라도
-    걸리면 통째로 거절한다(전부 아니면 전무). 리포트 소유자만 붙일 수 있다. 붙이면 리포트 화면의 구면 위험도 맵에서
-    각도를 골라 「형상 보기」 로 그 기기를 연다.
-    Attach a StepForge fe_cad bundle (folder or zip) to a report as its device shape — one per report, idempotent."""
+    묶음 폴더에는 manifest.json · glb · weights.json · weights.bin · parts.json · pairs.json 이 있다. 리포트 화면의 구면 위험도 맵에서
+    각도를 골라 「형상 보기」 로 그 기기를 열려면 붙인다. MCP 서버가 `path` 를 읽을 수 있는 같은 머신에서만 된다(upload_local_path 와
+    같다). 해석 온톨로지 꾸러미는 attach_cae_package, 시뮬 조건은 attach_report_scenario, 렌더 결과는
+    attach_render. 리포트 소유자만. 전송 크기 상한은 백엔드 업로드 상한(max_upload_mb)이다.
+
+    리포트 하나에 묶음 하나다. 같은 묶음(열쇠 · 파일 sha256 같음)을 다시 붙이면 바꾸는 것이 없고(already=true), 다른 열쇠의 묶음이면
+    갈아 끼우고 옛 파일을 지운다. 같은 열쇠인데 파일이 다르면 거절한다. 받는 쪽 검사(파일마다 sha256 · 크기, 열쇠, 가중치 배열, glb 정점
+    수, 묶음 파트가 리포트 파트와 겹치는가)에 하나라도 걸리면 통째로 거절한다(전부 아니면 전무).
+
+    돌려주는 것 — key(묶음 열쇠) · already · stored(저장한 파일 수) · n_parts · replaced(갈아 끼운 옛 열쇠, 처음이면 null) · warnings."""
     import io as _io
     import os as _os
     import zipfile as _zf
@@ -1949,50 +2159,88 @@ async def attach_cad(report_id: str, path: str, ctx: Context) -> dict:
         return _unwrap(await c.post(f"/reports/{_seg(report_id)}/cad", files=files, headers=_forward_headers(ctx)))
 
 
-@mcp.tool()
-async def attach_report_scenario(report_id: str, scenario_content: str, ctx: Context) -> dict:
-    """이미 인제스트된 리포트에 시뮬 조건(scenario.json 텍스트)을 첨부한다.
+@mcp.tool(annotations=_SET)
+async def attach_report_scenario(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    scenario_content: Annotated[str, Field(description="scenario.json 텍스트 그대로 — KooChainRun 의 scenario.json(scenarios 배열이 있는 "
+                                                       "JSON 객체). 크기 상한은 백엔드 업로드 상한(max_upload_mb).")],
+    ctx: Context,
+) -> AttachReportScenarioOut:
+    """이미 반입한 리포트에 시뮬 조건(scenario.json)을 붙인다 — 조건 요약을 캐시하고, 원본 K파일이 비어 있으면 template 으로 찾아 잇는다.
 
-    조건 요약(angle_source·tolerance·예상 run 수)이 리포트에 캐시되고, template(.k
-    파일명)로 세션 내 원본 K파일이 자동 매칭된다(미연결일 때)."""
+    template(.k 파일명)으로 같은 세션의 K파일을 찾는다. 리포트를 조건 없이 반입한 뒤 각도 출처 · 허용차 · 예상 런 수를 달 때 쓴다.
+    반입하면서 함께 주려면 ingest_report 의 scenario_content, 과제 · rev · K파일 링크 같은 메타는 update_report_meta. 리포트 소유자만.
+
+    다시 붙이면 리포트의 조건 요약 · scenario_type 을 새 것으로 바꾼다 — 옛 scenario 파일은 세션에 남고 새 파일이 `_1` 꼴 이름으로 하나
+    더 생긴다. JSON 이 아니거나 scenarios 배열이 없으면 오류이고 바뀐 것이 없다.
+
+    돌려주는 것 — 갱신된 리포트(id · kind · label · scenario(조건 요약 — sim_params · scenarios[각도 출처 · 허용차 · expected_runs] ·
+    templates) · scenario_type · scenario_file_id · source_kfile_id · n_cases · environment …)."""
     files = {"file": ("scenario.json", scenario_content.encode("utf-8"), "application/json")}
     async with _client() as c:
         return _unwrap(await c.post(
             f"/reports/{_seg(report_id)}/scenario", files=files, headers=_forward_headers(ctx)))
 
 
-@mcp.tool()
-async def list_reports(session_id: str, ctx: Context, kfile_id: int | None = None) -> list:
-    """세션에 인제스트된 리포트 목록(id·kind·프로젝트·과제메타·케이스수·시각).
-    kfile_id 를 주면 그 K파일에 매달린 리포트만 — 단일 K ↔ 다수 해석결과 조회.
+@mcp.tool(annotations=_READ)
+async def list_reports(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+    kfile_id: Annotated[int | None, Field(description="원본 K파일 id(세션 파일 id — get_session 의 files[].id) — 그 K파일에 매달린 "
+                                                      "리포트만. 비우면 세션의 모든 리포트.")] = None,
+) -> list[ReportListRow]:
+    """세션 하나에 반입된 리포트 목록을 최신 것부터 돌려준다 — kfile_id 를 주면 그 K파일에 매달린 리포트만(K파일 하나 ↔ 해석 결과 여럿).
 
-    ⚠ **user_id 스코프다** — 빈 배열은 '전사에 리포트가 없다'가 아니라 '이 호출자
-    계정에 없다'는 뜻이다. 전사 규모의 유사 해석 유무는 corpus_summary·report_corpus
-    (개인 식별 없는 집계)로 물어라. 심의 좌석이 빈 배열을 부재 증거로 오독한 실사례 있음."""
+    내 세션의 리포트 id 를 찾을 때 쓴다. 세션을 건너 조건으로 찾기는 find_reports, 리포트 하나의 내용은 report_summary. 세션 주인만
+    부를 수 있다.
+
+    ⚠ 세션 주인 스코프다 — 빈 배열은 「전사에 리포트가 없다」 가 아니라 「이 호출자 계정의 이 세션에 없다」 는 뜻이다. 빈 배열을 부재
+    증거로 읽지 말라. 전사 규모의 유사 해석 유무는 corpus_summary · report_corpus(개인 식별 없는 집계)로 물어라.
+
+    돌려주는 것 — 행마다 id · kind · label · focus · project_name · doe_strategy · scenario_type · drop_height(mm) · worst_stress(MPa) ·
+    max_severity · source_kfile_id · eng_meta(과제 · rev 수동 메타) · n_cases · created_at · environment. 자르지 않고 전부 준다."""
     params = {"kfile_id": kfile_id} if kfile_id is not None else None
     return await _get(ctx, f"/sessions/{_seg(session_id)}/reports", params=params)
 
 
-@mcp.tool()
-async def report_blocks(report_id: str, ctx: Context) -> dict:
-    """리포트 임베드 블록 **전수** 목록 — 이름·형태·크기·`read_by_parser`.
+@mcp.tool(annotations=_READ)
+async def report_blocks(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> ReportBlocksOut:
+    """리포트 원본에 임베드된 데이터 블록 전수 목록을 돌려준다 — 이름 · 형태 · 크기 · read_by_parser.
 
-    정규화가 해석하지 않는 블록도 여기 다 뜬다(`read_by_parser=false`). 그 블록은
-    `report_block` 으로 꺼내 쓴다. **무엇이 들어 있는지부터 여기서 보라** — 리포트 종류마다
-    블록 구성이 다르다(deep 21 · sphere 12 · impact 27 가 실측값이다)."""
+    리포트에 무엇이 들어 있는지부터 볼 때 쓴다 — 리포트 종류(deep · sphere · impact)마다 블록 구성이 다르다. 정규화가 해석하지 않는
+    블록도 다 뜬다(read_by_parser=false — 못 쓴다는 뜻이 아니라 전용 도구가 읽지 않는다는 뜻이다). 블록 하나를 꺼내기는 report_block,
+    큰 분석 블록 요약은 report_analytics, 정규화된 요약은 report_summary.
+
+    돌려주는 것 — n_blocks · n_unread(read_by_parser=false 수) · blocks[](name · type(object · array · …) · count · sub_keys(앞 40 개까지
+    — count 가 전체 수) · item_type · bytes(직렬화 크기 어림, sphere 의 results 는 각도 시계열 포함) · read_by_parser)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/blocks")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_block(
-    report_id: str, name: str, ctx: Context,
-    path: str = "", limit: int = 0, max_bytes: int = 60000,
-) -> dict:
-    """블록 하나(또는 하위 경로)를 꺼낸다 — 무엇이든 끝까지 되짚을 수 있다.
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    name: Annotated[str, Field(description="블록 이름 — report_blocks 의 blocks[].name(예 results · hotspot · set_report).")],
+    ctx: Context,
+    path: Annotated[str, Field(description="하위 경로(선택) — `a.b.0.c` 꼴(dict 키와 list 인덱스를 점으로, 음수 인덱스 가능). "
+                                           "비우면 블록 통째.")] = "",
+    limit: Annotated[int, Field(ge=0, description="배열을 앞에서 몇 개만(0 이상) — 0(기본)이면 개수로 자르지 않는다. 값이 배열이 "
+                                                  "아니면 무시된다.")] = 0,
+    max_bytes: Annotated[int, Field(ge=BLOCK_MAX_BYTES_MIN, le=BLOCK_MAX_BYTES_MAX,
+                                    description=f"응답 값의 크기 상한(바이트, {BLOCK_MAX_BYTES_MIN}~{BLOCK_MAX_BYTES_MAX}) — 넘는 배열은 "
+                                                "앞에서 잘라 truncated 로 말하고, 배열이 아닌 값은 value=null 과 too_big 이다. "
+                                                "기본 60000.")] = 60000,
+) -> ReportBlockOut:
+    """리포트 임베드 블록 하나(또는 그 하위 경로)를 원본 그대로 꺼낸다 — 전용 도구가 읽지 않는 값도 끝까지 되짚는다.
 
-    `path` 는 `a.b.0.c` 꼴(dict 키와 list 인덱스를 점으로). 경로가 끊기면 **그 자리에서 쓸 수
-    있는 키/인덱스를 알려 준다**. 큰 블록은 `limit`·`max_bytes` 로 좁혀라 — 넘으면 잘라서
-    **잘랐다고 말한다**(조용히 자르지 않는다)."""
+    report_blocks 로 이름을 본 뒤, 또는 report_analytics · report_hotspots 같은 요약의 원본을 확인할 때 쓴다. 요약으로 충분하면 전용
+    도구(report_summary · report_case · report_hotspots …)가 가볍다. sphere 의 results 는 `path` 를 `results.<순번>…` 으로 주면 그
+    각도만 시계열까지 읽는다(results 통째면 원본 전체를 읽어 무겁다).
+
+    경로가 끊기면 found=false 와 그 자리에서 쓸 수 있는 키 · 인덱스(note — 키는 앞 30 개)를, 없는 블록이면 found=false 와 블록 이름
+    목록(available — 앞 80 개)을 준다. 큰 값은 `limit` · `max_bytes` 로 좁혀라 — 넘으면 잘라서 truncated({kind: limit · bytes ·
+    too_big, returned, total})로 말한다(조용히 자르지 않는다).
+
+    돌려주는 것 — name · found · path · value · shape(type · count · sub_keys) · bytes · read_by_parser · truncated · note."""
     q = {"max_bytes": max_bytes}
     if path:
         q["path"] = path
@@ -2001,20 +2249,38 @@ async def report_block(
     return await _get(ctx, f"/reports/{_seg(report_id)}/blocks/{_seg(name)}", q)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_hotspots(
-    report_id: str, ctx: Context, criterion: str = "", part_id: int | None = None,
-    top: int = 20, order: str = "stress_max", case_key: str = "",
-) -> dict:
-    """★핫스팟 군집(deep · sphere) — **어디가 뜨거운가**. 중심좌표·둘러싼 반경·요소수·피크 시각이 온다
-    (deep 은 부피·피크 요소 ID 까지).
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+    criterion: Annotated[str, Field(description="판정 기준(선택) — von_mises · max_principal · min_principal 등. 이 리포트의 기준은 "
+                                                "응답의 criteria. 같은 것만 걸린다. 비우면 전부.")] = "",
+    part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None,
+    top: Annotated[int, Field(ge=1, le=HOTSPOT_TOP_MAX,
+                              description=f"군집 상위 몇 개(1~{HOTSPOT_TOP_MAX}) — order 로 매긴 뒤 자른다. sphere 의 envelope 도 같은 "
+                                          "수로 자른다. 기본 20.")] = 20,
+    order: Annotated[str, Field(description=f"정렬 칸 — deep 은 {_one_of(HOTSPOT_ORDERS_DEEP)}, sphere 는 "
+                                            f"{_one_of(HOTSPOT_ORDERS_SPHERE)} 중 하나. stress_* 는 절대값 큰 것부터, 나머지는 큰 것부터"
+                                            "(sphere 의 rank 만 작은 것부터). 그 종류에 없는 값이면 오류 없이 stress_max 로 매긴다"
+                                            "(응답 order 가 실제로 쓴 값). 기본 stress_max.")] = "stress_max",
+    case_key: Annotated[str, Field(description="각도 런(폴더) 하나만(sphere, 선택) — clusters[].case_key · envelope[].worst_case_key "
+                                               "의 값. envelope 는 이 값과 상관없이 전 각도로 센다. 비우면 전 각도.")] = "",
+) -> ReportHotspotsOut:
+    """핫스팟 군집(deep · sphere)을 돌려준다 — 파트 × 판정 기준마다 응력이 높은 요소가 모인 곳, sphere 는 각도별 군집과 포락까지.
 
-    sphere(전각도 낙하)는 각도 런마다 실린 군집을 **각도와 함께** 내고, `envelope` 에 파트 × 기준마다 **전 각도에서
-    가장 센** 군집(그 각도 · |응력| · 군집이 난 각도 수)을 붙인다 — 「어느 각도에서 어느 파트가 뜨거운가」 는 이것부터.
-    `case_key`(각도 런 폴더)를 주면 그 각도만 본다. 생성기 상한에 걸렸으면 `cap_note` 가 말한다.
-    `criterion` ∈ {von_mises, max_principal, min_principal, …} (비우면 전부).
-    주의 — `stress_*` 정렬은 **절대값**이다(`min_principal` 값은 음수다). `uniform=true` 레코드의 군집은
-    '가장 뜨거운 곳' 이 **아니다**(deep). sphere 압축본에는 uniform 표시·부피·평균응력이 없다(`compact_note`)."""
+    군집마다 중심 좌표(mm) · 둘러싼 반경 · 요소 수 · 최대 응력(MPa) · 피크 시각이 온다(deep 은 부피 · 평균 응력 · 피크 요소 ID 까지).
+    「어디가 뜨거운가」 를 볼 때 쓴다. sphere(전각도 낙하)는 각도 런마다 실린 군집을 각도와 함께 내고, envelope 에 파트 × 기준마다 전
+    각도에서 가장 센 군집(그 각도 · |응력| · 군집이 난 각도 수 n_angles)을 붙인다 — 「어느 각도에서 어느 파트가 뜨거운가」 는 이것부터.
+    캠페인의 여러 런을 덱 좌표로 묶기는 campaign_hotspot_sites, 파트 판정은 report_part_risk, 원본 레코드는 report_block(deep 은
+    name='hotspot').
+
+    주의 — stress_* 정렬은 절대값이다(min_principal 값은 음수다). deep 의 uniform=true 레코드의 군집은 「가장 뜨거운 곳」 이 아니다
+    (uniform_note). sphere 압축본에는 uniform 표시 · 부피 · 평균 응력이 없다(compact_note). 생성기 상한에 걸렸으면 cap_note 가 말한다.
+    군집이 없는 리포트는 available=false 와 까닭(note).
+
+    돌려주는 것 — available · n_records · n_clusters(거른 뒤 수) · criteria · parts · order · filter · clusters[] · truncated({returned,
+    total} — top 에서 잘랐을 때) · peak_provenance, sphere 는 더해 envelope[] · envelope_truncated · n_clusters_all · n_angles_total ·
+    n_angles_with_clusters."""
     q = {"top": top, "order": order}
     if criterion:
         q["criterion"] = criterion
@@ -2025,57 +2291,102 @@ async def report_hotspots(
     return await _get(ctx, f"/reports/{_seg(report_id)}/hotspots", q)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_contact_profile(
-    report_id: str, ctx: Context, metric: str = "pf", top: int = 10, case_key: str = "",
-    axis_top: int = 10,
-) -> dict:
-    """★파트쌍 접촉 프로파일(sphere · impact) — **어느 파트가 어느 파트를 어느 각도(위치)에서 세게 미는가**.
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+    metric: Annotated[Literal[CONTACT_METRICS],
+                      Field(description=f"지표 — {_one_of(CONTACT_METRICS)}(pf=최대 접촉력 peak_force · ti=총 충격량 total_impulse · "
+                                        "tw=총 일 total_work). 크기 비교는 |값|. 기본 pf.")] = "pf",
+    top: Annotated[int, Field(ge=1, le=CONTACT_TOP_MAX,
+                              description=f"pairs 상위 몇 쌍(1~{CONTACT_TOP_MAX}) — 파트로 분해된 쌍 · 큰 |값| 순으로 매긴 뒤 자른다. "
+                                          "기본 10.")] = 10,
+    case_key: Annotated[str, Field(description="각도(sphere) · 위치(impact) 하나(선택) — 주면 그 축의 파트쌍 엣지 전부(at.edges — 세 "
+                                               "지표)를 함께 준다. 값은 pairs[].peak_case_key · axis_summary[].case_key. 비우면 at 이 "
+                                               "없다.")] = "",
+    axis_top: Annotated[int, Field(ge=1, le=CONTACT_AXIS_TOP_MAX,
+                                   description=f"axis_summary 를 가장 센 접촉이 큰 각도(위치) 상위 몇 개로(1~{CONTACT_AXIS_TOP_MAX}). "
+                                               "기본 10.")] = 10,
+) -> ReportContactProfileOut:
+    """파트쌍 접촉 프로파일(sphere · impact)을 돌려준다 — 어느 파트가 어느 파트를 어느 각도(위치)에서 세게 미는가.
 
-    `metric` ∈ pf(peak_force) · ti(total_impulse) · tw(total_work). `pairs` 는 쌍마다 최대 |값| 과 그 각도(위치),
-    `axis_summary` 는 가장 센 접촉이 큰 각도(위치) 상위 `axis_top` 개다. `case_key` 를 주면 그 각도의 파트쌍 엣지
-    전부(`at.edges` — 세 지표)가 온다 — 그 각도의 접촉 그래프다. **전 각도**가 실린다(`report_energy_flow` 의 시계열
-    상세는 상위 각도에만 있다). None 은 '그 각도에 그 접촉이 없다' 이다(0 이 아니다) · resolved=false 는 파트로
-    분해되지 않은 접촉 · `trust` 는 전 각도 Newton-3 접촉력 신뢰 요약이다."""
+    각도(위치)마다의 접촉 스칼라를 전 각도로 견줄 때 쓴다. 전 각도가 실린다 — 시계열 · 하중경로 그래프 상세는 report_energy_flow 이고 그것은
+    상위 각도에만 있다. 여러 리포트를 건너 하중 경로를 찾기는 find_cae_load_paths(꾸러미를 실은 리포트), deep 리포트의 접촉력은
+    report_energy_flow.
+
+    돌려주는 것 — metric · metric_name · axis_kind(angle · position) · n_pairs · n_resolved · n_axis · pairs[](쌍마다 src · dst · 이름 ·
+    contact_id · resolved · n_engaged · peak(최대 |값|) · peak_case_key · peak_label) · pairs_truncated({returned, total} — top 에서
+    잘랐을 때) · axis_summary[](축마다 n_engaged · top_pair · top_value, axis_summary_note 가 「상위 n/N」) · at(case_key 를 줬을 때 —
+    found · edges[] 에 peak_force · total_impulse · total_work) · trust(전 각도 Newton-3 접촉력 신뢰 요약, 있을 때). 값의 단위는 리포트
+    단위계를 따른다(ton-mm-s 면 N · N·s · mJ).
+
+    주의 — None 은 「그 각도에 그 접촉이 없다」 이다(0 이 아니다). resolved=false 는 파트로 분해되지 않은 접촉이다. 프로파일이 없는
+    리포트(deep 등)는 available=false 와 까닭(note)."""
     q = {"metric": metric, "top": top, "axis_top": axis_top}
     if case_key:
         q["case_key"] = case_key
     return await _get(ctx, f"/reports/{_seg(report_id)}/contact_profile", q)
 
 
-@mcp.tool()
-async def report_behavior_clusters(report_id: str, ctx: Context) -> dict:
-    """거동 아키타입 군집(impact) — 낙하/충격 위치를 몇 가지 거동으로 묶은 결과.
+@mcp.tool(annotations=_READ)
+async def report_behavior_clusters(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> ReportBehaviorClustersOut:
+    """거동 아키타입 군집(impact)을 돌려준다 — 낙하 · 충격 위치를 몇 가지 거동으로 묶은 결과.
 
-    ★`degenerate=true` 면 선언한 군집 수와 **실제로 쓰인** 수가 다르다 — 거동이 갈리지 않은
-    것이고, 그때 "N 가지 거동" 으로 읽으면 안 된다(실측으로 4 선언/1 사용인 리포트가 있다).
-    ★`is_mock=true` 면 **합성**이다 — 결론의 근거로 쓰지 말라."""
+    impact 리포트에서 위치마다 거동이 몇 갈래로 갈리나를 볼 때 쓴다. 위치마다의 지표는 report_case · report_worst_cases, 위치별 그림은
+    report_media · report_image. deep · sphere 리포트에는 보통 없다(available=false 와 note).
+
+    돌려주는 것 — n_clusters(선언한 군집 수) · archetypes · features_used · n_positions_labeled · groups[](archetype · index ·
+    n_positions · positions, 큰 것부터) · n_archetypes_used · degenerate · is_mock(+ degenerate_note · mock_note).
+
+    주의 — degenerate=true 면 선언한 군집 수와 실제로 쓰인 수가 다르다 — 거동이 갈리지 않은 것이고, 그때 「N 가지 거동」 으로 읽으면 안
+    된다. is_mock=true 면 합성이다 — 결론의 근거로 쓰지 말라."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/clusters")
 
 
-@mcp.tool()
-async def report_analytics(report_id: str, ctx: Context, block: str = "") -> dict:
-    """큰 분석 블록 요약 — `doe_analysis`·`deep_analytics`·`insights`·`physics`·
-    `solver_quality`·`contact_profile`·`set_report`.
+@mcp.tool(annotations=_READ)
+async def report_analytics(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+    block: Annotated[str, Field(description=f"한 블록만(선택) — {_one_of(REPORT_ANALYTICS_BLOCKS)}. 비우면 전부. 이 리포트에 없는 "
+                                            "이름이면 오류 없이 그 블록이 available=false 로 온다.")] = "",
+) -> ReportAnalyticsOut:
+    """큰 분석 블록의 요약을 돌려준다 — 하위 분석마다 생성기가 계산한 summary 그대로와 상세의 형태.
 
-    각 하위 분석의 `summary` 는 **생성기가 계산한 값 그대로**다(여기서 다시 계산하지 않는다 —
-    다시 계산하면 리포트 화면의 숫자와 조용히 갈린다).
-    ★`not_computed` 가 붙은 하위는 "값이 0" 이 아니라 **계산되지 않았다**는 뜻이다.
-    원본은 `report_block(name, path=…)` 으로 끝까지 되짚어라."""
+    doe_analysis · deep_analytics · insights · physics · solver_quality · contact_profile · set_report 처럼 그대로는 크고 읽기 어려운
+    블록의 결론을 볼 때 쓴다. 원본 값은 report_block(name, path=…)으로 끝까지 되짚고, 블록 전수 목록은 report_blocks.
+
+    summary 는 생성기가 계산한 값 그대로다(여기서 다시 계산하지 않는다 — 다시 계산하면 리포트 화면의 숫자와 조용히 갈린다). not_computed 가
+    붙은 하위(empty=true · available=false · ok=false · is_mock=true)는 「값이 0」 이 아니라 계산되지 않았다는 뜻이다.
+
+    돌려주는 것 — requested · n_blocks · blocks[](name · available · bytes · n_subs · subs[](name · summary · values(작은 스칼라와 1.2 KB
+    이하 값) · detail_shape(큰 값의 형태만) · not_computed · not_computed_note)) · raw_access_note."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/analytics", {"block": block} if block else None)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_media(
-    report_id: str, ctx: Context, case_key: str = "", kind: str = "",
-    role: str = "", images_only: bool = False,
-) -> dict:
-    """리포트에 붙은 **결과 이미지·영상 목록**(내용은 `report_image` 로 본다).
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    ctx: Context,
+    case_key: Annotated[str, Field(description="케이스 하나만(선택) — 응답 cases_with_media 의 값(impact 는 위치 id). 비우면 "
+                                               "전부.")] = "",
+    kind: Annotated[str, Field(description="image · video 로 거르기(선택) — 같은 것만 걸린다(모르는 값이면 빈 목록). 비우면 "
+                                           "둘 다.")] = "",
+    role: Annotated[str, Field(description="역할로 거르기(선택) — peak(정점 그림) · view(영상) · render(렌더 결과). 같은 것만 "
+                                           "걸린다. 비우면 전부.")] = "",
+    images_only: Annotated[bool, Field(description="true 면 모델이 볼 수 있는 그림(can_llm_view — png · jpeg · gif · webp)만. 비교 "
+                                                   "전에 켠다. 기본 false.")] = False,
+) -> ReportMediaOut:
+    """리포트에 붙은 결과 이미지 · 영상 목록을 돌려준다 — 내용은 report_image 로 본다.
 
-    ★결과 이미지는 리포트 HTML 안에 없고 **옆에 딸린 파일**이다 — 리포트를 번들(.zip/.tar.gz)로
-    올려야 함께 들어온다. 비어 있으면 그렇게 말한다.
-    ★`can_llm_view` 가 **네가 볼 수 있는지**를 가른다 — png/jpeg/gif/webp 는 보고 **mp4 는
-    못 본다**. 비교에는 `images_only=true` 를 써라."""
+    케이스 그림을 보거나 비교하기 전에 무엇이 있는지 볼 때 쓴다. 그림 한 장을 실제로 보기는 report_image, 케이스 여러 개를 그림 + 지표로
+    견주기는 report_compare.
+
+    결과 이미지는 리포트 HTML 안에 없고 옆에 딸린 파일이다 — 리포트를 번들(.zip · .tar.gz)로 올려야 함께 들어온다(렌더 결과는
+    attach_render). 붙은 그림이 없으면 note 가 그렇게 말한다. can_llm_view 가 네가 볼 수 있는지를 가른다 — png · jpeg · gif · webp 는
+    보고 mp4 는 못 본다. 비교에는 images_only=true 를 써라.
+
+    돌려주는 것 — report_id · kind · n_total(거르기 전 전체) · n_returned · n_images · n_videos · cases_with_media · filter · media[](path ·
+    stored_as · file_id · bytes · kind · can_llm_view · case_key · set_name · set_title · role · face · declared) · note. 자르지 않는다."""
     q = {}
     for k, v in (("case_key", case_key), ("kind", kind), ("role", role)):
         if v:
