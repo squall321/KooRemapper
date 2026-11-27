@@ -19,6 +19,7 @@ import base64
 import contextvars
 import functools
 import hashlib
+import json
 import os
 import sys
 import time
@@ -34,7 +35,7 @@ except ImportError:     # SDK 1.x — 시험 · 스모크 venv(옛 세대 클라
     from mcp.server.fastmcp import Context, FastMCP as MCPServer, Image
     from mcp.server.fastmcp.exceptions import ToolError
     SDK2 = False
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer, model_validator
 
 from figure_png import FigurePngError, rasterize
@@ -177,6 +178,7 @@ def _shape(name: str, fields: dict[str, str]) -> type[_Out]:
 # (MCP 는 백엔드를 import 하지 않는다). ★같은 이름의 인자라도 도구마다 뜻이 다르면 문구를 따로 쓴다 — find_reports 의 severity 는
 # 「이 심각도 이상」, report_findings 의 severity 는 「같은 것만」 이다.
 REPORT_KINDS = ("deep", "sphere", "impact")
+DEV_REV_CODES = ("pre", "dv1", "dv2", "dv3", "dvr", "pv1", "pv2", "pv3", "pvr", "pra", "mp")  # 개발 단계(datahub.parse_stage)
 SEVERITIES = ("CRITICAL", "WARNING", "INFO")            # 높은 것부터
 FIND_SORTS = ("created_at", "worst_stress", "worst_g", "drop_height")
 SORT_ORDERS = ("asc", "desc")
@@ -290,6 +292,8 @@ _CORE_SESSION_FIELDS = {
     "visibility": "공개 범위 — company · department · team · private(만들 때 private).",
     "deck_revision_label": "덱 판 라벨(없으면 null).",
     "linked_cad": "연결된 StepForge 과제 {project_id, revision}(없으면 null).",
+    "task_key": "허브 과제명(자동 파이프라인의 과제 — 없으면 null).",
+    "dev_rev": "개발 단계 — pre · dv1 … · pv1 … · pra · mp(없으면 null).",
     "created_at": "만든 시각(ISO 8601).",
     "updated_at": "마지막으로 고친 시각(ISO 8601).",
     "file_count": "파일 수 — 목록 · 상세에서만 채운다(만들기 · 고치기 응답은 null).",
@@ -762,15 +766,25 @@ async def update_session(
     ctx: Context,
     name: Annotated[str | None, Field(description=f"새 세션 이름(1~{SESSION_NAME_MAX}자). null(기본)이면 그대로 둔다.")] = None,
     description: Annotated[str | None, Field(description="새 설명. null(기본)이면 그대로 둔다 — 빈 문자열을 주면 설명을 비운다.")] = None,
+    task_key: Annotated[str | None, Field(description=(
+        "허브 과제 — 과제명 · 과제코드 · 옛 과제명 · 별칭 무엇이든 받아 판 확정과 같은 규칙으로 풀고 과제명을 남긴다(못 풀면 거절과 "
+        "후보 — 이름은 list_tasks 로 찾는다). 빈 글이면 지운다 · null(기본)이면 그대로."))] = None,
+    dev_rev: Annotated[Literal[DEV_REV_CODES] | Literal[""] | None, Field(description=(
+        f"개발 단계 — {_one_of(DEV_REV_CODES)}. 빈 글이면 지운다 · null(기본)이면 그대로."))] = None,
 ) -> UpdateSessionOut:
-    """세션의 이름 · 설명을 바꾼다 — 작업이 바뀌어 이름이 안 맞을 때 정리한다.
+    """세션의 이름 · 설명 · 허브 과제 · 개발 단계를 바꾼다 — 작업이 바뀌어 이름이 안 맞을 때, 또는 자동 파이프라인이 읽을 과제를 둘 때.
 
-    준 칸만 바꾸고 null 인 칸은 그대로 둔다. 세션 주인만 바꿀 수 있다(아니면 404). 공개 범위 · 상태 · 덱 판 라벨 · CAD 연결은 이
-    도구로 바꿀 수 없다(REST PATCH /sessions/{id}). 파트 제목은 rename_session_part.
+    준 칸만 바꾸고 null 인 칸은 그대로 둔다. 세션 주인만 바꿀 수 있다(아니면 404). task_key · dev_rev 는 자동 파이프라인이 이 세션의
+    과제 · 차수로 읽는다(auto_changes 의 subject). 과제를 못 풀면 400 task_unresolved 와 후보, 단계가 틀리면 400 bad_dev_rev 이고 그때는
+    다른 칸도 바꾸지 않는다. 공개 범위 · 상태 · 덱 판 라벨 · CAD 연결은 이 도구로 바꿀 수 없다(REST PATCH /sessions/{id}). 파트 제목은
+    rename_session_part.
 
-    반환: 바뀐 세션 — id · name · description · status · visibility · deck_revision_label · linked_cad · created_at · updated_at ·
-    environment · revision_warning."""
+    반환: 바뀐 세션 — id · name · description · status · visibility · task_key · dev_rev · deck_revision_label · linked_cad · created_at ·
+    updated_at · environment · revision_warning."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
+    for k, v in (("task_key", task_key), ("dev_rev", dev_rev)):
+        if v is not None:
+            body[k] = v.strip() or None          # 빈 글 = 지운다(REST 는 null 을 지움으로 읽는다)
     async with _client() as c:
         return _unwrap(await c.patch(f"/sessions/{_seg(session_id)}", json=body, headers=_forward_headers(ctx)))
 
@@ -1513,7 +1527,6 @@ async def report_upload_instructions(
 # 허용값 · 경계는 백엔드가 받는 것과 같아야 한다 — 거절 자리가 백엔드에서 MCP 로 옮길 뿐 받는 집합은 같다. 개발단계는 백엔드
 # reports/datahub.py `parse_stage` 가 받는 열한 개다(dv · pv 는 차수 1 · 2 · 3 · r 필수, pre · pra · mp 는 차수 없음). 빈 글은 따로
 # 받는다 — intake 폼에선 비운 칸(FastAPI 가 None 으로 읽는다), 메타 고침에선 지우기, 캠페인에선 검사 없이 그대로 둔다.
-DEV_REV_CODES = ("pre", "dv1", "dv2", "dv3", "dvr", "pv1", "pv2", "pv3", "pvr", "pra", "mp")
 CAMPAIGN_THICKNESS_INPUTS = ("X", "Y", "Z", "x", "y", "z")   # 백엔드 CampaignBody.thickness_axis — 소문자는 대문자로 저장한다
 REQUIRED_EXTRACTIONS_MAX = 200                                 # 백엔드 campaigns/routes.py `_REQUIRED_MAX`
 BUNDLE_CAMPAIGNS_MAX = 20                                      # 백엔드 campaigns/routes.py `_BUNDLE_CAMPAIGNS_MAX`
@@ -5014,6 +5027,163 @@ async def recipe_deprecate(
     return await _post(ctx, f"/recipes/{_seg(name)}/deprecate", {"reason": reason})
 
 
+
+
+# ── 자동 파이프라인(포털 계약 v1.1 — 계획 docs/01-plan/features/auto-pipeline-1127.plan.md) ─────────────────────
+# 포털이 서비스 신원으로 부른다. 계약 §0.3 — 실패는 isError true 와 본문 {"error", "detail"(, "missing")} JSON, 성공은 isError false 이고
+# error 칸이 없다(포털이 isError 와 칸으로 판정한다 — 예외로 올리면 「Error executing tool …」 머리가 붙어 JSON 이 아니다).
+# 표지(계약 §3) — auto_submit · auto_cancel 은 readOnlyHint 없음(destructiveHint false), 나머지는 readOnlyHint true.
+# 공통 계약 C6 — 거듭해도 같음 · 바깥 세계 표지까지. auto_submit 은 idem_key 로 거듭해도 같은 실행이고 stcx 클러스터에 닿는다.
+_AUTO_RO = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+_AUTO_SUBMIT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True)
+_AUTO_RW = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+
+
+def _auto_out(data: dict, *, error: bool = False) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, ensure_ascii=False))],
+                          structuredContent=data, isError=error)
+
+
+async def _auto_call(ctx, method: str, path: str, *, params=None, body=None) -> CallToolResult:
+    try:
+        async with _client() as c:
+            r = await c.request(method, path, params=params, json=body, headers=_forward_headers(ctx))
+        doc = r.json()
+    except httpx.TimeoutException:
+        return _auto_out({"error": "timeout", "detail": f"DynaForge API 가 {API_TIMEOUT_S}초 안에 답하지 않았다"}, error=True)
+    except Exception as exc:  # noqa: BLE001 — 닿지 않음 · JSON 아님 모두 계약 꼴의 실패로
+        return _auto_out({"error": "unreachable", "detail": f"DynaForge API 에 닿지 못했다({type(exc).__name__})"}, error=True)
+    if r.status_code >= 400 or not (isinstance(doc, dict) and doc.get("success", True)):
+        data = doc.get("data") if isinstance(doc, dict) and isinstance(doc.get("data"), dict) else {}
+        err = {"error": data.get("error") or f"http_{r.status_code}",
+               "detail": data.get("detail") or (doc.get("message") if isinstance(doc, dict) else "") or ""}
+        if data.get("missing") is not None:
+            err["missing"] = data["missing"]
+        return _auto_out(err, error=True)
+    data = doc.get("data") if isinstance(doc, dict) else None
+    data = data if isinstance(data, dict) else {"data": data}
+    data.pop("error", None)                # 성공에 error 칸을 싣지 않는다(계약 §4-3)
+    return _auto_out(data)
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_changes(
+    ctx: Context,
+    since: Annotated[str | None, Field(description="앞 호출의 next_since 를 그대로(불투명 커서). 비우면 처음부터.")] = None,
+    limit: Annotated[int, Field(description="한 쪽의 최대 세션 수(1~500). complete 가 false 면 같은 next_since 로 다시 부른다.")] = 200,
+) -> CallToolResult:
+    """자동 파이프라인의 원천 — 마지막으로 본 뒤 바뀐 세션(덱)을 쪽 커서로 끝까지 돌려준다.
+
+    언제 — 포털 자동 파이프라인이 무엇을 다시 해석할지 고를 때 주기적으로 부른다. 첫 호출은 since 없이, 다음은 앞 응답의 next_since 를
+    그대로 준다. 낼 수 있는지는 auto_check, 내기는 auto_submit.
+
+    돌려주는 것 — items[] · next_since · complete. 항목마다 subject{project: 세션의 허브 과제명 | null, revision: 개발 단계 | null, refs:
+    {dynaforge: 세션 id}} · links{step_forge?} · inputs[세션 입력 파일 — kind(deck · file) · ref(파일 id) · sha256 · at] ·
+    ready{deck_ready: 낼 덱이 정확히 하나} · updated_at(세션 수정과 마지막 파일 가운데 늦은 때). 과제 · 단계는 update_session 의 task_key ·
+    dev_rev 로 넣고, 비면 null 이다(짐작하지 않는다).
+
+    한도 — 한 쪽은 limit(1~500 · 기본 200) 세션. complete 가 false 면 같은 next_since 로 다시 부른다. 게이트웨이 서비스 계정(설정)으로
+    부르면 모든 세션, 그 밖은 볼 수 있는 세션만. 실패는 isError 와 {error, detail} JSON(틀린 커서는 bad_cursor). 읽기만 한다."""
+    params = {"limit": limit}
+    if since:
+        params["since"] = since
+    return await _auto_call(ctx, "GET", "/auto/changes", params=params)
+
+_A_SUBJECT = ("무엇에 대한 일인가 — auto_changes 가 준 subject 그대로 {project: 허브 과제명, revision: 개발 단계, refs: {dynaforge: "
+              "세션 id}}. project · revision 이 비면 확인이 project_key · revision 으로 막는다.")
+_A_PROFILE = "auto_profiles 의 profile id(예 fullangle_162 · fullangle_26)."
+_A_UPSTREAM = "앞 해석 단계의 결과 봉투 {단계 id: 봉투}(선택) — 전각도 낙하는 쓰지 않는다."
+_A_RUN_REF = "auto_submit 이 돌려준 run_ref."
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_profiles(ctx: Context) -> CallToolResult:
+    """자동 파이프라인이 낼 수 있는 해석 묶음(profile)과 제출 준비 여부를 돌려준다 — 지금은 전각도 낙하 둘.
+
+    언제 — auto_check · auto_submit 에 줄 profile id 를 고르기 전에, 또는 제출 계정이 정해졌는지 볼 때.
+
+    돌려주는 것 — app_version · service_identity(제출 계정이 정해졌나 — false 면 포털이 막힘으로 세운다) · profiles[] — id
+    (fullangle_162 · fullangle_26 — Fibonacci 162 · 26 방향, 높이 · 바닥 · 시간은 stcx 제출 op 기본값) · title · inputs(덱 하나 필수) ·
+    cost{cores(방향 수 × 각도당 코어 — 대략치), minutes(null), cluster: stcx} · sync(false — 늘 비동기) · criteria_source(null — 판정 기준이
+    아직 없어 auto_result 의 verdict 는 늘 unknown) · outputs(metrics · artifacts).
+
+    실패는 isError 와 {error, detail} JSON. 읽기만 한다."""
+    return await _auto_call(ctx, "GET", "/auto/profiles")
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_check(
+    ctx: Context,
+    subject: Annotated[dict, Field(description=_A_SUBJECT)],
+    profile: Annotated[str, Field(description=_A_PROFILE)],
+    upstream: Annotated[dict | None, Field(description=_A_UPSTREAM)] = None,
+) -> CallToolResult:
+    """자동 파이프라인으로 이 세션을 지금 낼 수 있는지 본다 — 아무것도 바꾸지 않는다.
+
+    언제 — auto_submit 전에 막히는 까닭을 미리 볼 때. subject 는 auto_changes 항목의 것 그대로, profile 은 auto_profiles 의 id.
+
+    돌려주는 것 — ready · missing[{kind, name?, why}] · inputs. kind 는 project_key · revision(세션의 과제 · 단계 칸이 비었다 —
+    update_session 으로 넣는다) · input(세션 없음 · 덱이 정확히 하나가 아님 · 덱에 *INCLUDE) · infra(stcx 꺼짐 · 클러스터 공유 폴더가 아직
+    준비 전) · permission(제출 계정 없음). ready 면 inputs 가 이번에 낼 덱(이름 · sha256)이다.
+
+    실패는 isError 와 {error, detail} JSON(모르는 profile 은 bad_profile). 본문이 커서 POST 로 보내지만 읽기만 한다."""
+    return await _auto_call(ctx, "POST", "/auto/check", body={"subject": subject, "profile": profile, "upstream": upstream})
+
+
+@mcp.tool(annotations=_AUTO_SUBMIT)
+async def auto_submit(
+    ctx: Context,
+    subject: Annotated[dict, Field(description=_A_SUBJECT)],
+    profile: Annotated[str, Field(description=_A_PROFILE)],
+    idem_key: Annotated[str, Field(description="포털이 만든 64자 소문자 16진수 — 같은 값으로 다시 부르면 새로 내지 않고 같은 run_ref 를 "
+                                               "created false 로 돌려준다.")],
+    upstream: Annotated[dict | None, Field(description=_A_UPSTREAM)] = None,
+) -> CallToolResult:
+    """자동 파이프라인으로 전각도 낙하 해석을 낸다 — 세션 덱을 stcx 클러스터에 제출하고 결과 리포트까지 run_ref 하나로 묶는다.
+
+    언제 — auto_check 가 ready 일 때. 세션 덱을 실행 세션(제출 계정 소유)에 복사해 stcx 에 내고, Slurm 잡 번호가 서면 후처리 예약을 걸어
+    sphere 리포트 반입까지 이어 간다. 진행은 auto_status, 끝난 결과는 auto_result, 아직 내기 전이면 auto_cancel.
+
+    돌려주는 것 — run_ref · state(queued) · created. 같은 idem_key 로 다시 부르면 새로 내지 않고 같은 run_ref 를 created false 로 준다.
+    갖춰지지 않았으면 내지 않고 isError 와 {error: not_ready, detail, missing}(auto_check 의 missing 과 같다). 그 밖의 실패도 isError 와
+    {error, detail} JSON."""
+    return await _auto_call(ctx, "POST", "/auto/submit",
+                            body={"subject": subject, "profile": profile, "idem_key": idem_key, "upstream": upstream})
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_status(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """자동 파이프라인 실행 하나의 상태를 돌려준다 — 다섯 낱말 가운데 하나.
+
+    언제 — auto_submit 뒤 끝날 때까지 가끔 부른다. done 이면 auto_result 로 결과 봉투를 받는다.
+
+    돌려주는 것 — state(queued · running · done · failed · cancelled) · detail(지금 단계나 실패 까닭 — 예 「stcx 해석 중(Slurm 123)」) ·
+    progress(null) · updated_at. 부를 때 실행의 다음 단계를 잇는다(stcx 잡이 Slurm 번호를 얻으면 후처리 예약을 걸고, 리포트가 반입되면
+    done) — 같은 상태에서 거듭 불러도 결과는 같다. 남의 실행 · 없는 run_ref 는 isError 와 {error: not_found, detail}."""
+    return await _auto_call(ctx, "GET", f"/auto/runs/{_seg(run_ref)}/status")
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_result(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """끝난 자동 파이프라인 실행의 결과 봉투를 돌려준다 — 수치 · 산출물 · 리포트 id.
+
+    언제 — auto_status 가 done 일 때. 숫자를 더 깊이 볼 때는 report_id 로 report_summary · report_part_risk 를 연다.
+
+    돌려주는 것 — run_ref · subject · profile · app_version · verdict(늘 unknown — 판정 기준이 아직 없다) · metrics(sphere 리포트의 최대
+    응력 MPa · 최대 가속도 G — 단위계를 알 때만, 모르면 빼고 notes 에 까닭 · 끝난 각도 수 · 실패한 각도 수) · figures([]) · artifacts(결과
+    폴더 · 리포트) · inputs(낸 덱 · sha256) · notes · finished_at · report_id. done 이 아니면 isError 와 {error: not_done, detail}."""
+    return await _auto_call(ctx, "GET", f"/auto/runs/{_seg(run_ref)}/result")
+
+
+@mcp.tool(annotations=_AUTO_RW)
+async def auto_cancel(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """아직 stcx 에 내지 않은 자동 파이프라인 실행을 취소한다 — 이미 낸 실행은 여기서 멈추지 않는다.
+
+    언제 — auto_submit 직후 잘못 낸 것을 알았을 때(stcx 제출 전 몇 초 · 대기 중). 이미 클러스터에 낸 잡은 KooSlurm 에서 멈춘다.
+
+    돌려주는 것 — run_ref · state(cancelled). 이미 냈거나 끝났으면(취소된 것을 다시 불러도) isError 와 {error: not_cancellable, detail}
+    이고 상태는 그대로다. 없는 run_ref 는 not_found."""
+    return await _auto_call(ctx, "POST", f"/auto/runs/{_seg(run_ref)}/cancel")
 
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")

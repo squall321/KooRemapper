@@ -84,6 +84,9 @@ class Session(Base):
     # 덱 판 라벨 · 연결된 CAD(StepForge 과제 · 판) — 리스크 앱이 판을 헷갈리지 않게(DF-15 · 0026). 둘이 다르면 세션 응답이 경고한다
     deck_revision_label: Mapped[str | None] = mapped_column(String(64))
     linked_cad: Mapped[dict | None] = mapped_column(JSONB)   # {project_id, revision}
+    # 허브 과제(과제명 — plm_task key) · 개발 단계 코드(pre · dv1 … · mp) — 자동 파이프라인 원천의 subject(KR-AP1 · 0027)
+    task_key: Mapped[str | None] = mapped_column(String(300))
+    dev_rev: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     # 공개 범위 — company|department|team|private (HEAX Hub 와 같은 4단).
     # 기본 private: 만들어 두기만 한 세션이 조직에 노출되지 않는다. 넓히는 것은 소유자의 명시 행위.
@@ -817,3 +820,32 @@ class ReportBundleItem(Base):
     value: Mapped[float | None] = mapped_column(Float)
     unit: Mapped[str | None] = mapped_column(String(16))
     source_path: Mapped[str] = mapped_column(String(512), nullable=False)
+
+
+class AutoRun(Base):
+    """자동 파이프라인 실행 하나 — 포털이 낸 전각도 낙하(stcx 잡 → 후처리 예약 → sphere 리포트)를 run_ref 로 묶는다(KR-AP2 · 0028).
+
+    `stage` 는 안의 걸음(stcx · postprocess · done · failed · cancelled)이고, 포털에 내는 다섯 낱말은 `app.modules.auto.drop` 이
+    바꾼다. 원천 세션의 덱은 실행 세션(제출 계정 소유)에 복사해 그 안에서 돈다 — 잡 · 리포트의 주인이 한 사람이다.
+    """
+
+    __tablename__ = "auto_runs"
+
+    run_ref: Mapped[str] = mapped_column(String(26), primary_key=True)
+    idem_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    profile: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    inputs: Mapped[list | None] = mapped_column(JSONB)
+    source_session_id: Mapped[str | None] = mapped_column(String(26))
+    run_session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
+    stcx_job_id: Mapped[str | None] = mapped_column(String(26))
+    postprocess_job_id: Mapped[str | None] = mapped_column(String(26))
+    report_id: Mapped[str | None] = mapped_column(String(26))
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+                                                 nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+

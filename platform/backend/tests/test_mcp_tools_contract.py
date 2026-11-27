@@ -469,10 +469,14 @@ NO_SHAPE = {
     "report_image": "글 + 그림(Image)",
     "report_compare": "글 + 그림(Image)",
     "download_result": "파일 내용(5 MB 까지) — 구조 결과로 두 번 실으면 응답이 두 배",
+    **{n: "CallToolResult — 실패도 같은 꼴의 {error, detail} JSON(포털 자동 파이프라인 계약)" for n in (
+        "auto_changes", "auto_profiles", "auto_check", "auto_submit", "auto_status", "auto_result", "auto_cancel")},
 }
 _WRITE_VERBS = {"post", "put", "patch", "delete"}
 # 백엔드에 쓰지 않는데 읽기가 아닌 도구 — 이 박스의 파일을 쓴다
 LOCAL_WRITES = {"save_result_to_path"}
+# 읽기인데 POST 로 보내는 도구 — 본문이 커서(바꾸지 않는다는 것은 그 도구의 백엔드 시험이 잰다)
+READ_BY_POST = {"auto_check"}
 
 
 @pytest.fixture(scope="module")
@@ -498,6 +502,8 @@ def _verbs(fn: ast.AST, funcs: dict, seen: frozenset = frozenset()) -> set:
             f = c.func
             if isinstance(f, ast.Name) and f.id in ("_get", "_post", "_put", "_delete"):
                 out.add(f.id[1:])
+            elif isinstance(f, ast.Name) and f.id == "_auto_call" and len(c.args) > 1 and isinstance(c.args[1], ast.Constant):
+                out.add(str(c.args[1].value).lower())          # 자동 파이프라인 — _auto_call(ctx, "POST", …) 의 동사
             elif isinstance(f, ast.Name) and f.id in funcs and f.id not in seen:
                 out |= _verbs(funcs[f.id], funcs, seen | {f.id})
             elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "c" \
@@ -523,7 +529,7 @@ def test_the_read_write_marks_match_what_the_tool_sends(tools):
     assert set(defs) == set(tools)
     for name, fn in defs.items():
         verbs, ro = _verbs(fn, funcs, frozenset({name})), tools[name]["annotations"]["readOnlyHint"]
-        if ro:
+        if ro and name not in READ_BY_POST:
             assert not verbs & _WRITE_VERBS, f"{name} 은 읽기 표지인데 {sorted(verbs)} 를 보낸다"
         elif name not in LOCAL_WRITES:
             assert verbs & _WRITE_VERBS, f"{name} 은 쓰기 표지인데 백엔드에 쓰지 않는다({sorted(verbs)})"

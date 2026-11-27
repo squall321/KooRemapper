@@ -40,6 +40,9 @@ export interface SessionSummary {
   created_at: string
   updated_at: string
   file_count: number | null
+  // 허브 과제(과제명) · 개발 단계 — 자동 파이프라인이 이 세션의 과제 · 차수로 읽는다(KR-AP1 · 비면 null)
+  task_key?: string | null
+  dev_rev?: string | null
 }
 
 export interface ModelPart {

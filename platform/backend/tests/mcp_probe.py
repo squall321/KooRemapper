@@ -5,6 +5,7 @@ pytest 는 이 파일을 모으지 않는다(이름이 test_ 로 시작하지 �
 
     schemas <도구…>   — FastMCP 목록(`mcp.list_tools()`)이 내는 inputSchema 를 도구별로
     limits            — 느린 가짜 백엔드에 붙여 한도 · 기한 · 문구를 잰다(KOORM_MCP_API_TIMEOUT_S 를 작게 두고)
+    auto              — auto_* 도구의 표지(readOnlyHint)와 `_auto_call` 의 꼴(계약 §0.3 — 가짜 백엔드)
     paths <값…>       — 경로에 사용자 값을 넣는 도구를 값마다 불러 가짜 백엔드가 받은 요청 대상(퍼센트 인코딩 그대로)을 낸다
     scenario          — ingest_report 에 scenario.json 글(JSON 객체 글)을 주고 백엔드가 받은 multipart 의 scenario 부분을 낸다
     compare           — report_compare 의 지표 표를 케이스 응답(CaseRead 꼴) 가짜 백엔드로 — 칸이 「—」 가 아니라 값인지
@@ -342,6 +343,35 @@ def stateless() -> dict:
         srv.shutdown()
 
 
+def auto() -> dict:
+    """auto_* 도구의 표지(계약 §3)와 `_auto_call` 의 꼴(계약 §0.3) — 가짜 백엔드(httpx MockTransport)에 붙여 잰다."""
+    import httpx
+    server = _load()
+    tools = asyncio.run(server.mcp.list_tools())
+    ann = {t.name: (t.annotations.model_dump(exclude_none=True) if t.annotations else None)
+           for t in tools if t.name.startswith("auto_")}
+
+    def handler(req):
+        p = req.url.path
+        if p.endswith("/ok"):
+            return httpx.Response(200, json={"success": True, "data": {"items": [], "error": "끼어든 칸"}})
+        if p.endswith("/refused"):
+            return httpx.Response(400, json={"success": False, "message": "not_ready: 갖춰지지 않았다",
+                                             "data": {"error": "not_ready", "detail": "갖춰지지 않았다",
+                                                      "missing": [{"kind": "infra", "why": "공유 폴더 전"}]}})
+        if p.endswith("/auth"):
+            return httpx.Response(401, json={"success": False, "message": "인증 토큰이 필요합니다.", "data": None})
+        if p.endswith("/html"):
+            return httpx.Response(502, text="<html>bad gateway</html>")
+        raise httpx.ConnectTimeout("느림")
+    server._client = lambda: httpx.AsyncClient(base_url="http://fake/api/v1", transport=httpx.MockTransport(handler))
+    calls = {}
+    for name in ("ok", "refused", "auth", "html", "timeout"):
+        r = asyncio.run(server._auto_call(None, "GET", "/" + name))
+        calls[name] = {"isError": r.isError, "body": json.loads(r.content[0].text)}
+    return {"annotations": ann, "calls": calls}
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "schemas"
     if mode == "schemas":
@@ -356,6 +386,8 @@ if __name__ == "__main__":
         result = compare()
     elif mode == "scenario":
         result = scenario()
+    elif mode == "auto":
+        result = auto()
     else:
         result = limits()
     print(json.dumps(result, ensure_ascii=False))

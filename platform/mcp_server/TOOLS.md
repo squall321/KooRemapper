@@ -22,7 +22,7 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | `list_sessions` | — | GET /sessions | 내 세션 + 조직에 보이게 둔 남의 세션(읽기만 — 올리기 · 실행 · 고치기 · 지우기는 주인만) · 최신 200개까지 |
 | `create_session` | name, description? | POST /sessions | 새 세션 생성 |
 | `get_session` | session_id | GET /sessions/{id} | 세션 상세 + 파일 목록 |
-| `update_session` | session_id, name?, description? | PATCH /sessions/{id} | 세션 이름/설명 수정 |
+| `update_session` | session_id, name?, description?, task_key?, dev_rev? | PATCH /sessions/{id} | 세션 이름/설명 수정 · 허브 과제(과제명 · 과제코드 · 별칭 → 판 확정과 같은 규칙으로 풀고 못 풀면 거절) · 개발 단계(dev_rev 꼴) — 자동 파이프라인이 읽는다(빈 글은 지움) |
 | `delete_session` | session_id | DELETE /sessions/{id} | 세션 + 전체 파일 삭제 |
 
 ## 파일
@@ -203,6 +203,21 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | `recipe_evaluate` | run_id, useful, note | POST /recipes/runs/{id}/evaluate | useful=true+글(20자↑)이 등록 근거 |
 | `recipe_register` | name, version? | POST /recipes/{name}/register | **사람 승인 없이** 자동 관문(정적 검사 · 자기 시험 · 호환 시험 + 실데이터 성공 ≥1 + 쓸모 평가 ≥1)만 넘으면 모두에게 열린다(사용자 결정 10-26) · 파일 내보내기(커밋·푸시는 사람이) · 잘못 올라간 것은 `recipe_deprecate` |
 | `recipe_deprecate` | name, reason | POST /recipes/{name}/deprecate | 내린다(올린 사람·관리자) — 찾기(`recipe_search`)에서 빠진다. 이름으로 `recipe_get` · `recipe_run` 은 그대로 된다. 판 기록은 남는다 |
+
+## 자동 파이프라인 (포털 계약 v1.1 — 서비스 신원이 부른다)
+
+실패는 isError true 와 본문 `{error, detail(, missing)}` JSON, 성공에는 error 칸이 없다. 게이트웨이 서비스 계정(`KOORM_AUTO_SERVICE_EMAILS`)은
+auto_* 에서만 모든 세션 · 실행을 본다.
+
+| 도구 | 인자 | REST | 설명 |
+|---|---|---|---|
+| `auto_changes` | since?, limit? | GET /auto/changes | 바뀐 세션(덱)을 쪽 커서로 끝까지 — subject{project · revision(세션 칸 · 비면 null) · refs{dynaforge: 세션 id}} · links.step_forge · inputs(sha256) · ready.deck_ready |
+| `auto_profiles` | — | GET /auto/profiles | 전각도 낙하 profile 둘(Fibonacci 162 · 26) · cost · criteria_source null · service_identity(제출 계정 있나) |
+| `auto_check` | subject, profile, upstream? | POST /auto/check | 읽기만 — missing: project_key · revision · input(덱 하나 · *INCLUDE) · infra(stcx 꺼짐 · 공유 폴더 SH-01 · 02 전) · permission(제출 계정 없음) |
+| `auto_submit` | subject, profile, idem_key, upstream? | POST /auto/submit | 같은 idem_key 면 같은 run_ref(created false) · 덱을 제출 계정 소유 실행 세션에 복사 → stcx → 후처리 예약 → sphere 리포트 |
+| `auto_status` | run_ref | GET /auto/runs/{run_ref}/status | 다섯 낱말(queued · running · done · failed · cancelled) · 부를 때 사슬을 민다 |
+| `auto_result` | run_ref | GET /auto/runs/{run_ref}/result | 결과 봉투 — verdict unknown(기준 없음) · metrics(최대 응력 · 최대 가속도는 단위계를 알 때만 · 각도 수) · artifacts 결과 폴더 · report_id |
+| `auto_cancel` | run_ref | POST /auto/runs/{run_ref}/cancel | stcx 에 내기 전만 취소 |
 
 ## 시스템 / 신원
 | 도구 | 인자 | REST | 설명 |

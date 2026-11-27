@@ -11,6 +11,7 @@ import { FilePanel } from './FilePanel'
 import { JobPanel } from './JobPanel'
 import { ComparePanel } from './ComparePanel'
 import { ReportsPanel } from './ReportsPanel'
+import { SessionSubjectPanel } from './SessionSubjectPanel'
 import { SchemaForm, type ArgValues } from './SchemaForm'
 import { OptionReference } from '@/modules/operations/OptionReference'
 
@@ -66,6 +67,7 @@ export function SessionDetailPage() {
 
       <div className="grid lg:grid-cols-2 gap-4">
         <div className="space-y-4">
+          <SessionSubjectPanel session={session.data} />
           <FilePanel sessionId={id} files={files} />
           {files.length >= 2 && <ComparePanel files={files} />}
           <JobPanel sessionId={id} />
