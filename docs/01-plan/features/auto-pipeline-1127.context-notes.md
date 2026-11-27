@@ -27,3 +27,18 @@
   refs 는 {dynaforge: 세션 id} 하나로 고정하고 StepForge 과제 id 는 refs 밖 `links.step_forge`(없으면 빠짐)로 따로 싣는다. 같은 세션은 칸을
   채우거나 CAD 를 잇거나 refs 가 같아 포털이 막힘 줄을 걷는다.
 - 세션 파일의 sha256 은 올릴 때 채운다(`sessions/services.py`). 빈 옛 행은 auto_changes 가 처음 볼 때 한 번 재서 남긴다.
+
+## 4. 2단계 짓기(2026-11-27)
+- 실행 세션 — 원천 세션의 덱을 제출 계정(`KOORM_AUTO_SUBMIT_EMAIL`) 소유의 실행 세션에 복사해 그 안에서 돌린다. 원천 세션 주인과 제출자가 갈리면
+  잡 · 리포트 주인이 둘이 되고, 후처리 예약의 KooSlurm 위임은 잡 주인 명의라서다. 실행 세션에도 과제 · 단계를 적는다.
+- 사슬 — stcx 잡이 Slurm 잡 번호를 얻으면 곧 후처리 예약을 건다(예약이 귀환 매니페스트를 스스로 기다린다 — 기한 7일). 예약 인자는 잡 만들기
+  라우트와 같은 검사(인자 · `build_eng_meta`)를 지나고 소속은 비운다(서비스 계정은 소속 머리를 안 보낸다). 사슬은 auto_status · auto_result 를
+  부를 때 민다 — 포털이 상태를 묻는다. 끝난 stcx 잡에 Slurm 번호가 없으면(응답을 잃고 work_dir 로 되찾은 잡) 까닭과 함께 failed.
+- 확인은 아무것도 바꾸지 않는다 — 빈 sha 는 재서 답에 싣되 커밋하지 않는다(처음 짠 판은 커밋했다 · 변이가 잡았다). auto_changes 는 처음 잰 sha
+  를 남긴다(캐시).
+- 수치 단위 — KooD3plotReader 환산표(`koo_deep_report/ontology/package.py`)를 따른다: ton-mm-s · g-mm-ms 응력 MPa, SI 는 Pa → MPa, ton-mm-ms 는
+  일관 단위계가 아니라 응력 단위를 안 정한다. G 는 생성기가 단위계로 환산한 값이라 「G」. 단위계가 없거나 검출 안 됐으면 응력 · G 를 빼고 notes.
+  dev DB 의 sphere 리포트 14개에는 단위계 기록이 없다(10-17 이전 생성기) — 새 판은 실주행 뒤에 잰다.
+- `updated_at` 은 onupdate 라 run 을 고친 뒤 읽으면 비동기 지연 읽기가 터진다 — advance 끝에 다시 읽는다.
+- 시험 — 잡 행의 상태 · 외부 표지를 바꿔 워커가 한 일을 흉내 낸다(stcx · 예약은 돌리지 않는다). 변이 14 / 14(처음 살아남은 둘 — 확인의 sha 커밋
+  · 번호 없는 끝 — 은 시험이 그 길을 안 지났다).

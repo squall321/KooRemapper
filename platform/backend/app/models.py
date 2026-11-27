@@ -820,3 +820,32 @@ class ReportBundleItem(Base):
     value: Mapped[float | None] = mapped_column(Float)
     unit: Mapped[str | None] = mapped_column(String(16))
     source_path: Mapped[str] = mapped_column(String(512), nullable=False)
+
+
+class AutoRun(Base):
+    """자동 파이프라인 실행 하나 — 포털이 낸 전각도 낙하(stcx 잡 → 후처리 예약 → sphere 리포트)를 run_ref 로 묶는다(KR-AP2 · 0028).
+
+    `stage` 는 안의 걸음(stcx · postprocess · done · failed · cancelled)이고, 포털에 내는 다섯 낱말은 `app.modules.auto.drop` 이
+    바꾼다. 원천 세션의 덱은 실행 세션(제출 계정 소유)에 복사해 그 안에서 돈다 — 잡 · 리포트의 주인이 한 사람이다.
+    """
+
+    __tablename__ = "auto_runs"
+
+    run_ref: Mapped[str] = mapped_column(String(26), primary_key=True)
+    idem_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    profile: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    inputs: Mapped[list | None] = mapped_column(JSONB)
+    source_session_id: Mapped[str | None] = mapped_column(String(26))
+    run_session_id: Mapped[str | None] = mapped_column(ForeignKey("sessions.id", ondelete="SET NULL"))
+    stcx_job_id: Mapped[str | None] = mapped_column(String(26))
+    postprocess_job_id: Mapped[str | None] = mapped_column(String(26))
+    report_id: Mapped[str | None] = mapped_column(String(26))
+    stage: Mapped[str] = mapped_column(String(16), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(),
+                                                 nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+

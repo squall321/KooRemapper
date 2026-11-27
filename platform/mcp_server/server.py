@@ -2923,6 +2923,70 @@ async def auto_changes(
         params["since"] = since
     return await _auto_call(ctx, "GET", "/auto/changes", params=params)
 
+_A_SUBJECT = ("무엇에 대한 일인가 — auto_changes 가 준 subject 그대로 {project: 허브 과제명, revision: 개발 단계, refs: {dynaforge: "
+              "세션 id}}. project · revision 이 비면 확인이 project_key · revision 으로 막는다.")
+_A_PROFILE = "auto_profiles 의 profile id(예 fullangle_162 · fullangle_26)."
+_A_UPSTREAM = "앞 해석 단계의 결과 봉투 {단계 id: 봉투}(선택) — 전각도 낙하는 쓰지 않는다."
+_A_RUN_REF = "auto_submit 이 돌려준 run_ref."
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_profiles(ctx: Context) -> CallToolResult:
+    """자동 파이프라인 — 전각도 낙하 해석 profile(포털 계약 v1.1 §2). profile 둘(Fibonacci 162 · 26 방향 — 높이 · 바닥 · 시간은 stcx
+    제출 op 기본값) · cost(코어 대략치) · criteria_source null(판정 기준이 아직 없다 — verdict 는 늘 unknown) · service_identity
+    (제출 계정이 정해졌나 — false 면 포털이 막힘으로 세운다). 읽기만 한다."""
+    return await _auto_call(ctx, "GET", "/auto/profiles")
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_check(
+    ctx: Context,
+    subject: Annotated[dict, Field(description=_A_SUBJECT)],
+    profile: Annotated[str, Field(description=_A_PROFILE)],
+    upstream: Annotated[dict | None, Field(description=_A_UPSTREAM)] = None,
+) -> CallToolResult:
+    """자동 파이프라인 — 제출할 수 있나 본다(아무것도 바꾸지 않는다 · 계약 §2 · §4-2). {ready, missing[{kind, name?, why}], inputs}.
+    kind — project_key · revision(세션 칸이 비었다) · input(세션 없음 · 덱이 하나가 아님 · 덱에 *INCLUDE) · infra(stcx 꺼짐 ·
+    클러스터 공유 폴더 SH-01 · 02 전) · permission(제출 계정 없음). ready 면 inputs 가 이번에 낼 덱(sha256)이다."""
+    return await _auto_call(ctx, "POST", "/auto/check", body={"subject": subject, "profile": profile, "upstream": upstream})
+
+
+@mcp.tool(annotations=_AUTO_RW)
+async def auto_submit(
+    ctx: Context,
+    subject: Annotated[dict, Field(description=_A_SUBJECT)],
+    profile: Annotated[str, Field(description=_A_PROFILE)],
+    idem_key: Annotated[str, Field(description="포털이 만든 64자 소문자 16진수 — 같은 값으로 다시 부르면 새로 내지 않고 같은 run_ref 를 "
+                                               "created false 로 돌려준다.")],
+    upstream: Annotated[dict | None, Field(description=_A_UPSTREAM)] = None,
+) -> CallToolResult:
+    """자동 파이프라인 — 전각도 낙하를 낸다(계약 §2). 세션 덱을 실행 세션(제출 계정 소유)에 복사해 stcx 에 내고, Slurm 잡 번호가 서면
+    후처리 예약을 걸어 sphere 리포트까지 run_ref 하나로 묶는다. 갖춰지지 않았으면 내지 않고 not_ready + missing(auto_check 와 같다).
+    {run_ref, state: queued, created}."""
+    return await _auto_call(ctx, "POST", "/auto/submit",
+                            body={"subject": subject, "profile": profile, "idem_key": idem_key, "upstream": upstream})
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_status(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """자동 파이프라인 — 실행 상태(계약 §2). state 는 다섯 낱말뿐(queued · running · done · failed · cancelled) · failed 면 detail 에
+    까닭. 부를 때 사슬을 앞으로 민다(stcx 잡이 Slurm 번호를 얻으면 후처리 예약을 건다 · 리포트가 반입되면 done)."""
+    return await _auto_call(ctx, "GET", f"/auto/runs/{_seg(run_ref)}/status")
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_result(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """자동 파이프라인 — 결과 봉투(계약 §2). verdict 는 늘 unknown(판정 기준이 아직 없다 — 사용자 결정 11-27) · metrics 는 sphere
+    리포트의 최대 응력 · 최대 가속도(단위계를 알 때만 — 모르면 notes 에 까닭) · 끝난/실패한 각도 수 · artifacts 는 결과 폴더 ·
+    report_id 로 report_summary 를 연다. done 이 아니면 not_done."""
+    return await _auto_call(ctx, "GET", f"/auto/runs/{_seg(run_ref)}/result")
+
+
+@mcp.tool(annotations=_AUTO_RW)
+async def auto_cancel(ctx: Context, run_ref: Annotated[str, Field(description=_A_RUN_REF)]) -> CallToolResult:
+    """자동 파이프라인 — 아직 stcx 에 내지 않은 실행만 취소한다(계약 §2 선택). 이미 냈으면 not_cancellable(클러스터 잡은 KooSlurm 에서)."""
+    return await _auto_call(ctx, "POST", f"/auto/runs/{_seg(run_ref)}/cancel")
+
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
     mcp.settings.host = host

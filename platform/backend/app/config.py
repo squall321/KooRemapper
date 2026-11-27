@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     # 게이트웨이 서비스 계정(쉼표로 여럿) — 이 사용자가 부르면 auto_* 에서만 모든 세션 · 리포트를 본다(사용자 결정 11-27
     # 「auto_* 만 모두 읽기」). 비우면 아무도 아니다 — 서비스 계정도 자기 것 · 공개 세션만 본다.
     auto_service_emails: str = ""
+    # 전각도 낙하 제출 계정 — 실행 세션 · 잡 · 리포트의 주인이고 KooSlurm 위임은 이 사람 명의다. 비우면 제출 신원이 없다
+    # (auto_profiles 의 service_identity false · auto_submit 은 permission — 운영이 계정을 정한다, 사용자 결정 11-27).
+    auto_submit_email: str = ""
+    # 공유 폴더(KooSlurm SH-01 · 02)가 풀려 업로드 덱을 계산 노드가 읽을 수 있으면 참으로 — 거짓이면 auto_check 가 infra 로 막는다.
+    auto_drop_infra_ready: bool = False
 
     # --- stcx(356대 클러스터) 전각도 낙하 — 게이트웨이 MCP 경유 ---
     # **파일을 나른다.** cae00 `/data` 와 stcx `/data` 는 다른 저장소다 — 같은 경로를 보지
