@@ -14,7 +14,8 @@
 - [x] 4b ST-25-KR 착지 — StepForge 와 같은 날(11-26) main `4f8f73e` · 그쪽 `b7e937b6` · 블록 sha 같음 확인 · dev 재기동 · cae00 §1-17(허브 네
   타입 코어 공개)
 - [ ] 5 KR-12 — DP-13 답 뒤
-- [ ] 6 KR-10 · KR-19 — 운영 첫 제출 뒤
+- [x] 6a KR-10 — 받는 쪽 job_status 의 state · runs_summary 로 종료 판정(없는 판은 squeue 규칙 그대로) · 시험 9 · 변이 3 / 3(맥락 9절)
+- [ ] 6b KR-19 — 결과 회수(runs · job_manifest · job_provenance) — 운영 첫 제출 뒤
 - [x] 7a 백엔드 전체 1166(환경 탓 넷) · 계약 13 / 13 · 로컬 커밋 · hwaxportal-71 에 알림
 - [x] 7b 동결 해제 뒤 — main `6a90a41`(R-04 먼저) · 주 체크아웃 supervisor_log 4 / 4 · 배포(API · MCP · 스모크 넷) · Drive
   `dist-20261125-161932Z` · cae00 §1-15 · 알림(맥락 8절)

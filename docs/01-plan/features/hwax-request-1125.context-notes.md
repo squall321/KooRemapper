@@ -140,3 +140,14 @@
   구간의 올리기는 이 수에 안 잡힌다.
 - 시험 — test_upload_inflight.py 4 · test_deploy_r04_1125.py ④ 7(기다림 · 안 끝남 · stop.sh · restart.sh · 헬스 안 닿음 · 옛 판 · 0) · 기존
   스크립트 시험은 진짜 dev API 에 닿지 않게 기본 0 · 변이 8 / 8 · 백엔드 전체 1178(환경 탓 넷).
+
+## 9. KR-10 — 받는 쪽 state 로 종료 판정(2026-11-27)
+- smarttwinmcp-c8 — SmartTwin MCP dev(:5013 · KooSlurm `058c601c`) job_status 에 `state`(queued · running · completed · failed · cancelled ·
+  unknown) · `slurm_states` · `runs_summary`. 소스로 확인 — `job_helpers.state_word`: 하나라도 돌면 running, 대기만 queued, 다 끝났으면
+  cancelled > failed > completed, 끝난 잡은 sacct 로 본다, 못 읽은 잡이 끼면 unknown. 드라이버가 completed 여도 각도가 실패했을 수 있다.
+- 지음 — `parse_status` 가 이 칸이 있으면 그것으로 가른다(없는 판 — 운영 노드가 그 판을 받기 전 — 은 squeue 규칙 그대로). completed 인데
+  runs_summary 에 failed 가 있으면 실패(글 「각도 N 개 실패」), 끝나지 않은 각도가 남았으면 unknown(접지 않는다 · 까닭을 남긴다 — 끝없이 다시
+  본다). 「id 가 있는데 큐가 비면 끝」 잠정 규칙은 이 칸이 없을 때만 남는다.
+- 사용자 결정 거리 하나 — 드라이버 completed + 끝나지 않은 각도(pending 등)를 unknown(계속 봄)으로 둘지 실패로 접을지. 지금은 unknown.
+- 받는 쪽은 인자를 납작하게(`{"registry_id": 42, "runs": true}`) 받는 것이 정본이 됐고 예전 `{"args": {…}}` 꼴도 받는다 — 우리 클라이언트는
+  손대지 않는다. 새 도구 job_changes(커서 뒤 바뀐 잡) · job_manifest · job_provenance 는 KR-19 · 폴링 줄이기 때 본다.
