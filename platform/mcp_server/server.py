@@ -1508,49 +1508,221 @@ async def report_upload_instructions(
     }
 
 
-@mcp.tool()
+# ── 리포트 들이기 · 캠페인 · 묶음 도구의 허용값 · 경계 · 결과 꼴(공통 계약 C3 · C4 · C7) ───────────────────────────────────────
+# 허용값 · 경계는 백엔드가 받는 것과 같아야 한다 — 거절 자리가 백엔드에서 MCP 로 옮길 뿐 받는 집합은 같다. 개발단계는 백엔드
+# reports/datahub.py `parse_stage` 가 받는 열한 개다(dv · pv 는 차수 1 · 2 · 3 · r 필수, pre · pra · mp 는 차수 없음). 빈 글은 따로
+# 받는다 — intake 폼에선 비운 칸(FastAPI 가 None 으로 읽는다), 메타 고침에선 지우기, 캠페인에선 검사 없이 그대로 둔다.
+DEV_REV_CODES = ("pre", "dv1", "dv2", "dv3", "dvr", "pv1", "pv2", "pv3", "pvr", "pra", "mp")
+CAMPAIGN_THICKNESS_INPUTS = ("X", "Y", "Z", "x", "y", "z")   # 백엔드 CampaignBody.thickness_axis — 소문자는 대문자로 저장한다
+REQUIRED_EXTRACTIONS_MAX = 200                                 # 백엔드 campaigns/routes.py `_REQUIRED_MAX`
+BUNDLE_CAMPAIGNS_MAX = 20                                      # 백엔드 campaigns/routes.py `_BUNDLE_CAMPAIGNS_MAX`
+_REPORT_META_ROW_OUT = {
+    "id": "리포트 id — 다른 report_* 도구의 report_id.",
+    "session_id": "리포트가 든 세션 id.",
+    "kind": "리포트 종류 — deep · sphere · impact.",
+    "label": "이름표.",
+    "focus": "초점 라벨(camera-detail 등).",
+    "n_cases": "케이스(각도 · 위치) 수.",
+    "project_name": "리포트에 박힌 과제 이름.",
+    "eng_meta": "수동 메타 — {project, dev_revision{phase, round?, code}, design_variation, doe{study, case?}}. 없으면 null.",
+    "source_kfile_id": "원본 K파일의 세션 파일 id.",
+    "scenario": "시뮬 조건 요약(scenario.json 을 준 때).",
+    "drop_height": "낙하 높이 mm.",
+    "worst_stress": "가장 큰 응력 MPa.",
+    "worst_g": "가장 큰 가속도 G.",
+    "max_severity": "가장 높은 소견 심각도 — CRITICAL · WARNING · INFO.",
+    "created_at": "들인 시각(ISO 8601).",
+    "environment": "응답을 낸 서버 환경 — dev · prod · unknown.",
+}
+IngestReportOut = _shape("IngestReportOut", {
+    **_REPORT_META_ROW_OUT,
+    "task_links": ("반입 뒤 과제 잇기의 수 — {linked, already, candidates, unmatched, kept_manual, refused, …}. 깨졌으면 {error}, "
+                   "과제 · 개정 기능이 꺼져 있으면 {skipped: off}, 잠금을 다른 일이 쥐었으면 {skipped: busy}."),
+})
+UpdateReportMetaOut = _shape("UpdateReportMetaOut", _REPORT_META_ROW_OUT)
+AttachRenderOut = _shape("AttachRenderOut", {
+    "render_id": "렌더 id(render_result.json 의 것).",
+    "ok": "렌더가 성공한 결과인가 — false 면 그림 없이 기록만 남았다.",
+    "already": "true 면 같은 렌더 · 같은 출력이 이미 있어 바꾼 것이 없다.",
+    "stored": "이번에 붙인 출력 파일 수.",
+    "media_total": "붙인 뒤 리포트의 미디어 수.",
+    "warnings": "렌더 결과의 경고 · 대조하지 못한 입력(목록).",
+})
+_CAMPAIGN_CREATED_OUT = {
+    "campaign_id": "캠페인 id — 다른 캠페인 도구의 campaign_id.",
+    "name": "캠페인 이름.",
+    "project": "과제명.", "dev_rev": "개발단계.", "analysis_method": "해석 방법.", "analysis_target": "해석 대상.",
+    "doe_strategy": "DOE 전략.", "drop_height_mm": "낙하 높이 mm.", "duration_ms": "해석 지속 시간 ms.",
+    "thickness_axis": "두께 축 — X · Y · Z.", "impactor": "충격자 — {mass_g, height_mm, ke_mj}.",
+    "health_thresholds": "건강 판정 문턱 묶음 — {values(다섯 값), ref(이름표), changed(기본값에서 바뀐 열쇠), defaults}.",
+    "required_extractions": "필수 추출 목록 — [{field, parts, states}]. 없으면 null(모든 런의 삭제 보류).",
+    "created_at": "만든 시각(ISO 8601).",
+}
+CreateCampaignOut = _shape("CreateCampaignOut", {**_CAMPAIGN_CREATED_OUT, "environment": "응답을 낸 서버 환경."})
+IngestCampaignManifestOut = _shape("IngestCampaignManifestOut", {
+    "campaign_id": "캠페인 id.",
+    "added": "새로 더한 런 수(pending 으로 들어간다).",
+    "updated": "보낸 칸이 바뀐 런 수.",
+    "unchanged": "보냈지만 바뀐 칸이 없는 런 수.",
+    "listed": "올린 뒤 목록 전체의 런 수.",
+    "environment": "응답을 낸 서버 환경.",
+})
+CampaignIngestStatusOut = _shape("CampaignIngestStatusOut", {
+    "campaign": "캠페인 칸 — create_campaign 응답과 같은 꼴.",
+    "counts": "캠페인 전체의 수 — {listed, pending, received, skipped, rejected, with_report}. listed = 넷의 합.",
+    "matched": "state 로 거른 런 수(쪽과 무관한 전체).",
+    "runs": ("이 쪽의 런 — [{run_key, doe, pitch, roll, ingest_state, report_id, content_sha256, ingested_at, reject_reason}]. "
+             "reject_reason 은 2000자에서 잘린다."),
+    "limit": "이 쪽의 limit.", "offset": "이 쪽의 offset.",
+    "environment": "응답을 낸 서버 환경.",
+})
+_HEALTH_THRESHOLDS_OUT = ("문턱 묶음 — {values(지금 쓰는 다섯 값), ref(묶음 이름표 — 런의 health.thresholds_ref), changed(기본값에서 바뀐 열쇠), "
+                   "defaults(기본값)}.")
+SetCampaignHealthThresholdsOut = _shape("SetCampaignHealthThresholdsOut", {
+    "campaign_id": "캠페인 id.", "thresholds": _HEALTH_THRESHOLDS_OUT, "environment": "응답을 낸 서버 환경.",
+})
+CampaignProvenanceOut = _shape("CampaignProvenanceOut", {
+    "campaign_id": "캠페인 id.",
+    "generations": "설정 세대별 런 수 — [{config_generation, runs}]. 이름표 없는 런은 config_generation null.",
+    "mixed_config": "이름표가 붙은 세대가 둘 이상이면 true.",
+    "counts": "캠페인 전체의 수 — {listed, with_provenance, provenance_missing, superseded}.",
+    "matched": "config_generation 으로 거른 런 수(쪽과 무관한 전체).",
+    "runs": "이 쪽의 런 — [{run_key, doe, report_id, config_generation, superseded_by, provenance}].",
+    "limit": "이 쪽의 limit.", "offset": "이 쪽의 offset.",
+    "environment": "응답을 낸 서버 환경.",
+})
+CampaignHealthTableOut = _shape("CampaignHealthTableOut", {
+    "campaign_id": "캠페인 id.",
+    "header": ("머리 줄 — {total, included, excluded, excluded_by{까닭: 수}, valid, warn, invalid, line}. line 은 「유효 n / 전체 N · "
+               "제외 까닭별 건수」 다. 캠페인 전체를 센다."),
+    "thresholds": _HEALTH_THRESHOLDS_OUT,
+    "include_invalid": "제외 까닭이 있는 런도 실었는가.",
+    "matched": "실을 런 수(쪽과 무관한 전체).",
+    "runs": ("이 쪽의 런 — [{run_key, doe, pitch, roll, report_id, config_generation, superseded_by, validity{status, reasons}, "
+             "health, excluded_by}]."),
+    "limit": "이 쪽의 limit.", "offset": "이 쪽의 offset.",
+    "environment": "응답을 낸 서버 환경.",
+})
+ReportHealthOut = _shape("ReportHealthOut", {
+    "report_id": "리포트 id.",
+    "campaign": "그 런의 캠페인 — {campaign_id, name, run_key}. 캠페인 밖이거나 주인이 아니면 null.",
+    "run_key": "런 열쇠. 캠페인 밖이거나 주인이 아니면 null.",
+    "validity": "판정 — {status: valid | warn | invalid, reasons}.",
+    "health": "건강 수치(ingest_campaign_manifest 의 health 칸) + thresholds_ref. 없으면 null.",
+    "excluded_by": "기본 통계에서 빼는 까닭 목록 — invalid 까닭 · superseded · provenance_missing.",
+    "config_generation": "설정 세대(캠페인 런일 때만).",
+    "superseded_by": "이 런을 대체한 run_key(캠페인 런일 때만).",
+    "thresholds": _HEALTH_THRESHOLDS_OUT + " 캠페인 밖이면 null.",
+    "environment": "응답을 낸 서버 환경.",
+})
+SetCampaignRequiredExtractionsOut = _shape("SetCampaignRequiredExtractionsOut", {
+    "campaign_id": "캠페인 id.",
+    "required_extractions": "저장한 목록 — [{field, parts(정렬 · 겹침 없이, null = 모든 파트), states}]. 지웠으면 null.",
+    "environment": "응답을 낸 서버 환경.",
+})
+CampaignDeletionClearanceOut = _shape("CampaignDeletionClearanceOut", {
+    "campaign_id": "캠페인 id.",
+    "header": ("머리 줄 — {total, allow, hold, deleted, reasons{까닭: 수}, line}. line 은 「삭제 허가 a / 전체 N · 보류 h · 이미 지움 d」"
+               " 와 까닭별 수다. 캠페인 전체를 센다."),
+    "required_extractions": "캠페인의 필수 추출 목록(없으면 null).",
+    "matched": "status 로 거른 런 수(쪽과 무관한 전체).",
+    "runs": ("이 쪽의 런 — [{run_key, doe, report_id, extraction, peak_provenance, clearance{status, reasons, missing}}]."),
+    "limit": "이 쪽의 limit.", "offset": "이 쪽의 offset.",
+    "environment": "응답을 낸 서버 환경.",
+})
+ReportExtractionOut = _shape("ReportExtractionOut", {
+    "report_id": "리포트 id.",
+    "campaign": "그 런의 캠페인 — {campaign_id, name, run_key}. 캠페인 밖이거나 주인이 아니면 null.",
+    "run_key": "런 열쇠. 캠페인 밖이거나 주인이 아니면 null.",
+    "extraction": "런의 추출 목록(ingest_campaign_manifest 의 extraction 칸). 캠페인 밖이면 null.",
+    "peak_provenance": "피크 출처 표지 — {known, peak_source, states_read, states_total, peak_may_be_missed}.",
+    "clearance": "그 런의 d3plot 삭제 허가 — {status: allow | hold | deleted, reasons, missing}. 캠페인 밖이거나 주인이 아니면 null.",
+    "environment": "응답을 낸 서버 환경.",
+})
+_BUNDLE_HEAD_OUT = {
+    "bundle_id": "묶음 주소 — 다음 판을 지을 때 · 읽을 때 쓴다.",
+    "version": "판 번호(1 부터).",
+    "label": "이름표.",
+    "campaign_ids": "담은 캠페인 id 목록.",
+    "as_of": "기준 시각 — 그때까지 받은 리포트만 넣었다.",
+    "created_at": "판을 지은 시각.",
+    "basis": ("수치 기준 — {campaigns[{campaign_id, total, included, valid_runs, excluded_by, thresholds_ref, generations, line}], "
+              "include_invalid, units, items, line}. line 이 캠페인마다 「유효 n / 전체 N · 제외 까닭」 이다."),
+    "citation": "인용 꼴 — {source_platform, source_kind, source_id, source_version, scope}.",
+    "changes_counts": "앞 판 대비 바뀐 숫자 수 — {added, removed, changed}. 첫 판이면 null.",
+}
+BuildReportBundleOut = _shape("BuildReportBundleOut", {
+    **_BUNDLE_HEAD_OUT,
+    "unchanged": "true 면 숫자가 마지막 판과 같아 판을 올리지 않고 그 판을 돌려줬다.",
+    "counts": "이 판의 크기 — {items(숫자 항목 수), tables, figures}.",
+    "environment": "응답을 낸 서버 환경.",
+})
+ReportBundleOut = _shape("ReportBundleOut", {
+    **_BUNDLE_HEAD_OUT,
+    "spec": "기본값을 채운 명세 — {tables[{kind, metrics, parts}], figures{roles, exts}, include_invalid}.",
+    "tables": "표 — [{kind, columns, rows, units}]. 쪽으로 나누지 않고 통째로 싣는다.",
+    "figures": "인용한 그림 — [{campaign_id, run_key, report_id, file_id, path, ext, case_key, role, bytes, sha256}].",
+    "sources": "출처 — {reports[{campaign_id, run_key, report_id, cases}], figures, thresholds_refs, …}.",
+    "changes": "앞 판 대비 바뀐 숫자 — {added, removed, changed, counts}. 첫 판이면 null.",
+    "versions": "이 주소의 판 목록 — [{version, created_at}].",
+    "latest_version": "이 주소의 마지막 판 번호.",
+    "items": ("items=true 일 때만 — {total, offset, limit, rows[{item_key, value, unit, source_path, source}]}. "
+              "offset + limit < total 이면 이어 받는다."),
+    "environment": "응답을 낸 서버 환경.",
+})
+ReportBundleDiffOut = _shape("ReportBundleDiffOut", {
+    "bundle_id": "묶음 주소.",
+    "from_version": "앞 판.", "to_version": "뒤 판.",
+    "added": "더해진 숫자 — [{item_key, value, unit, source_path}]. 통째로 싣는다.",
+    "removed": "빠진 숫자 — [{item_key, value, unit, source_path}]. 통째로 싣는다.",
+    "changed": "값 · 단위가 바뀐 숫자 — [{item_key, old, new, unit, old_unit, source_path}]. 통째로 싣는다.",
+    "counts": "수 — {added, removed, changed}.",
+    "environment": "응답을 낸 서버 환경.",
+})
+
+
+@mcp.tool(annotations=_ADD)
 async def ingest_report(
-    session_id: str,
-    filename: str,
-    html_content: str,
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    filename: Annotated[str, Field(description=(
+        "리포트 파일 이름(예 drop_sphere.html) — 저장 이름이 된다. .gz 로 끝나거나 바이트가 gzip 이면 서버가 푼다."))],
+    html_content: Annotated[str, Field(description=(
+        "리포트 HTML 전체 — koo_deep_report · koo_sphere_report · koo_impact_report 가 만든 것(데이터가 임베드돼 있다). "
+        "base64_encoded 가 true 면 그 바이트(gzip 도 된다)의 base64 글."))],
     ctx: Context,
-    kind: str | None = None,
-    label: str | None = None,
-    base64_encoded: bool = False,
-    scenario_content: str | None = None,
-    kfile_id: int | None = None,
-    project: str | None = None,
-    dev_rev: str | None = None,
-    variation: str | None = None,
-    doe: str | None = None,
-) -> dict:
-    """낙하/충격 리포트 HTML 을 세션에 인제스트한다(deep/sphere/impact 자동판별).
+    kind: Annotated[Literal[REPORT_KINDS] | Literal[""] | None, Field(description=(
+        f"리포트 종류(선택) — {_one_of(REPORT_KINDS)}. 주면 자동 판별을 덮어쓴다. 비우거나 빈 글이면 자동 판별."))] = None,
+    label: Annotated[str | None, Field(description="이름표(선택 · 자유 글) — 목록에 보일 이름. 비우면 없음.")] = None,
+    base64_encoded: Annotated[bool, Field(description=(
+        "true 면 html_content 를 base64 로 풀어 쓴다(큰 HTML · gzip 바이트). 기본 false — UTF-8 글 그대로."))] = False,
+    scenario_content: Annotated[str | None, Field(description=(
+        "시뮬 조건 scenario.json 글(선택) — 조건 요약을 붙이고 template 으로 세션 안 K파일을 자동으로 맞춘다(한 K파일에 결과 "
+        "여럿). 비우면 없음."))] = None,
+    kfile_id: Annotated[int | None, Field(description=(
+        "원본 K파일의 세션 파일 id(선택) — list_session_files 의 id. 같은 세션의 파일이어야 한다. 비우면 scenario 로 자동으로 "
+        "맞추고, scenario 도 없으면 잇지 않는다."))] = None,
+    project: Annotated[str | None, Field(description=(
+        "과제명(선택) — 비우면 리포트에 박힌 과제 이름. dev_rev 와 함께 있으면 반입 때 개정에 잇는다."))] = None,
+    dev_rev: Annotated[Literal[DEV_REV_CODES] | Literal[""] | None, Field(description=(
+        f"개발단계(선택) — {_one_of(DEV_REV_CODES)}. 빈 글은 주지 않은 것과 같다."))] = None,
+    variation: Annotated[str | None, Field(description="설계안(선택 · 자유 글).")] = None,
+    doe: Annotated[str | None, Field(description="DOE 참조(선택) — `study` 또는 `study:case`.")] = None,
+) -> IngestReportOut:
+    """낙하 · 충격 리포트 HTML 한 건을 세션에 들여와 구조화한다(deep · sphere · impact 자동 판별).
 
-    ⚠ **대용량은 이 도구가 아니다** — html_content 를 문자열로 나르므로 수십 MB 이상은
-    부적합하다. PC/서버의 리포트 파일(전각도 낙하 등, 압축해도 수백 MB~GB)은 REST intake
-    로 올린다 — `report_upload_instructions()` 가 리포트+K파일 한 호출 명령을 알려 준다.
+    html_content 를 글로 나르므로 수십 MB 넘는 리포트(전각도 낙하 등)는 이 도구가 아니다 — REST intake 로 올린다
+    (`report_upload_instructions` 가 리포트 + K파일 한 호출 명령을 준다). 런 수백 개는 캠페인 길(`create_campaign` →
+    `ingest_campaign_manifest` → intake)이다. 들인 뒤 메타 고침은 `update_report_meta`, 렌더 붙이기는 `attach_render`.
 
-    `html_content` 는 koo_deep_report / koo_sphere_report / koo_impact_report 가 생성한
-    리포트 HTML 전체다(데이터가 임베드돼 있어 그대로 파싱된다). 큰 HTML 은 base64 로
-    주고 base64_encoded=true. kind 를 명시하면 자동판별을 덮어쓴다.
+    project(없으면 리포트에 박힌 과제 이름)와 dev_rev 가 있으면 반입 때 개정에 잇는다 — 허브 받기 뒤 자동 잇기와 같은 판정이다.
+    이름(과제명 · 과제코드 · 옛 과제명 · 별칭)이 허브 과제 하나로 풀리면 그 과제의 판에, 여러 과제에 걸리거나 이름(label)만 같으면
+    잇지 않고 후보로 남기며(`plan_task_links` · `report_revision` 의 `task_candidates`), 허브가 모르는 이름은 글자 그대로의 판
+    (`<project>@<dev_rev>`)에 잇는다. 과제 · 개정 기능이 꺼져 있으면 판정 없이 글자 그대로의 판에 잇고(허브가 바꾼 옛 과제명만 지금
+    이름으로 푼다) `report_revision` · `plan_task_links` 는 거절된다. 선은 `report_revision` 의 `linked` 로 본다.
 
-    선택 동반물 — scenario_content: 시뮬 조건 scenario.json 텍스트(조건 요약 + template
-    으로 세션 내 K파일 자동매칭 → 한 K에 여러 결과를 매달 수 있다), kfile_id: 원본
-    K파일 수동 지정, project/dev_rev/variation/doe: 과제 메타(예: S26-X / dv1).
-    project(안 주면 리포트에 박힌 과제 이름)와 dev_rev 가 있으면 반입 때 개정에 이어진다 — 허브 받기 뒤 자동 잇기와 **같은 판정**이다.
-      · 이름(과제명 · 과제코드 · 옛 과제명 · 별칭)이 허브 과제 **하나로** 풀리면 그 과제의 판에 잇는다(`report_revision` 의
-        `linked.source` 가 `rule`).
-      · 허브 과제와 맞는데 하나로 정해지지 않으면(여러 과제에 걸린다 · 이름(label)만 같다) **잇지 않는다** — 후보(없으면 못 붙임)로
-        남는다(`plan_task_links` · `report_revision` 의 `task_candidates`).
-      · 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 잇는다(`eng_meta`).
-    응답의 `task_links` — 반입 뒤 과제 잇기가 센 수다. 이름이 허브 과제 하나로 풀려 반입 때 이어졌으면 `already` 1 이다(`linked` 는
-    그 뒤에 새로 잇거나 옮긴 수 — 대개 0). 하나로 정해지지 않은 이름 · 허브가 모르는 이름은 `candidates`(고를 후보가 있다) ·
-    `unmatched`(없다)로 세기만 한다 — ★이 둘은 선이 있는지와 따로다(허브가 모르는 이름은 글자 그대로 이어진 채, 하나로 정해지지 않은
-    이름은 잇지 않은 채 센다 — 선은 `report_revision` 의 `linked` 로 본다). 깨졌으면 `error` 가 오고 반입은 그대로다. 과제·개정 기능이
-    꺼져 있으면 `skipped: off` 다 — 반입 뒤 잇기는 돌지 않는다. ★꺼져 있어도 반입 때 잇기는 돈다 — 다만 위 판정을 따르지 않고(거울에
-    허브 과제가 남아 있어도) 어느 이름이든 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 `eng_meta` 로 잇는다(허브가 바꾼 옛
-    과제명만 지금 과제명으로 푼다). 그때 응답은 `skipped: off` 뿐이고 `report_revision` · `plan_task_links` 는 거절된다(「과제·개정
-    기능이 꺼져 있습니다」). 나중에 켜면 받기 뒤 자동 잇기 · 일괄 적용이 하나로 풀리는 이름의 그 선을 판정대로 옮긴다."""
+    돌려주는 것 — 리포트 행(id · kind · n_cases · eng_meta · 가장 큰 응력 · 가속도 …)과 `task_links`(반입 뒤 잇기의 수). 반입 때
+    이어졌으면 `already` 1 이고 `linked` 는 그 뒤 새로 잇거나 옮긴 수다. `candidates` · `unmatched` 는 하나로 풀리지 않은 이름의
+    수로 선이 있는지와 따로다. 깨졌으면 `error`(반입은 그대로) · 기능이 꺼져 있으면 `skipped: off`. 업로드는 분당 한도가 있다(429)."""
     raw = base64.b64decode(html_content) if base64_encoded else html_content.encode("utf-8")
     data = {}
     for k, v in (("kind", kind), ("label", label), ("kfile_id", kfile_id),
@@ -1568,32 +1740,40 @@ async def ingest_report(
         ))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SET)
 async def update_report_meta(
-    report_id: str,
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     ctx: Context,
-    label: str | None = None,
-    project: str | None = None,
-    dev_rev: str | None = None,
-    variation: str | None = None,
-    doe: str | None = None,
-    kfile_id: int | None = None,
-    focus: str | None = None,
-) -> dict:
-    """리포트의 과제명(project)·개발단계(dev_rev: pre|dv1..dvr|pv1..pvr|pra|mp)·설계안·
-    DOE·초점(focus 예 camera-detail)·원본 K파일 링크를 수동 설정한다(부분 갱신).
-    설정해두면 DataHub 등재 때 project/stage 재입력 불필요. ""(빈문자)=그 필드 삭제.
-    project 나 dev_rev 를 주면 **기계가 이은** 개정 연결이 따라간다 — 허브 받기 뒤 자동 잇기와 **같은 판정**이다.
-      · 이름(과제명 · 과제코드 · 옛 과제명 · 별칭)이 허브 과제 **하나로** 풀리면 그 과제의 판으로 간다(이미 거기면 아무것도 바뀌지 않는다).
-      · 허브 과제와 맞는데 하나로 정해지지 않으면(여러 과제에 걸린다 · 이름(label)만 같다) **어디로도 가지 않는다** — 있던 연결은
-        그대로고, 메타와 다르면 `report_revision` 의 `mismatch` 가 말한다(후보는 그 `task_candidates` · `plan_task_links`).
-      · 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)으로 간다.
-      · 과제 이름(project 를 지우면 리포트에 박힌 과제 이름)이나 dev_rev 가 없으면 이을 것이 없다 — 있던 연결은 그대로다.
-    ★사람이 손으로 확정한 연결(`set_report_revision`)은 그대로 두고, 사람이 연결을 끊은 리포트(`report_revision` 의 `unlinked`)는
-    메타만 저장하고 다시 잇지 않는다. 설계안 · DOE 만 고치면 연결은 건드리지 않는다. 다시 잇게 하려면 `set_report_revision` 또는
-    `clear_report_unlink`. ★응답은 연결이 어떻게 됐는지 싣지 않는다 — `report_revision` 으로 확인한다. ★과제·개정 기능이 꺼져 있으면
-    위 판정을 따르지 않는다 — 어느 이름이든 예전처럼 글자 그대로의 판으로 간다(거울에 허브 과제가 남아 있어도 · 허브가 바꾼 옛
-    과제명만 지금 과제명으로 푼다 · 사람이 확정한 연결과 사람이 끊은 리포트는 그때도 그대로다). 그때 `report_revision` 은 거절된다."""
+    label: Annotated[str | None, Field(description="이름표(선택 · 255자까지). 빈 글이면 지운다 · 비우면 그대로.")] = None,
+    project: Annotated[str | None, Field(description=(
+        "과제명(선택 · 64자까지). 빈 글이면 지운다(그때 잇기는 리포트에 박힌 과제 이름을 쓴다) · 비우면 그대로."))] = None,
+    dev_rev: Annotated[Literal[DEV_REV_CODES] | Literal[""] | None, Field(description=(
+        f"개발단계(선택) — {_one_of(DEV_REV_CODES)}. 빈 글이면 지운다 · 비우면 그대로."))] = None,
+    variation: Annotated[str | None, Field(description="설계안(선택 · 64자까지). 빈 글이면 지운다 · 비우면 그대로.")] = None,
+    doe: Annotated[str | None, Field(description=(
+        "DOE 참조(선택 · 128자까지) — `study` 또는 `study:case`. 빈 글이면 지운다 · 비우면 그대로."))] = None,
+    kfile_id: Annotated[int | None, Field(description=(
+        "원본 K파일의 세션 파일 id(선택) — list_session_files 의 id. 리포트와 같은 세션의 파일이어야 한다. 비우면 그대로(지우는 "
+        "값은 없다)."))] = None,
+    focus: Annotated[str | None, Field(description=(
+        "초점 라벨(선택 · 64자까지 · 예 camera-detail). 빈 글이면 지운다 · 비우면 그대로."))] = None,
+) -> UpdateReportMetaOut:
+    """리포트의 수동 메타(이름표 · 과제명 · 개발단계 · 설계안 · DOE · 초점 · 원본 K파일)를 부분 갱신한다.
+
+    안 준 칸은 그대로, 빈 글은 그 칸을 지운다. 적어 두면 DataHub 등재 때 과제 · 단계를 다시 넣지 않는다. 리포트 소유자만 고친다.
+    새 리포트를 들이는 것은 `ingest_report`, 개정 선을 손으로 정하거나 끊는 것은 `set_report_revision` · `unlink_report_revision`.
+
+    project 나 dev_rev 를 주면 기계가 이은 개정 선이 따라간다 — 허브 받기 뒤 자동 잇기와 같은 판정이다. 이름(과제명 · 과제코드 ·
+    옛 과제명 · 별칭)이 허브 과제 하나로 풀리면 그 과제의 판으로 가고(이미 거기면 그대로), 여러 과제에 걸리거나 이름(label)만 같으면
+    어디로도 가지 않는다 — 있던 선은 그대로고 메타와 다르면 `report_revision` 의 `mismatch` 가 말한다(후보는 그 `task_candidates` ·
+    `plan_task_links`). 허브가 모르는 이름이면 글자 그대로의 판(`<project>@<dev_rev>`)으로 간다. 과제 이름이나 dev_rev 가 없으면
+    선은 그대로다. 사람이 손으로 정한 선(`set_report_revision`)과 사람이 끊은 리포트(`report_revision` 의 `unlinked`)는 메타만
+    저장하고 다시 잇지 않는다 — 다시 잇게 하려면 `set_report_revision` 또는 `clear_report_unlink`. 설계안 · DOE 만 고치면 선을 보지
+    않는다. 과제 · 개정 기능이 꺼져 있으면 판정 없이 글자 그대로의 판으로 간다(허브가 바꾼 옛 과제명만 지금 이름으로 푼다 · 사람이
+    정한 선과 끊은 리포트는 그때도 그대로 · `report_revision` 은 거절된다).
+
+    돌려주는 것 — 고친 리포트 행(id · label · focus · eng_meta · source_kfile_id …). 선이 어떻게 됐는지는 싣지 않는다 —
+    `report_revision` 으로 본다."""
     body = {k: v for k, v in {
         "label": label, "project": project, "dev_rev": dev_rev,
         "variation": variation, "doe": doe, "kfile_id": kfile_id, "focus": focus,
@@ -1603,15 +1783,27 @@ async def update_report_meta(
             f"/reports/{_seg(report_id)}", json=body, headers=_forward_headers(ctx)))
 
 
-@mcp.tool()
-async def attach_render(report_id: str, path: str, ctx: Context) -> dict:
-    """SceneForge 렌더 결과(C-11)를 리포트에 붙인다 — 결과 폴더(`render_result.json` + mp4 · 정지 화면 PNG) 또는
-    그 폴더를 묶은 zip 의 경로. MCP 서버가 그 경로를 읽을 수 있는 같은 머신에서만 된다(`upload_local_path` 와 같다).
+@mcp.tool(annotations=_ADD_OUT)
+async def attach_render(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    path: Annotated[str, Field(description=(
+        "MCP 서버 박스의 경로 — SceneForge 결과 폴더(render_result.json + mp4 · 정지 화면 PNG, 맨 위 파일만 싣는다) 또는 그 "
+        "폴더를 묶은 zip. 묶음 전송 상한은 업로드 상한(기본 512 MB)이다."))],
+    ctx: Context,
+) -> AttachRenderOut:
+    """SceneForge 렌더 결과(결과 폴더 또는 zip)를 리포트의 미디어로 더한다.
 
-    기존 리포트 미디어를 지우지 않고 **더한다**. 같은 render_id 를 다시 붙이면 바꾸는 것이 없다(멱등).
-    파일마다 sha256 · 크기가 결과의 적힌 값과 맞아야 하고, 하나라도 다르거나 적히지 않은 파일이 끼면 통째로
-    거절한다(전부 아니면 전무). 실패한 렌더(`ok: false`)는 그림 없이 기록만 남는다. 리포트 소유자만 붙일 수 있다.
-    Attach a SceneForge render result (folder or zip) to a report — appended, idempotent per render_id."""
+    MCP 서버가 그 경로를 읽을 수 있는 같은 머신에서만 된다(`upload_local_path` 와 같다). 폴더면 맨 위 파일만 묶어 보내고 하위
+    폴더는 빠진다. 리포트 소유자만 붙인다. StepForge CAD 묶음은 `attach_cad`, 해석 온톨로지 꾸러미는 `attach_cae_package`,
+    붙은 그림 보기는 `report_media`.
+
+    기존 미디어를 지우지 않고 더한다. 같은 render_id 를 같은 출력으로 다시 붙이면 바꾸는 것이 없고(`already: true`), 출력이 다르면
+    그 렌더의 옛 파일 · 항목만 바꾼다. 같은 render_id 가 성공 · 실패를 바꿔 오면 거절한다. 결과의 run.report_id 가 이 리포트,
+    run.case_key 가 이 리포트의 케이스여야 하고, 파일마다 sha256 · 크기가 결과에 적힌 값과 맞아야 한다 — 하나라도 다르거나 적히지
+    않은 파일이 끼면 통째로 거절한다(전부 아니면 전무 — 아무것도 저장하지 않는다). 실패한 렌더(`ok: false`)는 그림 없이 기록만
+    남는다.
+
+    돌려주는 것 — render_id · ok · already · stored(이번에 붙인 파일 수) · media_total(리포트의 미디어 수) · warnings."""
     import io as _io
     import os as _os
     import zipfile as _zf
@@ -1652,32 +1844,46 @@ _A_THRESHOLDS = ("건강 판정 문턱(선택) — 바꿀 열쇠만: energy_rati
                  "warn). 미끄럼 에너지는 문턱이 없다. 다른 열쇠는 거절된다.")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def create_campaign(
-    name: Annotated[str, Field(description="캠페인 이름(1~255자) — 내 캠페인 안에서 하나뿐이어야 한다.")],
+    name: Annotated[str, Field(description=(
+        "캠페인 이름(1~255자 · 앞뒤 공백은 떼고 저장한다) — 내 캠페인 안에서 하나뿐이어야 한다."))],
     ctx: Context,
     project: Annotated[str | None, Field(
         description="과제명(선택 · 64자까지) — 적어 두는 값이다. 리포트 메타는 intake 폼의 project 가 정한다.")] = None,
-    dev_rev: Annotated[str | None, Field(
-        description="개발단계(선택) — pre|dv1..dvr|pv1..pvr|pra|mp. 적어 두는 값이다(리포트 메타는 intake 폼의 dev_rev).")] = None,
+    dev_rev: Annotated[Literal[DEV_REV_CODES] | Literal[""] | None, Field(description=(
+        f"개발단계(선택) — {_one_of(DEV_REV_CODES)}. 적어 두는 값이다(리포트 메타는 intake 폼의 dev_rev). 빈 글은 검사 없이 "
+        "그대로 둔다."))] = None,
     analysis_method: Annotated[str | None, Field(description="해석 방법(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
     analysis_target: Annotated[str | None, Field(description="해석 대상(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
     doe_strategy: Annotated[str | None, Field(description="DOE 전략(선택 · 64자까지) — 온 글 그대로 둔다.")] = None,
-    drop_height_mm: Annotated[float | None, Field(description="낙하 높이 mm(선택 · 0 이상).")] = None,
-    duration_ms: Annotated[float | None, Field(description="해석 지속 시간 ms(선택 · 0 이상).")] = None,
-    thickness_axis: Annotated[str | None, Field(description="두께 축(선택) — X · Y · Z.")] = None,
-    impactor: Annotated[dict | None, Field(
-        description="충격자(선택) — {mass_g, height_mm, ke_mj} 가운데 아는 것만(0 이상). 다른 열쇠는 거절된다.")] = None,
-    health_thresholds: Annotated[dict | None, Field(description=_A_THRESHOLDS)] = None,
-    required_extractions: Annotated[list[dict] | None, Field(description=_A_REQUIRED)] = None,
-) -> dict:
+    drop_height_mm: Annotated[float | None, Field(ge=0, description="낙하 높이 mm(선택 · 0 이상).")] = None,
+    duration_ms: Annotated[float | None, Field(ge=0, description="해석 지속 시간 ms(선택 · 0 이상).")] = None,
+    thickness_axis: Annotated[Literal[CAMPAIGN_THICKNESS_INPUTS] | None, Field(description=(
+        "두께 축(선택) — X · Y · Z(소문자도 받아 대문자로 저장한다). 캠페인 분석 도구가 두께축을 안 받으면 이 값을 쓴다(없으면 "
+        "Z)."))] = None,
+    impactor: Annotated[dict | None, Field(description=(
+        "충격자(선택) — {mass_g(g), height_mm(mm), ke_mj(mJ)} 가운데 아는 것만(모두 0 이상). 예 {\"mass_g\": 32.5, "
+        "\"height_mm\": 1000}. 다른 열쇠는 거절된다."))] = None,
+    health_thresholds: Annotated[dict | None, Field(description=(
+        _A_THRESHOLDS + " energy_ratio_max · hg_over_ie_max 는 0 보다 크고 added_mass_pct_max · ke0_rel_tol 은 0 이상. "
+        "예 {\"energy_ratio_max\": 1.1}. 비우면 모두 기본값 · 나중엔 set_campaign_health_thresholds."))] = None,
+    required_extractions: Annotated[list[dict] | None, Field(max_length=REQUIRED_EXTRACTIONS_MAX, description=(
+        _A_REQUIRED + f" {REQUIRED_EXTRACTIONS_MAX}항목까지. 예 [{{\"field\": \"stress\", \"parts\": [12, 15]}}]. 선택이다 — 비우면 "
+        "목록이 없어 모든 런의 d3plot 삭제가 보류된다(required_extractions_unset). 나중엔 set_campaign_required_extractions."))] = None,
+) -> CreateCampaignOut:
     """캠페인(한 과제 · 한 판의 런 묶음)을 만든다 — 응답의 `campaign_id` 로 런 목록을 올리고 리포트를 받는다.
 
-    같은 이름을 이미 썼으면 오류고, 그 글에 있던 캠페인의 id 가 있다(id 를 잊었을 때도 이렇게 찾는다 — 캠페인 목록 · 고침 ·
-    지우기 도구는 없다). 차례 — `create_campaign` → `ingest_campaign_manifest`(런 목록) → 런마다 REST intake 에 `campaign_id` ·
-    `run_key` 를 붙여 리포트를 보낸다(`report_upload_instructions`) → `campaign_ingest_status` 로 수를 맞춘다.
-    캠페인은 만든 사람만 본다.
-    Create a campaign (a batch of runs); the same name again is an error whose message carries the existing id."""
+    차례 — `create_campaign` → `ingest_campaign_manifest`(런 목록) → 런마다 REST intake 에 `campaign_id` · `run_key` 를 붙여
+    리포트를 보낸다(`report_upload_instructions`) → `campaign_ingest_status` 로 수를 맞춘다. 리포트 한 건을 세션에 바로 들이는 것은
+    `ingest_report` 다.
+
+    같은 이름을 이미 썼으면 오류고 그 글에 있던 캠페인의 id 가 있다(id 를 잊었을 때도 이렇게 찾는다 — 캠페인 목록 · 고침 · 지우기
+    도구는 없다). 문턱 · 필수 추출은 나중에 `set_campaign_health_thresholds` · `set_campaign_required_extractions` 로 통째로 바꾼다.
+    필수 추출은 선택이지만 없으면 모든 런의 d3plot 삭제가 보류된다(`campaign_deletion_clearance`). 캠페인은 만든 사람만 본다.
+
+    돌려주는 것 — campaign_id · 적은 칸 그대로 · health_thresholds(문턱 묶음 — values · ref · changed · defaults) ·
+    required_extractions · created_at."""
     body = {k: v for k, v in {
         "name": name, "project": project, "dev_rev": dev_rev, "analysis_method": analysis_method,
         "analysis_target": analysis_target, "doe_strategy": doe_strategy, "drop_height_mm": drop_height_mm,
@@ -1687,10 +1893,10 @@ async def create_campaign(
     return await _post(ctx, "/campaigns", body)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SET)
 async def ingest_campaign_manifest(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
-    runs: Annotated[list[dict], Field(description=(
+    runs: Annotated[list[dict], Field(min_length=1, max_length=CAMPAIGN_RUNS_MAX, description=(
         f"런 목록(1~{CAMPAIGN_RUNS_MAX}건) — 항목마다 run_key(필수 · 빈칸 없는 글 128자까지 · `stcx:<잡 id>:<DOE>` 꼴을 권한다) · "
         "doe · pitch · roll(선택) · provenance(출처 — wrapper_name · wrapper_version · prescription_set · scenario_sha256 · "
         "runner_config_sha256 · deck_sha256 · include_sha256[] · solver{} · sif_version · deep_report_tool_commit · "
@@ -1700,39 +1906,51 @@ async def ingest_campaign_manifest(
         "json_complete) · extraction(추출 목록 — d3plot_states_total · d3plot_states_read(total 이하) · peak_source(binout · elout · "
         "d3plot_full · d3plot_sampled) · fields_extracted[](글 또는 {field, parts[], states: all | sampled}) · d3plot_retained · "
         "d3plot_deleted_at) · impacts(충격 구간 50 개까지 — 항목 {index(1 부터 · 겹치면 거절), t_start_ms, t_end_ms?, ke_frac?, "
-        "peaks?{무리 키: 그 충격의 피크}} — 각도 표 · 피크 표의 충격 수 · 차수가 이것으로 센다). 다른 열쇠는 거절된다."))],
+        "peaks?{무리 키: 그 충격의 피크}} — 각도 표 · 피크 표의 충격 수 · 차수가 이것으로 센다). 다른 열쇠는 거절된다. "
+        "예 [{\"run_key\": \"stcx:4512:p030r045\", \"pitch\": 30, \"roll\": 45, \"health\": {\"normal_termination\": true}}]."))],
     ctx: Context,
-) -> dict:
+) -> IngestCampaignManifestOut:
     """캠페인의 런 목록(매니페스트)을 올린다 — 리포트를 받기 전에 「무엇이 올 것인가」 를 먼저 적는다.
 
-    새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 **보낸 칸**(doe · pitch · roll · provenance ·
-    config_generation · superseded_by · health · extraction)만 맞춘다 — 객체 칸은 통째로 바뀌고, 안 보낸 칸은 그대로고 null 을 보내면 비운다.
-    `superseded_by` 는 같은 캠페인의 다른 run_key 여야 한다(자기 자신 · 고리는 거절). 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고, 목록에서 런을 빼는 길은
-    없다. 목록에 없는 `run_key` 로 온 리포트는 거절된다 — 목록을 먼저 올린다. 응답은 `added` · `updated` · `unchanged` · `listed`.
-    Upload a campaign's run manifest (idempotent upsert; runs are never removed)."""
+    `create_campaign` 다음, 런마다 리포트를 intake 로 보내기 전에 부른다. 목록에 없는 `run_key` 로 온 리포트는 거절된다.
+    새 `run_key` 는 pending 으로 더하고, 있는 것은 상태 · 리포트를 둔 채 보낸 칸(doe · pitch · roll · provenance ·
+    config_generation · superseded_by · health · extraction · impacts)만 맞춘다 — 객체 칸은 통째로 바뀌고, 안 보낸 칸은 그대로고
+    null 을 보내면 비운다. `superseded_by` 는 같은 캠페인의 다른 run_key 여야 한다(같은 요청에서 더하는 런도 된다 · 자기 자신 ·
+    고리는 거절 — 그때는 아무것도 바뀌지 않는다). 같은 목록을 다시 올려도 된다. 한 요청 안에 같은 `run_key` 가 둘이면 거절이고,
+    목록에서 런을 빼는 길은 없다.
+
+    건강 문턱 · 필수 추출은 캠페인 쪽(`set_campaign_health_thresholds` · `set_campaign_required_extractions`)이다. 올린 뒤에는
+    `campaign_ingest_status`(적재) · `campaign_provenance`(출처) · `campaign_health_table`(건강) ·
+    `campaign_deletion_clearance`(삭제 허가)로 본다.
+
+    돌려주는 것 — campaign_id · added(새 런) · updated(보낸 칸이 바뀐 런) · unchanged · listed(올린 뒤 목록 전체 런 수)."""
     return await _post(ctx, f"/campaigns/{_seg(campaign_id)}/runs", {"runs": runs})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def campaign_ingest_status(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     ctx: Context,
-    state: Annotated[str | None, Field(
+    state: Annotated[Literal[CAMPAIGN_STATES] | None, Field(
         description=f"이 상태의 런만(선택) — {_one_of(CAMPAIGN_STATES)}. 비우면 모두.")] = None,
-    limit: Annotated[int, Field(
-        description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 수(`counts`)는 이 값과 무관하게 캠페인 전체다.")] = 200,
-    offset: Annotated[int, Field(description="건너뛸 런 수(목록 순서) — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
-) -> dict:
-    """캠페인의 적재 상태 — 목록 수 · 상태별 수(`counts`) · 런마다 상태 · report_id · 지문(sha256) · 거절 까닭.
+    limit: Annotated[int, Field(ge=1, le=CAMPAIGN_RUNS_MAX, description=(
+        f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX} · 기본 200). 수(`counts`)는 이 값과 무관하게 캠페인 전체다."))] = 200,
+    offset: Annotated[int, Field(ge=0, description=(
+        "건너뛸 런 수(0 이상 · 목록 순서) — offset + limit 이 `matched` 보다 작으면 offset 을 늘려 이어 받는다."))] = 0,
+) -> CampaignIngestStatusOut:
+    """캠페인의 적재 상태 — 목록 수 · 상태별 수 · 런마다 상태 · report_id · 지문(sha256) · 거절 까닭을 본다.
 
-    `counts.listed = pending + received + skipped + rejected` 가 늘 맞는다. `ingest_state` 는 그 런의 **마지막 시도 결과**고
-    `report_id` 는 그 런이 **가진 리포트**다 — 가진 리포트가 있는데 뒤에 다른 내용이 와 거절된 런은 rejected 이면서 report_id 가
+    리포트를 다시 올리기 전에 `state` 를 pending · rejected 로 걸러 그 런만 보낸다 — 건너뛰는 런도 파일을 통째로 보내야 건너뛴다.
+    출처는 `campaign_provenance`, 건강 판정은 `campaign_health_table`, d3plot 삭제 허가는 `campaign_deletion_clearance`.
+
+    `counts.listed = pending + received + skipped + rejected` 가 늘 맞는다. `ingest_state` 는 그 런의 마지막 시도 결과고
+    `report_id` 는 그 런이 가진 리포트다 — 가진 리포트가 있는데 뒤에 다른 내용이 와 거절된 런은 rejected 이면서 report_id 가
     있다(`counts.with_report` 가 리포트를 가진 런 수). pending = 목록에만 있다(또는 가졌던 리포트가 지워졌다) · received = 받았다 ·
-    skipped = 같은 내용이 다시 와 건너뛰었다 · rejected = 거절(`reject_reason`).
-    ★다시 올리기 전에 `state` 를 pending · rejected 로 걸러 그 런만 보낸다 — 건너뛰는 런도 파일을 통째로 보내야 건너뛴다.
-    ★런에 적히지 않는 실패 — 401(토큰) · 429(분당 한도) · 요청 꼴 오류(file 칸 없음) · 게이트웨이가 앞에서 막은 요청 · 5xx 는
-    런 상태를 바꾸지 않는다(앞 그대로다).
-    Ingest status of a campaign: counts (listed = pending+received+skipped+rejected) and per-run state/report/sha256/reason."""
+    skipped = 같은 내용이 다시 와 건너뛰었다 · rejected = 거절(`reject_reason` — 2000자에서 잘린다). 런에 적히지 않는 실패 —
+    401(토큰) · 429(분당 한도) · 요청 꼴 오류(file 칸 없음) · 게이트웨이가 앞에서 막은 요청 · 5xx 는 런 상태를 바꾸지 않는다.
+
+    돌려주는 것 — campaign(캠페인 칸) · counts · matched(거른 런 수) · runs(이 쪽 — run_key · doe · pitch · roll · ingest_state ·
+    report_id · content_sha256 · ingested_at · reject_reason) · limit · offset."""
     params = {"limit": limit, "offset": offset}
     if state is not None:
         params["state"] = state
@@ -1740,22 +1958,31 @@ async def campaign_ingest_status(
 
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SET)
 async def set_campaign_health_thresholds(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     ctx: Context,
-    energy_ratio_max: Annotated[float | None, Field(description="에너지비 문턱(기본 1.05) — 넘으면 warn. 0 보다 커야 한다.")] = None,
-    hg_over_ie_max: Annotated[float | None, Field(description="HG/IE 비 문턱(기본 0.10 = 10 %) — 이 값 이상이면 warn. 0 보다 커야 한다.")] = None,
-    added_mass_pct_max: Annotated[float | None, Field(description="추가 질량 % 문턱(기본 0.5) — 기기 값(없으면 전체 값)이 넘으면 warn.")] = None,
-    ke0_rel_tol: Annotated[float | None, Field(description="첫 KE 와 ½mv² 의 상대 차이 문턱(기본 0.10) — 넘으면 warn.")] = None,
-    contact_energy_min_mJ: Annotated[float | None, Field(description="자체 접촉 에너지 문턱 mJ(기본 -100) — 이보다 낮으면 warn.")] = None,
-) -> dict:
-    """캠페인의 건강 판정 문턱을 바꾼다 — 안 준 열쇠는 기본값이다(아무것도 안 주면 모두 기본값으로 돌린다).
+    energy_ratio_max: Annotated[float | None, Field(gt=0, description=(
+        "에너지비 문턱(0 초과 · 비우면 기본 1.05) — 런의 energy_ratio_max 가 넘으면 warn(energy_ratio)."))] = None,
+    hg_over_ie_max: Annotated[float | None, Field(gt=0, description=(
+        "HG/IE 비 문턱(0 초과 · 비우면 기본 0.10 = 10 %) — 이 값 이상이면 warn(hourglass)."))] = None,
+    added_mass_pct_max: Annotated[float | None, Field(ge=0, description=(
+        "추가 질량 문턱 %(0 이상 · 비우면 기본 0.5) — 기기 값(added_mass_pct_device, 없으면 added_mass_pct_total)이 넘으면 "
+        "warn(added_mass)."))] = None,
+    ke0_rel_tol: Annotated[float | None, Field(ge=0, description=(
+        "첫 KE 와 ½mv² 의 상대 차이 문턱(0 이상 · 비우면 기본 0.10 = 10 %) — 넘으면 warn(ke0_mismatch)."))] = None,
+    contact_energy_min_mJ: Annotated[float | None, Field(description=(
+        "자체 접촉 에너지 문턱 mJ(비우면 기본 -100) — 런의 값이 이보다 낮으면 warn(contact_energy)."))] = None,
+) -> SetCampaignHealthThresholdsOut:
+    """캠페인의 건강 판정 문턱 다섯을 통째로 바꾼다 — 안 준 열쇠는 기본값이다(아무것도 안 주면 모두 기본값으로 돌린다).
 
-    판정은 읽을 때 세므로 바꾼 문턱이 곧바로 `campaign_health_table` · `report_health` 에 든다. 응답의 `thresholds.ref` 가 그
-    묶음의 이름표(런의 `health.thresholds_ref`)다. 정상 종료 아님 · NaN · 잘린 JSON · 첫 KE 0 이하는 문턱 없이 invalid 다.
-    미끄럼 에너지는 문턱이 없다. 캠페인 주인만.
-    Set a campaign's health thresholds (omitted keys fall back to defaults)."""
+    판정은 읽을 때 세므로 바꾼 문턱이 곧바로 `campaign_health_table` · `report_health` 와 다음에 짓는 묶음
+    (`build_report_bundle`)에 든다. 캠페인을 만들 때 함께 주려면 `create_campaign` 의 health_thresholds. 런의 건강 수치는
+    `ingest_campaign_manifest` 의 health 칸으로 올린다. 정상 종료 아님 · NaN · 잘린 JSON · 첫 KE 0 이하는 문턱 없이 invalid 다.
+    미끄럼 에너지는 문턱이 없다. 캠페인 주인만 바꾼다.
+
+    돌려주는 것 — campaign_id · thresholds(values — 지금 쓰는 다섯 값 · ref — 묶음 이름표로 런의 `health.thresholds_ref` 와 같다 ·
+    changed — 기본값에서 바뀐 열쇠 · defaults)."""
     body = {k: v for k, v in {
         "energy_ratio_max": energy_ratio_max, "hg_over_ie_max": hg_over_ie_max, "added_mass_pct_max": added_mass_pct_max,
         "ke0_rel_tol": ke0_rel_tol, "contact_energy_min_mJ": contact_energy_min_mJ,
@@ -1763,88 +1990,122 @@ async def set_campaign_health_thresholds(
     return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/health-thresholds", body)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def campaign_provenance(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     ctx: Context,
-    config_generation: Annotated[str | None, Field(description="이 설정 세대의 런만(선택 · 64자까지). 비우면 모두.")] = None,
-    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 분포 · 수는 이 값과 무관하게 전체다.")] = 200,
-    offset: Annotated[int, Field(description="건너뛸 런 수(목록 순서) — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
-) -> dict:
-    """캠페인의 런 출처 — 설정 세대별 런 수(`generations` — 이름표 없는 런은 config_generation null) · `mixed_config`(이름표가
-    붙은 세대가 둘 이상이면 true) · 출처가 빈 런 수 · 대체된 런 수(`counts`) · 런마다 provenance · config_generation ·
-    superseded_by. 출처가 빈 런과 대체된 런은 기본 통계에서 빠진다(`campaign_health_table`).
-    Provenance of a campaign's runs: per-generation counts, mixed_config flag, missing/superseded counts."""
+    config_generation: Annotated[str | None, Field(description=(
+        "이 설정 세대의 런만(선택 · 64자까지 · 같은 글만) — 세대 이름은 이 도구의 generations 에 있다. 비우면 모두."))] = None,
+    limit: Annotated[int, Field(ge=1, le=CAMPAIGN_RUNS_MAX, description=(
+        f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX} · 기본 200). 분포 · 수는 이 값과 무관하게 전체다."))] = 200,
+    offset: Annotated[int, Field(ge=0, description=(
+        "건너뛸 런 수(0 이상 · 목록 순서) — offset + limit 이 `matched` 보다 작으면 offset 을 늘려 이어 받는다."))] = 0,
+) -> CampaignProvenanceOut:
+    """캠페인의 런 출처 — 설정 세대별 런 수 · 세대가 섞였는지 · 출처가 빈 런 · 대체된 런과 런마다 출처를 본다.
+
+    출처는 `ingest_campaign_manifest` 의 provenance · config_generation · superseded_by 칸으로 올린다. 출처가 빈 런과 대체된 런은
+    기본 통계에서 빠진다(`campaign_health_table` 의 excluded_by — provenance_missing · superseded). 적재 상태는
+    `campaign_ingest_status`, 설정 세대끼리 견주기는 `compare_config_pairs`.
+
+    돌려주는 것 — campaign_id · generations([{config_generation, runs}] — 이름표 없는 런은 config_generation null) ·
+    mixed_config(이름표가 붙은 세대가 둘 이상이면 true) · counts(listed · with_provenance · provenance_missing · superseded — 캠페인
+    전체) · matched(거른 런 수) · runs(이 쪽 — run_key · doe · report_id · config_generation · superseded_by · provenance) · limit ·
+    offset."""
     params: dict = {"limit": limit, "offset": offset}
     if config_generation is not None:
         params["config_generation"] = config_generation
     return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/provenance", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def campaign_health_table(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     ctx: Context,
     include_invalid: Annotated[bool, Field(description="true 면 invalid · 대체된 런 · 출처가 빈 런도 싣는다(기본 false — "
                                                        "통계에 넣는 런만).")] = False,
-    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 머리 줄은 이 값과 무관하게 전체다.")] = 200,
-    offset: Annotated[int, Field(description="건너뛸 런 수 — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
-) -> dict:
-    """캠페인의 런 건강 표 — 머리 줄(`header.line` — 「유효 n / 전체 N · 제외 까닭별 건수」) · 판정에 쓴 문턱 묶음(`thresholds`
-    — values · ref · changed) · 런마다 건강 수치 · 판정(`validity` {status: valid | warn | invalid, reasons}) · 제외 까닭
-    (`excluded_by`).
+    limit: Annotated[int, Field(ge=1, le=CAMPAIGN_RUNS_MAX, description=(
+        f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX} · 기본 200). 머리 줄은 이 값과 무관하게 전체다."))] = 200,
+    offset: Annotated[int, Field(ge=0, description=(
+        "건너뛸 런 수(0 이상) — offset + limit 이 `matched` 보다 작으면 offset 을 늘려 이어 받는다."))] = 0,
+) -> CampaignHealthTableOut:
+    """캠페인의 런 건강 표 — 머리 줄 · 판정에 쓴 문턱 묶음 · 런마다 건강 수치 · 판정 · 제외 까닭을 본다.
+
+    통계에 넣는 런을 고르는 기준이다 — 캠페인 분석 도구와 묶음(`build_report_bundle`)이 같은 제외 까닭을 쓴다. 문턱 바꾸기는
+    `set_campaign_health_thresholds`, 리포트 하나는 `report_health`, 출처 분포는 `campaign_provenance`. 건강 수치는
+    `ingest_campaign_manifest` 의 health 칸으로 올린다.
 
     invalid 까닭 — no_report(리포트 없음) · health_missing(건강 수치 없음 — 스케줄러 상태만으로 valid 로 보지 않는다) ·
     termination_unknown · abnormal_termination · json_incomplete · nan · ke0_zero. warn 까닭 — energy_ratio · hourglass ·
     added_mass · ke0_mismatch · contact_energy. 기본 제외 — invalid · superseded(대체된 런) · provenance_missing. warn 은 넣는다.
-    Health table of a campaign: header line, thresholds bundle, per-run health/validity/exclusion."""
+
+    돌려주는 것 — header(`line` 「유효 n / 전체 N · 제외 까닭별 건수」 · total · included · excluded · excluded_by · valid · warn ·
+    invalid — 캠페인 전체) · thresholds(values · ref · changed · defaults) · include_invalid · matched(실을 런 수) · runs(이 쪽 —
+    run_key · doe · pitch · roll · report_id · config_generation · superseded_by · validity{status, reasons} · health ·
+    excluded_by) · limit · offset."""
     return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/health",
                       {"include_invalid": "true" if include_invalid else "false", "limit": limit, "offset": offset})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_health(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     ctx: Context,
-) -> dict:
-    """리포트 하나(런 하나)의 건강 수치 · 판정(`validity`) · 제외 까닭 · 판정에 쓴 문턱 묶음 — 캠페인 런에 묶인 리포트면 그
-    캠페인의 문턱으로 판정한다. 캠페인 주인이 아니면 `campaign` 을 비운다. 캠페인 밖 리포트는 `campaign: null` ·
-    health_missing(invalid) 이다.
-    Health and validity of one report's run (judged with its campaign's thresholds)."""
+) -> ReportHealthOut:
+    """리포트 하나(런 하나)의 건강 수치 · 판정 · 제외 까닭 · 판정에 쓴 문턱 묶음을 본다.
+
+    캠페인 런에 묶인 리포트면 그 캠페인의 문턱으로 판정한다. 캠페인 전체 표는 `campaign_health_table`, 같은 런의 추출 · 삭제
+    허가는 `report_extraction`, 문턱 바꾸기는 `set_campaign_health_thresholds`. 캠페인 주인이 아니면(같은 소속 공유로 읽는 사람)
+    campaign · run_key 를 비우고 판정 · 수치만 준다. 캠페인 밖 리포트는 campaign null · validity invalid(health_missing) ·
+    thresholds null 이다.
+
+    돌려주는 것 — report_id · campaign({campaign_id, name, run_key}) · run_key · validity({status: valid | warn | invalid, reasons}) ·
+    health(건강 수치 + thresholds_ref) · excluded_by · config_generation · superseded_by · thresholds(values · ref · changed ·
+    defaults)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/health")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SET)
 async def set_campaign_required_extractions(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
-    required_extractions: Annotated[list[dict], Field(description=_A_REQUIRED + " 빈 목록이면 지운다.")],
+    required_extractions: Annotated[list[dict], Field(max_length=REQUIRED_EXTRACTIONS_MAX, description=(
+        _A_REQUIRED + f" {REQUIRED_EXTRACTIONS_MAX}항목까지. 예 [{{\"field\": \"stress\", \"parts\": [12, 15]}}, "
+        "{\"field\": \"plastic_strain\", \"states\": \"sampled\"}]. 빈 목록이면 지운다."))],
     ctx: Context,
-) -> dict:
-    """캠페인의 필수 추출 목록을 통째로 바꾼다 — d3plot 을 지우기 전에 DynaForge 에 들어와 있어야 할 추출(DF-04).
+) -> SetCampaignRequiredExtractionsOut:
+    """캠페인의 필수 추출 목록을 통째로 바꾼다 — d3plot 을 지우기 전에 DynaForge 에 들어와 있어야 할 추출이다.
 
     목록이 없는 캠페인은 모든 런의 삭제가 보류다(`required_extractions_unset`). 허가는 읽을 때 세므로 바꾼 목록이 곧바로
-    `campaign_deletion_clearance` · `report_extraction` 에 든다. 캠페인 주인만.
-    Replace a campaign's required-extraction list (empty list clears it; unset means every deletion is held)."""
+    `campaign_deletion_clearance` · `report_extraction` 에 든다. 런마다 뽑은 것은 `ingest_campaign_manifest` 의 extraction 칸으로
+    올린다. 캠페인을 만들 때 함께 주려면 `create_campaign` 의 required_extractions. 빈 목록이면 지운다. 캠페인 주인만 바꾼다.
+
+    돌려주는 것 — campaign_id · required_extractions(저장한 목록 — 파트는 정렬 · 겹침 없이, 지웠으면 null)."""
     return await _put(ctx, f"/campaigns/{_seg(campaign_id)}/required-extractions",
                       {"required_extractions": required_extractions})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def campaign_deletion_clearance(
     campaign_id: Annotated[str, Field(description=_A_CAMPAIGN_ID)],
     ctx: Context,
-    status: Annotated[str | None, Field(description=f"이 허가 상태의 런만(선택) — {_one_of(CLEARANCE_STATUSES)}. 비우면 모두.")] = None,
-    limit: Annotated[int, Field(description=f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX}). 머리 줄은 이 값과 무관하게 전체다.")] = 200,
-    offset: Annotated[int, Field(description="건너뛸 런 수 — `matched` 가 limit 보다 크면 이어 받는다.")] = 0,
-) -> dict:
-    """캠페인의 d3plot 삭제 허가 — **조회만** 한다(지우기는 KooChainRun). 머리 줄(`header.line` — 「삭제 허가 a / 전체 N · 보류 h ·
-    이미 지움 d」 와 까닭별 수) · 필수 목록 · 런마다 추출 · 피크 표지(`peak_provenance`) · 허가(`clearance` {status: allow | hold |
-    deleted, reasons, missing}).
+    status: Annotated[Literal[CLEARANCE_STATUSES] | None, Field(
+        description=f"이 허가 상태의 런만(선택) — {_one_of(CLEARANCE_STATUSES)}. 비우면 모두.")] = None,
+    limit: Annotated[int, Field(ge=1, le=CAMPAIGN_RUNS_MAX, description=(
+        f"한 번에 받을 런 수(1~{CAMPAIGN_RUNS_MAX} · 기본 200). 머리 줄은 이 값과 무관하게 전체다."))] = 200,
+    offset: Annotated[int, Field(ge=0, description=(
+        "건너뛸 런 수(0 이상) — offset + limit 이 `matched` 보다 작으면 offset 을 늘려 이어 받는다."))] = 0,
+) -> CampaignDeletionClearanceOut:
+    """캠페인 런마다 d3plot 을 지워도 되는지(삭제 허가)를 본다 — 조회만 한다(지우기는 KooChainRun 이 한다).
+
+    허가는 캠페인의 필수 추출 목록(`set_campaign_required_extractions`)과 런의 추출 목록(`ingest_campaign_manifest` 의 extraction
+    칸)을 읽을 때 견줘 센다. 런 하나는 `report_extraction`.
 
     보류 까닭 — required_extractions_unset(필수 목록 없음) · no_report · extraction_missing(추출 목록 없음) · extraction_incomplete
     (`missing` 의 항목마다 field_missing · parts_missing(`parts_missing` 에 빠진 파트) · states_sampled(필수는 모든 상태인데 표본) ·
-    states_unknown). 이미 지운 런은 deleted 이고, 빠진 항목이 있으면 extraction_lost(다시 못 뽑는다)를 단다.
-    Deletion clearance of a campaign's d3plots (read-only): header, required list, per-run allow/hold/deleted with missing items."""
+    states_unknown). 이미 지운 런은 deleted(already_deleted)이고, 빠진 항목이 있으면 extraction_lost(다시 못 뽑는다)를 단다.
+
+    돌려주는 것 — header(`line` 「삭제 허가 a / 전체 N · 보류 h · 이미 지움 d」 와 까닭별 수 · total · allow · hold · deleted ·
+    reasons — 캠페인 전체) · required_extractions · matched(거른 런 수) · runs(이 쪽 — run_key · doe · report_id · extraction ·
+    peak_provenance · clearance{status: allow | hold | deleted, reasons, missing}) · limit · offset."""
     params: dict = {"limit": limit, "offset": offset}
     if status is not None:
         if status not in CLEARANCE_STATUSES:
@@ -1853,19 +2114,24 @@ async def campaign_deletion_clearance(
     return await _get(ctx, f"/campaigns/{_seg(campaign_id)}/deletion-clearance", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_extraction(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     ctx: Context,
-) -> dict:
-    """리포트 하나(런 하나)의 추출 목록 · 피크 출처 표지 · 그 런의 d3plot 삭제 허가 — 캠페인 런에 묶인 리포트면 그 캠페인의 필수
-    목록으로 허가를 센다. 캠페인 주인이 아니면 `campaign` · `clearance` 를 비운다. 캠페인 밖 리포트는 `extraction: null` 이다.
+) -> ReportExtractionOut:
+    """리포트 하나(런 하나)의 추출 목록 · 피크 출처 표지 · 그 런의 d3plot 삭제 허가를 본다.
+
+    캠페인 런에 묶인 리포트면 그 캠페인의 필수 목록으로 허가를 센다. 캠페인 전체는 `campaign_deletion_clearance`, 같은 런의 건강
+    판정은 `report_health`. 캠페인 주인이 아니면 campaign · run_key · clearance 를 비우고 추출 · 표지만 준다. 캠페인 밖 리포트는
+    extraction null · 표지 known false 다.
 
     피크 표지(`peak_provenance`) — peak_source · states_read · states_total · peak_may_be_missed(d3plot 표본 상태에서 나온 피크면
     true · binout · elout 이면 false · 모르면 null). 같은 표지가 피크를 돌려주는 리포트 도구(report_summary · report_query ·
     report_worst_cases · report_case · report_part_risk · report_directional · report_scatter · report_angle_stats ·
     report_hotspots · report_findings)의 응답에도 실린다.
-    Extraction record, peak-source flag and deletion clearance of one report's run."""
+
+    돌려주는 것 — report_id · campaign({campaign_id, name, run_key}) · run_key · extraction · peak_provenance · clearance({status:
+    allow | hold | deleted, reasons, missing})."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/extraction")
 
 
@@ -1875,50 +2141,71 @@ BUNDLE_ITEMS_PAGE_MAX = 20000                                  # 백엔드 GET /
 _A_BUNDLE_ID = "묶음 주소 — build_report_bundle 응답의 bundle_id."
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def build_report_bundle(
-    campaign_ids: Annotated[list[str], Field(description="담을 캠페인 id 목록(1~20) — 모두 내 캠페인이어야 한다.")],
+    campaign_ids: Annotated[list[str], Field(min_length=1, max_length=BUNDLE_CAMPAIGNS_MAX, description=(
+        f"담을 캠페인 id 목록(1~{BUNDLE_CAMPAIGNS_MAX} · id 는 26자까지) — 모두 내 캠페인이어야 한다. 겹친 id 는 하나로 센다."))],
     spec: Annotated[dict, Field(description=(
         "묶음 명세 — {tables: [{kind, metrics?, parts?}], figures?: {roles?, exts?}, include_invalid?}. "
         f"kind 는 {_one_of(BUNDLE_TABLE_KINDS)} — runs(런 목록 · 지표 pitch · roll), case_metrics(케이스 롤업 · 지표 max_stress · "
         "max_g · max_disp · min_safety_factor — 기본 넷), part_peaks(파트 피크 · 지표 peak_stress · peak_strain · peak_g · peak_disp · "
         "peak_principal · min_principal · peak_vm_strain — 기본 peak_stress · peak_g · parts 로 파트를 고른다). 같은 종류는 하나. "
         "figures 는 넣은 런의 리포트 그림 가운데 역할(roles — 없으면 모두) · 확장자(exts — 기본 png · svg)인 것을 인용한다(영상은 싣지 "
-        "않는다). include_invalid 가 참이면 제외 까닭이 있는 런도 넣는다(기본 거짓 — 건강 표와 같다). 모르는 열쇠 · 지표는 거절된다."))],
+        "않는다). include_invalid 가 참이면 제외 까닭이 있는 런도 넣는다(기본 거짓 — 건강 표와 같다). 모르는 열쇠 · 지표는 거절된다. "
+        "표는 1~10 개 · 지표는 표마다 50 개까지. 예 {\"tables\": [{\"kind\": \"case_metrics\"}, {\"kind\": \"part_peaks\", "
+        "\"parts\": [12, 15]}], \"figures\": {\"exts\": [\"png\"]}}."))],
     ctx: Context,
-    as_of: Annotated[str | None, Field(description="기준 시각(선택 · ISO 8601) — 그때까지 받은 리포트만 넣는다. 비우면 지금.")] = None,
+    as_of: Annotated[str | None, Field(description=(
+        "기준 시각(선택 · ISO 8601 · 시간대가 없으면 UTC) — 그때까지 받은 리포트만 넣는다. 비우면 지금."))] = None,
     bundle_id: Annotated[str | None, Field(description=(
-        "있는 주소의 다음 판을 지을 때(선택) — 캠페인 · 명세가 그 주소와 같아야 한다. 숫자가 같으면 판을 올리지 않는다."))] = None,
+        "있는 주소의 다음 판을 지을 때(선택) — 캠페인 · 명세가 그 주소와 같아야 한다. 숫자가 같으면 판을 올리지 않는다. 비우면 새 "
+        "주소."))] = None,
     label: Annotated[str | None, Field(description="이름표(선택 · 255자까지) — 비우면 앞 판의 것을 잇는다.")] = None,
-) -> dict:
-    """보고서 · 영상 생성기가 읽을 묶음을 짓는다(DF-13) — 주소(`bundle_id`) 하나에 판을 쌓는다. 결과가 바뀌면 같은 주소에서 새 판이고
-    응답 `changes_counts` 가 앞 판 대비 더해짐 · 빠짐 · 바뀐 숫자 수다(`unchanged: true` 면 숫자가 같아 판을 올리지 않았다).
+) -> BuildReportBundleOut:
+    """보고서 · 영상 생성기가 읽을 묶음(캠페인 숫자 · 그림 인용 · 숫자마다 출처)을 짓는다 — 주소(`bundle_id`) 하나에 판을 쌓는다.
 
-    판마다 수치 기준 줄(`basis.line` — 캠페인마다 「유효 n / 전체 N · 제외 까닭」 · 설정 세대 · 문턱 이름표 · 단위) · 표 · 그림
-    (파일 id · sha256) · 출처 · 인용 꼴(`citation` — ReportArchive 가 이것으로 인용한다)이 있다. 숫자는 항목 하나가 한 줄이고
-    `report_bundle(items=true)` 로 받는다 — 숫자마다 `source_path` 가 리포트 · 케이스 · (파트) · 지표까지 거슬러 간다.
-    한 판의 숫자는 200,000 개까지. 묶음은 만든 사람만 본다.
-    Build (or re-version) a report bundle of campaign numbers and figure references, with per-number provenance."""
+    넣는 런은 건강 표와 같다(`campaign_health_table` 의 제외 까닭이 없는 런 · include_invalid 면 리포트가 있는 런 모두). 지은 판은
+    `report_bundle` 로 읽고, 두 판 사이 바뀐 숫자는 `report_bundle_diff`. bundle_id 를 주면 그 주소의 다음 판이다 — 캠페인 · 명세가
+    그 주소와 같아야 하고(다르면 거절 — 명세를 바꾸려면 bundle_id 없이 새 주소로), 숫자 · 그림 · 기준 줄이 마지막 판과 같으면 판을
+    올리지 않고 그 판을 `unchanged: true` 로 돌려준다. 같은 주소의 판을 동시에 지으면 한쪽은 다시 지으라는 오류다.
+
+    숫자는 항목 하나가 한 줄이고 `report_bundle(items=true)` 로 받는다 — 숫자마다 `source_path` 가 리포트 · 케이스 · (파트) ·
+    지표까지 거슬러 간다. 한 판의 숫자는 200,000 개까지 — 넘으면 거절되니 표 종류 · 지표 · 파트를 좁힌다. 묶음은 만든 사람만
+    본다.
+
+    돌려주는 것 — bundle_id · version · label · campaign_ids · as_of · created_at · basis(수치 기준 — `basis.line` 이 캠페인마다
+    「유효 n / 전체 N · 제외 까닭」, 설정 세대 · 문턱 이름표 · 단위) · citation(ReportArchive 가 인용하는 꼴) · changes_counts(앞 판
+    대비 added · removed · changed, 첫 판이면 null) · unchanged · counts(items · tables · figures)."""
     body = {k: v for k, v in {"campaign_ids": campaign_ids, "spec": spec, "as_of": as_of, "bundle_id": bundle_id,
                               "label": label}.items() if v is not None}
     return await _post(ctx, "/bundles", body)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_bundle(
     ctx: Context,
     bundle_id: Annotated[str | None, Field(description=_A_BUNDLE_ID + " bundle_id · campaign_id 가운데 하나만 준다.")] = None,
     campaign_id: Annotated[str | None, Field(description=(
         "캠페인 id — 주면 그 캠페인을 담은 묶음 가운데 가장 늦게 지은 판(REST /campaigns/{id}/bundles/latest).") )] = None,
-    version: Annotated[int | None, Field(description="판(선택 · bundle_id 와 함께) — 비우면 마지막 판.")] = None,
-    items: Annotated[bool, Field(description="참이면 숫자 항목(item_key · value · unit · source_path · source)을 쪽으로 싣는다.")] = False,
-    limit: Annotated[int, Field(description=f"한 쪽의 항목 수(1~{BUNDLE_ITEMS_PAGE_MAX}).")] = 1000,
-    offset: Annotated[int, Field(description="건너뛸 항목 수 — items.total 이 limit 보다 크면 이어 받는다.")] = 0,
-) -> dict:
-    """묶음의 판 하나(DF-13) — 머리(주소 · 판 · 기준 시각 · 수치 기준 줄 · 인용 꼴) · 명세 · 표 · 그림 · 출처 · 앞 판 대비 바뀐
-    숫자(`changes`) · 판 목록. `items=true` 면 숫자 항목을 쪽으로 — `source` 는 `source_path` 를 푼 것(report_id · case_key ·
-    part_id · metric, 런 표는 campaign_id · run_key · metric)이다.
-    One bundle version (latest by default), or the latest bundle that contains a campaign."""
+    version: Annotated[int | None, Field(ge=1, description=(
+        "판(선택 · 1 이상 · bundle_id 와 함께만) — 비우면 마지막 판."))] = None,
+    items: Annotated[bool, Field(description=(
+        "참이면 숫자 항목(item_key · value · unit · source_path · source)을 쪽으로 싣는다. 기본 거짓 — 항목 없이 머리 · 표 · 그림만."))] = False,
+    limit: Annotated[int, Field(ge=1, le=BUNDLE_ITEMS_PAGE_MAX, description=(
+        f"한 쪽의 항목 수(1~{BUNDLE_ITEMS_PAGE_MAX} · 기본 1000) — items 가 참일 때만 쓴다."))] = 1000,
+    offset: Annotated[int, Field(ge=0, description=(
+        "건너뛸 항목 수(0 이상) — offset + limit 이 items.total 보다 작으면 offset 을 늘려 이어 받는다."))] = 0,
+) -> ReportBundleOut:
+    """묶음의 판 하나를 읽는다 — bundle_id 의 판(기본 마지막 판) 또는 campaign_id 를 담은 묶음 가운데 가장 늦게 지은 판.
+
+    짓기는 `build_report_bundle`, 두 판 사이 바뀐 숫자만 보려면 `report_bundle_diff`. bundle_id · campaign_id 가운데 하나만 주고,
+    version 은 bundle_id 와 함께만 준다.
+
+    돌려주는 것 — 머리(bundle_id · version · label · campaign_ids · as_of · created_at · basis · citation · changes_counts) · spec ·
+    tables(표마다 columns · rows · units — 쪽으로 나누지 않고 통째로 싣는다) · figures(파일 id · sha256) · sources · changes(앞 판
+    대비 바뀐 숫자 목록과 counts) · versions(판 목록) · latest_version. items 가 참이면 items({total, offset, limit, rows}) — 행마다
+    item_key · value · unit · source_path · source(source_path 를 푼 것 — report_id · case_key · part_id · metric, 런 표는
+    campaign_id · run_key · metric)."""
     if (bundle_id is None) == (campaign_id is None):
         raise RuntimeError("bundle_id · campaign_id 가운데 하나만 주세요.")
     params: dict = {"items": items, "limit": limit, "offset": offset}
@@ -1931,15 +2218,21 @@ async def report_bundle(
     return await _get(ctx, f"/bundles/{_seg(bundle_id)}", params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_bundle_diff(
     bundle_id: Annotated[str, Field(description=_A_BUNDLE_ID)],
     ctx: Context,
-    from_version: Annotated[int | None, Field(description="앞 판(선택) — 비우면 뒤 판의 바로 앞 판.")] = None,
-    to_version: Annotated[int | None, Field(description="뒤 판(선택) — 비우면 마지막 판.")] = None,
-) -> dict:
-    """묶음의 두 판 사이 바뀐 숫자(DF-13) — 더해짐 · 빠짐 · 값(또는 단위) 바뀜(옛 값 → 새 값 · 출처 경로)과 그 수. 판이 하나뿐이면
-    오류다. Numbers that changed between two versions of a bundle."""
+    from_version: Annotated[int | None, Field(ge=1, description="앞 판(선택 · 1 이상) — 비우면 뒤 판의 바로 앞 판.")] = None,
+    to_version: Annotated[int | None, Field(ge=1, description="뒤 판(선택 · 1 이상) — 비우면 마지막 판.")] = None,
+) -> ReportBundleDiffOut:
+    """묶음의 두 판 사이 바뀐 숫자를 본다 — 더해짐 · 빠짐 · 값(또는 단위) 바뀜(옛 값 → 새 값 · 출처 경로)과 그 수.
+
+    기본은 마지막 판과 그 바로 앞 판이다. 판 하나의 전체 내용은 `report_bundle`, 새 판 짓기는 `build_report_bundle`. 판이 하나뿐이면
+    (견줄 앞 판이 없으면) 오류다. 목록은 쪽으로 나누지 않고 통째로 싣는다 — 숫자가 많이 바뀐 판끼리는 응답이 크니
+    `build_report_bundle` · `report_bundle` 의 changes_counts 를 먼저 본다.
+
+    돌려주는 것 — bundle_id · from_version · to_version · added · removed(항목마다 item_key · value · unit · source_path) ·
+    changed(item_key · old · new · unit · old_unit · source_path) · counts(added · removed · changed)."""
     params: dict = {}
     if from_version is not None:
         params["from"] = from_version
