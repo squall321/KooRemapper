@@ -6,6 +6,7 @@ pytest 는 이 파일을 모으지 않는다(이름이 test_ 로 시작하지 �
     schemas <도구…>   — FastMCP 목록(`mcp.list_tools()`)이 내는 inputSchema 를 도구별로
     limits            — 느린 가짜 백엔드에 붙여 한도 · 기한 · 문구를 잰다(KOORM_MCP_API_TIMEOUT_S 를 작게 두고)
     paths <값…>       — 경로에 사용자 값을 넣는 도구를 값마다 불러 가짜 백엔드가 받은 요청 대상(퍼센트 인코딩 그대로)을 낸다
+    contract          — 도구 전부의 설명 · inputSchema · outputSchema · 표지(공통 계약 C1 ~ C8 전수 시험)
     stateless         — 실제 streamable-http 앱(ASGI)에 JSON-RPC 를 보내 세션 번호 · initialize 없는 호출 · 옛 세션 번호 · 머리 나르기를 잰다
 """
 from __future__ import annotations
@@ -45,6 +46,17 @@ def schemas(names: list[str]) -> dict:
     return {"tools": got, "api_timeout_s": getattr(server, "API_TIMEOUT_S", None),
             "gateway_call_timeout_s": getattr(server, "GATEWAY_CALL_TIMEOUT_S", None),
             "knob": getattr(server, "API_TIMEOUT_KNOB", None)}
+
+
+def contract() -> dict:
+    server = _load()
+    out = {}
+    for t in asyncio.run(server.mcp.list_tools()):
+        ann = t.annotations
+        output = getattr(t, "outputSchema", None) if hasattr(t, "outputSchema") else t.output_schema
+        out[t.name] = {"description": t.description or "", "input": _input_schema(t), "output": output,
+                       "annotations": None if ann is None else ann.model_dump(by_alias=True, exclude_none=True)}
+    return out
 
 
 class _Slow(BaseHTTPRequestHandler):
@@ -257,6 +269,8 @@ if __name__ == "__main__":
         result = paths(sys.argv[2:])
     elif mode == "stateless":
         result = stateless()
+    elif mode == "contract":
+        result = contract()
     else:
         result = limits()
     print(json.dumps(result, ensure_ascii=False))

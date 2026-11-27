@@ -1,5 +1,5 @@
 {
- "_note": "MCP 도구 인자 계약 — 설명을 달기 전(2026-10-31, origin/main d3d777c 뒤 판)에 FastMCP 목록에서 뜬 형 · 기본값 · 필수 · 순서. 설명(description)과 pydantic 이 이름으로 만드는 title 은 뺐다. 포털 요청 arg-descriptions §2-3 · §5(형 · 기본값 · 필수 · 순서는 그대로). · 2026-11-12 find_reports 에 external_job_key 를 kfile_id 뒤에 덧붙였다(포털 낙하 파이프라인 (b) — 덧붙이기만, 기존 인자 불변). · 2026-11-22 find_reports 에 config_generation 을 external_job_key 뒤에 덧붙였다(DF-02 설정 세대 — 덧붙이기만, 기존 인자 불변).",
+ "_note": "MCP 도구 인자 계약 — 설명을 달기 전(2026-10-31, origin/main d3d777c 뒤 판)에 FastMCP 목록에서 뜬 형 · 기본값 · 필수 · 순서. 설명(description)과 pydantic 이 이름으로 만드는 title 은 뺐다. 포털 요청 arg-descriptions §2-3 · §5(형 · 기본값 · 필수 · 순서는 그대로). · 2026-11-12 find_reports 에 external_job_key 를 kfile_id 뒤에 덧붙였다(포털 낙하 파이프라인 (b) — 덧붙이기만, 기존 인자 불변). · 2026-11-22 find_reports 에 config_generation 을 external_job_key 뒤에 덧붙였다(DF-02 설정 세대 — 덧붙이기만, 기존 인자 불변). · 2026-11-27 공통 계약 C3 · C4 — find_reports 의 kind · severity · sort · order 에 enum, limit 에 minimum · maximum(백엔드가 받는 집합 · 경계 그대로 — 형 · 기본값 · 필수 · 순서는 그대로).",
  "tools": {
   "create_session": {
    "args": [
@@ -35,6 +35,11 @@
      "schema": {
       "anyOf": [
        {
+        "enum": [
+         "deep",
+         "sphere",
+         "impact"
+        ],
         "type": "string"
        },
        {
@@ -161,6 +166,11 @@
      "schema": {
       "anyOf": [
        {
+        "enum": [
+         "CRITICAL",
+         "WARNING",
+         "INFO"
+        ],
         "type": "string"
        },
        {
@@ -314,6 +324,12 @@
      "name": "sort",
      "schema": {
       "default": "created_at",
+      "enum": [
+       "created_at",
+       "worst_stress",
+       "worst_g",
+       "drop_height"
+      ],
       "type": "string"
      }
     },
@@ -321,6 +337,10 @@
      "name": "order",
      "schema": {
       "default": "desc",
+      "enum": [
+       "asc",
+       "desc"
+      ],
       "type": "string"
      }
     },
@@ -328,6 +348,8 @@
      "name": "limit",
      "schema": {
       "default": 100,
+      "maximum": 500,
+      "minimum": 1,
       "type": "integer"
      }
     }

@@ -453,3 +453,253 @@ def test_tool_errors_reach_the_model_under_the_sif_sdk():
     for case in ("find_slow", "compare_six", "figure_never"):
         assert not got[case]["ok"] and knob in (got[case]["error"] or ""), (case, got[case])
     assert "job_id=j1" in got["figure_never"]["error"], "몸통 안에서 바꿔 버리면 그림 기다림이 _Late 를 못 잡아 job_id 를 못 붙인다"
+
+
+# ── 공통 계약 C1 ~ C8 전수(포털 mcp-modernize contract.md · 사용자 결정 11-27 「남기지 말고 최대한 많이」) ───────────────────────
+# 도구 120 전부 — 표지 · 인자 설명 · 설명의 꼴 · 결과 꼴 · 닫힌 어휘와 숫자 경계가 백엔드와 같은지. 이름 · 동작은 그대로(조건).
+
+HISTORY_WORDS = re.compile(r"(사용자 결정|요청서|검토 반영|재검토|실측|\bDF-\d+|\bKR-\d+|§\s?\d|\b20\d\d-\d\d-\d\d\b|heaxkooremapper)")
+# 결과 꼴을 달지 않는 도구와 까닭 — 새 도구는 꼴을 달거나 여기에 까닭과 함께 올린다
+NO_SHAPE = {
+    "mesh_section_figure": "dict + 그림(Image) 섞인 목록",
+    "mesh_surface_figure": "dict + 그림(Image) 섞인 목록",
+    "mesh_stack_diagram": "dict + 그림(Image) 섞인 목록",
+    "campaign_sphere_map": "dict + 그림(Image) 섞인 목록",
+    "campaign_site_map": "dict + 그림(Image) 섞인 목록",
+    "report_image": "글 + 그림(Image)",
+    "report_compare": "글 + 그림(Image)",
+    "download_result": "파일 내용(5 MB 까지) — 구조 결과로 두 번 실으면 응답이 두 배",
+}
+_WRITE_VERBS = {"post", "put", "patch", "delete"}
+# 백엔드에 쓰지 않는데 읽기가 아닌 도구 — 이 박스의 파일을 쓴다
+LOCAL_WRITES = {"save_result_to_path"}
+
+
+@pytest.fixture(scope="module")
+def tools() -> dict:
+    return _probe("contract")
+
+
+def _funcs() -> dict:
+    tree = ast.parse(SERVER.read_text(encoding="utf-8"))
+    return {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _tool_defs() -> dict:
+    return {k: n for k, n in _funcs().items() if isinstance(n, ast.AsyncFunctionDef)
+            and any(isinstance(d, ast.Call) and getattr(d.func, "attr", "") == "tool" for d in n.decorator_list)}
+
+
+def _verbs(fn: ast.AST, funcs: dict, seen: frozenset = frozenset()) -> set:
+    """도구가 백엔드에 보내는 HTTP 동사 — `_get` · `_post` · `_put` · `_delete` · `c.<동사>(…)`, 부르는 모듈 함수(그림 잡 등)까지 따라간다."""
+    out = set()
+    for c in ast.walk(fn):
+        if isinstance(c, ast.Call):
+            f = c.func
+            if isinstance(f, ast.Name) and f.id in ("_get", "_post", "_put", "_delete"):
+                out.add(f.id[1:])
+            elif isinstance(f, ast.Name) and f.id in funcs and f.id not in seen:
+                out |= _verbs(funcs[f.id], funcs, seen | {f.id})
+            elif isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "c" \
+                    and f.attr in ("get", "post", "put", "patch", "delete"):
+                out.add(f.attr)
+    return out
+
+
+@needs_mcp
+def test_every_tool_says_whether_it_reads_or_writes(tools):
+    """C6 — 모든 도구에 readOnlyHint · openWorldHint, 바꾸는 도구는 destructiveHint · idempotentHint 까지."""
+    for name, t in tools.items():
+        a = t["annotations"] or {}
+        assert "readOnlyHint" in a and "openWorldHint" in a, (name, a)
+        if not a["readOnlyHint"]:
+            assert "destructiveHint" in a and "idempotentHint" in a, (name, a)
+
+
+@needs_mcp
+def test_the_read_write_marks_match_what_the_tool_sends(tools):
+    """C6 를 몸통과 대조 — 읽기 표지 도구는 GET 만 보내고, 쓰기 표지 도구는 POST · PUT · PATCH · DELETE 를 하나 이상 보낸다."""
+    defs, funcs = _tool_defs(), _funcs()
+    assert set(defs) == set(tools)
+    for name, fn in defs.items():
+        verbs, ro = _verbs(fn, funcs, frozenset({name})), tools[name]["annotations"]["readOnlyHint"]
+        if ro:
+            assert not verbs & _WRITE_VERBS, f"{name} 은 읽기 표지인데 {sorted(verbs)} 를 보낸다"
+        elif name not in LOCAL_WRITES:
+            assert verbs & _WRITE_VERBS, f"{name} 은 쓰기 표지인데 백엔드에 쓰지 않는다({sorted(verbs)})"
+
+
+@needs_mcp
+def test_every_argument_of_every_tool_is_described(tools):
+    """C2 — 인자 설명 100%(게이트웨이가 세는 inputSchema 맨 위 인자의 description)."""
+    bare = [(n, k) for n, t in tools.items() for k, v in (t["input"].get("properties") or {}).items() if not v.get("description")]
+    assert not bare, bare
+
+
+@needs_mcp
+def test_descriptions_keep_the_contract_form(tools):
+    """C1 — 1,500자 이하 · 첫 줄이 한 문장 · 결정 번호 · 날짜 · 실측 일화 · 요청 번호 · 게이트웨이 접두 이름이 없다(이력은 TOOLS.md 로)."""
+    for name, t in tools.items():
+        d = t["description"]
+        assert 0 < len(d) <= 1500, (name, len(d))
+        assert d.strip().splitlines()[0].strip(), name
+        m = HISTORY_WORDS.search(d)
+        assert not m, f"{name} 설명에 이력 낱말 {m.group(0)!r}"
+
+
+@needs_mcp
+def test_argument_and_result_field_texts_carry_no_history(tools):
+    """C1 · C2 — 인자 설명 · 결과 칸 뜻에도 결정 번호 · 실측 일화 · 요청 번호가 없다(날짜는 꼴 예시로 쓰므로 여기서는 세지 않는다)."""
+    words = re.compile(HISTORY_WORDS.pattern.replace(r"|\b20\d\d-\d\d-\d\d\b", ""))
+    hits = []
+    for name, t in tools.items():
+        o = t["output"] or {}
+        fields = [(f"{name}.{k}", v) for k, v in (t["input"].get("properties") or {}).items()]
+        fields += [(f"{name}->{k}", v) for sect in [o.get("properties") or {}, *[d.get("properties") or {} for d in (o.get("$defs") or {}).values()]]
+                   for k, v in sect.items()]
+        hits += [(where, m.group(0)) for where, v in fields if (m := words.search(v.get("description") or ""))]
+    assert not hits, hits
+
+
+@needs_mcp
+def test_structured_results_have_real_fields(tools):
+    """C7 — 꼴이 없는 도구는 NO_SHAPE(까닭)뿐이고, 꼴은 칸 이름이 있다(껍데기 object 아님)."""
+    bare = sorted(n for n, t in tools.items() if not t["output"])
+    assert bare == sorted(NO_SHAPE), f"꼴 없는 도구가 목록과 다르다: {sorted(set(bare) ^ set(NO_SHAPE))}"
+    for name, t in tools.items():
+        o = t["output"]
+        if not o:
+            continue
+        props = o.get("properties") or {}
+        if set(props) == {"result"}:                   # 목록 — {"result": [행]} 의 행 꼴에 칸이 있어야 한다
+            ref = (props["result"].get("items") or {}).get("$ref", "")
+            props = (o.get("$defs") or {}).get(ref.rsplit("/", 1)[-1], {}).get("properties") or {}
+        assert props and all(v.get("description") for v in props.values()), name
+
+
+def _mx(info, key):
+    return next(getattr(m, key) for m in info.metadata if getattr(m, key, None) is not None)
+
+
+def _gq(path: str, name: str):
+    """GET 경로의 쿼리 인자 field_info — 경로 꼴 그대로(`{report_id}` 등)."""
+    return _query(path, name)
+
+
+def test_closed_vocabularies_and_bounds_are_the_backend_constraints():
+    """C3 · C4 — MCP 의 Literal · ge/le 상수가 백엔드가 실제로 받는 집합 · 경계와 같다(받는 집합은 그대로, 거절 자리만 MCP 로 옮긴다)."""
+    import inspect
+    from typing import get_args
+    c = _server_constants()
+    # 메시 그림 — 카탈로그 enum · 바이너리 검사
+    from app.runner.catalog import get_operation
+    sec = {p["name"]: p for p in get_operation("section")["params"]}
+    assert set(c["MESH_SECTION_AXES"]) == set(sec["axis"]["enum"]) and set(c["MESH_SECTION_MODES"]) == set(sec["mode"]["enum"])
+    src = PLATFORM.parent / "src" / "commands"
+    stack = (src / "stackdiagram.cpp").read_text(encoding="utf-8")
+    assert all(f'val == "{a}"' in stack for a in c["MESH_STACK_AXES"]) and "axis: 는 x, y, z 중 하나" in stack
+    for cpp in ("section.cpp", "surfview.cpp", "stackdiagram.cpp"):
+        assert f"c.width < {c['MESH_FIG_MIN_WIDTH_PX']} || c.height < {c['MESH_FIG_MIN_HEIGHT_PX']}" in \
+            (src / cpp).read_text(encoding="utf-8"), cpp
+    # 코퍼스
+    from app.modules.corpus import routes as corpus
+    for fn in (corpus.material_usage, corpus.section_contact_usage):
+        info = inspect.signature(fn).parameters["limit"].default
+        assert (_mx(info, "ge"), _mx(info, "le")) == (1, c["CORPUS_LIMIT_MAX"]), fn.__name__
+    # 캠페인 분석
+    from app.modules.campaigns import analysis_routes as AR, angles as G
+    P = "/api/v1/campaigns/{campaign_id}"
+    assert set(c["ANGLE_METRICS"]) | set(c["METRIC_ALIASES"]) == set(G.METRICS) | set(G.METRIC_ALIASES)
+    for path in ("/angle-table", "/angle-stats", "/sphere-map"):
+        assert c["THICKNESS_AXES"] == get_args(get_args(_gq(P + path, "thickness_axis").annotation)[0]), path
+    assert c["MARGIN_AXES"] == get_args(get_args(_gq(P + "/part-margin", "metric_axis").annotation)[0])
+    assert c["ANALYSIS_MATCH_MODES"] == get_args(_gq("/api/v1/campaigns/compare", "match").annotation)
+    assert _mx(_gq(P + "/angle-table", "offset"), "ge") == 0 and _mx(_gq(P + "/peaks", "offset"), "ge") == 0
+    assert _mx(_gq(P + "/angle-stats", "top"), "le") == c["ANALYSIS_TOP_MAX"]
+    for path, name in ((P + "/angle-table", "config_generation"), (P + "/sphere-map", "group"), (P + "/hotspot-sites", "criterion")):
+        assert _mx(_gq(path, name), "max_length") == c["ANALYSIS_KEY_MAX"], (path, name)
+    assert _mx(_gq("/api/v1/campaigns/compare", "a"), "max_length") == c["ANALYSIS_ID_MAX"]
+    tol = _gq("/api/v1/campaigns/compare", "tol_deg")
+    assert (_mx(tol, "gt"), _mx(tol, "le")) == (0, 90)
+    assert _mx(_gq(P + "/hotspot-sites", "part_id"), "gt") == 0
+    assert _mx(_gq(P + "/hotspot-sites", "radius_mm"), "le") == c["ANALYSIS_RADIUS_MAX_MM"]
+    for model, field, key in ((AR.GroupsBody, "groups", "ANALYSIS_GROUPS_MAX"), (AR.CriteriaBody, "criteria", "ANALYSIS_CRITERIA_MAX"),
+                              (AR.SitesBody, "sites", "ANALYSIS_SITES_MAX"), (AR.PartMapBody, "rows", "ANALYSIS_PART_MAP_ROWS_MAX"),
+                              (AR.PairRuleBody, "metrics", "ANALYSIS_PAIR_METRICS_MAX")):
+        assert _mx(model.model_fields[field], "max_length") == c[key], key
+    rc = AR.PairRuleBody.model_fields["rank_corr_min"]
+    assert (_mx(rc, "ge"), _mx(rc, "le")) == (-1, 1) and _mx(AR.PairRuleBody.model_fields["max_failed_pairs"], "ge") == 0
+    from app.modules.sessions.schemas import PartRename
+    assert _mx(PartRename.model_fields["title"], "max_length") == c["RENAME_PART_TITLE_MAX"]
+    assert _mx(PartRename.model_fields["file_id"], "gt") == 0
+    # 리포트 · 해석 온톨로지
+    assert _mx(_gq("/api/v1/cae/parts", "max_safety_factor"), "ge") == 0
+    eng = _gq("/api/v1/cae/load-paths", "min_engage_ratio")
+    assert (_mx(eng, "ge"), _mx(eng, "le")) == (0, 1)
+    cp = "/api/v1/reports/{report_id}/contact_profile"
+    from app.reports.parser import ANALYTICS_BLOCKS, CONTACT_PROFILE_METRICS, _HOTSPOT_ORDERS, _SCATTER_METRICS, _SPHERE_HOTSPOT_ORDERS
+    assert c["CONTACT_METRICS"] == _pattern_values(_gq(cp, "metric")) == tuple(CONTACT_PROFILE_METRICS)
+    assert _mx(_gq(cp, "top"), "le") == c["CONTACT_TOP_MAX"] and _mx(_gq(cp, "axis_top"), "le") == c["CONTACT_AXIS_TOP_MAX"]
+    assert _mx(_gq("/api/v1/reports/{report_id}/hotspots", "top"), "le") == c["HOTSPOT_TOP_MAX"]
+    mb = _gq("/api/v1/reports/{report_id}/blocks/{name}", "max_bytes")
+    assert (_mx(mb, "ge"), _mx(mb, "le")) == (c["BLOCK_MAX_BYTES_MIN"], c["BLOCK_MAX_BYTES_MAX"])
+    assert c["HOTSPOT_ORDERS_DEEP"] == tuple(_HOTSPOT_ORDERS) and c["HOTSPOT_ORDERS_SPHERE"] == tuple(_SPHERE_HOTSPOT_ORDERS)
+    assert c["REPORT_ANALYTICS_BLOCKS"] == tuple(ANALYTICS_BLOCKS) and c["REPORT_SCATTER_METRICS"] == tuple(_SCATTER_METRICS)
+    from app.modules.reports import services as RS
+    assert c["WORST_CASE_METRICS"] == tuple(RS._SORT_COLS)
+    assert _mx(_gq("/api/v1/reports/{report_id}/cases", "limit"), "le") == c["REPORT_CASES_LIMIT_MAX"]
+    assert _mx(_gq("/api/v1/reports", "limit"), "ge") == 1
+    Q, A = "/api/v1/reports/{report_id}/query", "/api/v1/reports/{report_id}/angle-stats"
+    assert c["REPORT_QUERY_METRICS"] == tuple(RS._QUERY_METRICS)
+    assert c["SORT_ORDERS"] == _pattern_values(_gq(Q, "sort"))
+    assert _mx(_gq(Q, "limit"), "le") == c["REPORT_QUERY_LIMIT_MAX"]
+    for path, name in ((Q, "angle_tol_deg"), (A, "tol_deg")):
+        assert (_mx(_gq(path, name), "ge"), _mx(_gq(path, name), "le")) == (0, c["REPORT_ANGLE_TOL_MAX_DEG"]), (path, name)
+    assert _mx(_gq(A, "top_parts"), "le") == c["REPORT_TOP_PARTS_MAX"]
+    from app.reports.datahub import _STAGE_RE
+    codes = {s for s in (p + r for p in ("pre", "dv", "pv", "pra", "mp") for r in ("", "1", "2", "3", "r"))
+             if (m := _STAGE_RE.fullmatch(s)) and (m.group(1) in ("dv", "pv")) == bool(m.group(2))}
+    assert set(c["REVISION_CODES"]) == codes and set(c["DATAHUB_STAGES"]) == codes | {""}
+    # 리포트 적재 · 캠페인 묶음 · 보고서 묶음
+    from app.modules.reports import routes as RR0
+    assert set(c["REPORT_KINDS"]) == set(RR0._KINDS)
+    from app.reports.datahub import DataHubError, parse_stage
+
+    def _stage_ok(v):
+        try:
+            parse_stage(v)
+            return True
+        except DataHubError:
+            return False
+    assert set(c["DEV_REV_CODES"]) == {p + r for p in ("pre", "dv", "pv", "pra", "mp") for r in ("", "1", "2", "3", "r") if _stage_ok(p + r)}
+    from app.modules.campaigns import extraction as CX, routes as CR, services as CS
+    assert set(c["CAMPAIGN_THICKNESS_INPUTS"]) == set(get_args(get_args(CR.CampaignBody.model_fields["thickness_axis"].annotation)[0]))
+    assert tuple(c["CAMPAIGN_STATES"]) == tuple(CS.STATES) and tuple(c["CLEARANCE_STATUSES"]) == tuple(CX.STATUSES)
+    for tail in ("ingest-status", "provenance", "health", "deletion-clearance"):
+        lim = _gq(f"/api/v1/campaigns/{{campaign_id}}/{tail}", "limit")
+        assert (_mx(lim, "ge"), _mx(lim, "le")) == (1, c["ANALYSIS_ROWS_MAX"]), tail
+        assert _mx(_gq(f"/api/v1/campaigns/{{campaign_id}}/{tail}", "offset"), "ge") == 0, tail
+    runs = CR.RunsBody.model_fields["runs"]
+    assert (_mx(runs, "min_length"), _mx(runs, "max_length")) == (1, c["CAMPAIGN_RUNS_MAX"])
+    assert _mx(CR.CampaignBody.model_fields["drop_height_mm"], "ge") == 0 and _mx(CR.CampaignBody.model_fields["duration_ms"], "ge") == 0
+    assert c["REQUIRED_EXTRACTIONS_MAX"] == CR._REQUIRED_MAX
+    assert _mx(CR.CampaignBody.model_fields["required_extractions"], "max_length") == CR._REQUIRED_MAX
+    th = CR.ThresholdsBody.model_fields
+    assert (_mx(th["energy_ratio_max"], "gt"), _mx(th["hg_over_ie_max"], "gt"), _mx(th["added_mass_pct_max"], "ge"),
+            _mx(th["ke0_rel_tol"], "ge")) == (0, 0, 0, 0)
+    assert c["BUNDLE_CAMPAIGNS_MAX"] == CR._BUNDLE_CAMPAIGNS_MAX == _mx(CR.BundleBody.model_fields["campaign_ids"], "max_length")
+    assert _mx(_gq("/api/v1/bundles/{bundle_id}", "version"), "ge") == 1
+    assert _mx(_gq("/api/v1/bundles/{bundle_id}", "limit"), "le") == c["BUNDLE_ITEMS_PAGE_MAX"]
+    assert _mx(_gq("/api/v1/bundles/{bundle_id}/diff", "from"), "ge") == 1 and _mx(_gq("/api/v1/bundles/{bundle_id}/diff", "to"), "ge") == 1
+    # 과제 · 온톨로지 · 레시피
+    from app.modules.ontology import routes as OR
+    assert c["ONTO_STATES"] == tuple(OR._STATES)
+    assert _mx(_gq("/api/v1/ontology/tasks", "limit"), "le") == c["TASK_LIMIT_MAX"]
+    assert _mx(_gq("/api/v1/ontology/objects", "limit"), "le") == c["ONTO_FIND_LIMIT_MAX"]
+    assert _mx(_gq("/api/v1/ontology/objects", "offset"), "ge") == 0
+    assert _mx(_gq("/api/v1/ontology/task-links", "limit"), "le") == c["TASK_LINKS_LIMIT_MAX"]
+    assert _mx(_gq("/api/v1/recipes", "limit"), "le") == c["RECIPE_SEARCH_LIMIT_MAX"]
+    from app.modules.recipes import routes as RR, services as RSV
+    rf = RR.RunBody.model_fields["report_ids"]
+    assert (_mx(rf, "min_length"), _mx(rf, "max_length")) == (1, c["RECIPE_RUN_REPORTS_MAX"])
+    assert c["RECIPE_NOTE_MIN"] == RSV._MIN_NOTE
