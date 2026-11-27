@@ -19,6 +19,7 @@ import base64
 import contextvars
 import functools
 import hashlib
+import json
 import os
 import sys
 import time
@@ -27,6 +28,7 @@ from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import Field
 
 from figure_png import FigurePngError, rasterize
@@ -410,11 +412,17 @@ async def cancel_job(job_id: str, ctx: Context) -> dict:
 
 @mcp.tool()
 async def update_session(
-    session_id: str, ctx: Context, name: str | None = None, description: str | None = None
+    session_id: str, ctx: Context, name: str | None = None, description: str | None = None,
+    task_key: str | None = None, dev_rev: str | None = None,
 ) -> dict:
     """세션 이름·설명을 수정한다 — 작업이 진화해 이름이 안 맞을 때 정리용.
-    / Rename or re-describe a session."""
+    `task_key`(허브 과제 — 과제명 · 과제코드 · 옛 과제명 · 별칭 무엇이든, 판 확정과 같은 규칙으로 풀어 과제명을 남긴다 · 못 풀면 거절과
+    후보) · `dev_rev`(개발 단계 — pre · dv1 … · pv1 … · pra · mp)는 자동 파이프라인이 이 세션의 과제 · 차수로 읽는다(auto_changes).
+    빈 글("")을 주면 그 칸을 지운다. / Rename or re-describe a session; set its hub task and development stage."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
+    for k, v in (("task_key", task_key), ("dev_rev", dev_rev)):
+        if v is not None:
+            body[k] = v.strip() or None          # 빈 글 = 지운다(REST 는 null 을 지움으로 읽는다)
     async with _client() as c:
         return _unwrap(await c.patch(f"/sessions/{_seg(session_id)}", json=body, headers=_forward_headers(ctx)))
 
@@ -2862,6 +2870,58 @@ async def recipe_deprecate(name: str, reason: str, ctx: Context) -> dict:
     return await _post(ctx, f"/recipes/{_seg(name)}/deprecate", {"reason": reason})
 
 
+
+
+# ── 자동 파이프라인(포털 계약 v1.1 — 계획 docs/01-plan/features/auto-pipeline-1127.plan.md) ─────────────────────
+# 포털이 서비스 신원으로 부른다. 계약 §0.3 — 실패는 isError true 와 본문 {"error", "detail"(, "missing")} JSON, 성공은 isError false 이고
+# error 칸이 없다(포털이 isError 와 칸으로 판정한다 — 예외로 올리면 「Error executing tool …」 머리가 붙어 JSON 이 아니다).
+# 표지(계약 §3) — auto_submit · auto_cancel 은 readOnlyHint 없음(destructiveHint false), 나머지는 readOnlyHint true.
+_AUTO_RO = ToolAnnotations(readOnlyHint=True)
+_AUTO_RW = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+
+
+def _auto_out(data: dict, *, error: bool = False) -> CallToolResult:
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(data, ensure_ascii=False))],
+                          structuredContent=data, isError=error)
+
+
+async def _auto_call(ctx, method: str, path: str, *, params=None, body=None) -> CallToolResult:
+    try:
+        async with _client() as c:
+            r = await c.request(method, path, params=params, json=body, headers=_forward_headers(ctx))
+        doc = r.json()
+    except httpx.TimeoutException:
+        return _auto_out({"error": "timeout", "detail": f"DynaForge API 가 {API_TIMEOUT_S}초 안에 답하지 않았다"}, error=True)
+    except Exception as exc:  # noqa: BLE001 — 닿지 않음 · JSON 아님 모두 계약 꼴의 실패로
+        return _auto_out({"error": "unreachable", "detail": f"DynaForge API 에 닿지 못했다({type(exc).__name__})"}, error=True)
+    if r.status_code >= 400 or not (isinstance(doc, dict) and doc.get("success", True)):
+        data = doc.get("data") if isinstance(doc, dict) and isinstance(doc.get("data"), dict) else {}
+        err = {"error": data.get("error") or f"http_{r.status_code}",
+               "detail": data.get("detail") or (doc.get("message") if isinstance(doc, dict) else "") or ""}
+        if data.get("missing") is not None:
+            err["missing"] = data["missing"]
+        return _auto_out(err, error=True)
+    data = doc.get("data") if isinstance(doc, dict) else None
+    data = data if isinstance(data, dict) else {"data": data}
+    data.pop("error", None)                # 성공에 error 칸을 싣지 않는다(계약 §4-3)
+    return _auto_out(data)
+
+
+@mcp.tool(annotations=_AUTO_RO)
+async def auto_changes(
+    ctx: Context,
+    since: Annotated[str | None, Field(description="앞 호출의 next_since 를 그대로(불투명 커서). 비우면 처음부터.")] = None,
+    limit: Annotated[int, Field(description="한 쪽의 최대 세션 수(1~500). complete 가 false 면 같은 next_since 로 다시 부른다.")] = 200,
+) -> CallToolResult:
+    """자동 파이프라인 원천 — 마지막으로 본 뒤 바뀐 세션(덱)을 쪽 커서로 끝까지 준다(포털 계약 v1.1 §1).
+    항목마다 subject{project: 세션의 허브 과제명 | null, revision: 개발 단계 | null, refs: {dynaforge: 세션 id}} · links{step_forge?} ·
+    inputs[세션 입력 파일 — kind(deck|file) · ref(파일 id) · sha256 · at] · ready{deck_ready: 낼 덱이 하나} · updated_at(세션 수정과 마지막
+    파일 가운데 늦은 때). 과제 · 단계는 update_session 의 task_key · dev_rev 로 넣는다 — 비면 null(짐작하지 않는다).
+    게이트웨이 서비스 계정(설정)으로 부르면 모든 세션, 그 밖은 볼 수 있는 세션만. 읽기만 한다."""
+    params = {"limit": limit}
+    if since:
+        params["since"] = since
+    return await _auto_call(ctx, "GET", "/auto/changes", params=params)
 
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")

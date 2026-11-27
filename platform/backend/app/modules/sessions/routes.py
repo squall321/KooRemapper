@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import User
+from app.modules.ontology import services as onto_svc
 from app.modules.sessions import services as svc
 from app.modules.sessions.schemas import (
     FileRead,
@@ -18,7 +19,8 @@ from app.config import settings
 from app.shared import storage
 from app.shared.auth import get_current_user
 from app.shared.ratelimit import rate_limit
-from app.shared.responses import ok
+from app.reports.datahub import DataHubError, parse_stage
+from app.shared.responses import fail, ok
 
 router = APIRouter(tags=["sessions"])
 
@@ -107,6 +109,22 @@ async def update_session(
     db: AsyncSession = Depends(get_db),
 ):
     s = await _require_session(db, user, session_id)
+    # 허브 과제 · 개발 단계 — 아무것도 바꾸기 전에 먼저 본다(거절이면 다른 칸도 그대로)
+    task_key = dev_rev = None
+    if "task_key" in body.model_fields_set and body.task_key is not None:
+        got = await onto_svc.resolve_confirm_task(db, body.task_key)
+        if not got["ok"]:
+            names = " · ".join(c["key"] for c in got["candidates"]) or "없음"
+            return fail(f"task_unresolved: {got['detail']} — 후보: {names}", status_code=status.HTTP_400_BAD_REQUEST,
+                        data={"error": "task_unresolved", "ambiguous": got["ambiguous"], "candidates": got["candidates"]})
+        task_key = got["key"]
+    if "dev_rev" in body.model_fields_set and body.dev_rev is not None:
+        dev_rev = body.dev_rev.strip()
+        try:
+            parse_stage(dev_rev)
+        except DataHubError as exc:
+            return fail(f"bad_dev_rev: {exc}", status_code=status.HTTP_400_BAD_REQUEST,
+                        data={"error": "bad_dev_rev"})
     if body.name is not None:
         s.name = body.name
     if body.description is not None:
@@ -121,6 +139,10 @@ async def update_session(
         s.deck_revision_label = body.deck_revision_label.strip() if body.deck_revision_label else None
     if "linked_cad" in body.model_fields_set:
         s.linked_cad = body.linked_cad.model_dump() if body.linked_cad is not None else None
+    if "task_key" in body.model_fields_set:
+        s.task_key = task_key
+    if "dev_rev" in body.model_fields_set:
+        s.dev_rev = dev_rev
     await db.commit()
     await db.refresh(s)
     return ok(_session_out(s), message="수정됨")

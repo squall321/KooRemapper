@@ -84,6 +84,9 @@ class Session(Base):
     # 덱 판 라벨 · 연결된 CAD(StepForge 과제 · 판) — 리스크 앱이 판을 헷갈리지 않게(DF-15 · 0026). 둘이 다르면 세션 응답이 경고한다
     deck_revision_label: Mapped[str | None] = mapped_column(String(64))
     linked_cad: Mapped[dict | None] = mapped_column(JSONB)   # {project_id, revision}
+    # 허브 과제(과제명 — plm_task key) · 개발 단계 코드(pre · dv1 … · mp) — 자동 파이프라인 원천의 subject(KR-AP1 · 0027)
+    task_key: Mapped[str | None] = mapped_column(String(300))
+    dev_rev: Mapped[str | None] = mapped_column(String(8))
     status: Mapped[str] = mapped_column(String(16), default="active", nullable=False)
     # 공개 범위 — company|department|team|private (HEAX Hub 와 같은 4단).
     # 기본 private: 만들어 두기만 한 세션이 조직에 노출되지 않는다. 넓히는 것은 소유자의 명시 행위.

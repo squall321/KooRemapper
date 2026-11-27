@@ -9,6 +9,7 @@ API_PREFIX = "/api/v1"
 def register_routers(app: FastAPI) -> None:
     from app.modules.admin.routes import router as admin_router
     from app.modules.analysis.routes import router as analysis_router
+    from app.modules.auto.routes import router as auto_router
     from app.modules.auth.routes import router as auth_router
     from app.modules.campaigns.routes import router as campaigns_router
     from app.modules.campaigns.routes import bundles_router
@@ -28,6 +29,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(users_router, prefix=API_PREFIX)
     app.include_router(sessions_router, prefix=API_PREFIX)
+    # 자동 파이프라인(포털 계약 v1.1) — 원천 auto_changes · 전각도 낙하 해석 auto_*
+    app.include_router(auto_router, prefix=API_PREFIX)
     app.include_router(reports_router, prefix=API_PREFIX)
     # 캠페인 — 런 묶음과 그 적재 상태. 리포트 본문은 /reports/intake 가 받는다.
     app.include_router(campaigns_router, prefix=API_PREFIX)

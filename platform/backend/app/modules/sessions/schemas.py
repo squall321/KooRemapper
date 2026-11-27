@@ -19,6 +19,10 @@ class SessionUpdate(BaseModel):
     # 덱 판 라벨 · 연결된 CAD(DF-15) — 보낸 칸만 맞춘다(null 은 지운다)
     deck_revision_label: str | None = Field(default=None, min_length=1, max_length=64)
     linked_cad: "LinkedCad | None" = None
+    # 허브 과제 · 개발 단계(자동 파이프라인 KR-AP1 · 사용자 결정 11-27) — 보낸 칸만 맞춘다(null 은 지운다). 과제는 과제명 · 과제코드 ·
+    # 옛 과제명 · 별칭 무엇이든 — 판 확정과 같은 규칙으로 풀어 과제명을 남기고 못 풀면 거절한다. 개발 단계는 dev_rev 꼴
+    task_key: str | None = Field(default=None, min_length=1, max_length=300)
+    dev_rev: str | None = Field(default=None, min_length=1, max_length=8)
 
 
 class LinkedCad(BaseModel):
@@ -45,6 +49,8 @@ class SessionRead(BaseModel):
     visibility: str = "private"
     deck_revision_label: str | None = None
     linked_cad: dict | None = None
+    task_key: str | None = None
+    dev_rev: str | None = None
     created_at: datetime
     updated_at: datetime
     file_count: int | None = None

@@ -109,6 +109,11 @@ class Settings(BaseSettings):
     # 포털 update 의 `git stash -u` 가 쓸어 갔다(포털 요청 R-09 · 사용자 「데이터 뿌리 아래로」, 2026-11-25).
     recipe_export_dir: str = ""
 
+    # --- 자동 파이프라인(포털 계약 v1.1 · 계획 docs/01-plan/features/auto-pipeline-1127.plan.md) ---
+    # 게이트웨이 서비스 계정(쉼표로 여럿) — 이 사용자가 부르면 auto_* 에서만 모든 세션 · 리포트를 본다(사용자 결정 11-27
+    # 「auto_* 만 모두 읽기」). 비우면 아무도 아니다 — 서비스 계정도 자기 것 · 공개 세션만 본다.
+    auto_service_emails: str = ""
+
     # --- stcx(356대 클러스터) 전각도 낙하 — 게이트웨이 MCP 경유 ---
     # **파일을 나른다.** cae00 `/data` 와 stcx `/data` 는 다른 저장소다 — 같은 경로를 보지
     # 않으므로 제출 전에 stcx 대시보드(:5010)의 청크 업로드로 덱을 올려야 한다.
@@ -223,6 +228,10 @@ class Settings(BaseSettings):
         if here.is_dir() and os.access(here, os.W_OK):
             return recipes
         return Path(self.storage_dir) / ".recipes"
+
+    @property
+    def auto_service_email_set(self) -> frozenset[str]:
+        return frozenset(e.strip().lower() for e in (self.auto_service_emails or "").split(",") if e.strip())
 
     @property
     def recipe_seed_path(self) -> Path:
