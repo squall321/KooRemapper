@@ -5,6 +5,9 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 응답 봉투 `{success,data,message,errors}`를 벗겨 반환하며, 백엔드 오류 시 **예외를
 던져** Claude가 툴 에러(isError)로 인식한다.
 
+서버는 세션을 쥐지 않는다(stateless — 2026-11-27). `Mcp-Session-Id` 를 내지 않고, initialize 없이 온 호출 · MCP 재기동 전의 세션 번호를
+단 호출도 그대로 받는다. 서버가 먼저 묻거나 미는 일(elicit · sampling · 목록 바뀜 알림)은 없다 — 같은 호출의 진행 알림만 그 응답으로 간다.
+
 연결: `claude mcp add --transport http kooremapper http://<host>:8701/mcp --header "Authorization: Bearer kr_..."`
 
 ## 카탈로그

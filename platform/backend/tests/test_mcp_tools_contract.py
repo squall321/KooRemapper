@@ -7,6 +7,7 @@
    같은지를 여기서 대조한다 — 같은 이름의 인자라도 도구마다 뜻이 다르면 문구가 달라야 한다(severity).
 ② 한도 — 손잡이 기본값이 게이트웨이 600초보다 작고, 늦는 백엔드 · 여러 번 부르는 도구 · 안 끝나는 그림 잡이 호출 하나의 기한 안에
    손잡이 이름이 든 문구로 끝난다.
+stateless — 서버가 세션을 쥐지 않는다(포털 MCP 현대화 1단계 · 사용자 결정 11-27). 실제 streamable-http 앱에 보내 본다.
 """
 from __future__ import annotations
 
@@ -379,3 +380,34 @@ def test_nasty_ids_reach_the_backend_as_one_encoded_segment():
                 continue
             want = PATHS[tool].format(s=got["seg"][v], k=got["seg_key"][v])
             assert sent and sent[0] == want, (tool, v, sent, rec["error"])
+
+
+# ── stateless(포털 MCP 현대화 1단계 · 사용자 결정 11-27) ─────────────────────────────────────
+
+# stateless 에서 버려지는 서버 → 클라이언트 채널. 도구가 이것을 부르면 답이 오지 않거나 조용히 사라진다 — 쓰려면 먼저 포털 계약(mcp-modernize)과 맞춘다.
+SERVER_TO_CLIENT = {"elicit", "create_message", "list_roots", "send_request", "send_ping",
+                    "send_tool_list_changed", "send_resource_list_changed", "send_prompt_list_changed"}
+
+
+@needs_mcp
+def test_the_server_holds_no_session():
+    """세션 번호를 내지 않고, initialize 없이 온 호출 · 재기동 전의 세션 번호를 단 호출을 받으며, 그 호출에도 들어온 머리를 백엔드로 나른다.
+
+    예전(세션을 쥘 때)은 셋째 · 넷째가 400 「Missing session ID」 · 404 「Session not found」 였다 — MCP 를 다시 띄우면 게이트웨이가 쥔 세션이
+    모두 끊겼다. 응답은 SSE 그대로라(json_response 아님) 같은 요청의 진행 알림은 간다."""
+    got = _probe("stateless")
+    assert got["stateless_http"] is True and got["json_response"] is False, got
+    assert got["initialize"]["status"] == 200 and got["initialize"]["session_id"] is None, got["initialize"]
+    call = got["call_without_initialize"]
+    assert call["status"] == 200 and call["error"] is None and call["ctype"] == "text/event-stream", call
+    assert got["forwarded"] == {"authorization": "Bearer probe-token", "x-heax-user-affiliation": "probe-aff",
+                                "x-heax-aff-proof": None}, "stateless 호출에서 머리를 나르지 않았다 — 백엔드가 401 로 막는다"
+    stale = got["stale_session_id"]
+    assert stale["status"] == 200 and stale["error"] is None and stale["tools"] > 0, stale
+
+
+def test_no_tool_uses_a_server_to_client_channel():
+    """AST 로 — 글(주석 · 설명)에 낱말이 있는 것은 세지 않는다. 진행 알림(report_progress)은 같은 요청의 응답으로 가므로 막지 않는다."""
+    used = sorted({(n.func.attr, n.lineno) for n in ast.walk(ast.parse(SERVER.read_text(encoding="utf-8")))
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in SERVER_TO_CLIENT})
+    assert not used, f"stateless 에서 버려지는 채널을 부른다: {used}"

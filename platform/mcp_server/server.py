@@ -36,7 +36,11 @@ API = f"{API_BASE}/api/v1"
 
 # MCP serverInfo.name — 포탈/HEAX 카탈로그와 통일한 브랜드 표시명.
 # (라우트 슬러그·URL 은 여전히 kooremapper 로 유지된다.)
-mcp = FastMCP("DynaForge")
+# stateless(포털 MCP 현대화 1단계 · 사용자 결정 11-27) — 서버가 세션을 쥐지 않는다. 요청마다 새 전송을 열어 답하고 닫으므로 Mcp-Session-Id 를
+# 내지도 보지도 않고, initialize 없이 온 호출 · 재기동 전의 세션 번호를 단 호출도 받는다. 서버 → 클라이언트 채널(elicit · sampling ·
+# list_changed · roots)은 버려지는데 이 서버는 쓰지 않는다 — ctx 는 들어온 HTTP 요청의 머리(_forward_headers)만 읽는다. 응답은 SSE 그대로라
+# 같은 요청의 진행 알림은 간다. 시험 `tests/test_mcp_tools_contract.py` 의 stateless 절.
+mcp = FastMCP("DynaForge", stateless_http=True)
 
 # ── 시간 한도 — 손잡이 하나 · 도구 호출 하나에 벽시계 기한 하나(포털 time-limits 1-1, 사용자 결정 10-31) ──────────────────
 # ★바깥 층(게이트웨이가 도구 호출을 기다리는 600초 — 그쪽 `GATEWAY_CALL_TIMEOUT`)보다 안쪽이어야 이 층이 먼저 걸려 값과 손잡이

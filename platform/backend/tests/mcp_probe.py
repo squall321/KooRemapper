@@ -6,6 +6,7 @@ pytest 는 이 파일을 모으지 않는다(이름이 test_ 로 시작하지 �
     schemas <도구…>   — FastMCP 목록(`mcp.list_tools()`)이 내는 inputSchema 를 도구별로
     limits            — 느린 가짜 백엔드에 붙여 한도 · 기한 · 문구를 잰다(KOORM_MCP_API_TIMEOUT_S 를 작게 두고)
     paths <값…>       — 경로에 사용자 값을 넣는 도구를 값마다 불러 가짜 백엔드가 받은 요청 대상(퍼센트 인코딩 그대로)을 낸다
+    stateless         — 실제 streamable-http 앱(ASGI)에 JSON-RPC 를 보내 세션 번호 · initialize 없는 호출 · 옛 세션 번호 · 머리 나르기를 잰다
 """
 from __future__ import annotations
 
@@ -169,12 +170,80 @@ def paths(values: list[str]) -> dict:
             "seg_key": {v: enc(server._seg_key, v) for v in values}}
 
 
+class _Who(BaseHTTPRequestHandler):
+    """받은 머리를 그대로 돌려주는 가짜 백엔드 — 도구가 들어온 MCP 요청의 머리를 나르는지(_forward_headers) 본다."""
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        got = {h: self.headers.get(h) for h in ("authorization", "x-heax-user-affiliation", "x-heax-aff-proof")}
+        raw = json.dumps({"success": True, "data": {"headers": got}, "message": None}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+def _rpc_body(r) -> dict | None:
+    """SSE 한 덩이(`data: {...}`) 또는 JSON 본문에서 JSON-RPC 응답을 꺼낸다 — 세션 오류(400 · 404)는 JSON 본문으로 온다."""
+    for line in r.text.splitlines():
+        if line.startswith("data:"):
+            return json.loads(line[5:])
+    try:
+        return r.json()
+    except ValueError:
+        return None
+
+
+def stateless() -> dict:
+    import httpx
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Who)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    server = _load(f"http://127.0.0.1:{srv.server_address[1]}")
+    app = server.mcp.streamable_http_app()
+    accept = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
+    init = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "probe", "version": "0"}}
+
+    def rpc(i: int, method: str, params: dict | None = None) -> dict:
+        return {"jsonrpc": "2.0", "id": i, "method": method, "params": params or {}}
+
+    def seen(r, b) -> dict:
+        return {"status": r.status_code, "ctype": (r.headers.get("content-type") or "").split(";")[0],
+                "session_id": r.headers.get("mcp-session-id"), "error": (b or {}).get("error")}
+
+    async def run() -> dict:
+        out = {"stateless_http": server.mcp.settings.stateless_http, "json_response": server.mcp.settings.json_response}
+        async with server.mcp.session_manager.run():
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8701") as c:
+                r = await c.post("/mcp", json=rpc(1, "initialize", init), headers=accept)
+                out["initialize"] = seen(r, _rpc_body(r))
+                # initialize 도 세션 번호도 없이 바로 부른다 — 게이트웨이가 재기동 뒤 · 다른 대로 보내는 꼴
+                h = {**accept, "authorization": "Bearer probe-token", "x-heax-user-affiliation": "probe-aff"}
+                r = await c.post("/mcp", json=rpc(2, "tools/call", {"name": "whoami", "arguments": {}}), headers=h)
+                b = _rpc_body(r)
+                out["call_without_initialize"] = seen(r, b)
+                content = ((b or {}).get("result") or {}).get("content") or []
+                out["forwarded"] = json.loads(content[0]["text"]).get("headers") if content else None
+                r = await c.post("/mcp", json=rpc(3, "tools/list"), headers={**accept, "mcp-session-id": "stale-before-restart"})
+                b = _rpc_body(r)
+                out["stale_session_id"] = {**seen(r, b), "tools": len(((b or {}).get("result") or {}).get("tools") or [])}
+        return out
+
+    try:
+        return asyncio.run(run())
+    finally:
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "schemas"
     if mode == "schemas":
         result = schemas(sys.argv[2:])
     elif mode == "paths":
         result = paths(sys.argv[2:])
+    elif mode == "stateless":
+        result = stateless()
     else:
         result = limits()
     print(json.dumps(result, ensure_ascii=False))
