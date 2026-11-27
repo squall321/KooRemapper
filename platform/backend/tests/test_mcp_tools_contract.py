@@ -703,3 +703,12 @@ def test_closed_vocabularies_and_bounds_are_the_backend_constraints():
     rf = RR.RunBody.model_fields["report_ids"]
     assert (_mx(rf, "min_length"), _mx(rf, "max_length")) == (1, c["RECIPE_RUN_REPORTS_MAX"])
     assert c["RECIPE_NOTE_MIN"] == RSV._MIN_NOTE
+
+
+@needs_mcp
+def test_report_compare_fills_the_metric_table():
+    """report_compare 지표 표 — 예전에는 케이스 응답에 없는 rollup · summary 칸만 봐서 칸이 늘 「—」 였다(공통 계약 작업 중 발견 · 11-27).
+    기본 지표(peak_*)는 케이스 롤업 칸으로, 롤업 이름은 그대로, 파트 지표는 파트 중 최댓값(min_* 은 최솟값), 없는 이름만 「—」."""
+    got = _probe("compare")
+    assert got["default"] == ["123.5", "45", "2.5"], got
+    assert got["named"] == ["123.5", "1.2", "0.03", "-7", "—"], got

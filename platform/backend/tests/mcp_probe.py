@@ -6,6 +6,7 @@ pytest 는 이 파일을 모으지 않는다(이름이 test_ 로 시작하지 �
     schemas <도구…>   — FastMCP 목록(`mcp.list_tools()`)이 내는 inputSchema 를 도구별로
     limits            — 느린 가짜 백엔드에 붙여 한도 · 기한 · 문구를 잰다(KOORM_MCP_API_TIMEOUT_S 를 작게 두고)
     paths <값…>       — 경로에 사용자 값을 넣는 도구를 값마다 불러 가짜 백엔드가 받은 요청 대상(퍼센트 인코딩 그대로)을 낸다
+    compare           — report_compare 의 지표 표를 케이스 응답(CaseRead 꼴) 가짜 백엔드로 — 칸이 「—」 가 아니라 값인지
     contract          — 도구 전부의 설명 · inputSchema · outputSchema · 표지(공통 계약 C1 ~ C8 전수 시험)
     stateless         — 실제 streamable-http 앱(ASGI)에 JSON-RPC 를 보내 세션 번호 · initialize 없는 호출 · 옛 세션 번호 · 머리 나르기를 잰다
 """
@@ -57,6 +58,47 @@ def contract() -> dict:
         out[t.name] = {"description": t.description or "", "input": _input_schema(t), "output": output,
                        "annotations": None if ann is None else ann.model_dump(by_alias=True, exclude_none=True)}
     return out
+
+
+class _Cases(BaseHTTPRequestHandler):
+    """리포트 · 케이스 · 미디어만 답하는 가짜 백엔드 — 케이스는 백엔드 CaseRead 꼴(롤업은 맨 위 칸, 파트 값은 parts_metrics)."""
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        if path.endswith("/media"):
+            data = {"media": []}
+        elif "/cases/" in path:
+            data = {"case_key": path.rsplit("/", 1)[-1], "max_stress": 123.5, "max_g": 45.0, "max_disp": 2.5, "min_safety_factor": 1.2,
+                    "parts_metrics": {"1": {"peak_strain": 0.01, "min_principal": -3.0}, "2": {"peak_strain": 0.03, "min_principal": -7.0}}}
+        else:
+            data = {"id": "r1", "kind": "impact", "session_id": "s1"}
+        raw = json.dumps({"success": True, "data": data, "message": None}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+def compare() -> dict:
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), _Cases)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    server = _load(f"http://127.0.0.1:{srv.server_address[1]}")
+    server._forward_headers = lambda ctx: {}
+    try:
+        out = {}
+        for label, metrics in (("default", None), ("named", ["max_stress", "min_safety_factor", "peak_strain", "min_principal", "nope"])):
+            got = server.mcp.call_tool("report_compare", {"report_id": "r1", "case_keys": ["c1"], "metrics": metrics, "max_images": 0})
+            res = asyncio.run(got)
+            blocks = res[0] if isinstance(res, tuple) else getattr(res, "content", res)
+            text = next(b.text for b in blocks if getattr(b, "type", "") == "text")
+            row = next(l for l in text.splitlines() if l.startswith("| c1 |"))
+            out[label] = [c.strip() for c in row.strip("|").split("|")][1:]
+        return out
+    finally:
+        srv.shutdown()
 
 
 class _Slow(BaseHTTPRequestHandler):
@@ -271,6 +313,8 @@ if __name__ == "__main__":
         result = stateless()
     elif mode == "contract":
         result = contract()
+    elif mode == "compare":
+        result = compare()
     else:
         result = limits()
     print(json.dumps(result, ensure_ascii=False))

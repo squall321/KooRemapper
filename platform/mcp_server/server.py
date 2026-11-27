@@ -3624,14 +3624,34 @@ async def report_image(
             Image(data=data, format=_IMAGE_MIME.get(ext, "png"))]
 
 
+
+# 케이스 응답(CaseRead)의 롤업 칸 — 파트 피크의 최댓값(안전율은 최솟값)이 맨 위 칸에 있다(백엔드 parser._case_rollup).
+_CASE_ROLLUP = {"peak_stress": "max_stress", "peak_g": "max_g", "peak_disp": "max_disp", "safety_factor": "min_safety_factor"}
+
+
+def _case_metric(case: dict, m: str):
+    """report_compare 표 한 칸 — 맨 위 칸(max_stress 등) → 롤업 이름(peak_stress → max_stress) → 파트 지표의 최댓값(min_* · 안전율은
+    최솟값). 예전에는 케이스 응답에 없는 rollup · summary 칸만 봐서 표가 늘 「—」 였다."""
+    v = case.get(m)
+    if v is None and m in _CASE_ROLLUP:
+        v = case.get(_CASE_ROLLUP[m])
+    if v is None:
+        vals = [p[m] for p in (case.get("parts_metrics") or {}).values() if isinstance(p, dict) and isinstance(p.get(m), (int, float))]
+        if vals:
+            v = min(vals) if m.startswith("min_") or m == "safety_factor" else max(vals)
+    return v
+
+
 @mcp.tool(annotations=_READ)
 async def report_compare(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     case_keys: Annotated[list[str], Field(description="견줄 케이스 키 목록 — report_worst_cases 결과의 case_key. 준 순서대로 표 행 · "
                                                       "그림이 놓인다. 없는 키가 하나라도 있으면 오류다.")],
     ctx: Context,
-    metrics: Annotated[list[str] | None, Field(description="표에 놓을 지표 이름 목록 — 비우면(null · 빈 목록) peak_stress · peak_g · "
-                                                           "peak_disp. 케이스 응답에서 그 이름의 값을 찾지 못한 칸은 「—」 다.")] = None,
+    metrics: Annotated[list[str] | None, Field(description=(
+        "표에 놓을 지표 이름 목록 — 비우면(null · 빈 목록) peak_stress · peak_g · peak_disp. 케이스 롤업 칸(max_stress · max_g · "
+        "max_disp · min_safety_factor — peak_stress · peak_g · peak_disp · safety_factor 도 그 칸)이나 파트 지표 이름(peak_strain · "
+        "peak_vel 등 — 파트 중 최댓값, min_* 은 최솟값). 값이 없는 칸은 「—」 다."))] = None,
     max_images: Annotated[int, Field(description=f"보낼 이미지 장수 상한 — 기본 {MAX_COMPARE_IMAGES}. 그림이 있는 케이스가 이보다 "
                                                  "많으면 뒤 케이스의 그림을 빼고 뺀 장수를 표 아래에 말한다. 0 이면 표만 온다.")
                           ] = MAX_COMPARE_IMAGES,
@@ -3641,8 +3661,8 @@ async def report_compare(
     언제 — report_worst_cases 로 좁힌 몇 케이스를 그림과 함께 나란히 볼 때. 그림 한 장만이면 report_image, 숫자 순위는
     report_worst_cases, 한 케이스의 파트별 숫자는 report_case, 다른 리포트(개정 · 조건)끼리 파트별 최악을 견주려면 compare_reports 다.
 
-    돌려주는 것 — ① 글 한 덩이 — 케이스마다 한 행인 지표 표와 경고(그림 없는 케이스 · 뺀 그림 수). 케이스 응답에서 그 지표 이름의
-    값을 찾지 못한 칸은 「—」 이니 숫자는 report_case 로 확인하라. ② 케이스마다 출처 한 줄(report · case · file_id · sha256 · path)과
+    돌려주는 것 — ① 글 한 덩이 — 케이스마다 한 행인 지표 표와 경고(그림 없는 케이스 · 뺀 그림 수). 칸은 케이스 롤업
+    (max_stress 등)이나 파트 지표의 최댓값이고 값이 없으면 「—」 — 파트별 숫자는 report_case 로 본다. ② 케이스마다 출처 한 줄(report · case · file_id · sha256 · path)과
     피크 렌더 이미지(그 케이스 role=peak 의 볼 수 있는 첫 장). 케이스에 묶인 peak 그림은 impact 번들 리포트에만 있어 sphere · deep
     은 보통 표만 온다(그때는 report_media 로 경로를 찾아 report_image(path) 로 본다). 내려받지 못한 그림은 말없이 빠진다.
 
@@ -3657,12 +3677,9 @@ async def report_compare(
              "|---" * (len(metrics) + 1) + "|"]
     for ck in case_keys:
         case = (await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(ck)}")) or {}
-        roll = case.get("rollup") or {}
         cells = []
         for m in metrics:
-            v = roll.get(m)
-            if v is None:
-                v = (case.get("summary") or {}).get(m)
+            v = _case_metric(case, m)
             cells.append("—" if v is None else ("%g" % v if isinstance(v, (int, float)) else str(v)))
         lines.append("| %s | %s |" % (ck, " | ".join(cells)))
 
