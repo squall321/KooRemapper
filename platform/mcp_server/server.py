@@ -1696,8 +1696,8 @@ async def ingest_report(
     label: Annotated[str | None, Field(description="이름표(선택 · 자유 글) — 목록에 보일 이름. 비우면 없음.")] = None,
     base64_encoded: Annotated[bool, Field(description=(
         "true 면 html_content 를 base64 로 풀어 쓴다(큰 HTML · gzip 바이트). 기본 false — UTF-8 글 그대로."))] = False,
-    scenario_content: Annotated[str | None, Field(description=(
-        "시뮬 조건 scenario.json 글(선택) — 조건 요약을 붙이고 template 으로 세션 안 K파일을 자동으로 맞춘다(한 K파일에 결과 "
+    scenario_content: Annotated[str | dict | None, Field(description=(
+        "시뮬 조건 scenario.json 글 또는 그 JSON 객체(선택) — 조건 요약을 붙이고 template 으로 세션 안 K파일을 자동으로 맞춘다(한 K파일에 결과 "
         "여럿). 비우면 없음."))] = None,
     kfile_id: Annotated[int | None, Field(description=(
         "원본 K파일의 세션 파일 id(선택) — list_session_files 의 id. 같은 세션의 파일이어야 한다. 비우면 scenario 로 자동으로 "
@@ -1732,6 +1732,10 @@ async def ingest_report(
         if v is not None:
             data[k] = str(v)
     files = {"file": (filename, raw, "text/html")}
+    if isinstance(scenario_content, dict):
+        # SDK 는 str 가 아닌 칸에 온 JSON 꼴 글을 객체로 먼저 푼다 — scenario.json 글이 「Input should be a valid string」 으로 막혔었다
+        import json as _json
+        scenario_content = _json.dumps(scenario_content, ensure_ascii=False, indent=2)
     if scenario_content:
         files["scenario"] = ("scenario.json", scenario_content.encode("utf-8"), "application/json")
     async with _client() as c:

@@ -712,3 +712,12 @@ def test_report_compare_fills_the_metric_table():
     got = _probe("compare")
     assert got["default"] == ["123.5", "45", "2.5"], got
     assert got["named"] == ["123.5", "1.2", "0.03", "-7", "—"], got
+
+
+@needs_mcp
+def test_ingest_report_takes_scenario_json_text():
+    """ingest_report 의 scenario_content — SDK 는 str 가 아닌 칸(str | None)에 온 JSON 꼴 글을 객체로 먼저 풀어 scenario.json 글이 늘
+    「Input should be a valid string」 으로 막혔다(공통 계약 작업 중 발견 · 11-27 — 1.x · 2.x 같음). 객체로 와도 받아 글로 실어 보낸다."""
+    got = _probe("scenario")
+    assert got["error"] is None, got["error"]
+    assert got["posted"] == 1 and got["scenario"] == got["sent"], got
