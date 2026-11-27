@@ -14,12 +14,12 @@ MCP 서버는 streamable-http로 뜨고, 들어온 `Authorization: Bearer kr_...
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
 | `list_operations` | — | GET /operations | 전체 오퍼레이션 요약 목록 |
-| `describe_operation` | operation | GET /operations/{op} | 한 op의 인자 JSON Schema·예제·매뉴얼 |
+| `describe_operation` | operation | GET /operations/{op} | 한 op의 인자 JSON Schema·예제 |
 
 ## 세션
 | 도구 | 인자 | REST | 설명 |
 |---|---|---|---|
-| `list_sessions` | — | GET /sessions | 내 세션(프로젝트) 목록 |
+| `list_sessions` | — | GET /sessions | 내 세션 + 조직에 보이게 둔 남의 세션(읽기만 — 올리기 · 실행 · 고치기 · 지우기는 주인만) · 최신 200개까지 |
 | `create_session` | name, description? | POST /sessions | 새 세션 생성 |
 | `get_session` | session_id | GET /sessions/{id} | 세션 상세 + 파일 목록 |
 | `update_session` | session_id, name?, description? | PATCH /sessions/{id} | 세션 이름/설명 수정 |
@@ -202,7 +202,7 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 | `recipe_propose` | name, code, meta? | POST /recipes/propose | `run(reports,params)`+`test_*`. 정적 검사→자기 시험→후보. 허용 import 는 stdlib 일부·numpy·scipy·recipe_kit 뿐 |
 | `recipe_evaluate` | run_id, useful, note | POST /recipes/runs/{id}/evaluate | useful=true+글(20자↑)이 등록 근거 |
 | `recipe_register` | name, version? | POST /recipes/{name}/register | **사람 승인 없이** 자동 관문(정적 검사 · 자기 시험 · 호환 시험 + 실데이터 성공 ≥1 + 쓸모 평가 ≥1)만 넘으면 모두에게 열린다(사용자 결정 10-26) · 파일 내보내기(커밋·푸시는 사람이) · 잘못 올라간 것은 `recipe_deprecate` |
-| `recipe_deprecate` | name, reason | POST /recipes/{name}/deprecate | 내린다(올린 사람·관리자). 판 기록은 남는다 |
+| `recipe_deprecate` | name, reason | POST /recipes/{name}/deprecate | 내린다(올린 사람·관리자) — 찾기(`recipe_search`)에서 빠진다. 이름으로 `recipe_get` · `recipe_run` 은 그대로 된다. 판 기록은 남는다 |
 
 ## 시스템 / 신원
 | 도구 | 인자 | REST | 설명 |
@@ -228,3 +228,64 @@ C++·백엔드에 박아 **빌드·배포**하는 대신, 분석 함수 하나�
 - `mcp_server/figures_smoke.py` · `mcp_server/deckops_smoke.py` — 그림 도구와 **덱을 쓰는 op**(새 op 은 `CASES` 에
   한 줄 더한다)을 살아 있는 스택에서 끝까지 부른다. 게시 바이너리·API·MCP 가 하나라도 낡으면 빨개진다.
 - `backend/tests/test_parity.py` — 광고 카운트(`mcp_tools`)와 실제 `@mcp.tool` 수 일치 강제.
+
+## 도구 설명에서 옮긴 이력(2026-11-27 — 포털 공통 계약 C1)
+
+도구 설명(모델이 읽는 글)에는 무엇 · 언제 · 형제 도구 · 돌려주는 꼴 · 한도만 둔다. 결정 번호 · 날짜 · 실측 일화 · 요청 번호를 아래로 옮겼다(원문 그대로).
+같은 뜻의 영어 문장(도구 쉰 남짓)은 옮기지 않고 뺐다. 계약 시험 `tests/test_mcp_tools_contract.py` 의 「공통 계약 C1 ~ C8 전수」 절이 다시 들어오지 않게 잰다.
+
+- `get_session`
+  - (DF-15 — 라벨 · 연결은 REST PATCH /sessions/{id} 로 둔다)
+- `upload_kfile`
+  - (2026-10-17 — 예전에는 마스터를 먼저 올리면 meta 가 절점 0 으로 남았다)
+- `session_includes`
+  - (닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다 · 2026-10-17) 의 날짜
+- `system_status`
+  - 「7-1 반입」(세 곳) — 이제 「외부 잡으로 반입된(external_job_key 가 있는)」
+- `mesh_section_figure`
+  - 실측으로 61파트 배터리 적층은 z 가 2파트뿐이고 x·y 가 59파트이며, 감긴 덱은 그 반대다.
+  - 실제 적층은 가로:최박층이 1:9,375 라 등축으로 그리면 층이 보이지 않는다(1200px 에서 0.081px — 실측).
+  - 이 리포는 절점 번호 일치를 요구하므로 겹침 짝맞춤 비용이 0 이다.
+- `mesh_surface_figure`
+  - 자유면만 그리는 것이 성능 꾀가 아니라 그림의 요지다. 실측 286k 요소 덱에서 전체 면 855,575 중 자유면이 57,098(6.7%) 뿐이고 나머지는 묻혀서 보이지 않는다.
+  - 실측 286k 요소 덱이 12.2MB 이고 다운로드 상한은 5MB 다.
+- `mesh_stack_diagram`
+  - (단면은 축을 잘못 고르면 61파트 중 1개만 만난다)
+  - 실측 감긴 덱의 세 파트가 z 범위가 전부 `0~1.0` 으로 세 쌍 모두 겹쳐 그릴 층 순서가 아예 없다.
+  - (실제 덱은 `*INCLUDE` 안에 있다)
+- `ingest_report`
+  - 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 잇는다(`eng_meta`).
+  - 어느 이름이든 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)에 `eng_meta` 로 잇는다
+- `update_report_meta`
+  - 허브가 모르는 이름이면(거울의 과제와 맞는 데가 없다) 예전처럼 글자 그대로의 판(`<project>@<dev_rev>`)으로 간다.
+  - 어느 이름이든 예전처럼 글자 그대로의 판으로 간다
+- `attach_render`
+  - SceneForge 렌더 결과(C-11)를 리포트에 붙인다 — 의 「(C-11)」
+- `set_campaign_required_extractions`
+  - 들어와 있어야 할 추출(DF-04) — 의 「(DF-04)」
+- build_report_bundle · report_bundle · report_bundle_diff
+  - 첫 줄의 「(DF-13)」
+- 캠페인 분석 · 자리 · 비교 17 도구
+  - 첫 줄의 요청 번호 — 「(DF-05)」 part_groups · angle_table · angle_stats, 「(DF-06)」 peak_table, 「(DF-07)」 frame_offset · hotspot_sites, 「(DF-08)」 criteria · part_margin, 「(DF-09)」 sphere_map, 「(DF-10)」 sites · site_table · site_map, 「(DF-11)」 import_part_map · compare_campaigns, 「(DF-12)」 pair_rule · compare_config_pairs, 「(DF-15)」 rename_session_part
+  - campaign_angle_table — 방향 벡터(덱 틀 · 요청서 식 d = …) 의 「요청서 식」(식은 남았다)
+- `attach_cad`
+  - (C-6 가중치 · C-7 glb) — 계약 번호(「가중치 · glb」 는 남았다)
+- `list_reports`
+  - 심의 좌석이 빈 배열을 부재 증거로 오독한 실사례 있음.
+- `report_blocks`
+  - (deep 21 · sphere 12 · impact 27 가 실측값이다)
+- `report_behavior_clusters`
+  - (실측으로 4 선언/1 사용인 리포트가 있다)
+- `report_summary`
+  - 후처리 예약(7-1)으로 들어온 리포트면 — 의 「(7-1)」
+- `find_reports`
+  - config_generation(내 캠페인에서 그 설정 세대의 런에 묶인 리포트 — DF-02) 의 「DF-02」
+  - ★0 건이어도 빈 봉투를 준다(KR-08) 의 「(KR-08)」
+- `report_geometry`
+  - — 실측으로 유일한 impact 샘플은 25/25 가 합성이고 `zmin`/`zmax` 도 전부 null 이다.
+- `report_angle_stats`
+  - 현재 낙하/충격 리포트는 peak_stress/peak_strain/peak_g/peak_disp. 소성 스트레인 등은 상류 리포트가 넣어야 잡힌다
+- `report_revision`
+  - (저절로 옮기지 않는다 — 사용자 결정) 의 「사용자 결정」
+- `recipe_register`
+  - (사용자 결정 10-26 「LLM 자동 + 자동 관문」)
