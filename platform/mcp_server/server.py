@@ -145,6 +145,7 @@ _ADD_OUT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotent
 _SET = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)     # 덮어쓰기 — 같은 값이면 같다
 _SET_OUT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
 _DELETE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+_REPLACE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)  # 덮되 부를 때마다 새 파일
 
 
 # ── 결과 꼴(공통 계약 C7) — 반환 타입으로 적으면 FastMCP 가 칸 이름 · 뜻이 든 outputSchema 와 structuredContent 를 낸다 ──────────
@@ -2248,7 +2249,7 @@ METRIC_ALIASES = ("MET-STRESS", "MET-STRAIN", "MET-ACCEL", "MET-DISP")       # �
 MARGIN_AXES = ("tension_principal_stress", "von_mises", "compressive_strain", "board_strain_ue", "effective_plastic_strain")
 THICKNESS_AXES = ("X", "Y", "Z")
 ANALYSIS_ROWS_MAX = 5000                                                      # 백엔드 각도 표 · 피크 표의 limit 상한과 같아야 한다
-_A_METRIC = (f"지표 — {_one_of(ANGLE_METRICS)} 또는 요청서 별칭 {_one_of(METRIC_ALIASES)}(MET-STRESS → peak_stress · MET-STRAIN → "
+_A_METRIC = (f"지표 — {_one_of(ANGLE_METRICS)} 또는 별칭 {_one_of(METRIC_ALIASES)}(MET-STRESS → peak_stress · MET-STRAIN → "
              "peak_strain · MET-ACCEL → peak_g · MET-DISP → peak_disp).")
 _A_GROUPS = "무리 키(쉼표로 여럿 · 선택) — 비우면 정한 무리 전부(무리를 안 정했으면 all = 모든 파트)."
 _A_THICK = f"두께축(선택) — {_one_of(THICKNESS_AXES)}. 비우면 캠페인의 thickness_axis, 그것도 없으면 Z. 라벨은 덱 축으로 나온다."
@@ -2608,7 +2609,7 @@ async def set_campaign_sites(
     sites: Annotated[list[dict], Field(max_length=ANALYSIS_SITES_MAX, description=(
         f"자리 표(0~{ANALYSIS_SITES_MAX} 개) — 항목 {{site_id, face?(TOP · BOT), col?, row?, x_mm?, y_mm?, under_category?(받침 분류), "
         "impactor?{mass_g, height_mm, ke_mj}, run_key?(그 자리를 친 런 — 자리 지표가 없으면 그 런의 리포트 피크 · 건강 에너지비로 "
-        "채운다), footprint?{measured: 참이어야 실측, …}, metrics?[{part, metric, value?, time_ms?, elem_id?, ratio?}]}. 통째로 바꾸고 "
+        "채운다), footprint?{measured: 참이어야 실제 측정, …}, metrics?[{part, metric, value?, time_ms?, elem_id?, ratio?}]}. 통째로 바꾸고 "
         "빈 목록이면 지운다. 같은 site_id 는 거절. 예: [{\"site_id\": \"S01\", \"face\": \"TOP\", \"x_mm\": 10, \"y_mm\": 20, "
         "\"run_key\": \"r001\"}]."))],
     ctx: Context,
@@ -3216,7 +3217,7 @@ async def attach_cad(
         return _unwrap(await c.post(f"/reports/{_seg(report_id)}/cad", files=files, headers=_forward_headers(ctx)))
 
 
-@mcp.tool(annotations=_SET)
+@mcp.tool(annotations=_REPLACE)
 async def attach_report_scenario(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     scenario_content: Annotated[str, Field(description="scenario.json 텍스트 그대로 — KooChainRun 의 scenario.json(scenarios 배열이 있는 "
