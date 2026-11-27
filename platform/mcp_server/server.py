@@ -26,7 +26,14 @@ from typing import Annotated, Any, Literal  # noqa: F401 — Literal 은 닫힌 
 from urllib.parse import quote
 
 import httpx
-from mcp.server.fastmcp import Context, FastMCP, Image
+try:                    # SDK 2.x — 2026-07-28 새 세대(initialize 없는 POST 하나)와 옛 세대(initialize)를 같은 자리에서 받는다
+    from mcp.server.mcpserver import Context, Image, MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError
+    SDK2 = True
+except ImportError:     # SDK 1.x — 시험 · 스모크 venv(옛 세대 클라이언트)와 옛 mcp.sif. 둘 다 같은 server.py 로 돈다
+    from mcp.server.fastmcp import Context, FastMCP as MCPServer, Image
+    from mcp.server.fastmcp.exceptions import ToolError
+    SDK2 = False
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer, model_validator
 
@@ -40,8 +47,20 @@ API = f"{API_BASE}/api/v1"
 # stateless(포털 MCP 현대화 1단계 · 사용자 결정 11-27) — 서버가 세션을 쥐지 않는다. 요청마다 새 전송을 열어 답하고 닫으므로 Mcp-Session-Id 를
 # 내지도 보지도 않고, initialize 없이 온 호출 · 재기동 전의 세션 번호를 단 호출도 받는다. 서버 → 클라이언트 채널(elicit · sampling ·
 # list_changed · roots)은 버려지는데 이 서버는 쓰지 않는다 — ctx 는 들어온 HTTP 요청의 머리(_forward_headers)만 읽는다. 응답은 SSE 그대로라
-# 같은 요청의 진행 알림은 간다. 시험 `tests/test_mcp_tools_contract.py` 의 stateless 절.
-mcp = FastMCP("DynaForge", stateless_http=True)
+# 같은 요청의 진행 알림은 간다. 시험 `tests/test_mcp_tools_contract.py` 의 stateless 절. 1.x 는 생성자에서, 2.x 는 기동(http_options)에서 켠다.
+STATELESS_HTTP = True
+# 요청 본문 상한 — 1.x 는 상한이 없었다. 2.x 기본(4 MiB)이면 덱을 본문에 싣는 upload_kfile 이 큰 덱에서 막힌다. 앞단 nginx 의
+# client_max_body_size(1g)와 같게 둔다 — 파일 하나의 실제 상한은 백엔드 KOORM_MAX_UPLOAD_MB(기본 512)가 건다.
+MAX_REQUEST_BODY_BYTES = 1 << 30
+mcp = MCPServer("DynaForge") if SDK2 else MCPServer("DynaForge", stateless_http=STATELESS_HTTP)
+
+
+def http_options(security=None) -> dict:
+    """2.x streamable-http 앱 선택지 — 기동(__main__)과 탐침(tests/mcp_probe.py stateless)이 같은 것을 쓴다. 1.x 는 생성자 · settings 로 준다."""
+    if not SDK2:
+        return {}
+    return {"stateless_http": STATELESS_HTTP, "json_response": False, "transport_security": security,
+            "max_request_body_size": MAX_REQUEST_BODY_BYTES}
 
 # ── 시간 한도 — 손잡이 하나 · 도구 호출 하나에 벽시계 기한 하나(포털 time-limits 1-1, 사용자 결정 10-31) ──────────────────
 # ★바깥 층(게이트웨이가 도구 호출을 기다리는 600초 — 그쪽 `GATEWAY_CALL_TIMEOUT`)보다 안쪽이어야 이 층이 먼저 걸려 값과 손잡이
@@ -86,7 +105,11 @@ _register = mcp.tool
 def _bounded_tool(*args, **kwargs):
     """`mcp.tool()` 과 같되 도구 호출 하나에 벽시계 기한 하나를 건다 — REST 를 여러 번 부르는 도구(compare_reports · 그림 잡
     기다림)도 합쳐서 그 안이다. httpx 시간 초과는 값과 손잡이 이름이 든 문구로 바꾼다. 끊긴 요청은 다시 보내지 않는다(쓰기가 두 번
-    나갈 수 있다). 인자 꼴은 그대로다(FastMCP 는 `__wrapped__` 의 서명으로 스키마를 만든다). 도구가 다른 도구를 부르면 바깥 기한을 쓴다."""
+    나갈 수 있다). 인자 꼴은 그대로다(FastMCP 는 `__wrapped__` 의 서명으로 스키마를 만든다). 도구가 다른 도구를 부르면 바깥 기한을 쓴다.
+
+    도구 밖으로 나가는 예외는 ToolError 로 바꾼다(포털 공통 계약 P3) — 2.x 는 ToolError 가 아닌 예외의 글을 서버에 남기고 모델에는
+    「Error executing tool <이름>」 만 보낸다. 1.x 는 어느 예외든 「Error executing tool <이름>: <글>」 이라 글이 그대로다. 바꾸기는 몸통
+    밖에서만 하므로 몸통이 _Late 를 잡아 job_id 를 덧붙이는 그림 기다림(_run_figure_job)은 그대로다."""
     register = _register(*args, **kwargs)
 
     def deco(fn):
@@ -96,9 +119,14 @@ def _bounded_tool(*args, **kwargs):
             outer = _DEADLINE.get()
             token = _DEADLINE.set(min(outer, mine) if outer is not None else mine)
             try:
-                return await fn(*a, **kw)
-            except httpx.TimeoutException:
-                raise _late() from None
+                try:
+                    return await fn(*a, **kw)
+                except httpx.TimeoutException:
+                    raise _late() from None
+            except Exception as exc:
+                if isinstance(exc, ToolError):
+                    raise
+                raise ToolError(str(exc)) from exc
             finally:
                 _DEADLINE.reset(token)
         return register(bounded)
@@ -2905,9 +2933,7 @@ async def recipe_deprecate(name: str, reason: str, ctx: Context) -> dict:
 
 if __name__ == "__main__":
     host = os.environ.get("MCP_HOST", "127.0.0.1")
-    mcp.settings.host = host
     port = int(os.environ.get("KOORM_MCP_PORT", os.environ.get("MCP_PORT", "8701")))
-    mcp.settings.port = port
 
     # DNS-rebinding 보호는 항상 ON으로 두되 허용 Host를 명시한다. 리버스 프록시
     # (nginx, HEAX Caddy)는 Host를 포트 없이(예: '127.0.0.1') 보내기도 하므로
@@ -2926,10 +2952,14 @@ if __name__ == "__main__":
             "뒤에서는 프록시가 보내는 Host를 넣어야 한다.",
             flush=True,
         )
-    mcp.settings.transport_security = TransportSecuritySettings(
+    security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=allowed,
         allowed_origins=[],
     )
 
-    mcp.run(transport="streamable-http")
+    if SDK2:
+        mcp.run(transport="streamable-http", host=host, port=port, **http_options(security))
+    else:
+        mcp.settings.host, mcp.settings.port, mcp.settings.transport_security = host, port, security
+        mcp.run(transport="streamable-http")

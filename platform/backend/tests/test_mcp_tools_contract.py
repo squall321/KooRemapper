@@ -14,6 +14,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -389,13 +390,11 @@ SERVER_TO_CLIENT = {"elicit", "create_message", "list_roots", "send_request", "s
                     "send_tool_list_changed", "send_resource_list_changed", "send_prompt_list_changed"}
 
 
-@needs_mcp
-def test_the_server_holds_no_session():
-    """세션 번호를 내지 않고, initialize 없이 온 호출 · 재기동 전의 세션 번호를 단 호출을 받으며, 그 호출에도 들어온 머리를 백엔드로 나른다.
+MCP_SIF = PLATFORM / "infra" / "apptainer" / "mcp.sif"
+CONSTRAINTS = PLATFORM / "infra" / "apptainer" / "mcp.constraints.txt"
 
-    예전(세션을 쥘 때)은 셋째 · 넷째가 400 「Missing session ID」 · 404 「Session not found」 였다 — MCP 를 다시 띄우면 게이트웨이가 쥔 세션이
-    모두 끊겼다. 응답은 SSE 그대로라(json_response 아님) 같은 요청의 진행 알림은 간다."""
-    got = _probe("stateless")
+
+def _assert_stateless(got: dict) -> None:
     assert got["stateless_http"] is True and got["json_response"] is False, got
     assert got["initialize"]["status"] == 200 and got["initialize"]["session_id"] is None, got["initialize"]
     call = got["call_without_initialize"]
@@ -404,6 +403,38 @@ def test_the_server_holds_no_session():
                                 "x-heax-aff-proof": None}, "stateless 호출에서 머리를 나르지 않았다 — 백엔드가 401 로 막는다"
     stale = got["stale_session_id"]
     assert stale["status"] == 200 and stale["error"] is None and stale["tools"] > 0, stale
+    assert got["big_body"]["status"] == 200, f"본문 5 MiB 가 막혔다 — 큰 덱의 upload_kfile 이 끊긴다: {got['big_body']}"
+
+
+@needs_mcp
+def test_the_server_holds_no_session():
+    """세션 번호를 내지 않고, initialize 없이 온 호출 · 재기동 전의 세션 번호를 단 호출을 받으며, 그 호출에도 들어온 머리를 백엔드로 나른다.
+
+    예전(세션을 쥘 때)은 셋째 · 넷째가 400 「Missing session ID」 · 404 「Session not found」 였다 — MCP 를 다시 띄우면 게이트웨이가 쥔 세션이
+    모두 끊겼다. 응답은 SSE 그대로라(json_response 아님) 같은 요청의 진행 알림은 간다. 이 시험은 시험 venv(SDK 1.x)로 잰다."""
+    _assert_stateless(_probe("stateless"))
+
+
+APPTAINER = shutil.which("apptainer")
+needs_sif = pytest.mark.skipif(not (MCP_SIF.exists() and APPTAINER), reason="mcp.sif 또는 apptainer 없음")
+
+
+def _sif_probe(mode: str) -> dict:
+    got = subprocess.run([APPTAINER, "exec", "--env", "PYTHONNOUSERSITE=1", str(MCP_SIF), "python3", "-I", str(PROBE), mode],
+                         capture_output=True, text=True, timeout=180, env={"PATH": "/usr/bin:/bin"})
+    assert got.returncode == 0, got.stderr[-2000:]
+    return json.loads(got.stdout.strip().splitlines()[-1])
+
+
+@needs_sif
+def test_the_sif_runs_the_pinned_sdk_and_holds_no_session_too():
+    """운영이 도는 mcp.sif 안에서 같은 탐침 — SIF 의 SDK 가 고정판(mcp.constraints.txt)의 주 판과 같고, 그 SDK 로도 stateless 다.
+
+    시험 venv(1.x)만 재면 운영 판(2.x)을 안 잰 것이다. 고정판만 고치고 SIF 를 다시 굽지 않았으면 여기서 빨갛다."""
+    out = _sif_probe("stateless")
+    pinned = re.search(r"^mcp==(\d+)\.", CONSTRAINTS.read_text(encoding="utf-8"), re.M).group(1)
+    assert out["sdk2"] is (pinned == "2"), f"SIF 의 SDK 가 고정판 mcp {pinned}.x 와 다르다 — mcp.sif 를 다시 구워라"
+    _assert_stateless(out)
 
 
 def test_no_tool_uses_a_server_to_client_channel():
@@ -411,3 +442,14 @@ def test_no_tool_uses_a_server_to_client_channel():
     used = sorted({(n.func.attr, n.lineno) for n in ast.walk(ast.parse(SERVER.read_text(encoding="utf-8")))
                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in SERVER_TO_CLIENT})
     assert not used, f"stateless 에서 버려지는 채널을 부른다: {used}"
+
+
+@needs_sif
+def test_tool_errors_reach_the_model_under_the_sif_sdk():
+    """공통 계약 P3 — 2.x 는 ToolError 가 아닌 예외의 글을 가리고 「Error executing tool <이름>」 만 보낸다. 도구 몸통 밖에서 ToolError 로
+    바꾸므로(_bounded_tool) 손잡이 이름 · job_id 가 든 글이 그대로 온다. 1.x 시험 venv 는 어느 예외든 글을 보이므로 이것은 SIF 에서만 잰다."""
+    got = _sif_probe("limits")
+    knob = got["knob"]
+    for case in ("find_slow", "compare_six", "figure_never"):
+        assert not got[case]["ok"] and knob in (got[case]["error"] or ""), (case, got[case])
+    assert "job_id=j1" in got["figure_never"]["error"], "몸통 안에서 바꿔 버리면 그림 기다림이 _Late 를 못 잡아 job_id 를 못 붙인다"

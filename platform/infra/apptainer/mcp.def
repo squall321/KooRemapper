@@ -3,7 +3,7 @@ From: python:3.12-slim
 
 %labels
     Component  koorm-mcp
-    Version    0.1.0
+    Version    0.2.0
 
 %files
     mcp.constraints.txt /opt/mcp.constraints.txt
@@ -13,7 +13,8 @@ From: python:3.12-slim
     pip install --upgrade pip
     # Separate image from the API: the mcp SDK and FastAPI/starlette pins can
     # conflict, so the MCP server runs as its own process/deps (REST-only link).
-    # Pinned: an unpinned rebuild on 2026-11-02 pulled mcp 2.3.0 (was 1.28.0).
+    # Pinned (mcp.constraints.txt): mcp 2.3.0 since 2026-11-27 — SDK 2.x serves the 2026-07-28 era and the
+    # initialize era on the same endpoint. server.py also runs on 1.x (test/smoke venv).
     pip install --no-cache-dir -c /opt/mcp.constraints.txt mcp httpx pillow
     # Mesh figure tools return a raster image block next to the SVG (figure_png.py).
     # The SVGs carry Korean text, so the renderer needs a real font: rsvg-convert + Nanum.
@@ -24,6 +25,9 @@ From: python:3.12-slim
 %environment
     export PYTHONDONTWRITEBYTECODE=1
     export PYTHONUNBUFFERED=1
+    # Use only the packages baked in here. Without this, a home bind with ~/.local/lib/python3.12 (the dev box)
+    # shadowed the SIF's mcp with another version, so dev and ops ran different SDKs.
+    export PYTHONNOUSERSITE=1
 
 %startscript
     cd /workspace/platform/mcp_server

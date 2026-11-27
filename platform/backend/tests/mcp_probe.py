@@ -32,10 +32,16 @@ def _load(api_base: str | None = None, knob: str | None = None):
     return server
 
 
+def _input_schema(t) -> dict:
+    """도구의 inputSchema — 1.x 는 `inputSchema`, 2.x(mcp_types)는 `input_schema` 칸이다. 줄로 나가는 JSON 은 둘 다 inputSchema 다."""
+    got = getattr(t, "inputSchema", None)
+    return got if got is not None else t.input_schema
+
+
 def schemas(names: list[str]) -> dict:
     server = _load()
     tools = asyncio.run(server.mcp.list_tools())
-    got = {t.name: t.inputSchema for t in tools if not names or t.name in names}
+    got = {t.name: _input_schema(t) for t in tools if not names or t.name in names}
     return {"tools": got, "api_timeout_s": getattr(server, "API_TIMEOUT_S", None),
             "gateway_call_timeout_s": getattr(server, "GATEWAY_CALL_TIMEOUT_S", None),
             "knob": getattr(server, "API_TIMEOUT_KNOB", None)}
@@ -201,7 +207,9 @@ def stateless() -> dict:
     srv = ThreadingHTTPServer(("127.0.0.1", 0), _Who)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     server = _load(f"http://127.0.0.1:{srv.server_address[1]}")
-    app = server.mcp.streamable_http_app()
+    # 2.x 는 stateless 를 기동 선택지로 준다 — server.py 의 기동이 쓰는 http_options() 그대로. 1.x 는 생성자에서 이미 켰다.
+    opts = server.http_options() if getattr(server, "SDK2", False) else {}
+    app = server.mcp.streamable_http_app(**opts)
     accept = {"accept": "application/json, text/event-stream", "content-type": "application/json"}
     init = {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "probe", "version": "0"}}
 
@@ -213,7 +221,8 @@ def stateless() -> dict:
                 "session_id": r.headers.get("mcp-session-id"), "error": (b or {}).get("error")}
 
     async def run() -> dict:
-        out = {"stateless_http": server.mcp.settings.stateless_http, "json_response": server.mcp.settings.json_response}
+        conf = opts or {"stateless_http": server.mcp.settings.stateless_http, "json_response": server.mcp.settings.json_response}
+        out = {"sdk2": bool(opts), "stateless_http": conf["stateless_http"], "json_response": conf["json_response"]}
         async with server.mcp.session_manager.run():
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8701") as c:
                 r = await c.post("/mcp", json=rpc(1, "initialize", init), headers=accept)
@@ -228,6 +237,10 @@ def stateless() -> dict:
                 r = await c.post("/mcp", json=rpc(3, "tools/list"), headers={**accept, "mcp-session-id": "stale-before-restart"})
                 b = _rpc_body(r)
                 out["stale_session_id"] = {**seen(r, b), "tools": len(((b or {}).get("result") or {}).get("tools") or [])}
+                # 본문 5 MiB — 덱을 본문에 싣는 upload_kfile 꼴. 2.x 기본 상한(4 MiB)이면 413 이다
+                big = rpc(4, "tools/list", {"_meta": {"pad": "x" * (5 << 20)}})
+                r = await c.post("/mcp", json=big, headers=accept)
+                out["big_body"] = seen(r, _rpc_body(r))
         return out
 
     try:
