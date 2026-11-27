@@ -8,5 +8,6 @@
   꼴(CallToolResult) · 시험(auto_changes 7 · MCP 2) — 콘솔은 3
 - [x] 2 auto_runs(0028) · profiles · check · submit · status · result · cancel · 사슬 나아가기 · 시험(auto_drop 14 · 변이 14 / 14 — 1단계 몫
   포함)
-- [ ] 3 콘솔 · MCP 설명 · 카탈로그 · 계약 §4 시험 · 백엔드 전체 · MCP 계약 · 가지 push · 알림
+- [x] 3 콘솔(세션 과제 · 단계 칸 — tsc 통과) · MCP 설명 · TOOLS.md · 예시 .env 셋 · 계약 §4 시험 여섯 다 · 백엔드 전체 1199(건너뜀 14 은 환경 ·
+  실패 넷 .env) · MCP 계약 15 · 가지 push · 알림
 - [ ] 4 87 운영 회차 — main · Drive · 착지 값(커밋 · Drive · 이관 0027 · 0028 · 운영 손 할 일 — 서비스 계정 · SH-01 · 02 뒤 infra 스위치)

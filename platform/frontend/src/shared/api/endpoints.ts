@@ -57,7 +57,7 @@ export async function getSession(id: string): Promise<SessionDetail> {
   const { data } = await api.get(`/sessions/${id}`)
   return unwrap<SessionDetail>(data)
 }
-export async function updateSession(id: string, patch: Partial<{ name: string; description: string; status: string }>): Promise<SessionSummary> {
+export async function updateSession(id: string, patch: Partial<{ name: string; description: string; status: string; task_key: string | null; dev_rev: string | null }>): Promise<SessionSummary> {
   const { data } = await api.patch(`/sessions/${id}`, patch)
   return unwrap<SessionSummary>(data)
 }
