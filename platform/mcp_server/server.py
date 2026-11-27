@@ -2578,18 +2578,226 @@ async def delete_report(report_id: str, ctx: Context) -> dict:
 # ── 과제 · 개발 개정 (온톨로지) ──────────────────────────────────────
 # 과제의 정본은 **허브**다 — 여기에 과제를 만들거나 고치는 도구는 **없다**(있으면 다음 받기가
 # 덮어쓰고 그 사실이 고친 사람에게 안 보인다). 쓰는 것은 **우리 것**(개정)뿐이다.
-@mcp.tool()
-async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str = "") -> dict:
-    """허브에서 받은 **과제 목록**. `q` 로 검색한다 — key(**과제명**) · `properties.task_code`(**과제코드**) ·
-    **별칭**(허브 `properties.aliases` · 이 플랫폼에서 붙인 별칭) · 이름 모두 본다. 항목마다 `matched_by`
-    (task_name · task_code · alias · label)와 `match_kind`(prefix 앞부분 · word 낱말 경계 · substring 부분)가 온다 —
-    별칭으로 걸렸으면 `matched_alias` · `alias_source`(hub · dynaforge)도. **순위를 매긴 뒤 자른다** — 앞부분 · 낱말 경계
-    일치가 위로 오고, 더 있으면 `truncated:true` · `total`. `project` 로 좁힐 수 있다.
-    ★`status:"deprecated"` 는 허브가 **그만 쓰라고 한** 과제다 — 새로 붙일 때는 고르지 마라(이미 이은 것은 그대로다).
-    ★목록이 비면 `reason` 을 본다 — 「수신이 꺼져 있다」 와 「받았지만 없다」 는 다르다. `last_error`(허브가 준 오류 원문)는 시스템
-    관리자에게만 온다 — 일반 사용자는 null 이고 `last_status` 를 본다.
-    / Mirrored PLM tasks. `q` matches name · task_code · aliases · label, ranked before truncation;
-    each item carries `matched_by` and `match_kind`."""
+
+# 과제 · 개정 · 레시피 도구(list_tasks ~ recipe_deprecate)의 허용값 · 상한 · 결과 꼴(계약 C3 · C4 · C7) — 허용값 · 상한은 백엔드 라우트의 제약과 같다.
+ONTO_STATES = ("all", "active", "deprecated", "inactive")       # GET /ontology/objects 의 state — 이 밖은 백엔드가 422 로 거절한다
+TASK_LIMIT_MAX = 1000                                           # GET /ontology/tasks 의 limit(ge=1)
+ONTO_FIND_LIMIT_MAX = 1000                                      # GET /ontology/objects 의 limit(ge=1) · offset(ge=0)
+TASK_LINKS_LIMIT_MAX = 2000                                     # GET /ontology/task-links 의 limit(ge=1 — 0 이하는 MCP 가 싣지 않는다)
+RECIPE_SEARCH_LIMIT_MAX = 200                                   # GET /recipes 의 limit(ge=1)
+RECIPE_RUN_REPORTS_MAX = 32                                     # POST /recipes/{name}/run 의 report_ids(1개 이상)
+RECIPE_NOTE_MIN = 20                                            # 등록 근거가 되는 평가 글의 최소 글자 수
+# 개정 코드 — 설명에만 쓴다(enum 이 아니다 — 백엔드는 앞뒤 공백을 떼고 받는다). dv · pv 는 차수(1 · 2 · 3 · r) 필수, pre · pra · mp 는 차수 없음.
+REVISION_CODES = ("pre", "dv1", "dv2", "dv3", "dvr", "pv1", "pv2", "pv3", "pvr", "pra", "mp")
+
+_A_TASK_KEY = ("과제명(허브 plm_task 의 key) — list_tasks 의 items[].key. 과제코드가 아니다(과제코드면 list_tasks 의 q 로 과제명을 "
+               "먼저 찾는다). '/' 가 들어도 된다.")
+_A_OWN_REPORT_ID = _A_REPORT_ID + " 내 리포트여야 한다(남의 리포트는 404)."
+_A_RECIPE_NAME = "레시피 이름(소문자 · 숫자 · 밑줄) — recipe_search 의 name."
+
+ListTasksOut = _shape("ListTasksOut", {
+    "items": "과제 — key(과제명) · label · status(deprecated 면 그만 씀) · deleted · properties(task_code · project · aliases …) · "
+             "updated_at, 검색했으면 matched_by · match_kind, 별칭으로 걸렸으면 matched_alias · alias_source",
+    "total": "q 로 걸린 전체 수 — q 가 있을 때만 온다",
+    "truncated": "limit 에서 잘렸으면 true",
+    "sync_enabled": "허브 수신이 켜져 있나",
+    "last_status": "과제 타입의 마지막 받기 상태",
+    "last_error": "허브가 준 오류 원문 — 시스템 관리자에게만(그 밖에는 null)",
+    "last_run_at": "과제 타입을 마지막으로 받은 때",
+    "reason": "목록이 비었을 때의 까닭(수신 꺼짐 · 받았지만 없음) — 비지 않았으면 null",
+})
+TaskRevisionsOut = _shape("TaskRevisionsOut", {
+    "task": "물은 과제명",
+    "task_found": "거울에 있는 과제거나 개정이 있으면 true — false 면 모르는 과제",
+    "revisions": "판(rev_seq 순) — key(<과제명>@<code>) · code · phase · round · rev_seq · rev_source · status · decided_by · "
+                 "decided_at · model · supersedes(앞 판 key) · reports(읽을 수 있는 리포트 id)",
+    "scope": "all(시스템 관리자 — 리포트 전부) · readable(읽을 수 있는 리포트만)",
+    "reason": "unknown_task — task_found 가 false 일 때만",
+    "hint": "모르는 과제일 때 다음 할 일",
+})
+ReportRevisionOut = _shape("ReportRevisionOut", {
+    "report_id": "리포트 id",
+    "eng_meta": "수동 메타(project · dev_revision …)",
+    "free_task": "리포트가 말하는 과제 이름(수동 메타의 project, 없으면 리포트에 박힌 이름)",
+    "resolved_task": "그 이름이 지금 풀리는 과제명 — 못 풀면 null",
+    "resolved_how": "어떻게 풀렸나 — exact · task_code · previous_key · alias · hub_alias",
+    "linked": "이어진 판 {key, task, code, source(manual · rule · eng_meta · null)} — 없으면 null",
+    "unlinked": "사람이 끊은 기록 {by, at, was} — 없으면 null",
+    "task_state": "그 과제의 허브 처지 {key, state(active · deprecated · merged · gone · hidden · renamed · unknown), into …} — 과제가 "
+                  "없으면 null",
+    "mismatch": "수동 메타와 이어진 판의 어긋남 {kind(differs · renamed · merged · eng_meta_missing), linked, eng_meta, said} — 없으면 null",
+    "candidates": "개정 코드 후보 — code · source · evidence · valid(false 면 why) · phase · round · rev_seq",
+    "task_candidates": "과제가 하나로 안 풀렸을 때의 과제 후보와 근거",
+    "ambiguous": "글자 그대로 맞는 과제가 둘 이상이면 true(잇지 않았다)",
+    "alias_missing": "끝(과제)이 거울에 없는 사람의 별칭이 가리키는 key — 없으면 null",
+})
+SetReportRevisionOut = _shape("SetReportRevisionOut", {
+    "ok": "확정했으면 true",
+    "key": "확정한 판 key(<과제명>@<code>)",
+    "rev_seq": "판 차례 번호(단계 × 10 + 차수)",
+    "task_unverified": "과제 거울에 그 과제가 없어 확인하지 못했으면 true",
+    "detail": "덧붙임 글",
+    "task_resolved": "적은 과제를 어떻게 풀었나 {input, key, how(exact · task_code · previous_key · alias · hub_alias · verbatim)}",
+})
+OntologySyncStateOut = _shape("OntologySyncStateOut", {
+    "enabled": "허브 수신이 켜져 있나",
+    "receive_types": "받을 타입 — null 이면 공개된 것 전부",
+    "types": "타입 줄 — type_slug · objects_as_of · relations_as_of · catalog_revision · last_run_at · last_status · last_error(관리자만) · "
+             "objects · stopped · stopped_why",
+    "stopped_types": "멈춘 타입 slug",
+    "problems": "지금 상태에서 본 문제(멈춘 타입 등) — 사람이 읽는 줄",
+    "objects_by_type": "타입별 객체 수",
+    "object_states": "타입별 {total, active, deprecated, inactive, hidden}",
+    "last_run": "마지막 받기 실행 — id · started_at · finished_at · mode · trigger · result · revision · counts · problem_count · notes · "
+                "problems · error — 없으면 null",
+    "catalog": "마지막 허브 카탈로그 {revision, received_at, system, types(타입 수)} — 없으면 null",
+    "full_every_days": "처음부터 다시 받는 주기(일)",
+    "merged_waiting": "관리자가 옮기기를 기다리는 합쳐진 과제 수",
+})
+OntologyTypesOut = _shape("OntologyTypesOut", {
+    "types": "타입 — slug · label · description · source(hub · dynaforge · null) · catalog_revision · properties(칸) · relations · "
+             "counts{total, active, deprecated, inactive, hidden}",
+    "relation_types": "관계 종류 — slug · label · inverse_label · src · dst · source",
+})
+OntologyFindOut = _shape("OntologyFindOut", {
+    "type": "물은 타입 slug",
+    "total": "거른 전체 수(페이지와 무관)",
+    "offset": "이 페이지의 시작 위치",
+    "items": "객체(key 순) — type · key · label · status · active(false 면 사라짐) · hidden · merged_into · source · updated_at · synced_at",
+})
+OntologyObjectOut = _shape("OntologyObjectOut", {
+    "object": "객체 — type · key · label · status · active · hidden · merged_into · source · properties(칸) · previous_keys. 옛 식별자로 "
+              "물었으면 null",
+    "renamed_to": "옛 식별자로 물었을 때만 — 지금 key",
+    "merged_into_now": "합쳐진 객체면 바뀜 · 합침을 끝까지 푼 지금 key — 아니면 null",
+    "out": "나가는 선(지금 이어진 것) — relation · type · key · label · source · evidence_note · updated_at",
+    "in": "들어오는 선(지금 이어진 것) — out 과 같은 꼴",
+    "previous": "옛 식별자",
+    "scope": "all(시스템 관리자) · readable(끝이 리포트인 선은 읽을 수 있는 것만)",
+})
+PlanTaskLinksOut = _shape("PlanTaskLinksOut", {
+    "scope": "all(시스템 관리자 — 리포트 전부) · readable(읽을 수 있는 리포트만)",
+    "counts": "reports · reports_without_a_name · strings(자유 문자열 전체 수) · links · proposal · unmatched(판정한 문자열 기준) · unlinked",
+    "plan": "자유 문자열별 판정(문자열 정렬 순) — free · reports · n_reports · codes · task_key · how · verdict(links · proposal · "
+            "unmatched) · candidates · ambiguous · alias_missing · unlinked",
+    "reports_without_a_name": "과제 이름조차 없는 리포트 id",
+})
+CompareTaskRevisionsOut = _shape("CompareTaskRevisionsOut", {
+    "task": "물은 과제명",
+    "task_found": "거울에 있는 과제거나 개정이 있으면 true",
+    "revisions": "판(rev_seq 순) — 개정 줄 칸 + n_reports · worst_stress(MPa) · worst_g(G) · max_severity · n_cases · measured_from · "
+                 "missing_reports · d_worst_stress(앞 판 대비 — 한쪽이라도 없으면 null)",
+    "scope": "all(시스템 관리자) · readable(읽을 수 있는 리포트만으로 셌다)",
+    "note": "과제는 있으나 개정이 없을 때의 글",
+    "reason": "unknown_task — 모르는 과제일 때만",
+    "hint": "모르는 과제일 때 다음 할 일",
+})
+UnlinkReportRevisionOut = _shape("UnlinkReportRevisionOut", {
+    "ok": "끊었으면 true",
+    "was": "끊은 개정 key",
+    "unlinked_by": "끊은 사람",
+    "unlinked_at": "끊은 때",
+    "detail": "덧붙임 글",
+})
+ClearReportUnlinkOut = _shape("ClearReportUnlinkOut", {
+    "ok": "지웠으면 true",
+    "was": "기록에 있던 개정 key",
+    "detail": "덧붙임 글",
+    "task_links": "지운 뒤 이 리포트 하나에 돈 자동 잇기 결과 — 기능 꺼짐 · 잠금이면 skipped(off · busy), 실패면 error",
+})
+ConfirmTaskAliasOut = _shape("ConfirmTaskAliasOut", {
+    "ok": "붙였으면 true",
+    "alias": "붙인 자유 문자열(앞뒤 공백을 뗀 것)",
+    "key": "가리키는 과제명",
+})
+RemoveTaskAliasOut = _shape("RemoveTaskAliasOut", {
+    "ok": "뗐으면 true",
+    "alias": "뗀 자유 문자열",
+    "was": "가리키던 과제명",
+    "detail": "덧붙임 글",
+})
+RecipeSearchRow = _shape("RecipeSearchRow", {
+    "name": "레시피 이름",
+    "domain": "영역(report)",
+    "registered": "등록 판이 있으면 true",
+    "current_version": "등록 판 번호 — 없으면 null",
+    "meta": "title · question · when_to_use · kinds · needs · inputs · params · tags",
+    "useful_count": "등록 판에 붙은 '쓸모 있었다' 평가 수",
+    "has_draft": "내가 올린 초안 · 후보가 있으면 true",
+})
+RecipeGetOut = _shape("RecipeGetOut", {
+    "name": "레시피 이름",
+    "domain": "영역(report)",
+    "origin": "platform(이 플랫폼에서 올림) · git(씨앗 · 내보낸 파일에서 읽음)",
+    "current_version": "등록 판 번호 — 없으면 null",
+    "deprecated_at": "내린 때 — 안 내렸으면 null",
+    "deprecated_reason": "내린 까닭",
+    "versions": "판(새 것부터) — version · status(draft · candidate · registered · superseded) · meta · checks · gate · code(볼 수 없으면 "
+                "null) · created_at · registered_at",
+})
+RecipeRunOut = _shape("RecipeRunOut", {
+    "run_id": "실행 id — recipe_evaluate 에 넣는다",
+    "job_id": "플랫폼 잡 id — get_job 으로 본다",
+    "status": "queued · running · succeeded · failed",
+    "result": "run() 이 돌려준 값 — 크면 안내만",
+    "result_truncated": "결과가 커서 result 에 싣지 않았으면 true(전체는 산출 파일)",
+    "output_file_id": "결과 전체가 든 세션 산출 파일 id(download_result)",
+    "error": "실패 까닭 — 성공이면 null",
+    "sandbox": "샌드박스 층 정보",
+    "elapsed_ms": "실행 시간(ms)",
+    "hint": "다음 할 일",
+})
+RecipeProposeOut = _shape("RecipeProposeOut", {
+    "name": "레시피 이름",
+    "version": "새 판 번호",
+    "status": "candidate(자기 시험 통과) · draft(실패)",
+    "checks": "static_ok · tests · selftest_ok · tests_passed · compat_base · compat_ok · layers · error · stdout_tail",
+    "message": "다음 할 일 · 실패 까닭",
+    "similar": "비슷한 레시피 이름(최대 5)",
+})
+RecipeEvaluateOut = _shape("RecipeEvaluateOut", {
+    "run_id": "실행 id",
+    "useful": "남긴 평가",
+    "note": "남긴 글(최대 2000자)",
+})
+RecipeRegisterOut = _shape("RecipeRegisterOut", {
+    "name": "레시피 이름",
+    "version": "등록한 판 번호",
+    "status": "registered",
+    "superseded": "물러난 앞 등록 판 번호 — 없으면 null",
+    "exported": "내보낸 recipe.json 경로 — 내보내기에 실패했으면 null",
+    "message": "덧붙임 글",
+})
+RecipeDeprecateOut = _shape("RecipeDeprecateOut", {
+    "name": "레시피 이름",
+    "deprecated": "내렸으면 true",
+    "reason": "남긴 까닭",
+})
+
+
+@mcp.tool(annotations=_READ)
+async def list_tasks(
+    ctx: Context,
+    q: Annotated[str, Field(description="검색어 — 과제명(key) · 과제코드(properties.task_code) · 별칭(허브 · 이 플랫폼) · 이름(label)의 "
+                                        "일부(대소문자 무시). 비우면 거르지 않고 과제명 순이다.")] = "",
+    limit: Annotated[int, Field(ge=1, le=TASK_LIMIT_MAX,
+                                description=f"돌려줄 최대 과제 수(1~{TASK_LIMIT_MAX}). 기본 100. 넘치면 순위대로 앞에서 자르고 "
+                                            "truncated:true.")] = 100,
+    project: Annotated[str, Field(description="프로젝트 — 허브 칸 properties.project 와 글자 그대로 같은 과제만. "
+                                              "비우면 모든 프로젝트.")] = "",
+) -> ListTasksOut:
+    """허브에서 받은 과제(plm_task) 거울을 과제명 · 과제코드 · 별칭 · 이름으로 찾는다.
+
+    과제명(key)을 모를 때 먼저 쓴다 — task_revisions · compare_task_revisions · set_report_revision · confirm_task_alias 에 넣을
+    과제명을 여기서 얻는다. 과제가 아닌 받은 타입은 ontology_find.
+    검색은 순위를 매긴 뒤 자른다 — 앞부분(prefix) · 낱말 경계(word) · 부분(substring) 순이고, 같은 꼴이면 과제명 · 과제코드 · 별칭 ·
+    이름 순이다. 항목마다 `matched_by`(task_name · task_code · alias · label) · `match_kind` 가 오고, 별칭으로 걸렸으면
+    `matched_alias` · `alias_source`(hub · dynaforge)도 온다. 허브에서 사라진 과제는 빠진다.
+    돌려주는 것 — `items` · `truncated`(limit 에서 잘렸나) · `total`(q 가 있을 때 걸린 전체 수) · 수신 상태(`sync_enabled` ·
+    `last_status` · `last_run_at`). 페이지는 없다 — 잘렸으면 q · project 로 좁힌다.
+    ★`status:"deprecated"` 는 허브가 그만 쓰라고 한 과제다 — 새로 붙일 때 고르지 마라(이미 이은 것은 그대로다).
+    ★목록이 비면 `reason` 을 본다 — 수신이 꺼진 것과 받았지만 없는 것은 다르다. `last_error`(허브 오류 원문)는 시스템 관리자에게만
+    오고 그 밖에는 null 이다. 과제·개정 기능이 꺼진 박스는 거절한다(HTTP 409 — 까닭이 문구에 있다)."""
     params: dict = {"limit": limit}
     if q:
         params["q"] = q      # ★빈 값을 None 으로 실으면 httpx 가 `q=` 를 보낸다 — 키를 뺀다
@@ -2598,208 +2806,268 @@ async def list_tasks(ctx: Context, q: str = "", limit: int = 100, project: str =
     return await _get(ctx, "/ontology/tasks", params)
 
 
-@mcp.tool()
-async def task_revisions(task_key: str, ctx: Context) -> dict:
-    """한 과제의 **개발 개정 줄** — rev_seq 순, 각 판에 달린 리포트와 앞 판(supersedes).
-    같은 과제의 판끼리 결과를 견주려면 여기서 리포트 id 를 얻어 report_compare 로 넘긴다.
-    ★`task_found:false`(reason `unknown_task`)면 **정본에 그 과제가 없다**는 뜻이다 — 개정이 0 인 것과 다르다.
-    그때는 list_tasks 로 정본 과제명을 먼저 찾아라(과제코드로도 검색된다).
-    ★판은 다 보이지만 판마다 리포트는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 온다 — 시스템 관리자는 전부(`scope`).
-    / Revision chain; task_found:false means the task is unknown (not just empty). Report ids cover only reports you can read."""
+@mcp.tool(annotations=_READ)
+async def task_revisions(task_key: Annotated[str, Field(description=_A_TASK_KEY)], ctx: Context) -> TaskRevisionsOut:
+    """한 과제의 개발 개정 줄을 rev_seq 순으로 준다 — 판마다 달린 리포트 id 와 앞 판(supersedes).
+
+    판마다 리포트 id 를 얻을 때 쓴다. 판끼리 수치(최악 응력 · G · 심각도)를 나란히 보려면 compare_task_revisions, 리포트 하나가
+    어느 판인지는 report_revision 이다. 판끼리 리포트를 파트별로 견주려면 여기서 얻은 id 를 compare_reports 로 넘긴다.
+    돌려주는 것 — `task` · `task_found` · `revisions[]`(key `<과제명>@<code>` · code · phase · round · rev_seq · rev_source(manual 이면
+    사람이 확정한 판) · decided_by · decided_at · model · supersedes · reports) · `scope`. 상한 · 페이지 없이 전부 온다.
+    ★`task_found:false`(reason `unknown_task`)면 정본에 그 과제가 없다 — 개정이 0 인 것과 다르다. 과제코드를 넣었을 수 있으니
+    list_tasks 로 과제명을 먼저 찾는다.
+    ★판은 다 보이지만 판마다 리포트는 읽을 수 있는 것(소유 · 같은 소속)만 온다 — `scope` 가 readable 이면 전사 수가 아니다(시스템
+    관리자는 all)."""
     return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/revisions")
 
 
-@mcp.tool()
-async def report_revision(report_id: str, ctx: Context, task_key: str = "") -> dict:
-    """이 리포트가 어느 과제·개정인가(`linked`) + **어긋남** + **후보와 근거** + 그 과제의 허브 처지(`task_state`).
-    `ambiguous: true` 면 글자 그대로 맞는 과제가 둘 이상이다(원천이 엇갈린다) — 풀지 않고 `task_candidates` 에 근거와 함께 둔다.
-    그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다(살아 있는 과제의 일치를 막지 못한다).
-    `alias_missing` 은 사람이 붙인 별칭의 끝(과제)이 거울에 없다는 뜻이다 — 그 별칭으로는 허브 과제에 잇지 않았다(그 별칭을 떼고 다시
-    붙인다). 이름이 그 별칭**만** 맞으면 허브가 모르는 이름이라 리포트는 글자 그대로의 판에 있을 수 있고(`linked.source` 가 `eng_meta`),
-    허브의 다른 과제와도 맞으면 엇갈림이라 아예 잇지 않는다.
+@mcp.tool(annotations=_READ)
+async def report_revision(
+    report_id: Annotated[str, Field(description=_A_OWN_REPORT_ID)],
+    ctx: Context,
+    task_key: Annotated[str, Field(description="개정 코드 후보를 볼 과제명 — 주면 그 과제의 허브 개발모델(plm_model) model_revision 도 "
+                                               "후보 근거에 넣는다. 비우면 리포트의 이름이 풀리는 과제로 본다.")] = "",
+) -> ReportRevisionOut:
+    """리포트 하나가 어느 과제 · 개정에 이어져 있는지와 어긋남 · 후보와 근거 · 그 과제의 허브 처지를 함께 준다(리포트 소유자만).
 
-    ★`mismatch` 가 비어 있지 않으면 수동 메타(eng_meta)와 이어진 개정이 다르다는 뜻이다 —
-    **관계가 정본**이지만 서버는 조용히 맞추지 않는다. 사람에게 보여 주고 고르게 하라. `kind` 가
-    `renamed` · `merged` 면 잘못이 아니다 — 허브가 과제명을 바꿨거나 합쳤고 개정이 그리로 옮겨졌다(수동 메타는 옛 이름).
-    「다르다」 는 글자가 아니라 판정으로 가른다 — 수동 메타의 이름이 과제코드 · 별칭이어도 그것이 풀리는 과제의 그 판에 이어져 있으면
-    `mismatch` 는 비어 있다(`differs` 가 아니다).
-    ★`task_state.state` — `merged` 면 「A 는 B(`into`)로 합쳐짐」 을 알려라. 옮기는 것은 **시스템 관리자**가 화면에서
-    누른다(저절로 옮기지 않는다 — 사용자 결정). `gone` 은 허브에서 사라짐(사용 안 함), `deprecated` 는 그만 씀.
-    `candidates` 는 고르지 않은 후보다(근거 포함). `valid: false` 인 것은 형식이 아니지만
-    **버리지 않고** 보여 주는 것이다.
-    ★`unlinked` 가 있으면 사람이 이 리포트의 연결을 끊었다(`by` · `at` · `was`) — 자동 잇기가 다시 잇지 않는다.
-    `linked.source` 는 이 리포트의 선을 누가 이었나다 — `manual` 사람, `rule` 기계(이름이 허브 과제 하나로 풀렸다 — 반입 · 메타 고침 ·
-    받기 뒤 · 일괄 적용 · 끊은 기록을 지운 뒤), `eng_meta` 기계(반입 · 메타 고침 — 허브가 모르는 이름을, 기능이 꺼져 있던 때에는 어느
-    이름이든, 수동 메타 글자 그대로). 누가 이었는지 적지 않던 때의 옛 선은 그 판이 사람 판이면 `manual`, 아니면 null 이다. 기계가 지은
-    판에 사람이 확정하면 그 판의 다른 옛 선은 그때 `eng_meta` 가 된다(남이 확정했다고 내 리포트가 사람 선이 되지 않는다). 사람이 이은
-    선은 기계가 옮기지 않는다. ★선을 **이을 때** 찍은 표시다 — 이름이 풀리는 그 판에 이미 이어져 있던 선은 다시 찍지 않아 옛
-    표시(`eng_meta` · `manual` · null)가 그대로다. 그래서 지금은 허브 과제로 풀리는 이름인데 `eng_meta` 일 수 있고(과제가 허브에 오기
-    전이나 기능이 꺼져 있던 때에 글자 그대로 이은 선), 한 판의 리포트들이 서로 다른 표시를 가질 수 있다.
-    / The linked revision, any mismatch, unchosen candidates, and the hub state of its task (merged → admin moves it)."""
+    set_report_revision 으로 확정하기 전에 부른다 — 후보와 근거를 사람에게 보여 주고 고르게 한다. 과제의 판 줄 전체는 task_revisions.
+    - `linked` — 이어진 판 `{key, task, code, source}`. source 는 선을 누가 이었나다 — `manual` 사람 · `rule` 기계(이름이 허브 과제
+      하나로 풀림) · `eng_meta` 기계(허브가 모르는 이름을 수동 메타 글자 그대로) · null(누가 이었는지 적지 않던 옛 선). 이을 때 찍은
+      표시라 지금 풀리는 과제와 다를 수 있다 — 지금 풀림은 `resolved_task` · `resolved_how`. 사람이 이은 선은 기계가 옮기지 않는다.
+    - `mismatch` — 비어 있지 않으면 수동 메타(eng_meta)와 이어진 판이 다르다. 관계가 정본이지만 서버는 조용히 맞추지 않는다 — 사람에게
+      보여 주고 고르게 한다. kind `renamed` · `merged` 는 잘못이 아니다(허브가 과제명을 바꿨거나 합쳤고 판이 옮겨졌다). 수동 메타의
+      이름이 과제코드 · 별칭이어도 같은 판으로 풀리면 어긋남이 아니다.
+    - `task_state.state` — active · deprecated(그만 씀) · merged(`into` 로 합쳐짐 — 옮기기는 시스템 관리자가 화면에서 누른다, 저절로
+      옮기지 않는다) · gone(허브에서 사라짐) · hidden · renamed · unknown.
+    - `candidates` — 개정 코드 후보와 근거(`valid:false` 도 버리지 않고 보인다). `ambiguous:true` 면 글자 그대로 맞는 과제가 둘 이상이라
+      잇지 않았다(`task_candidates`). 그만 쓴 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다.
+    - `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어 그 별칭으로는 잇지 않았다(remove_task_alias 로 떼고 다시 붙인다).
+    - `unlinked` — 사람이 연결을 끊은 기록 `{by, at, was}` — 자동 잇기가 다시 잇지 않는다."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/revision",
                       {"task_key": task_key} if task_key else None)
 
 
-@mcp.tool()
-async def set_report_revision(report_id: str, task_key: str, code: str, ctx: Context,
-                              model_key: str = "", supersedes: str = "",
-                              note: str = "") -> dict:
-    """리포트를 과제의 한 개정에 **확정한다**(사람의 판정으로 기록된다).
+@mcp.tool(annotations=_SET)
+async def set_report_revision(
+    report_id: Annotated[str, Field(description=_A_OWN_REPORT_ID)],
+    task_key: Annotated[str, Field(description="과제 — 과제명 · 과제코드 · 옛 과제명 · 별칭 어느 것이든(list_tasks 로 찾는다). 과제 "
+                                               "하나로 풀려야 한다. 1~300자.")],
+    code: Annotated[str, Field(description=f"개정 코드 — {_one_of(REVISION_CODES)} 가운데 하나(dv · pv 는 차수 1 · 2 · 3 · r 필수, "
+                                           "pre · pra · mp 는 차수 없음).")],
+    ctx: Context,
+    model_key: Annotated[str, Field(description="허브 개발모델(plm_model) key — 판에 적는다. 비우면 바꾸지 않는다. 최대 300자.")] = "",
+    supersedes: Annotated[str, Field(description="앞 판의 개정 key(<과제명>@<code> — task_revisions 의 revisions[].key). 비우면 앞 판을 "
+                                                 "잇지 않는다. 자기 자신 · 순환은 거절된다. 최대 300자.")] = "",
+    note: Annotated[str, Field(description="판에 남길 메모 — 비우면 바꾸지 않는다. 최대 2000자.")] = "",
+) -> SetReportRevisionOut:
+    """리포트를 과제의 한 개정에 확정한다 — 사람의 판정으로 기록되고 재인제스트에도 지워지지 않는다(리포트 소유자만).
 
-    `task_key` 는 과제명 · 과제코드 · 옛 과제명 · 별칭 어느 것이든 된다 — 자동 잇기와 같은 규칙으로 과제 하나로 풀리면 그 과제명으로
-    잇고(응답 `task_resolved`), 없음 · 둘 이상이면 `task_unresolved` 로 거절한다(HTTP 400 · 후보를 함께 준다 — 아무것도 바꾸지 않았다).
-    허브 거울에 과제가 하나도 없는 박스는 글자 그대로 잇는다.
-    `code` 는 `pre|dv1..dvr|pv1..pvr|pra|mp` — dv/pv 는 차수 필수, pre/pra/mp 는 차수 금지.
-    `supersedes` 는 앞 판의 개정 키(`<과제 key(과제명)>@<code>`)다 — 순환은 거절된다.
-    ★이 확정은 **재인제스트에 지워지지 않는다.** 그래서 짐작으로 부르지 마라 —
-    `report_revision` 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣어라. 사람이 끊은 기록이 있으면 지운다.
-    기계가 지은 판에 확정하면 그 판에 얹힌 다른 리포트의 옛 선(누가 이었는지 안 적힌 선)에 기계가 이었다고 먼저 적는다 — 그 리포트를
-    누가 고치는 중이면 `busy` 로 거절한다(HTTP 409 — 아무것도 바꾸지 않았다. 잠시 뒤 다시 부른다).
-    / Confirm the revision of a report. Survives re-ingest; do not guess."""
+    ★짐작으로 부르지 마라 — report_revision 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣는다. 잘못 확정했으면
+    unlink_report_revision 으로 끊는다. 이 리포트에 사람이 끊은 기록이 있으면 지운다.
+    과제는 과제명 · 과제코드 · 옛 과제명 · 별칭 어느 것이든 된다 — 자동 잇기와 같은 규칙으로 과제 하나로 풀리면 그 과제명으로
+    잇고(응답 `task_resolved`), 없거나 둘 이상이면 `task_unresolved` 로 거절한다(HTTP 400 · 후보를 함께 준다 · 아무것도 바꾸지
+    않았다). 허브 거울에 과제가 하나도 없는 박스는 글자 그대로 잇는다(how `verbatim`).
+    이미 다른 판에 이어져 있으면 이 판으로 옮긴다(리포트 하나에 판 하나). 그 판이 기계가 지은 판이면 거기 얹힌 다른 리포트의 옛
+    선에 기계가 이었다고 먼저 적는다 — 그 리포트를 누가 고치는 중이면 `busy` 로 거절한다(HTTP 409 · 아무것도 바꾸지 않았다 · 잠시
+    뒤 다시 부른다).
+    돌려주는 것 — `key`(<과제명>@<code>) · `rev_seq` · `task_unverified`(과제 거울에 없어 확인 못 함) · `task_resolved`."""
     return await _put(ctx, f"/reports/{_seg(report_id)}/revision", {
         "task_key": task_key, "code": code, "model_key": model_key,
         "supersedes": supersedes, "note": note})
 
 
-@mcp.tool()
-async def ontology_sync_state(ctx: Context) -> dict:
-    """허브 수신 상태 — 타입별 시계 · 마지막 실행 · 정의 판 · 타입별 건수(읽기는 로그인한 사용자 누구나).
-    '받기가 됐나' 는 여기서 본다. `last_run.result` 는 셋이다 — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패.
-    사유 수는 `last_run.problem_count` 다. ★오류 원문은 **시스템 관리자에게만** 온다 — 사유 줄(`last_run.problems` — 공개 안 된 타입 ·
-    「절반 넘게 안 와서 정리를 멈춤」 · 예외 원문 등) · 오류 글(`last_run.error`) · 층 2 반영의 예외(`counts.reflected.error`) · 끊은 줄과
-    같은 판으로 접을 때 남는 판에 못 옮긴 앞 판 줄(`dropped`) · 옮긴 리포트 수(`reports`) · 타입 줄의 `last_error`(허브가 준 원문). 일반
-    사용자에게는 빈 목록 · null 이고 `counts.reflected` 는 반영 수(`renamed` · `revisions` · `collapsed` · `aliases` · `models` ·
-    `merged_waiting` · `deferred` — 그 과제의 리포트 · 판을 그때 누가 고치고 있어 이번에 못 옮기고 다음 받기로 미룬 이름 바뀜 과제
-    수)만 온다. 미뤘으면 `last_run.notes` 에도 한 줄 적힌다(수만 — 누구나 본다).
-    타입의 `last_status` 가 `skipped` 면 허브가 그 타입을 **공개하지 않은 것**이다(고칠 곳은 허브 관리자다).
-    ★타입 줄의 `stopped: true` 는 **멈춘 타입**이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이라(`stopped_why`
-    `not_in_list`) 또는 허브 카탈로그에 없어서(`not_published`) 더 받지 않는다. 그 줄의 `last_status`(`ok` 일 수 있다) · 건수는
-    마지막으로 받았을 때 그대로다. 맨 위 `problems` 는 지금 상태에서 본 문제(멈춘 타입 등)다 — 비어 있지 않으면 `last_run.result`
-    가 `ok` 여도 다 받고 있는 것이 아니다. 받을 타입을 넓히는 것은 박스 설정(KOORM_SP_CORE_TYPES)이다.
-    `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
-    `last_run.counts.task_links` 는 받기 뒤 과제 잇기(붙는 것만) 결과다 — 이음(`linked` · 리포트) · 후보(`candidates` · 문자열) ·
-    못 붙임(`unmatched` · 문자열) · 이름 없는 리포트(`reports_without_a_name`) · 사람이 끊어 건너뜀(`skipped_unlinked`). 리포트 전부를 센 것이라 **시스템 관리자에게만** 온다.
-    과제·개정 기능이 꺼져 있으면(KOORM_ONTOLOGY=0) 받기는 돌아도 잇지 않는다 — `skipped: off`.
-    받기 실행 · 처음부터 · 강제 정리는 **관리자 화면에만** 있다(도구 없음). / Hub sync state; result is ok · needs_check · failed."""
+@mcp.tool(annotations=_READ)
+async def ontology_sync_state(ctx: Context) -> OntologySyncStateOut:
+    """허브 수신(받기) 상태를 준다 — 타입별 시계 · 마지막 실행 결과 · 정의 판 · 타입별 건수(로그인한 누구나 읽는다).
+
+    '받기가 됐나' 는 여기서 본다. 받은 타입 정의는 ontology_types, 받은 과제는 list_tasks. 받기 실행 · 처음부터 · 강제 정리 · 합친
+    과제 옮기기는 관리자 화면에만 있다(도구 없음).
+    - `last_run.result` — `ok` 정상 · `needs_check` 확인 필요 · `failed` 실패. 사유 수는 `last_run.problem_count`, 알림 줄
+      `last_run.notes` 는 누구나 본다(이름 바뀐 과제의 개정 옮기기를 미뤘으면 그 수).
+    - 타입 줄 `types[]` — `last_status` 가 `skipped` 면 허브가 그 타입을 공개하지 않았다(고칠 곳은 허브 관리자). `stopped:true` 는
+      멈춘 타입이다 — 받을 타입(`receive_types`, null 이면 공개된 것 전부) 밖이거나(`stopped_why` `not_in_list`) 허브 카탈로그에
+      없어서(`not_published`) 더 받지 않는다. 그 줄의 상태 · 건수는 마지막으로 받았을 때 그대로다.
+    - 맨 위 `problems` 는 지금 상태에서 본 문제다 — 비어 있지 않으면 `last_run.result` 가 `ok` 여도 다 받고 있는 것이 아니다. 받을
+      타입을 넓히는 것은 박스 설정 KOORM_SP_CORE_TYPES 다.
+    - `object_states` 는 타입별 활성 · 그만 씀 · 사용 안 함 건수, `merged_waiting` 은 관리자가 옮길 합쳐진 과제 수다.
+    ★시스템 관리자에게만 오는 것 — 오류 원문(`last_run.problems` · `last_run.error` · 타입 줄의 `last_error`), 받기 뒤 과제 잇기
+    결과 `last_run.counts.task_links`(리포트 전부를 센 것 — `skipped: off` 면 그때 과제·개정 기능이 꺼져 잇지 않았다), 층 2 반영의
+    예외 · 못 옮긴 앞 판 줄 · 옮긴 리포트 수. 일반 사용자에게는 빈 목록 · null 이고 `last_run.counts.reflected` 에는 반영 수(renamed ·
+    revisions · collapsed · aliases · models · merged_waiting · deferred)만 온다."""
     return await _get(ctx, "/ontology/sync")
 
 
-@mcp.tool()
-async def ontology_types(ctx: Context) -> dict:
-    """허브에서 받은 **타입 정의**(칸 · 관계)와 타입별 건수 — 활성 · 그만 씀(deprecated) · 사용 안 함(사라짐 · 합쳐짐) ·
-    그중 안 보이게 됨(hidden). 우리 것(`dev_revision`)도 같은 표에 있어 `source`(hub · dynaforge)로 가른다.
-    ★읽기 전용이다 — 정본은 허브다(고치는 도구는 없다). / Received types with fields, relations and per-state counts."""
+@mcp.tool(annotations=_READ)
+async def ontology_types(ctx: Context) -> OntologyTypesOut:
+    """허브에서 받은 타입 정의(칸 · 관계)와 타입별 건수를 준다 — 우리 것(dev_revision)도 같은 표에 있다.
+
+    ontology_find · ontology_object 의 type_slug 를 여기서 고른다(`types[].slug`). 과제(plm_task)를 찾을 때는 list_tasks 가 낫다.
+    돌려주는 것 — `types[]`(slug · label · description · source(hub 허브 · dynaforge 우리 것 · null 정의 없이 행만 받은 타입) ·
+    catalog_revision · properties(칸) · relations · counts) · `relation_types[]`(slug · label · inverse_label · src · dst · source).
+    counts 는 total · active(활성) · deprecated(그만 씀) · inactive(사용 안 함 — 사라짐 · 합쳐짐) · hidden(그중 안 보이게 됨)이고,
+    리포트에서 나온 행(cae_*)은 세지 않는다.
+    ★읽기 전용이다 — 정본은 허브라 고치는 도구는 없다. 상한 · 페이지 없이 전부 온다."""
     return await _get(ctx, "/ontology/types")
 
 
-@mcp.tool()
-async def ontology_find(type_slug: str, ctx: Context, q: str = "", state: str = "all",
-                        limit: int = 100, offset: int = 0) -> dict:
-    """받은 한 타입의 객체를 찾는다 — `q` 는 key · 이름 일부, `state` 는 all · active · deprecated(그만 씀) · inactive(사용 안 함).
-    ★사라진 것도 지우지 않았다 — `active:false` 로 함께 온다(합쳐졌으면 `merged_into`). `total` 이 전체 건수다.
-    과제는 `list_tasks` 가 낫다(과제코드 · 별칭 · 순위). / Find objects of one received type; gone ones stay as active:false."""
+@mcp.tool(annotations=_READ)
+async def ontology_find(
+    type_slug: Annotated[str, Field(description="타입 slug — ontology_types 의 types[].slug(예 plm_task · plm_model · dev_revision). "
+                                                "모르는 타입이면 거절하지 않고 빈 목록이다. 1~80자.")],
+    ctx: Context,
+    q: Annotated[str, Field(description="key · 이름(label)의 일부(대소문자 무시). 비우면 거르지 않는다. 최대 200자.")] = "",
+    state: Annotated[Literal[ONTO_STATES], Field(description="상태 거르개 — all(기본 · 전부) · active(활성) · deprecated(그만 씀) · "
+                                                             "inactive(사용 안 함 — 사라짐 · 합쳐짐).")] = "all",
+    limit: Annotated[int, Field(ge=1, le=ONTO_FIND_LIMIT_MAX,
+                                description=f"한 페이지의 최대 객체 수(1~{ONTO_FIND_LIMIT_MAX}). 기본 100.")] = 100,
+    offset: Annotated[int, Field(ge=0, description="건너뛸 객체 수(0 이상) — 다음 페이지는 앞 offset + 받은 수. 기본 0(처음부터).")] = 0,
+) -> OntologyFindOut:
+    """받은 한 타입의 객체를 key · 이름 일부로 찾는다 — 페이지(limit · offset)로 넘긴다.
+
+    type_slug 는 ontology_types 의 slug 다. 과제는 list_tasks 가 낫다(과제코드 · 별칭 · 순위). 객체 하나의 칸 · 선은 ontology_object.
+    돌려주는 것 — `type` · `total`(거른 전체 수) · `offset` · `items[]`(type · key · label · status · active · hidden · merged_into ·
+    source · updated_at · synced_at). key 순이다.
+    ★사라진 것도 지우지 않았다 — `active:false` 로 함께 온다(합쳐졌으면 `merged_into`). `state` 로 거른다.
+    ★`offset + items 수` 가 `total` 보다 작으면 더 있다 — 다음 페이지를 부른다. 리포트에서 나온 행(cae_*)은 여기 오지 않는다."""
     params: dict = {"type": type_slug, "state": state, "limit": limit, "offset": offset}
     if q:
         params["q"] = q      # 빈 값을 실으면 `q=` 가 간다 — 키를 뺀다
     return await _get(ctx, "/ontology/objects", params)
 
 
-@mcp.tool()
-async def ontology_object(type_slug: str, key: str, ctx: Context) -> dict:
-    """객체 하나 — 칸 · 상태 · 합쳐진 곳(`merged_into_now` — 바뀜 · 합침을 끝까지 푼 것) · 옛 식별자(`previous`) ·
-    나가는/들어오는 선(`out` · `in` — 지금 이어진 것, 근거 메모 포함).
-    ★허브가 바꾼 **옛 식별자로** 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다.
-    끝이 리포트인 선(개정에 달린 리포트)은 읽을 수 있는 리포트만 보인다(`scope`).
-    / One received object with fields, state, old keys and live edges; an old key answers with renamed_to."""
+@mcp.tool(annotations=_READ)
+async def ontology_object(
+    type_slug: Annotated[str, Field(description="타입 slug — ontology_types 의 types[].slug(예 plm_task). '/' 는 쓸 수 없다.")],
+    key: Annotated[str, Field(description="객체 key — ontology_find 의 items[].key(과제면 과제명). '/' 가 들어도 된다. 허브가 바꾼 "
+                                          "옛 식별자도 받는다(renamed_to 로 답한다).")],
+    ctx: Context,
+) -> OntologyObjectOut:
+    """받은 객체 하나를 칸 · 상태 · 옛 식별자 · 지금 이어진 선과 함께 준다.
+
+    key 는 ontology_find 의 items[].key(과제면 list_tasks 의 key)다. 목록 · 검색은 ontology_find, 과제의 판 줄은 task_revisions.
+    돌려주는 것 — `object`(type · key · label · status · active · hidden · merged_into · source · properties(칸) · previous_keys) ·
+    `merged_into_now`(바뀜 · 합침을 끝까지 푼 지금 key — 합쳐진 객체만) · `previous`(옛 식별자) · `out` · `in`(나가는 · 들어오는 선 —
+    relation · type · key · label · source · evidence_note(근거 메모) · updated_at, 지금 이어진 것만) · `scope`.
+    ★허브가 바꾼 옛 식별자로 물으면 `object:null` 과 `renamed_to`(지금 key)가 온다 — 「없다」 가 아니다. 받은 적이 없는 key 는
+    거절된다(HTTP 404).
+    ★끝이 리포트인 선(개정에 달린 리포트)은 읽을 수 있는 리포트만 보인다 — `scope` 가 readable 이면 전부가 아니다(시스템 관리자는
+    all). 선 수에 상한 · 페이지는 없다."""
     return await _get(ctx, f"/ontology/objects/{_seg(type_slug)}/{_seg_key(key)}")
 
 
-@mcp.tool()
-async def plan_task_links(ctx: Context, limit: int = 0) -> dict:
-    """과거 리포트의 자유 문자열 과제를 정본에 붙이는 **계획** — 로그인한 누구나 부른다.
-    ★**아무것도 쓰지 않는다**(미리 보기다). `links`(붙는다)·`proposal`(후보 있음)·`unmatched`(없음)로
-    갈라서 주고, **이름조차 없는 리포트 수**를 따로 센다. 짐작으로 붙이지 마라. `links` 는 글자 그대로 맞는 원천(과제명 ·
-    과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 **과제 하나로 모일 때만**이다 — 엇갈리면(`ambiguous: true`) 후보다.
-    그만 쓴(deprecated) 과제는 살아 있는 과제가 하나도 안 맞을 때만 센다 — 하나면 잇고, 여럿이면 못 붙임(후보로 내지 않는다).
-    항목의 `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어(지워짐 · 합쳐짐 · 받은 적 없음) 그 별칭으로는 잇지 않았다. 그
-    별칭**만** 맞는 이름은 허브가 모르는 이름이라 그 리포트는 반입 때 글자 그대로의 판에 이어져 있을 수 있다(자동 잇기는 그 선을 옮기지
-    않는다 — 별칭의 끝이 거울에 오면 옮긴다).
-    ★일반 사용자에게는 **읽을 수 있는 리포트(소유 · 같은 소속)만** 들고 수도 그것으로 센다(`scope: readable`) —
-    전사 수가 아니다. 시스템 관리자는 전부다(`scope: all`). 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
-    ★`links` 는 **허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다**(과제·개정 기능이 켜져 있을 때 · 사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서
-    `links` 에 든 리포트는 대개 이미 이어져 있다. 후보(`proposal`) · 못 붙임(`unmatched`)은 사람이 별칭으로 정한다.
-    반입 때 잇기 · 수동 메타 고침(`update_report_meta`)도 **이 판정을 따른다** — `links` 의 이름은 반입 때 바로 그 과제의 판에 이어지고,
-    허브 과제와 맞는데 하나로 정해지지 않은 이름(엇갈림 · 이름만 같음)은 반입 때도 잇지 않는다. 허브가 모르는 이름(거울의 과제와 맞는 데가
-    없다)만 글자 그대로의 판에 이어져 있다가, 허브가 그 과제를 내거나 사람이 별칭을 붙인 뒤의 자동 잇기(받기 뒤 · 관리자 일괄 적용)가 옮긴다.
-    항목의 `unlinked`(리포트 id) · `counts.unlinked` 는 사람이 연결을 끊은 리포트다 — 자동 잇기 · 일괄 적용이 건너뛴다.
-    / A dry plan for attaching legacy free-text task names. Writes nothing. Any signed-in user may call it;
-    a regular user's plan and counts cover only the reports they can read (scope=readable), a system admin sees all."""
+@mcp.tool(annotations=_READ)
+async def plan_task_links(
+    ctx: Context,
+    limit: Annotated[int, Field(le=TASK_LINKS_LIMIT_MAX,
+                                description=f"판정할 자유 문자열 수 상한(1~{TASK_LINKS_LIMIT_MAX}) — 문자열 정렬 순으로 앞에서부터. "
+                                            "0 이하(기본 0)면 전부. 자르면 counts 의 links · proposal · unmatched 도 판정한 것만 "
+                                            "센다(counts.strings 가 전체 문자열 수).")] = 0,
+) -> PlanTaskLinksOut:
+    """과거 리포트의 자유 문자열 과제를 정본 과제에 붙이는 계획을 미리 본다 — 아무것도 쓰지 않는다(로그인한 누구나).
+
+    후보 · 못 붙임을 사람에게 보여 주고 confirm_task_alias 로 별칭을 붙이게 할 때 쓴다. 리포트 하나의 판은 report_revision, 확정은
+    set_report_revision. 적용(붙는 것을 실제로 잇기)은 이 도구가 아니다(시스템 관리자 REST).
+    돌려주는 것 — `plan[]`(자유 문자열마다 free · reports · n_reports · codes · task_key · how · verdict · candidates · ambiguous ·
+    alias_missing · unlinked) · `counts` · `reports_without_a_name`(과제 이름조차 없는 리포트 id) · `scope`.
+    - verdict `links`(붙는다)는 글자 그대로 맞는 원천(과제명 · 과제코드 · 옛 과제명 · 사람이 붙인 별칭 · 허브 별칭)이 과제 하나로
+      모일 때만이다. 엇갈리면(`ambiguous:true`) `proposal`(후보 있음), 없으면 `unmatched`. 그만 쓴(deprecated) 과제는 살아 있는
+      과제가 하나도 안 맞을 때만 센다 — 하나면 잇고 여럿이면 못 붙임이다. 짐작으로 붙이지 마라.
+    - `links` 는 허브 받기 뒤 · 리포트 반입 뒤 스스로 이어진다(사람이 손으로 확정한 리포트는 옮기지 않는다) — 그래서 대개 이미
+      이어져 있다. 반입 · 수동 메타 고침(update_report_meta)도 같은 판정을 따르고, 허브가 모르는 이름만 글자 그대로의 판에
+      이어져 있다가 허브가 그 과제를 내거나 사람이 별칭을 붙인 뒤 자동 잇기가 옮긴다.
+    - `alias_missing` — 사람이 붙인 별칭의 끝(과제)이 거울에 없어(지워짐 · 합쳐짐 · 받은 적 없음) 그 별칭으로는 잇지 않았다.
+      `unlinked` · `counts.unlinked` — 사람이 연결을 끊은 리포트(자동 잇기 · 일괄 적용이 건너뛴다).
+    ★일반 사용자는 읽을 수 있는 리포트(소유 · 같은 소속)만 들고 수도 그것으로 센다(`scope: readable` — 전사 수가 아니다). 시스템
+    관리자는 전부다(`all`)."""
     # ⚠`{"limit": None}` 을 넘기면 httpx 가 `limit=` 를 빈 값으로 보내고 `int` 쿼리가
     #   **422 로 거절한다**(실측 — 기본 호출이 그래서 깨져 있었다). 키를 아예 뺀다.
     return await _get(ctx, "/ontology/task-links", {"limit": limit} if limit > 0 else None)
 
 
-@mcp.tool()
-async def compare_task_revisions(task_key: str, ctx: Context) -> dict:
-    """한 과제의 개정을 **나란히** — 판마다 최악 응력·최악 G·심각도·케이스 수와 **앞 판 대비 변화**.
+@mcp.tool(annotations=_READ)
+async def compare_task_revisions(task_key: Annotated[str, Field(description=_A_TASK_KEY)],
+                                 ctx: Context) -> CompareTaskRevisionsOut:
+    """한 과제의 개정을 나란히 놓는다 — 판마다 최악 응력 · 최악 G · 심각도 · 케이스 수와 앞 판 대비 변화.
 
-    이것이 "같은 과제의 판끼리 견준다" 의 자리다. 숫자는 리포트에 이미 승격된 칸을 그대로
-    쓴다(다시 계산하지 않는다).
-    ★**안 잰 것은 `null` 이고 0 이 아니다** — 0 으로 읽으면 "쟀는데 0" 이 된다.
-    ★`measured_from` 은 그 판의 **몇 건에서** 최악값을 모았는지다. 한 건과 열 건의 최악값은
-    같은 뜻이 아니다. 그림까지 견주려면 `reports` 의 id 를 `report_compare` 로 넘긴다.
-    ★리포트 줄 · 수치(최악값 · 심각도 · 케이스 · `measured_from`)는 **읽을 수 있는 리포트(소유 · 같은 소속)만**으로 센다 —
-    판은 다 보이고 시스템 관리자는 전부다(`scope`: all · readable). 전사 수가 아닐 수 있다.
-    / Revisions of one task side by side; report rows and numbers cover only reports you can read (scope)."""
+    같은 과제의 판끼리 결과를 견줄 때 쓴다. 판 줄만 필요하면 task_revisions 다. 판끼리 리포트를 파트별로 견주려면
+    `revisions[].reports` 의 id 를 compare_reports 로, 리포트 하나의 케이스를 그림으로 보려면 report_compare 로 넘긴다.
+    돌려주는 것 — `task` · `task_found` · `revisions[]`(개정 줄 칸 + n_reports · worst_stress(MPa) · worst_g(G) · max_severity ·
+    n_cases · measured_from · missing_reports · d_worst_stress) · `scope`. 숫자는 리포트에 이미 승격된 칸을 그대로 쓴다(다시 계산하지
+    않는다). 상한 · 페이지 없이 전부 온다.
+    ★안 잰 것은 `null` 이고 0 이 아니다 — 0 으로 읽으면 「쟀는데 0」 이 된다. `d_worst_stress` 는 앞 판과 양쪽에 값이 있을 때만
+    수이고 아니면 null 이다.
+    ★`measured_from` 은 그 판의 몇 건에서 최악값을 모았는지다 — 한 건과 열 건의 최악값은 같은 뜻이 아니다.
+    ★리포트 줄 · 수치는 읽을 수 있는 리포트(소유 · 같은 소속)만으로 센다 — 판은 다 보인다(`scope`: all 시스템 관리자 · readable).
+    `task_found:false`(reason `unknown_task`)면 정본에 없는 과제다 — list_tasks 로 과제명을 찾는다."""
     return await _get(ctx, f"/ontology/tasks/{_seg_key(task_key)}/compare")
 
 
-@mcp.tool()
-async def unlink_report_revision(report_id: str, ctx: Context) -> dict:
-    """리포트와 개정 사이의 **연결을 끊는다**(개정 객체는 남는다 · 리포트 소유자만).
+@mcp.tool(annotations=_SET)
+async def unlink_report_revision(report_id: Annotated[str, Field(description=_A_OWN_REPORT_ID)],
+                                 ctx: Context) -> UnlinkReportRevisionOut:
+    """리포트와 개정 사이의 연결을 끊고 끊은 기록을 남긴다 — 개정 객체는 남는다(리포트 소유자만).
 
-    잘못 확정했을 때 쓴다. 객체를 안 지우는 이유는 그 판에 다른 리포트가 달려 있거나
-    `supersedes` 줄의 가운데일 수 있어서다 — 지우면 되돌릴 수 없다.
-    ★끊은 사람 · 때를 **기록한다** — 그 뒤로는 자동 잇기(허브 받기 뒤 · 리포트 반입 뒤 · 관리자 일괄 적용)도 수동 메타 고침
-    (update_report_meta)도 이 리포트를 다시 잇지 않는다. 다시 잇게 하려면 `set_report_revision`(손으로) 또는
-    `clear_report_unlink`(기록 지우기).
-    / Unlink a report from its revision and record who/when; automatic linking then leaves it alone."""
+    잘못 확정했을 때 쓴다. 다른 판으로 옮기려면 끊지 말고 set_report_revision 으로 바로 다시 확정한다(옛 선은 그때 떨어진다).
+    개정 객체를 지우지 않는 까닭 — 그 판에 다른 리포트가 달려 있거나 `supersedes` 줄의 가운데일 수 있어 지우면 되돌릴 수 없다.
+    ★끊은 사람 · 때를 기록한다 — 그 뒤로는 자동 잇기(허브 받기 뒤 · 리포트 반입 뒤 · 관리자 일괄 적용)도 수동 메타 고침
+    (update_report_meta)도 이 리포트를 다시 잇지 않는다. 다시 잇게 하려면 set_report_revision(손으로) 또는 clear_report_unlink(기록
+    지우기). 기록은 report_revision 의 `unlinked` 로 본다.
+    돌려주는 것 — `was`(끊은 개정 key) · `unlinked_by` · `unlinked_at` · `detail`. 이어진 개정이 없으면 거절된다(HTTP 409
+    `not_linked`)."""
     return await _delete(ctx, f"/reports/{_seg(report_id)}/revision")
 
 
-@mcp.tool()
-async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
-    """사람이 끊은 기록을 **지운다**(리포트 소유자만) — 그 리포트를 자동 잇기가 다시 본다.
+@mcp.tool(annotations=_SET)
+async def clear_report_unlink(report_id: Annotated[str, Field(description=_A_OWN_REPORT_ID)],
+                              ctx: Context) -> ClearReportUnlinkOut:
+    """사람이 끊은 기록을 지워 그 리포트를 자동 잇기가 다시 보게 한다(리포트 소유자만).
 
-    지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다 — 과제명 · 과제코드 · 별칭이 글자 그대로 맞고 개정 코드가 있으면
-    지금 이어진다(`task_links`). 허브가 모르는 이름은 지금 이어지지 않는다(세기만 한다) — 글자 그대로의 선은 project 나 dev_rev 를 주는
-    다음 메타 저장(`update_report_meta`) 때 다시 생긴다(또는 `set_report_revision` 으로 손으로 잇는다). 기록이 없으면 거절된다(조용히
-    성공하지 않는다). 기록은 `report_revision` 의 `unlinked` 로 본다.
-    / Clear the unlink record of a report (owner only) and run the automatic link for it once."""
+    unlink_report_revision 을 되돌릴 때 쓴다. 특정 판에 바로 이으려면 set_report_revision 이 낫다(기록도 함께 지운다).
+    지운 뒤 그 리포트 하나의 자동 잇기를 바로 한 번 돈다 — 과제명 · 과제코드 · 별칭이 글자 그대로 과제 하나로 풀리고 개정 코드가
+    있으면 지금 이어진다(`task_links`). 허브가 모르는 이름은 지금 이어지지 않는다(세기만 한다) — 글자 그대로의 선은 project 나
+    dev_rev 를 주는 다음 메타 저장(update_report_meta) 때 다시 생긴다.
+    돌려주는 것 — `was`(기록에 있던 개정 key) · `detail` · `task_links`(이 리포트의 자동 잇기 결과 — 기능 꺼짐 · 잠금이면 `skipped`,
+    실패면 `error`). 기록이 없으면 거절된다(HTTP 409 `not_unlinked` — 조용히 성공하지 않는다). 기록은 report_revision 의
+    `unlinked` 로 본다."""
     return await _delete(ctx, f"/reports/{_seg(report_id)}/revision/unlinked")
 
 
-@mcp.tool()
-async def confirm_task_alias(alias: str, task_key: str, ctx: Context,
-                             note: str = "") -> dict:
-    """자유 문자열을 정본 과제에 **붙인다**(시스템 관리자). 한 번 붙이면 다음부터 자동이다 — 단 다른 정확 일치(과제명 ·
-    과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous` — 그만 쓴
-    과제는 살아 있는 과제를 막지 못한다). 붙인 과제가 거울에 없으면(받기 전 · 허브에서 지워짐) 그 별칭으로는 잇지 않는다(`alias_missing`
-    — 그 별칭만 맞는 이름의 리포트는 반입 때 예전처럼 글자 그대로의 판에 이어지고, 붙인 과제가 거울에 오면 자동 잇기가 옮긴다).
-    허브가 이름을 바꾼 **옛 과제명**에 붙였으면 없는 것이 아니다 — 지금 이름의 과제로 본다(합쳐 없어진 과제는 따라가지 않는다).
+@mcp.tool(annotations=_SET)
+async def confirm_task_alias(
+    alias: Annotated[str, Field(description="붙일 자유 문자열 — 과거 리포트에 적힌 과제 이름 그대로(plan_task_links 의 plan[].free). "
+                                            "앞뒤 공백은 뗀다. 1~500자.")],
+    task_key: Annotated[str, Field(description="가리킬 과제명 — list_tasks 의 items[].key(과제코드가 아니다 — 풀지 않고 글자 그대로 "
+                                               "적는다). 1~300자.")],
+    ctx: Context,
+    note: Annotated[str, Field(description="근거 메모 — 비우면 적지 않는다(같은 과제에 다시 붙일 때 비우면 앞 메모를 둔다). "
+                                           "최대 2000자.")] = "",
+) -> ConfirmTaskAliasOut:
+    """자유 문자열(과거 리포트의 과제 이름)을 정본 과제에 별칭으로 붙인다(시스템 관리자).
 
-    ★짐작으로 부르지 마라 — `plan_task_links` 의 후보와 **근거**를 사람에게 보여 주고 고른
-    값을 넣어라. 한 문자열은 **한 과제만** 가리킨다(다른 곳에 붙어 있으면 거절된다).
-    / Bind a legacy free-text name to a canonical task. Do not guess."""
+    ★짐작으로 부르지 마라 — plan_task_links 의 후보와 근거를 사람에게 보여 주고 고른 값을 넣는다. 떼기는 remove_task_alias.
+    한 번 붙이면 다음 자동 잇기(허브 받기 뒤 · 리포트 반입 뒤)부터 그 이름의 리포트가 그 과제에 이어진다. 단 다른 정확 일치(과제명 ·
+    과제코드 · 옛 과제명 · 허브 별칭 · 같은 이름)가 다른 과제를 가리키면 엇갈림이라 잇지 않고 후보로 남는다(`ambiguous` — 그만 쓴
+    과제는 살아 있는 과제를 막지 못한다).
+    붙인 과제가 거울에 없으면(받기 전 · 허브에서 지워짐) 그 별칭으로는 잇지 않는다(`alias_missing`) — 그 과제가 거울에 오면 자동
+    잇기가 옮긴다. 허브가 이름을 바꾼 옛 과제명에 붙였으면 지금 이름의 과제로 본다(합쳐 없어진 과제는 따라가지 않는다).
+    한 문자열은 한 과제만 가리킨다 — 다른 과제에 붙어 있으면 거절된다(HTTP 409 `already_bound` — 먼저 뗀다). 같은 과제에 다시
+    붙이면 새 행 없이 붙인 사람 · 메모만 고친다.
+    돌려주는 것 — `ok` · `alias` · `key`."""
     return await _post(ctx, "/ontology/aliases",
                        {"alias": alias, "key": task_key, "note": note})
 
 
-@mcp.tool()
-async def remove_task_alias(alias: str, ctx: Context) -> dict:
-    """붙여 둔 별칭을 **뗀다**(시스템 관리자). **이미 이어 둔 개정은 건드리지 않는다** —
-    별칭은 「다음부터 이렇게 붙여라」 는 규칙이고, 과거에 붙인 것은 사람이 확정한 사실이다.
-    / Remove an alias. Already-linked revisions are left alone."""
+@mcp.tool(annotations=_DELETE)
+async def remove_task_alias(
+    alias: Annotated[str, Field(description="뗄 자유 문자열 — 붙일 때 적은 그대로(앞뒤 공백은 뗀다). 1~500자.")],
+    ctx: Context,
+) -> RemoveTaskAliasOut:
+    """붙여 둔 별칭을 뗀다(시스템 관리자) — 이미 이어 둔 개정은 건드리지 않는다.
+
+    별칭을 잘못 붙였거나 다른 과제로 옮겨 붙이기 전에 쓴다(한 문자열은 한 과제만 가리키므로 먼저 뗀다 — 다시 붙이기는
+    confirm_task_alias). 별칭은 「다음부터 이렇게 붙여라」 는 규칙이고 과거에 붙인 것은 사람이 확정한 사실이라, 이미 이어진 리포트의
+    판은 그대로다 — 끊으려면 리포트마다 unlink_report_revision.
+    돌려주는 것 — `alias` · `was`(가리키던 과제명) · `detail`. 붙은 것이 없으면 거절된다(HTTP 404 `not_found`)."""
     return await _delete(ctx, "/ontology/aliases", {"alias": alias})
 
 
@@ -2807,33 +3075,72 @@ async def remove_task_alias(alias: str, ctx: Context) -> dict:
 # ★ 규칙 둘(SKILL.md 와 같다):
 #   1) 새 비교·분석 코드를 쓰기 전에 `recipe_search` 로 이미 있는지 먼저 보라.
 #   2) 즉석으로 짠 분석이 효과를 봤으면 `recipe_propose` 로 올려라 — 다음부터 남도 쓴다.
-@mcp.tool()
-async def recipe_search(ctx: Context, q: str = "", kind: str = "", tag: str = "",
-                        limit: int = 50) -> list:
-    """★분석·비교 코드를 쓰기 전에 **먼저** 여기를 보라 — 이미 쌓인 레시피가 있는지 찾는다.
+@mcp.tool(annotations=_READ)
+async def recipe_search(
+    ctx: Context,
+    q: Annotated[str, Field(description="검색어 — 이름과 meta 의 title · question · when_to_use · tags 에 든 부분 문자열(대소문자 "
+                                        "무시). 비우면 거르지 않는다.")] = "",
+    kind: Annotated[str, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 가운데 하나를 받는 레시피만(meta.kinds). 비우면 "
+                                           "모두. 다른 값은 거절되지 않고 빈 목록이 된다.")] = "",
+    tag: Annotated[str, Field(description="태그 — meta.tags 에 글자 그대로 든 레시피만. 비우면 모두.")] = "",
+    limit: Annotated[int, Field(ge=1, le=RECIPE_SEARCH_LIMIT_MAX,
+                                description=f"돌려줄 최대 레시피 수(1~{RECIPE_SEARCH_LIMIT_MAX}). 기본 50.")] = 50,
+) -> list[RecipeSearchRow]:
+    """쌓인 레시피(빌드 없이 쌓이는 분석 함수)를 검색어 · 종류 · 태그로 찾는다 — 분석 · 비교 코드를 쓰기 전에 먼저 본다.
 
-    등록된 레시피(와 내 초안·후보)를 검색어·종류(sphere/impact/deep)·태그로 좁혀 돌려준다.
-    '쓸모 있었다' 평가가 많은 것부터 나온다(경험이 쌓이는 순). 쓸 만한 게 있으면 `recipe_run`,
-    없으면 직접 분석하고 효과를 보면 `recipe_propose`."""
+    등록된 레시피와 내가 올린 초안 · 후보가 온다(내려진 것은 빠진다). 등록 판이 먼저, 그 안에서 '쓸모 있었다' 평가가 많은
+    것부터다. 쓸 만한 게 있으면 recipe_get 으로 코드 · 인자를 보고 recipe_run, 없으면 직접 분석하고 효과를 보면 recipe_propose 로
+    올린다.
+    돌려주는 것 — 목록(name · domain · registered · current_version · meta(title · question · when_to_use · kinds · tags · inputs ·
+    params) · useful_count · has_draft).
+    ★limit 에서 조용히 잘린다 — 전체 수 · 잘림 표시가 없다. 받은 수가 limit 과 같으면 더 있을 수 있으니 q · kind · tag 로
+    좁히거나 limit 을 올린다."""
     params = {"q": q, "kind": kind, "tag": tag, "limit": limit}
     return await _get(ctx, "/recipes", params={k: v for k, v in params.items() if v != ""})
 
 
-@mcp.tool()
-async def recipe_get(name: str, ctx: Context) -> dict:
-    """레시피 하나의 상세 — 판 목록·상태·메타·관문 결과·코드. 돌리기 전에 무엇을 하는지 본다."""
+@mcp.tool(annotations=_READ)
+async def recipe_get(name: Annotated[str, Field(description=_A_RECIPE_NAME)], ctx: Context) -> RecipeGetOut:
+    """레시피 하나의 상세를 준다 — 판 목록 · 상태 · 메타 · 관문 결과 · 코드.
+
+    recipe_run 전에 무엇을 하는지, 어떤 params 를 받는지 본다(`versions[].meta.params` 와 코드의 `params.get(...)`). 찾기는
+    recipe_search.
+    돌려주는 것 — `name` · `domain` · `origin`(platform 이 플랫폼에서 올림 · git 씨앗 · 내보낸 파일) · `current_version`(등록 판 —
+    없으면 null) · `deprecated_at` · `deprecated_reason` · `versions[]`(새 판부터 — version · status(draft 자기 시험 실패 · candidate
+    후보 · registered 등록 · superseded 물러남) · meta · checks(정적 검사 · 자기 시험 · 앞 판 호환) · gate(등록 근거) · code ·
+    created_at · registered_at).
+    ★코드는 등록 · 물러난 판과 내가 올린 판만 보인다 — 남의 초안 · 후보는 `code:null`. 없는 이름이면 거절된다(HTTP 404)."""
     return await _get(ctx, f"/recipes/{_seg(name)}")
 
 
-@mcp.tool()
-async def recipe_run(name: str, session_id: str, report_ids: list, ctx: Context,
-                     params: dict | None = None, version: int | None = None,
-                     wait_sec: int = 200) -> dict:
-    """레시피를 실데이터 리포트로 돌리고 **결과까지** 기다려 돌려준다(격리 샌드박스 · 플랫폼 잡).
+@mcp.tool(annotations=_ADD)
+async def recipe_run(
+    name: Annotated[str, Field(description=_A_RECIPE_NAME)],
+    session_id: Annotated[str, Field(description="잡을 돌릴 내 세션 id — create_session 응답 · list_sessions 의 id. 결과 파일이 이 "
+                                                 "세션에 남는다.")],
+    report_ids: Annotated[list[str], Field(min_length=1, max_length=RECIPE_RUN_REPORTS_MAX,
+                                           description=f"돌릴 리포트 id(1~{RECIPE_RUN_REPORTS_MAX}개) — find_reports 의 items[].id. "
+                                                       "읽을 수 있는 리포트여야 하고, 개수 · 종류는 레시피의 meta.inputs "
+                                                       "(min_reports · max_reports) · meta.kinds 를 따른다.")],
+    ctx: Context,
+    params: Annotated[dict | None, Field(description='레시피 인자 — 키는 그 레시피가 읽는 것이다(recipe_get 의 versions[].meta.params '
+                                                     '와 코드의 params.get(...)). 예 angles_over_threshold 는 {"metric": '
+                                                     '"max_stress", "threshold": 300}. 비우면 {}(레시피의 기본값).')] = None,
+    version: Annotated[int | None, Field(description="돌릴 판 번호 — 비우면 등록 판(current_version). 등록 전 판(초안 · 후보)은 "
+                                                     "올린 사람만 돌린다.")] = None,
+    wait_sec: Annotated[int, Field(description="결과를 기다릴 최대 초(약 1초마다 확인 — 0 이하는 한 번만 본다). 기본 200. 도구 호출 "
+                                               "기한(기본 540초)을 넘기면 오류로 끊기고 run_id 를 못 받으니 그보다 작게 둔다.")] = 200,
+) -> RecipeRunOut:
+    """레시피를 실데이터 리포트로 돌리고 끝날 때까지(최대 wait_sec 초) 기다려 결과를 준다 — 격리 샌드박스 · 플랫폼 잡.
 
-    report_ids 는 이 세션에서 읽을 수 있는 리포트들이다. 결과가 쓸모 있었으면 `recipe_evaluate`
-    로 평가를 남겨라 — 그래야 그 판이 등록 관문에 걸린다. 큰 결과는 산출 파일로 가고 여기엔
-    요약만 온다(run 의 output_file_id). 돌려주는 것: {run_id, job_id, status, result, error}."""
+    recipe_search · recipe_get 으로 고른 레시피를 돌릴 때 쓴다. 결과가 쓸모 있었으면 recipe_evaluate 로 평가를 남겨라 — 그래야 그
+    판이 등록 관문(recipe_register)에 걸린다. 부를 때마다 새 실행 · 새 잡이 생긴다.
+    돌려주는 것 — `run_id` · `job_id` · `status`(queued · running · succeeded · failed) · `result` · `result_truncated` ·
+    `output_file_id` · `error` · `sandbox` · `elapsed_ms` · `hint`. 결과 전체는 세션 산출 파일(output_file_id — download_result)에 있고,
+    크면(기본 256 KB 넘음) `result` 에는 안내만 오고 `result_truncated:true` 다.
+    ★wait_sec 안에 안 끝나면 그때 상태(queued · running)로 돌아온다 — 잡은 계속 돈다. get_job(job_id) 로 상태를, 끝난 뒤
+    get_job_outputs · download_result 로 결과 파일을 본다. 도구 호출 기한에 걸려 run_id 를 못 받았으면 list_session_jobs 로 잡을 찾는다.
+    실행 하나는 샌드박스에서 기본 180초까지다. 리포트 수 · 종류가 레시피의 meta.inputs · meta.kinds 를 벗어나면 거절된다(HTTP 400)."""
     import asyncio
     body = {"session_id": session_id, "report_ids": report_ids, "params": params or {}}
     if version is not None:
@@ -2855,50 +3162,83 @@ async def recipe_run(name: str, session_id: str, report_ids: list, ctx: Context,
     }
 
 
-@mcp.tool()
-async def recipe_propose(name: str, code: str, ctx: Context, meta: dict | None = None) -> dict:
-    """즉석 분석이 효과를 봤을 때 레시피로 올린다 — 정적 검사 → 자기 시험 → 후보.
+@mcp.tool(annotations=_ADD)
+async def recipe_propose(
+    name: Annotated[str, Field(description="레시피 이름 — 소문자로 시작하는 소문자 · 숫자 · 밑줄 3~64자(예 angles_over_threshold). "
+                                           "있는 이름이면 그 레시피의 다음 판이 된다.")],
+    code: Annotated[str, Field(description="파이썬 소스 — run(reports, params) 와 test_*() 하나 이상을 정의한다. 최대 200000자.")],
+    ctx: Context,
+    meta: Annotated[dict | None, Field(description="레시피 메타 — {title, question, when_to_use, kinds:[sphere|impact|deep], "
+                                                   "needs:['data']?, inputs:{min_reports, max_reports}, params:{인자: 설명}, tags:[...]}. "
+                                                   "비우면 kinds 는 셋 모두 · inputs 는 1~8 · 나머지는 빈 값. 적지 않은 키는 버린다. "
+                                                   "needs 에 data 를 넣으면 리포트 원본 데이터(data.json)도 받는다.")] = None,
+) -> RecipeProposeOut:
+    """즉석 분석이 효과를 봤을 때 그 코드를 레시피 새 판으로 올린다 — 정적 검사 → 자기 시험(+앞 판 호환 시험) → 후보.
 
-    code 는 `run(reports, params)` 와 하나 이상의 `test_*()` 를 정의해야 한다. 리포트는
-    `recipe_kit.Report`(meta·parts·cases·part_worst()·hotspots()·contact_profile()·case_energy()
-    …)로 받고, 시험은 `recipe_kit.make_report(...)` 로 작은 리포트를 만든다. 허용 import 는
-    stdlib 일부 · numpy · scipy · recipe_kit 뿐이고, 파일 열기·os·던더 속성은 막힌다.
-    meta: {title, question, when_to_use, kinds:[sphere|impact|deep], needs:[\"data\"]?,
-    inputs:{min_reports,max_reports}, tags:[...]}. 후보가 되면 recipe_run → recipe_evaluate →
-    recipe_register 로 등록까지 간다."""
+    recipe_search 로 같은 것이 없는지 먼저 본다. 같은 이름이 있으면 다음 판 번호로 올라간다(누구나 새 판을 올릴 수 있다). 부를
+    때마다 새 판이 생긴다. 후보가 되면 recipe_run → recipe_evaluate → recipe_register 로 등록까지 간다.
+    code 는 `run(reports, params)` 와 하나 이상의 `test_*()` 를 정의해야 한다. 리포트는 `recipe_kit.Report`(meta · parts · cases ·
+    part_worst() · hotspots() · contact_profile() · case_energy() …)로 받고, 시험은 `recipe_kit.make_report(...)` 로 작은 리포트를
+    만든다. 허용 import 는 stdlib 일부 · numpy · scipy · recipe_kit 뿐이고 파일 열기 · os · 던더 속성은 막힌다.
+    돌려주는 것 — `name` · `version` · `status`(candidate 자기 시험 통과 · draft 실패) · `checks` · `message` · `similar`(비슷한
+    레시피 이름). 정적 검사에 걸리거나 이름 · meta 가 틀리면 판을 만들지 않고 거절된다(HTTP 400)."""
     return await _post(ctx, "/recipes/propose",
                        {"name": name, "code": code, "meta": meta or {}})
 
 
-@mcp.tool()
-async def recipe_evaluate(run_id: str, useful: bool, note: str, ctx: Context) -> dict:
-    """실행이 쓸모 있었는지·왜 그런지 남긴다 — useful=true + 글(20자↑)이 등록 관문의 근거다.
+@mcp.tool(annotations=_SET)
+async def recipe_evaluate(
+    run_id: Annotated[str, Field(description="실행 id — recipe_run 응답의 run_id.")],
+    useful: Annotated[bool, Field(description="쓸모 있었으면 true — true 이고 글이 충분해야 등록 근거로 센다.")],
+    note: Annotated[str, Field(description=f"까닭 — 무엇을 보여 줬는지 구체적으로. 등록 근거가 되려면 앞뒤 공백을 뺀 "
+                                           f"{RECIPE_NOTE_MIN}자 이상, 최대 2000자.")],
+    ctx: Context,
+) -> RecipeEvaluateOut:
+    """레시피 실행 하나가 쓸모 있었는지와 그 까닭을 남긴다 — useful=true 와 20자 이상의 글이 등록 관문의 근거다.
 
-    무엇을 보여 줬는지 구체적으로 적어라(예: '전 각도에서 파트 7 이 항복을 넘는 방향을 한 번에 집어냈다')."""
+    recipe_run 결과를 본 뒤 쓴다. 근거가 갖춰지면 recipe_register 로 등록한다. 성공(succeeded)한 실행의 평가만 근거로 센다.
+    같은 실행에 다시 부르면 앞 평가를 덮는다. 자기 실행만 평가할 수 있다(시스템 관리자는 전부).
+    무엇을 보여 줬는지 구체적으로 적어라(예 '전 각도에서 파트 7 이 항복을 넘는 방향을 한 번에 집어냈다').
+    돌려주는 것 — `run_id` · `useful` · `note`."""
     return await _post(ctx, f"/recipes/runs/{_seg(run_id)}/evaluate",
                        {"useful": useful, "note": note})
 
 
-@mcp.tool()
-async def recipe_register(name: str, ctx: Context, version: int | None = None) -> dict:
-    """후보를 **등록**한다 — **사람 승인 없이** 자동 관문만 넘으면 바로 모두가 검색 · 실행하게 된다
-    (사용자 결정 10-26 「LLM 자동 + 자동 관문」).
+@mcp.tool(annotations=_SET)
+async def recipe_register(
+    name: Annotated[str, Field(description=_A_RECIPE_NAME)],
+    ctx: Context,
+    version: Annotated[int | None, Field(description="등록할 판 번호 — 비우면 지금 등록 판(current_version)이라, 새 후보를 등록하려면 "
+                                                     "꼭 넣는다(recipe_propose 응답의 version). 내가 올린 후보만 등록할 수 있다.")] = None,
+) -> RecipeRegisterOut:
+    """후보 판을 등록한다 — 사람 승인 없이 자동 관문만 넘으면 바로 모두가 검색 · 실행한다.
 
-    관문: 정적 검사 · 자기 시험 · (있으면)앞 판 호환 시험 통과 + 이 판으로 실데이터 실행 성공 ≥1 +
-    「쓸모 있었다」 평가(글 20자 이상) ≥1. 코드는 격리 샌드박스에서만 돈다(허용 import 만 — recipe_propose).
-    잘못 올라간 것은 사람이 recipe_deprecate 로 내린다(올린 사람 · 관리자, 판 기록은 남는다).
-    통과하면 데이터 뿌리(…/svc/kooremapper/recipes/<이름>/)로 파일까지 내보낸다(git 반영은 사람이 그 폴더를 platform/recipes/ 로
-    옮겨 커밋한다 — 서버는 커밋 · 푸시하지 않는다).
-    관문을 못 넘으면 무엇이 빠졌는지 알려 준다 — 보통 실행이나 평가가 아직 없는 것이다."""
+    recipe_propose → recipe_run → recipe_evaluate 뒤에 부른다. 관문 — 정적 검사 · 자기 시험 · (있으면)앞 판 호환 시험 통과, 이 판으로
+    성공한 실데이터 실행 1건 이상, 그 실행에 「쓸모 있었다」 평가(글 20자 이상) 1건 이상. 못 넘으면 무엇이 빠졌는지 알려 준다
+    (HTTP 400 — 보통 실행이나 평가가 아직 없다).
+    등록하면 앞 등록 판은 물러나고(superseded) 이 판이 current_version 이 된다. 코드는 격리 샌드박스에서만 돈다(허용 import 만 —
+    recipe_propose). 잘못 올라간 것은 recipe_deprecate 로 내린다(올린 사람 · 관리자 — 판 기록은 남는다).
+    통과하면 데이터 뿌리(…/svc/kooremapper/recipes/<이름>/)로 recipe.py · recipe.json 을 내보낸다 — git 반영은 사람이 그 폴더를
+    platform/recipes/ 로 옮겨 커밋한다(서버는 커밋 · 푸시하지 않는다).
+    돌려주는 것 — `name` · `version` · `status` · `superseded`(물러난 앞 판 번호) · `exported`(내보낸 recipe.json 경로 — 실패면 null) ·
+    `message`."""
     body = {"version": version} if version is not None else {}
     return await _post(ctx, f"/recipes/{_seg(name)}/register", body)
 
 
-@mcp.tool()
-async def recipe_deprecate(name: str, reason: str, ctx: Context) -> dict:
-    """레시피를 **내린다**(올린 사람·관리자) — 검색과 남의 실행에서 빠진다. 판 기록은 남는다.
+@mcp.tool(annotations=_DELETE)
+async def recipe_deprecate(
+    name: Annotated[str, Field(description=_A_RECIPE_NAME)],
+    reason: Annotated[str, Field(description="내리는 까닭(틀린 결과 · 더 나은 레시피로 대체 등) — recipe_get 의 deprecated_reason 으로 "
+                                             "남는다. 최대 1000자.")],
+    ctx: Context,
+) -> RecipeDeprecateOut:
+    """레시피를 내린다(올린 사람 · 시스템 관리자) — recipe_search 에서 빠지고 판 기록은 남는다.
 
-    왜 내리는지 reason 에 남겨라(틀린 결과·더 나은 레시피로 대체 등)."""
+    틀린 결과를 내거나 더 나은 레시피로 바뀌었을 때 쓴다. 판 하나가 아니라 레시피 전체를 내린다 — 코드만 고치려면 recipe_propose 로
+    새 판을 올려 recipe_register 로 등록한다(앞 판은 물러난다). 왜 내리는지 reason 에 남긴다. 되살리는 도구는 없다.
+    ★검색에서만 빠진다 — 이름을 아는 사람의 recipe_get · recipe_run 은 막지 않는다.
+    돌려주는 것 — `name` · `deprecated` · `reason`."""
     return await _post(ctx, f"/recipes/{_seg(name)}/deprecate", {"reason": reason})
 
 
