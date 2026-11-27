@@ -2127,18 +2127,104 @@ def _provenance(report_id: str, case_key: str | None, row: dict, data: bytes) ->
         row.get("path") or "-")
 
 
-@mcp.tool()
+# ── 리포트 조회 도구의 닫힌 어휘 · 경계 · 결과 꼴(공통 계약 C3 · C4 · C7) ─────────────────────────────────────────────────
+# 최악 케이스 지표 — 백엔드 GET /reports/{id}/cases 의 sort 가 정렬하는 열(services._SORT_COLS 의 열쇠)이고 report_worst_cases 가 받는
+# 집합(_WORST_METRICS)과 같다. 백엔드는 모르는 값을 조용히 max_stress 로 바꾸므로 MCP 가 먼저 거절한다. 상한은 같은 라우트의 limit(1~2000).
+WORST_CASE_METRICS = ("max_stress", "max_g", "max_disp", "min_safety_factor")
+REPORT_CASES_LIMIT_MAX = 2000
+_OUT_PEAK_PROVENANCE = ("피크 출처 표지 — known · peak_source · states_read · states_total · peak_may_be_missed(true 면 d3plot 표본 "
+                        "상태에서 읽은 피크라 실제 피크를 놓쳤을 수 있다 · 캠페인 밖 리포트는 known=false)")
+_ReportSummaryOut = _shape("ReportSummaryOut", {
+    "id": "리포트 id",
+    "session_id": "리포트가 든 세션 id",
+    "kind": f"리포트 종류 — {_one_of(REPORT_KINDS)}",
+    "label": "표시 이름",
+    "project_name": "리포트에 박힌 과제 이름",
+    "eng_meta": "과제 · 개발 단계 · 설계안 수동 메타",
+    "doe_strategy": "방향 컨셉(예 cuboid_26)",
+    "scenario_type": "방향 조건 종류",
+    "scenario": "시뮬 조건 요약",
+    "drop_height": f"낙하 높이({UNIT_LENGTH})",
+    "sim_params": "해석 조건",
+    "parts": "파트 목록 — part_id · name · group",
+    "findings": f"위험 소견 목록({_one_of(SEVERITIES)})",
+    "summary": "전역 최악 롤업 — 값 · 케이스 · 파트",
+    "worst_stress": f"전역 최악 응력({UNIT_STRESS})",
+    "worst_g": f"전역 최악 가속({UNIT_ACCEL})",
+    "max_severity": f"가장 높은 소견 심각도 — {_one_of(SEVERITIES)}",
+    "n_cases": "케이스 수",
+    "reservation": "후처리 예약 원장 — 예약으로 들어온 리포트만",
+    "created_at": "반입 시각",
+    "environment": "응답을 낸 서버 환경 — dev · prod · unknown",
+    "peak_provenance": _OUT_PEAK_PROVENANCE,
+})
+_ReportCaseOut = _shape("ReportCaseOut", {
+    "id": "케이스 행 번호",
+    "report_id": "리포트 id",
+    "case_key": "케이스 키 — sphere 는 각도 런 폴더, impact 는 위치 id(pos_id), deep 은 single",
+    "identity": "케이스 정체 — sphere 는 angle(name · roll · pitch · yaw · category · lon · lat), impact 는 face · pos_id · pos_x · pos_y",
+    "num_states": "결과 상태(state) 수",
+    "success": "정상 종료 여부",
+    "parts_metrics": f"파트 번호 → 지표(peak_stress {UNIT_STRESS} · peak_g {UNIT_ACCEL} · peak_disp {UNIT_LENGTH} · safety_factor …)",
+    "max_stress": f"케이스 안 파트 최악 응력({UNIT_STRESS})",
+    "max_g": f"케이스 안 파트 최악 가속({UNIT_ACCEL})",
+    "max_disp": f"케이스 안 파트 최악 변위({UNIT_LENGTH})",
+    "min_safety_factor": "케이스 안 파트 최소 안전율 — 작을수록 위험",
+    "peak_provenance": _OUT_PEAK_PROVENANCE,
+})
+_ReportPartRiskOut = _shape("ReportPartRiskOut", {
+    "report_id": "리포트 id",
+    "kind": f"리포트 종류 — {_one_of(REPORT_KINDS)}",
+    "parts": (f"파트별 최악(최악 응력 큰 것부터) — part_id · part_name · worst_stress(value {UNIT_STRESS} · case_key) · "
+              f"worst_g(value {UNIT_ACCEL} · case_key) · worst_disp(value {UNIT_LENGTH} · case_key) · min_safety_factor"),
+    "peak_provenance": _OUT_PEAK_PROVENANCE,
+})
+_ReportDirectionalOut = _shape("ReportDirectionalOut", {
+    "report_id": "리포트 id",
+    "kind": f"리포트 종류 — {_one_of(REPORT_KINDS)}",
+    "part_id": "준 파트 번호 — null 이면 모든 파트",
+    "directions": (f"범주별 최악(최악 응력 큰 것부터) — category · n_cases · worst_stress(value {UNIT_STRESS} · part_id · part_name · "
+                   f"case_key) · worst_g(value {UNIT_ACCEL} · part_id · part_name · case_key)"),
+    "peak_provenance": _OUT_PEAK_PROVENANCE,
+})
+_ReportFacetsOut = _shape("ReportFacetsOut", {
+    "kind": "리포트 종류별 건수 — [{value, count}]",
+    "project": "과제(수동 메타 과제, 없으면 project_name)별 건수",
+    "dev_rev": "개발 단계 코드별 건수",
+    "design_variation": "설계안별 건수(find_reports 의 variation)",
+    "doe_strategy": "방향 컨셉별 건수",
+    "scenario_type": "조건 종류별 건수",
+    "focus": "초점 라벨별 건수",
+    "max_severity": "리포트 최고 심각도별 건수",
+    "drop_height": f"낙하 높이({UNIT_LENGTH})별 건수",
+})
+
+
+@mcp.tool(annotations=_READ)
 async def report_image(
-    report_id: str, ctx: Context, case_key: str = "", path: str = "", role: str = "peak",
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    case_key: Annotated[str, Field(description="케이스 키 — report_media 의 media[].case_key · cases_with_media(report_worst_cases 의 "
+                                               "case_key 와 같은 키). 비우면 모든 케이스에서 고른다.")] = "",
+    path: Annotated[str, Field(description="그림 한 장의 경로 — report_media 의 media[].path(또는 stored_as) 그대로. 주면 role 은 "
+                                           "쓰지 않는다. 비우면 case_key · role 로 고른다.")] = "",
+    role: Annotated[str, Field(description="그림 역할 — report_media 의 media[].role 값으로 peak(피크 상태 png) · view(영상 mp4 — "
+                                           "모델이 못 본다) · render(attach_render 로 붙인 렌더) 따위다. 기본 peak, 빈 문자열이면 "
+                                           "역할을 가리지 않는다. path 를 주면 쓰지 않는다.")] = "peak",
 ):
-    """★결과 이미지를 **그림으로** 돌려준다 — 네가 실제로 보고 판단·비교할 수 있다.
+    """결과 이미지 한 장을 그림(이미지 콘텐츠)으로 돌려준다 — 글자가 아니라 모델이 직접 보고 판단할 수 있다.
 
-    `case_key` 로 그 케이스의 그림을, 또는 `path` 로 정확히 한 장을 지정한다
-    (경로는 `report_media` 가 알려 준다). `role` 은 보통 `peak`(피크 상태 렌더)다.
+    언제 — 피크 렌더 같은 그림 한 장을 볼 때. 무엇이 붙어 있는지(경로 · 역할 · 케이스 · 볼 수 있는지)는 먼저 report_media 로 본다.
+    여러 케이스를 지표와 그림으로 나란히 놓으려면 report_compare, 숫자만 필요하면 report_case · report_worst_cases 다.
 
-    ★mp4 는 **모델이 못 본다** — 그것을 고르면 거절하고 대신 쓸 png 를 알려 준다.
-    ★여러 케이스를 **한 번에 비교**하려면 `report_compare` 를 써라(지표 표까지 같이 온다).
-    그림 앞에 **출처 한 줄**(report·case·file_id·sha256·path)이 온다."""
+    고르는 법 — `path` 를 주면 그 한 장이다(`role` 은 쓰지 않고 `case_key` 만 함께 건다). 안 주면 `case_key` · `role` 로 거른 것
+    가운데 모델이 볼 수 있는 첫 장이다. 번들 그림을 케이스 · 역할에 묶는 것은 impact 리포트뿐이다 — sphere · deep 번들 그림은
+    case_key · role 이 비어 있으니 `path` 로 고르거나 `role` 을 비워라. attach_render 로 붙인 렌더는 종류와 상관없이 case_key ·
+    role=render 가 있다.
+
+    돌려주는 것 — 출처 한 줄(report · case · file_id · sha256 · path)과 이미지 한 장. 그림이 없으면 {error, hint}, 고른 것이 영상(mp4)
+    뿐이면 {error, videos(경로 앞 5개), hint} 다 — 모델은 mp4 를 못 보므로 거절하고 같은 케이스의 peak png 를 권한다. `path` 에
+    맞는 그림이 없으면 오류다. 결과 이미지는 리포트 HTML 안에 없고 옆에 딸린 파일이라 리포트를 번들(.zip/.tar.gz)로 올렸을 때만
+    있다."""
     # ⚠ `path` 로 한 장을 지정했으면 `role` 로 **걸러서는 안 된다** — 예컨대 mp4(role=view)를
     #   지정했는데 기본 `role=peak` 가 먼저 걸러 버리면 "그림이 없다" 라는 **엉뚱한 까닭**을
     #   대고, 정작 "영상은 못 본다" 를 말하지 못한다(실측으로 그랬다).
@@ -2169,20 +2255,30 @@ async def report_image(
             Image(data=data, format=_IMAGE_MIME.get(ext, "png"))]
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_compare(
-    report_id: str, case_keys: list[str], ctx: Context,
-    metrics: list[str] | None = None, max_images: int = MAX_COMPARE_IMAGES,
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    case_keys: Annotated[list[str], Field(description="견줄 케이스 키 목록 — report_worst_cases 결과의 case_key. 준 순서대로 표 행 · "
+                                                      "그림이 놓인다. 없는 키가 하나라도 있으면 오류다.")],
+    ctx: Context,
+    metrics: Annotated[list[str] | None, Field(description="표에 놓을 지표 이름 목록 — 비우면(null · 빈 목록) peak_stress · peak_g · "
+                                                           "peak_disp. 케이스 응답에서 그 이름의 값을 찾지 못한 칸은 「—」 다.")] = None,
+    max_images: Annotated[int, Field(description=f"보낼 이미지 장수 상한 — 기본 {MAX_COMPARE_IMAGES}. 그림이 있는 케이스가 이보다 "
+                                                 "많으면 뒤 케이스의 그림을 빼고 뺀 장수를 표 아래에 말한다. 0 이면 표만 온다.")
+                          ] = MAX_COMPARE_IMAGES,
 ) -> list:
-    """★케이스 여러 개를 **그림 + 지표**로 한 번에 비교한다 — 리포트를 쓸 때 쓰라.
+    """케이스 여러 개를 지표 표와 피크 렌더 그림으로 한 번에 견준다 — 그림을 보면서 「어느 방향이 왜 더 나쁜가」 를 쓸 때.
 
-    돌려주는 것: ① 케이스별 지표 표(텍스트) ② 각 케이스의 피크 렌더 **이미지**(앞에 출처 한 줄 —
-    report·case·file_id·sha256·path).
-    그래서 그림을 **보면서** "어느 방향이 왜 더 나쁜가" 를 쓸 수 있다.
+    언제 — report_worst_cases 로 좁힌 몇 케이스를 그림과 함께 나란히 볼 때. 그림 한 장만이면 report_image, 숫자 순위는
+    report_worst_cases, 한 케이스의 파트별 숫자는 report_case, 다른 리포트(개정 · 조건)끼리 파트별 최악을 견주려면 compare_reports 다.
 
-    `metrics` 를 비우면 기본(peak_stress·peak_g·peak_disp)을 쓴다.
-    ★이미지 장수에 상한이 있다(기본 8) — 넘으면 **몇 장을 뺐는지 말한다**. 그림은 응답을
-    금방 불리므로, 많은 케이스는 지표로 먼저 좁히고(`report_worst_cases`) 그중 몇 개만 보라."""
+    돌려주는 것 — ① 글 한 덩이 — 케이스마다 한 행인 지표 표와 경고(그림 없는 케이스 · 뺀 그림 수). 케이스 응답에서 그 지표 이름의
+    값을 찾지 못한 칸은 「—」 이니 숫자는 report_case 로 확인하라. ② 케이스마다 출처 한 줄(report · case · file_id · sha256 · path)과
+    피크 렌더 이미지(그 케이스 role=peak 의 볼 수 있는 첫 장). 케이스에 묶인 peak 그림은 impact 번들 리포트에만 있어 sphere · deep
+    은 보통 표만 온다(그때는 report_media 로 경로를 찾아 report_image(path) 로 본다). 내려받지 못한 그림은 말없이 빠진다.
+
+    한도 — 이미지는 `max_images` 장까지이고 넘으면 몇 장을 뺐는지 말한다. 그림은 응답을 금방 불리므로 많은 케이스는 지표로 먼저
+    좁혀 몇 개만 넣어라."""
     metrics = metrics or ["peak_stress", "peak_g", "peak_disp"]
     rep = (await _get(ctx, f"/reports/{_seg(report_id)}")) or {}
     session_id = rep.get("session_id")
@@ -2215,7 +2311,8 @@ async def report_compare(
         dropped = len(picks) - max_images
         picks = picks[:max_images]
     if missing:
-        lines += ["", "⚠ 그림이 없는 케이스: %s" % ", ".join(missing[:12]),
+        lines += ["", "⚠ 그림이 없는 케이스: %s" % ", ".join(missing[:12])
+                  + (" 외 %d 개" % (len(missing) - 12) if len(missing) > 12 else ""),
                   "   (결과 이미지는 번들로 올려야 들어온다 — `report_media` 로 확인하라)"]
     if dropped:
         lines += ["", "⚠ 이미지 %d 장을 **뺐다**(상한 %d) — 케이스를 줄여 다시 부르거나 "
@@ -2237,23 +2334,44 @@ async def report_compare(
     return out
 
 
-@mcp.tool()
-async def report_summary(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> dict:
-    """리포트 요약 — kind, 프로젝트/DOE, sim_params, parts, findings, 전역 최악 롤업.
-    무엇을 분석할 수 있는지 먼저 여기서 파악하라. 후처리 예약(7-1)으로 들어온 리포트면 `reservation` 에 예약 원장 —
-    잡 키 · 해석 조건 · 매니페스트 요약(이미지 출처가 실려 왔으면 `manifest.images` 원본 칸과 `manifest.images_observed`
-    관측 — get_job 의 `external.images` 와 같은 꼴)."""
+@mcp.tool(annotations=_READ)
+async def report_summary(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> _ReportSummaryOut:
+    """리포트 하나의 머리 정보와 전역 요약을 돌려준다 — 종류 · 과제 · 조건 · 파트 목록 · 소견 · 전역 최악값.
+
+    언제 — 리포트를 처음 열 때 무엇을 분석할 수 있는지(kind · parts · n_cases)부터 여기서 본다. 여기서 얻은 part_id 로
+    report_part_risk · report_directional 을, 케이스 순위는 report_worst_cases 를, 소견을 심각도로 거르려면 report_findings 를,
+    리포트에 실린 원본 블록 목록은 report_blocks 를 쓴다. 리포트를 찾는 것은 find_reports 다.
+
+    돌려주는 것 — id · session_id · kind(deep · sphere · impact) · label · project_name · eng_meta(과제 · 개발 단계 · 설계안 수동
+    메타) · doe_strategy · scenario_type · scenario · drop_height(mm) · sim_params · parts[](part_id · name · group) · findings[] ·
+    summary(전역 최악 롤업) · worst_stress(MPa) · worst_g(G) · max_severity · n_cases · created_at · environment ·
+    peak_provenance(피크 출처 — report_extraction 참고). 후처리 예약으로 들어온 리포트면 `reservation` 에 예약 원장 — 잡 키 ·
+    해석 조건 · 매니페스트 요약(이미지 출처가 실려 왔으면 `manifest.images` 원본 칸과 `manifest.images_observed` 관측 — get_job 의
+    `external.images` 와 같은 꼴). 붙인 렌더 기록은 `renders`, CAD 형상 묶음은 `cad`, 해석 온톨로지 적재 요약은 `ontology` 다.
+    소유자이거나 같은 소속으로 공유된 리포트만 읽힌다(아니면 「찾을 수 없다」)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_worst_cases(
-    report_id: str, ctx: Context, metric: str = "max_stress", top_n: int = 10
-) -> list:
-    """최악 케이스 랭킹. sphere=최악 낙하 방향, impact=최악 충격 위치, deep=단건.
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    metric: Annotated[Literal[WORST_CASE_METRICS], Field(
+        description=f"줄 세울 지표 — {_one_of(WORST_CASE_METRICS)}. max_stress(케이스 최악 응력 {UNIT_STRESS}) · max_g(최악 가속 "
+                    f"{UNIT_ACCEL}) · max_disp(최악 변위 {UNIT_LENGTH}) 는 큰 것부터, min_safety_factor(최소 안전율)는 작은 것부터"
+                    "(작을수록 위험). 기본 max_stress.")] = "max_stress",
+    top_n: Annotated[int, Field(ge=1, le=REPORT_CASES_LIMIT_MAX,
+                                description=f"돌려줄 케이스 수 — 1~{REPORT_CASES_LIMIT_MAX}, 기본 10. 늘 맨 위부터다.")] = 10,
+) -> list[_ReportCaseOut]:
+    """한 리포트의 케이스를 지표 하나로 줄 세워 위험한 것부터 돌려준다 — sphere 는 최악 낙하 방향, impact 는 최악 충격 위치(deep 은 케이스 하나).
 
-    metric ∈ {max_stress, max_g, max_disp, min_safety_factor}. min_safety_factor 는
-    작을수록 위험하므로 오름차순으로 준다. 각 케이스의 identity(각도/위치)와 승격 메트릭 반환."""
+    언제 — 「어느 방향(위치)이 가장 나쁜가」 를 케이스 단위로 볼 때. 파트별 최악과 그 케이스는 report_part_risk, 방향 범주(면 · 엣지 ·
+    코너 · F1~F6)별 묶음은 report_directional, 파트 · 각도 · 임계로 거른 낱값은 report_query, 한 케이스의 파트별 상세는
+    report_case, 고른 케이스를 그림과 함께 견주려면 report_compare 다.
+
+    돌려주는 것 — 케이스 목록(최대 top_n 개, 값 없는 케이스는 맨 뒤). 항목마다 case_key · identity(sphere 는 angle — name · roll ·
+    pitch · yaw · category · lon · lat, impact 는 face · pos_id · pos_x · pos_y) · num_states · success · max_stress(MPa) · max_g(G) ·
+    max_disp(mm) · min_safety_factor · parts_metrics(파트 번호 → peak_stress · peak_g · peak_disp · safety_factor …) ·
+    peak_provenance. 건너뛰기(페이지)는 없다 — 늘 맨 위 top_n 개이고, 전체 케이스 수는 report_summary 의 n_cases 다."""
     if metric not in _WORST_METRICS:
         raise RuntimeError(f"metric 은 {sorted(_WORST_METRICS)} 중 하나여야 합니다.")
     order = "asc" if metric == "min_safety_factor" else "desc"
@@ -2263,36 +2381,71 @@ async def report_worst_cases(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_part_risk(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
-                           part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> dict:
-    """파트별 최악값과 그게 발생한 케이스(각도/위치) + 최소 안전율. part_id 를 주면 그 파트만.
-    "어느 파트가 어느 방향/위치에서 가장 위험한가" 를 답한다."""
+                           part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> _ReportPartRiskOut:
+    """파트마다 최악 응력 · G · 변위와 그 값이 난 케이스(각도 · 위치), 최소 안전율을 돌려준다 — 「어느 파트가 어느 방향(위치)에서 가장 위험한가」.
+
+    언제 — 파트 단위 위험 순위가 필요할 때. part_id 를 주면 그 파트만. 케이스 단위 순위는 report_worst_cases, 방향 범주별 최악은
+    report_directional, 여러 리포트(개정 · 조건)의 파트별 최악을 나란히 놓으려면 compare_reports, 한 파트의 시간이력은
+    report_part_series, 핫스팟 위치는 report_hotspots 다.
+
+    돌려주는 것 — report_id · kind · parts[] · peak_provenance. parts 는 최악 응력이 큰 것부터(값 없는 파트는 뒤)이고 항목마다
+    part_id · part_name · worst_stress{value(MPa) · case_key} · worst_g{value(G) · case_key} · worst_disp{value(mm) · case_key} ·
+    min_safety_factor(없으면 null). 케이스를 모두 훑어 계산하고 자르지 않는다 — 파트가 많으면 응답이 길다. 없는 part_id 면
+    parts 가 빈 목록이다."""
     params = {"part_id": part_id} if part_id is not None else None
     return await _get(ctx, f"/reports/{_seg(report_id)}/parts", params=params)
 
 
-@mcp.tool()
-async def report_case(report_id: str, case_key: str, ctx: Context) -> dict:
-    """한 케이스(각도/위치)의 상세 — identity + 파트별 메트릭. case_key 는
-    report_worst_cases 결과의 case_key(sphere=run_folder/각도명, impact=pos_id)."""
+@mcp.tool(annotations=_READ)
+async def report_case(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
+    case_key: Annotated[str, Field(description="케이스 키 — report_worst_cases 결과의 case_key(sphere 는 각도 런 폴더 이름 · 없으면 "
+                                               "각도 이름, impact 는 위치 id(pos_id), deep 은 single). 같은 키만 걸린다.")],
+    ctx: Context,
+) -> _ReportCaseOut:
+    """케이스(각도 · 위치) 하나의 상세를 돌려준다 — identity 와 파트별 지표.
+
+    언제 — report_worst_cases · report_part_risk · report_directional 이 가리킨 case_key 하나를 파고들 때. 그 케이스 · 파트의
+    시간이력은 report_part_series, 하중 경로 · 에너지는 report_energy_flow, 그 케이스의 핫스팟은 report_hotspots(case_key), 그림은
+    report_image(case_key), 여러 케이스를 그림과 함께 견주려면 report_compare 다.
+
+    돌려주는 것 — case_key · identity(sphere 는 angle — name · roll · pitch · yaw · category · lon · lat, impact 는 face · pos_id ·
+    pos_x · pos_y, deep 은 빈 객체) · num_states · success · parts_metrics(파트 번호 → peak_stress(MPa) · peak_g(G) · peak_disp(mm) ·
+    safety_factor 등 리포트가 실은 지표) · 케이스 최악 max_stress · max_g · max_disp · min_safety_factor · peak_provenance.
+    없는 case_key 면 오류다(「케이스를 찾을 수 없습니다」)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(case_key)}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_directional(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
-                             part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> dict:
-    """방향 취약도 — 방향 범주(sphere: 면/엣지/코너, impact: F1~F6)별 최악 응력·G.
-    part_id 를 주면 그 파트의 범주별 취약도. "어느 방향이 가장 위험한가"."""
+                             part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None) -> _ReportDirectionalOut:
+    """방향 범주별 최악 응력 · G 를 돌려준다 — sphere 는 face · edge · corner(면 · 엣지 · 코너), impact 는 충격 면 F1~F6, deep 은 single 하나.
+
+    언제 — 「어느 방향 범주가 가장 위험한가」. part_id 를 주면 그 파트만 따진 범주별 취약도다. 낱낱의 케이스 순위는
+    report_worst_cases, 파트별 최악은 report_part_risk, 범주 · 각도군의 분포 통계(평균 · 산포 · 부품별 분해)는 report_angle_stats,
+    sphere 방향 섭동 산포는 report_scatter, 범주로 거른 낱값은 report_query(category) 다.
+
+    돌려주는 것 — report_id · kind · part_id(준 값, 없으면 null) · directions[] · peak_provenance. directions 는 최악 응력이 큰
+    것부터이고 항목마다 category · n_cases(그 범주의 케이스 수) · worst_stress{value(MPa) · part_id · part_name · case_key} ·
+    worst_g{value(G) · part_id · part_name · case_key}. 범주가 없는 케이스는 unknown 으로 묶인다. 자르지 않는다."""
     params = {"part_id": part_id} if part_id is not None else None
     return await _get(ctx, f"/reports/{_seg(report_id)}/directional", params=params)
 
 
-@mcp.tool()
-async def report_facets(ctx: Context) -> dict:
-    """리포트 검색 facet — 어떤 kind·과제·rev·설계안·방향컨셉(doe_strategy)·조건종류·초점·
-    심각도·높이가 있나 + 각 건수. 목표를 정하기 전 '먼저 뭐가 있나'를 보고 find_reports 로
-    좁힌다. 소유분 + 같은 소속으로 공유된 리포트(관리자는 전사)."""
+@mcp.tool(annotations=_READ)
+async def report_facets(ctx: Context) -> _ReportFacetsOut:
+    """읽을 수 있는 리포트 전체에서 검색 칸마다 어떤 값이 몇 건 있는지 돌려준다 — find_reports 로 좁히기 전에 「무엇이 있나」 를 본다.
+
+    언제 — find_reports 의 project · dev_rev · variation · doe_strategy · scenario_type · focus 에 넣을 값을 모를 때(그 칸들은
+    여기 값과 같은 것만 걸린다). 리포트 하나의 내용은 report_summary, 해석 결과 전체 분포(종류 · 케이스 수 · 반복 소견)는
+    report_corpus 다.
+
+    돌려주는 것 — 칸마다 [{value, count}] 목록이다 — kind · project(수동 메타 과제, 없으면 리포트의 project_name) · dev_rev(개발
+    단계 코드) · design_variation(설계안 — find_reports 의 variation) · doe_strategy(방향 컨셉) · scenario_type(조건 종류) ·
+    focus(초점 라벨) · max_severity(리포트 최고 심각도) · drop_height(낙하 높이 mm). 값이 null 인 리포트는 세지 않는다. 범위는
+    소유분과 같은 소속으로 공유된 리포트(관리자는 전부)다. 인자도 페이지도 없다."""
     return await _get(ctx, "/reports/facets")
 
 
