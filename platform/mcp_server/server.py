@@ -2296,58 +2296,170 @@ async def report_facets(ctx: Context) -> dict:
     return await _get(ctx, "/reports/facets")
 
 
-@mcp.tool()
+# ── 리포트 찾기 · 조회 · 비교 · 등재 · 지우기(계약 C1 ~ C8) — 허용값 · 경계는 백엔드가 받는 집합 · 경계를 그대로 옮겼다 ──────────────────
+# 질의 지표 = GET /reports/{id}/query 의 metric(services._QUERY_METRICS 의 열쇠). 질의 상한 · 각도 허용 · 부품 상위 수 = 그 라우트들의 Query
+# 경계. 개발 단계 = datahub.parse_stage 가 받는 코드 + 빈 글(백엔드가 리포트 메타로 갈음해 받는다). 산포 지표(parser._SCATTER_METRICS)는
+# sphere 가 아닌 리포트에서 지표를 보지 않고 note 만 주므로 enum 으로 막지 않고 설명에만 쓴다.
+REPORT_QUERY_METRICS = ("peak_stress", "peak_strain", "peak_g", "peak_disp", "peak_vel", "peak_plastic_strain",
+                        "peak_principal", "min_principal", "peak_principal_stress", "min_principal_stress",
+                        "peak_principal_strain", "min_principal_strain", "peak_vm_strain", "safety_factor",
+                        "peak_ie", "peak_ke", "final_ie", "final_ke")
+REPORT_QUERY_LIMIT_MAX = 5000
+REPORT_ANGLE_TOL_MAX_DEG = 180
+REPORT_TOP_PARTS_MAX = 50
+REPORT_SCATTER_METRICS = ("peak_stress", "peak_strain", "peak_plastic_strain", "peak_g", "peak_disp", "peak_vel",
+                          "peak_ie", "peak_ke")
+DATAHUB_STAGES = ("pre", "dv1", "dv2", "dv3", "dvr", "pv1", "pv2", "pv3", "pvr", "pra", "mp", "")
+
+_A_VALUE_UNIT = (f"단위는 물리량의 단위(응력 {UNIT_STRESS} · 가속 {UNIT_ACCEL} · 변위 {UNIT_LENGTH} · 변형률 무차원, 그 밖은 "
+                 "리포트에 실린 단위 그대로)")
+_A_PEAK_PROV = "피크 출처 표지 — 캠페인 런에서 온 리포트만 값이 있다(모르면 known:false)"
+
+FindReportsOut = _shape("FindReportsOut", {
+    "items": "리포트 행 — id · kind · label · focus · project_name · doe_strategy · scenario_type · drop_height(mm) · "
+             "worst_stress(MPa) · max_severity · source_kfile_id · eng_meta · n_cases · created_at · environment",
+    "total": "돌려준 행 수(items 의 길이) — 조건에 맞는 전체 수가 아니다",
+    "reason": "0 건일 때 까닭 글(도구 실패가 아니라 맞는 리포트가 없다는 뜻). 있으면 null",
+    "truncated": "true 면 limit 에서 잘렸을 수 있다 — 다음 쪽은 없으니 조건을 좁혀 다시 부른다",
+})
+ReportQueryOut = _shape("ReportQueryOut", {
+    "report_id": "리포트 id", "kind": "deep · sphere · impact", "metric": "물은 물리량",
+    "n_matched": "조건에 맞은 행 수(자르기 전 · 훑기 상한에 걸렸으면 그때까지 센 수)",
+    "returned": "facts 에 실은 행 수",
+    "truncated": "limit 또는 훑기 상한(케이스 × 파트 20000)에서 잘렸으면 true",
+    "facts": "[case_key · identity(각도 · 위치) · part_id · part_name · quantity · value · at_time(피크 시각 s, 있으면)] — value 순",
+    "peak_provenance": _A_PEAK_PROV,
+})
+ReportScatterOut = _shape("ReportScatterOut", {
+    "kind": "리포트 종류(sphere 가 아니면 note 만 온다)", "metric": "지표", "part_id": "고른 파트(null 이면 케이스마다 파트 최댓값)",
+    "n_cases": "묶은 케이스 수", "n_bases": "표본이 있는 정준 방향 수",
+    "degenerate": "방향당 표본이 하나뿐이라 산포가 0 이면 true",
+    "note": "까닭 글(degenerate · sphere 가 아님)",
+    "most_severe": "평균이 가장 큰 방향(groups 의 한 행)", "most_scattered": "CoV 가 가장 큰 방향(표본 2 이상)",
+    "groups": "[base · category · representative · n · mean · std · cov · min · max · worst_value · worst_case_key] — 평균 큰 순",
+    "peak_provenance": _A_PEAK_PROV,
+})
+ReportPartEnergyOut = _shape("ReportPartEnergyOut", {
+    "kind": "리포트 종류", "part_id": "고른 파트(있으면)", "t": "시간 축(s) — matsum 이 있을 때",
+    "parts": "[part_id · part_name · internal_energy · kinetic_energy · peak_internal_energy · peak_kinetic_energy · "
+             "hourglass_energy(있으면)]",
+    "note": "값이 없을 때 까닭(matsum 없음 · deep 이 아님 · 파트 없음)",
+})
+ReportAngleStatsOut = _shape("ReportAngleStatsOut", {
+    "kind": "리포트 종류", "metric": "지표", "part_id": "고른 파트(null 이면 케이스마다 파트 대표값)",
+    "available_metrics": "이 리포트에 실린 파트 물리량 이름",
+    "selection": "고른 방식 — mode(near · base · category · all_bases · all_categories)와 그 인자",
+    "n_cases_total": "지표 값이 있는 케이스 수", "n_groups": "그룹 수",
+    "groups": "[group_key · category · representative · stats · worst · parts(part_id 를 비웠을 때)]",
+    "note": "까닭 글(지표 없음 · sphere 전용 고르기 · 맞는 케이스 없음)",
+    "peak_provenance": _A_PEAK_PROV,
+})
+ReportEnergyFlowOut = _shape("ReportEnergyFlowOut", {
+    "kind": "리포트 종류",
+    "energy_balance": "deep — energy_ratio_min · energy_ratio_max · has_mass_added · normal_termination",
+    "energy_series": "deep — t · total_energy · kinetic_energy · internal_energy · hourglass_energy · energy_ratio",
+    "contacts": "deep — rcforc 접촉별 [id · name · side · peak_fmag] 큰 순",
+    "contact_metrics": "deep — 리포트에 실린 접촉 계측(있으면)", "has_matsum": "deep — 파트별 에너지(matsum)가 실렸나",
+    "case_key": "sphere · impact — 물은 케이스", "flow_case_key": "sphere · impact — 실제로 쓴 케이스(없으면 null)",
+    "n_flows": "sphere · impact — 하중경로 상세가 실린 케이스 수",
+    "energy_flow": "sphere · impact — 하중경로 그래프(form · impactor_ke_* · energy_dissipated · propagation_order · nodes · "
+                   "edges · form_note)",
+    "detail_note": "생성기가 상세를 일부 케이스에만 실었다는 글", "available_case_keys": "상세가 있는 케이스(200 개까지)",
+    "note": "값이 없을 때 까닭",
+})
+ReportGeometryOut = _shape("ReportGeometryOut", {
+    "kind": "리포트 종류", "device_outline": "impact — 디바이스 외곽선(XY)", "device_bbox": "impact — 디바이스 경계 상자",
+    "parts": "impact — [part_id · name · group · footprint(XY 다각형) · synthetic_footprint · zmin · zmax]",
+    "synthetic_footprints": "지어낸 footprint 를 가진 파트 수", "footprints_are_measured": "모든 footprint 가 실제 형상이면 true",
+    "footprint_warning": "지어낸 footprint 가 있을 때 경고 글",
+})
+ReportPartSeriesOut = _shape("ReportPartSeriesOut", {
+    "kind": "리포트 종류", "case_key": "케이스(sphere · impact)", "part_id": "파트 번호",
+    "series_blocks": "deep — 실린 시계열 블록 이름",
+    "stress": "deep — {물리량: {t · max · avg · global_max · global_min · time_of_max · unit}}(다른 블록도 같은 꼴로 온다)",
+    "motion": "deep — t · disp_mag · vel_mag · acc_mag",
+    "stress_ts": "sphere · impact — 응력 시계열", "strain_ts": "sphere — 변형률 시계열", "g_ts": "sphere — 가속 시계열(max 별칭)",
+    "disp_ts": "sphere — 변위 시계열(max 별칭)", "acc_ts": "sphere — 가속도 시계열",
+    "note": "케이스 · 파트를 못 찾았을 때 글",
+})
+ReportFindingRow = _shape("ReportFindingRow", {
+    "severity": "CRITICAL · WARNING · INFO", "title": "소견 제목", "detail": "내용", "recommendation": "권고",
+    "peak_provenance": _A_PEAK_PROV,
+})
+CompareReportsOut = _shape("CompareReportsOut", {
+    "kinds": "{리포트 id: kind}", "note": "kind 가 섞였을 때 경고(아니면 null)",
+    "parts": "[part_id · part_name · by_report{리포트 id: {worst_stress(MPa) · worst_stress_case · min_safety_factor}}] — "
+             "part_id 글자 순",
+})
+PublishReportToDatahubOut = _shape("PublishReportToDatahubOut", {
+    "record_id": "DataHub 레코드 id(SIM-…)", "data_type": "SIM", "doc_type": "sim_report", "sim_domain": "시뮬 도메인",
+    "report_kind": "리포트 종류", "view": "레코드 주소(DataHub /api/records/<id>)",
+})
+DeleteReportOut = _shape("DeleteReportOut", {"message": "지웠다는 글"})
+
+
+@mcp.tool(annotations=_READ)
 async def find_reports(
     ctx: Context,
-    kind: Annotated[str | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나"
+    kind: Annotated[Literal[REPORT_KINDS] | None, Field(description=f"리포트 종류 — {_one_of(REPORT_KINDS)} 중 하나"
                                                   "(sphere 전각도 낙하 · impact 부분 충격 · deep 단건). 비우면 모두.")] = None,
     project: Annotated[str | None, Field(description="과제 — 수동 메타의 과제(eng_meta.project) 또는 리포트에 박힌 "
-                                                     "project_name 과 같은 것. " + _A_FACET)] = None,
-    dev_rev: Annotated[str | None, Field(description="개발 단계 코드(예 dv1 · pv2 · mp) — " + _A_FACET)] = None,
-    variation: Annotated[str | None, Field(description="설계안 — " + _A_FACET)] = None,
-    doe: Annotated[str | None, Field(description="DOE 캠페인(study) — " + _A_FACET)] = None,
-    focus: Annotated[str | None, Field(description="초점 라벨(예 camera-detail) — " + _A_FACET)] = None,
-    doe_strategy: Annotated[str | None, Field(description="방향 컨셉(예 cuboid_26 · fibonacci_162) — " + _A_FACET)] = None,
-    scenario_type: Annotated[str | None, Field(description="조건 종류(scenario source_type) — " + _A_FACET)] = None,
+                                                     "project_name 과 같은 것. " + _A_FACET + " 비우면 거르지 않는다.")] = None,
+    dev_rev: Annotated[str | None, Field(description="개발 단계 코드(예 dv1 · pv2 · mp) — " + _A_FACET
+                                                     + " 비우면 거르지 않는다.")] = None,
+    variation: Annotated[str | None, Field(description="설계안 — " + _A_FACET + " 비우면 거르지 않는다.")] = None,
+    doe: Annotated[str | None, Field(description="DOE 캠페인(study) — " + _A_FACET + " 비우면 거르지 않는다.")] = None,
+    focus: Annotated[str | None, Field(description="초점 라벨(예 camera-detail) — " + _A_FACET + " 비우면 거르지 않는다.")] = None,
+    doe_strategy: Annotated[str | None, Field(description="방향 컨셉(예 cuboid_26 · fibonacci_162) — " + _A_FACET
+                                                          + " 비우면 거르지 않는다.")] = None,
+    scenario_type: Annotated[str | None, Field(description="조건 종류(scenario source_type) — " + _A_FACET
+                                                           + " 비우면 거르지 않는다.")] = None,
     drop_height: Annotated[float | None, Field(description=f"낙하 높이({UNIT_LENGTH}) — 이 높이 ±{HEIGHT_TOL_MM:g} "
-                                                           f"{UNIT_LENGTH} 의 리포트.")] = None,
-    severity: Annotated[str | None, Field(description=f"심각도 — {_one_of(SEVERITIES)} 중 하나. 이 심각도 **이상**의 소견이 "
-                                                      "있는 리포트(WARNING 이면 CRITICAL 도 걸린다).")] = None,
+                                                           f"{UNIT_LENGTH} 의 리포트. 비우면 거르지 않는다.")] = None,
+    severity: Annotated[Literal[SEVERITIES] | None, Field(description=f"심각도 — {_one_of(SEVERITIES)} 중 하나. 리포트의 최고 "
+                                                      "소견 심각도가 이 심각도 **이상**인 리포트(WARNING 이면 CRITICAL 도 걸린다). "
+                                                      "단 INFO 는 최고 심각도가 INFO 인 리포트만 건다. 비우면 거르지 않는다.")] = None,
     min_worst_stress: Annotated[float | None, Field(description=f"최악 응력 하한({UNIT_STRESS}) — 리포트의 전역 최악 "
-                                                                "응력이 이 값 이상.")] = None,
+                                                                "응력이 이 값 이상. 비우면 하한 없음.")] = None,
     min_worst_g: Annotated[float | None, Field(description=f"최악 가속 하한({UNIT_ACCEL}) — 리포트의 전역 최악 가속이 "
-                                                           "이 값 이상.")] = None,
+                                                           "이 값 이상. 비우면 하한 없음.")] = None,
     has_part: Annotated[str | None, Field(description="파트 이름 — 이 이름(정확히 같은 것)의 파트를 가진 리포트"
-                                                      "(report_summary 의 parts[].name).")] = None,
-    q: Annotated[str | None, Field(description="글자 검색 — 라벨 · 과제에 이 글자가 든 리포트(대소문자 무시).")] = None,
+                                                      "(report_summary 의 parts[].name). 비우면 거르지 않는다.")] = None,
+    q: Annotated[str | None, Field(description="글자 검색 — 라벨 · 과제(박힌 이름 · 수동 메타)에 이 글자가 든 리포트"
+                                               "(대소문자 무시). 비우면 거르지 않는다.")] = None,
     since: Annotated[str | None, Field(description="만든 때 하한 — ISO 8601(예 2026-10-01 또는 "
-                                                   "2026-10-01T09:00:00+09:00). 이 시각 이후.")] = None,
-    until: Annotated[str | None, Field(description="만든 때 상한 — ISO 8601(since 와 같은 꼴). 이 시각 이전.")] = None,
-    session_id: Annotated[str | None, Field(description="세션 id — 이 세션의 리포트만(list_sessions 의 id).")] = None,
+                                                   "2026-10-01T09:00:00+09:00). 이 시각 이후. 꼴이 틀리면 오류. 비우면 하한 없음.")] = None,
+    until: Annotated[str | None, Field(description="만든 때 상한 — ISO 8601(since 와 같은 꼴). 이 시각 이전. "
+                                                   "비우면 상한 없음.")] = None,
+    session_id: Annotated[str | None, Field(description="세션 id — 이 세션의 리포트만(list_sessions 의 id). "
+                                                        "비우면 모든 세션.")] = None,
     kfile_id: Annotated[int | None, Field(description="K파일 id — 이 K파일(세션 파일)에서 나온 리포트만"
-                                                      "(get_session 의 files[].id).")] = None,
-    external_job_key: Annotated[str | None, Field(description="외부 잡 키 — 후처리 예약이 반입한 리포트의 잡 키 "
-                                                              "`stcx:<Slurm 잡 id>`(정확히 같음). get_job 의 external 과 짝.")] = None,
+                                                      "(get_session 의 files[].id). 비우면 거르지 않는다.")] = None,
+    external_job_key: Annotated[str | None, Field(description="외부 잡 키(64자까지) — 후처리 예약이 반입한 리포트의 잡 키 "
+                                                              "`stcx:<Slurm 잡 id>`(정확히 같음). get_job 의 external 과 짝. "
+                                                              "비우면 거르지 않는다.")] = None,
     config_generation: Annotated[str | None, Field(description="설정 세대(64자까지) — 내 캠페인에서 이 세대 이름표가 붙은 "
-                                                               "런에 묶인 리포트만(campaign_provenance 의 generations).")] = None,
-    sort: Annotated[str, Field(description=f"정렬 기준 — {_one_of(FIND_SORTS)} 중 하나.")] = "created_at",
-    order: Annotated[str, Field(description=f"정렬 방향 — {_one_of(SORT_ORDERS)}.")] = "desc",
-    limit: Annotated[int, Field(description=f"최대 건수(1~{FIND_LIMIT_MAX}). 결과가 이만큼이면 truncated:true — "
-                                            "더 있을 수 있다.")] = 100,
-) -> dict:
-    """조건으로 리포트 검색(전 세션, 결과 폭증 대비 다축 서버 필터) — 소유분 + 같은 소속 공유분(관리자는 전사).
+                                                               "런에 묶인 리포트만(campaign_provenance 의 generations). "
+                                                               "비우면 거르지 않는다.")] = None,
+    sort: Annotated[Literal[FIND_SORTS], Field(description=f"정렬 기준 — {_one_of(FIND_SORTS)} 중 하나. 기본 created_at"
+                                                           "(만든 때). 그 값이 없는 리포트는 뒤로 간다.")] = "created_at",
+    order: Annotated[Literal[SORT_ORDERS], Field(description=f"정렬 방향 — {_one_of(SORT_ORDERS)}. 기본 desc"
+                                                             "(큰 것 · 최근 것부터).")] = "desc",
+    limit: Annotated[int, Field(ge=1, le=FIND_LIMIT_MAX,
+                                description=f"최대 건수(1~{FIND_LIMIT_MAX}) · 기본 100. 결과가 이만큼이면 truncated:true — "
+                                            "더 있을 수 있다(다음 쪽은 없다 — 조건을 좁혀라).")] = 100,
+) -> FindReportsOut:
+    """조건으로 리포트를 찾는다 — 전 세션에서 내 것 + 같은 소속으로 공유된 것(관리자는 전사)을 서버(SQL)가 걸러 한 쪽만 준다.
 
-    같은 전각도라도 방향 컨셉·초점·조건·높이별로 각기 골라낸다. 필터는 서버(SQL)가 처리해
-    리포트가 수천 개여도 슬라이스만. 축:
-    - kind, project(과제·미기입분은 임베드 project_name 폴백), dev_rev, variation, doe
-    - focus(초점 예 camera-detail), doe_strategy(cuboid_26·fibonacci_162 등), scenario_type
-    - drop_height(특정 높이), severity(이 심각도 이상 소견 보유), min_worst_stress/min_worst_g
-    - has_part(그 부품명 포함), q(라벨/과제 텍스트), since/until(ISO), session_id, kfile_id
-    - external_job_key(후처리 예약이 반입한 리포트 — `stcx:<Slurm 잡 id>`)
-    - config_generation(내 캠페인에서 그 설정 세대의 런에 묶인 리포트 — DF-02)
-    - sort(created_at|worst_stress|worst_g|drop_height)·order. 먼저 report_facets 로 값을 훑어라.
-    ★0 건이어도 **빈 봉투**를 준다(KR-08) — `{items:[], total:0, reason:'리포트 없음'}`. 빈 출력이 아니라
-    「이 조건에 맞는 리포트가 없다」 는 뜻이다(도구 실패와 구분된다). `total==limit` 이면 더 있을 수 있다(truncated)."""
+    리포트 id 를 모를 때 맨 먼저 쓴다. 어떤 과제 · 개발 단계 · 설계안 · 방향 컨셉 · 초점 · 조건 종류 · 높이가 있는지는 report_facets 로
+    먼저 훑고 그 값을 그대로 넣는다(같은 것만 걸린다). 같은 전각도라도 방향 컨셉 · 초점 · 조건 · 높이로 따로 골라낸다. 한 세션의 리포트를
+    차례로 보려면 list_reports, 찾은 리포트 안은 report_summary(무엇이 있나) · report_query(부품 × 각도 × 물리량 값) ·
+    report_findings(소견)로 간다.
+
+    돌려주는 것 — `{items, total, reason, truncated}`. items 는 리포트 행(id · kind · label · project_name · drop_height ·
+    worst_stress · max_severity · n_cases · eng_meta · created_at …)이고 total 은 돌려준 행 수다(조건에 맞는 전체 수가 아니다).
+    0 건이어도 빈 봉투(`items:[]` · `total:0` · `reason`)를 준다 — 도구 실패가 아니라 「이 조건에 맞는 리포트가 없다」 는 뜻이다.
+    한 번에 limit 건까지이고 다음 쪽은 없다 — `truncated:true` 면 잘렸을 수 있으니 조건을 좁히거나 sort · order 를 바꿔 다시 부른다."""
     params: dict = {"sort": sort, "order": order, "limit": limit}
     for k, v in {
         "kind": kind, "project": project, "dev_rev": dev_rev, "variation": variation, "doe": doe,
@@ -2367,34 +2479,54 @@ async def find_reports(
             "truncated": len(items) >= limit}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_query(
-    report_id: str,
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     ctx: Context,
-    part_id: int | None = None,
-    category: str | None = None,
-    angle_name: str | None = None,
-    near_roll: float | None = None,
-    near_pitch: float | None = None,
-    near_yaw: float | None = None,
-    angle_tol_deg: float | None = None,
-    metric: str = "peak_stress",
-    min_value: float | None = None,
-    max_value: float | None = None,
-    sort: str = "desc",
-    limit: int = 200,
-) -> dict:
-    """리포트 내부 fact 드릴다운 — 서버가 부품·각도·물리량·임계로 필터해 슬라이스만 준다.
+    part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None,
+    category: Annotated[str | None, Field(description="방향 범주 — sphere 는 각도 범주(예 face · edge · corner), impact 는 "
+                                                      "충격 면(F1 ~ F6), deep 은 single. 정확히 같은 것만"
+                                                      "(report_directional 의 directions[].category). 비우면 모두.")] = None,
+    angle_name: Annotated[str | None, Field(description="각도 이름 — 정확히 같은 것(예 F1_Back · P0001). report_worst_cases · "
+                                                        "report_case 의 identity.angle.name. 비우면 모두.")] = None,
+    near_roll: Annotated[float | None, Field(description="근접 기준 roll(도) — near_pitch 와 함께 그 방향 둘레(angle_tol_deg) "
+                                                         "의 케이스만. 근접 거르기를 켰는데 비우면 0 으로 친다.")] = None,
+    near_pitch: Annotated[float | None, Field(description="근접 기준 pitch(도) — near_roll 과 같다. 근접 거르기를 켰는데 "
+                                                          "비우면 0 으로 친다.")] = None,
+    near_yaw: Annotated[float | None, Field(description="근접 기준 yaw(도) — 보내기만 하고 서버가 쓰지 않는다(yaw 는 낙하 "
+                                                        "방향을 바꾸지 않는다). 이것만으로는 근접 거르기가 켜지지 않는다.")] = None,
+    angle_tol_deg: Annotated[float | None, Field(ge=0, le=REPORT_ANGLE_TOL_MAX_DEG,
+                                                 description=f"근접 허용 대원거리(도, 0~{REPORT_ANGLE_TOL_MAX_DEG}). "
+                                                             "near_roll · near_pitch · 이것 중 하나라도 주면 근접 거르기가 "
+                                                             "켜진다. 비우면 15 도.")] = None,
+    metric: Annotated[Literal[REPORT_QUERY_METRICS], Field(description=f"물리량 — {_one_of(REPORT_QUERY_METRICS)} 중 하나. "
+                                                                       "기본 peak_stress. 리포트에 없는 물리량이면 맞는 행이 0 "
+                                                                       "이다(실린 것은 report_angle_stats 의 "
+                                                                       "available_metrics).")] = "peak_stress",
+    min_value: Annotated[float | None, Field(description="값 하한 — 이 값 이상만. " + _A_VALUE_UNIT
+                                                         + ". 비우면 하한 없음.")] = None,
+    max_value: Annotated[float | None, Field(description="값 상한 — 이 값 이하만. " + _A_VALUE_UNIT
+                                                         + ". 비우면 상한 없음.")] = None,
+    sort: Annotated[Literal[SORT_ORDERS], Field(description=f"값 정렬 — {_one_of(SORT_ORDERS)}. 기본 desc(큰 것부터). "
+                                                            "safety_factor · min_* 처럼 작을수록 나쁜 물리량은 asc.")] = "desc",
+    limit: Annotated[int, Field(ge=1, le=REPORT_QUERY_LIMIT_MAX,
+                                description=f"돌려줄 최대 행 수(1~{REPORT_QUERY_LIMIT_MAX}) · 기본 200. 넘으면 "
+                                            "truncated:true 이고 n_matched 가 자르기 전 수다.")] = 200,
+) -> ReportQueryOut:
+    """리포트 하나 안의 값(fact)을 부품 · 각도 · 물리량 · 값 범위로 걸러 평탄한 행으로 준다 — 거르기 · 정렬 · 자르기는 서버가 한다.
 
-    "특정 부품이 특정 각도에서 어떤 값" 을 한 콜로. 필터:
-    - part_id: 특정 부품
-    - category: 방향 범주(sphere face/edge/corner, impact F1~F6)
-    - angle_name: 정확한 각도명(예 F1_Back, P0001)
-    - near_roll/near_pitch/near_yaw + angle_tol_deg: 각도 근접(대원거리 ±도)
-    - metric: peak_stress|peak_g|peak_disp|peak_strain|peak_principal|min_principal|peak_vm_strain|safety_factor
-    - min_value/max_value: 값 임계, sort(desc|asc), limit
-    반환: (case_key·각도·부품·물리량·값·at_time) 평탄 fact + n_matched·truncated.
-    전 케이스를 LLM 이 훑지 않아도 되니 대형 sphere(수천 케이스)에서 효율적이다."""
+    「이 부품이 이 각도(근처)에서 응력이 얼마인가」 · 「응력 상위 N 개 (케이스, 부품)」 처럼 값을 바로 묻는 질문에 쓴다. 케이스가 수천인
+    sphere 도 전 케이스를 훑지 않고 답한다. 각도군의 분포 통계(평균 · 표준편차 · 백분위)는 report_angle_stats, 26 정준 방향별 산포는
+    report_scatter, 케이스 순위만은 report_worst_cases, 파트별 최악 한 줄은 report_part_risk, 한 케이스의 시간이력은
+    report_part_series 다.
+
+    각도 근접 — near_roll · near_pitch 를 리포트의 각도 규약(swap 포함)대로 방향으로 바꿔 대원거리 angle_tol_deg 안의 케이스를 고른다.
+    near_yaw 는 서버가 보지 않는다.
+
+    돌려주는 것 — `facts`[case_key · identity · part_id · part_name · quantity · value · at_time(피크 시각, 있으면)](value 순,
+    limit 개까지) + `n_matched`(자르기 전 맞은 수) · `returned` · `truncated`. 한 질의가 훑는 케이스 × 파트는 20000 까지다 — 넘으면
+    거기서 멈추고 truncated:true 다(n_matched 도 그때까지 센 수). 그때는 조건을 좁혀 다시 부른다. 캠페인 런에서 온 리포트면
+    `peak_provenance` 에 피크 출처가 있다."""
     params: dict = {"metric": metric, "sort": sort, "limit": limit}
     for k, v in {
         "part_id": part_id, "category": category, "angle_name": angle_name,
@@ -2406,52 +2538,87 @@ async def report_query(
     return await _get(ctx, f"/reports/{_seg(report_id)}/query", params=params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_scatter(
-    report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None
-) -> dict:
-    """방향 섭동 산포 분석(sphere 전용) — 26면 낙하 주변 방향 섭동에 대한 응답 산포.
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    metric: Annotated[str, Field(description=f"지표 — {_one_of(REPORT_SCATTER_METRICS)} 중 하나(sphere 리포트에서 이 밖이면 "
+                                             "오류). 기본 peak_stress.")] = "peak_stress",
+    part_id: Annotated[int | None, Field(description="파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id. 비우면 "
+                                                     "케이스마다 모든 파트의 최댓값.")] = None,
+) -> ReportScatterOut:
+    """방향 섭동 산포를 낸다(sphere 전용) — 케이스를 가장 가까운 26 정준 방향(면 6 · 엣지 12 · 코너 8)으로 묶어 방향별 지표 산포를 잰다.
 
-    케이스를 최근접 26 정준방향(면/엣지/코너)으로 묶어 방향별 metric 산포(n·mean·std·
-    CoV·최악)와 민감도(가장 산포 큰 방향)를 낸다. metric 은 리포트에 실재하는 지표
-    (stress/strain/plastic_strain/g/disp/vel/ie/ke 등, 없으면 400). 방향당 표본이 1개뿐
-    (순수 26면)이면 degenerate=true(산포 0) — 섭동 DOE 라야 의미 있다."""
+    「같은 낙하 방향을 조금 틀면 결과가 얼마나 흔들리나」(방향 민감도)를 물을 때 쓴다. 방향마다 여러 런이 있는 섭동 DOE 라야 뜻이 있다 —
+    방향당 표본이 하나뿐(순수 26면)이면 `degenerate:true`(산포 0)다. 고른 각도군(범주 · 기준 방향 · 원하는 방향의 콘)의 분포 통계는
+    report_angle_stats, 개별 값은 report_query, 범주별 최악만은 report_directional 이다.
+
+    돌려주는 것 — `groups`[base(정준 방향 x,y,z) · category(face · edge · corner) · representative(가장 가까운 각도 이름) · n · mean ·
+    std(표본) · cov · min · max · worst_value · worst_case_key](평균 큰 순) + `most_severe`(평균이 가장 큰 방향) ·
+    `most_scattered`(CoV 가 가장 큰 방향, 표본 2 이상) · n_cases · n_bases · degenerate · note. 지표가 리포트에 없으면 groups 가 빈다.
+    sphere 가 아닌 리포트는 `note` 만 온다(지표를 보지 않는다)."""
     params = {"metric": metric}
     if part_id is not None:
         params["part_id"] = part_id
     return await _get(ctx, f"/reports/{_seg(report_id)}/scatter", params=params)
 
 
-@mcp.tool()
-async def report_part_energy(report_id: str, ctx: Context, part_id: int | None = None) -> dict:
-    """파트별 에너지(내부 IE·운동 KE) 시계열 — deep 리포트의 binout matsum(덤프됐을 때).
+@mcp.tool(annotations=_READ)
+async def report_part_energy(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    part_id: Annotated[int | None, Field(description="파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id. 비우면 "
+                                                     "matsum 의 모든 파트.")] = None,
+) -> ReportPartEnergyOut:
+    """파트별 에너지(내부 IE · 운동 KE · 있으면 hourglass) 시간이력을 준다 — deep 리포트에 LS-DYNA matsum 이 실렸을 때만 값이 있다.
 
-    각 파트의 IE/KE 시간이력(+peak, hourglass 있으면) 을 준다. part_id 미지정 시 전 파트,
-    지정 시 그 파트만. matsum 이 없으면(run 이 안 덤프) note 로 안내. sphere/impact 는 파트별
-    에너지 시계열이 리포트에 없어 note — 글로벌 에너지/하중경로는 report_energy_flow 를 써라."""
+    「어느 파트가 에너지를 얼마나 흡수했나 · 언제 최대였나」 를 물을 때 쓴다. 원본 리포트를 다시 읽는다. 전체 에너지 밸런스
+    (hourglass · energy_ratio) · 접촉력 · 하중경로는 report_energy_flow, 응력 · 변형률 · G 시간이력은 report_part_series 다.
+
+    돌려주는 것 — `t`(시간 축) + `parts`[part_id · part_name · internal_energy · kinetic_energy · peak_internal_energy ·
+    peak_kinetic_energy · hourglass_energy(있으면)] · `note`. part_id 를 주면 그 파트만. matsum 이 없는 deep(런이 덤프하지 않았다)과
+    sphere · impact 는 parts 가 비고 `note` 가 까닭을 말한다(오류가 아니다). 시계열을 통째로 주므로 파트가 많으면 응답이 크다 —
+    필요한 파트만 골라 부른다."""
     params = {"part_id": part_id} if part_id is not None else None
     return await _get(ctx, f"/reports/{_seg(report_id)}/part-energy", params=params)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_angle_stats(
-    report_id: str, ctx: Context, metric: str = "peak_stress", part_id: int | None = None,
-    category: str | None = None, angle_name: str | None = None,
-    near_lon: float | None = None, near_lat: float | None = None,
-    tol_deg: float = 15.0, top_parts: int = 5,
-) -> dict:
-    """특정 각도군의 표준 통계(분포 + 부품별 분해) — 한 도구, 전 선택 모드.
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    metric: Annotated[str, Field(description="지표 — 리포트에 실린 파트 물리량 이름(예 peak_stress · peak_strain · peak_g · "
+                                             "peak_disp). 기본 peak_stress. 실린 것은 응답의 available_metrics — 없는 것을 "
+                                             "주면 groups 가 비고 note 가 말한다.")] = "peak_stress",
+    part_id: Annotated[int | None, Field(description="파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id. 비우면 "
+                                                     "케이스마다 파트 최댓값(작을수록 나쁜 지표는 최솟값)을 대표값으로 쓰고 "
+                                                     "부품별 분해(parts)를 붙인다.")] = None,
+    category: Annotated[str | None, Field(description="방향 범주로 고른다 — sphere 는 각도 범주(예 face · edge · corner), "
+                                                      "impact 는 충격 면(F1 ~ F6). 정확히 같은 것만(report_directional 의 "
+                                                      "directions[].category). near · angle_name 이 있으면 무시된다. "
+                                                      "비우면 고르지 않는다.")] = None,
+    angle_name: Annotated[str | None, Field(description="각도 이름(sphere) — 그 각도와 같은 26 정준 방향에 묶인 케이스들을 "
+                                                        "고른다(report_case 의 identity.angle.name). near_lon · near_lat 이 "
+                                                        "있으면 무시된다. 비우면 고르지 않는다.")] = None,
+    near_lon: Annotated[float | None, Field(description="콘 중심 경도(도, sphere) — 리포트 각도의 등장방형 투영 경도"
+                                                        "(-180 ~ 180). near_lat 과 둘 다 있어야 콘으로 고른다.")] = None,
+    near_lat: Annotated[float | None, Field(description="콘 중심 위도(도, sphere, -90 ~ 90). near_lon 과 둘 다 있어야 "
+                                                        "콘으로 고른다.")] = None,
+    tol_deg: Annotated[float, Field(ge=0, le=REPORT_ANGLE_TOL_MAX_DEG,
+                                    description=f"콘 반경(대원거리, 도, 0~{REPORT_ANGLE_TOL_MAX_DEG}) · 기본 15. near_lon · "
+                                                "near_lat 을 줄 때만 쓴다.")] = 15.0,
+    top_parts: Annotated[int, Field(ge=1, le=REPORT_TOP_PARTS_MAX,
+                                    description=f"부품별 분해(parts.top_risk · most_sensitive)의 상위 몇 개"
+                                                f"(1~{REPORT_TOP_PARTS_MAX}) · 기본 5. part_id 를 주면 쓰지 않는다.")] = 5,
+) -> ReportAngleStatsOut:
+    """고른 각도군의 표준 통계(분포 + 부품별 분해)를 낸다 — 모든 그룹이 같은 꼴이라 그룹끼리 견줄 수 있다.
 
-    각도군 선택(우선순위): near_lon+near_lat(임의 방향 콘, tol_deg 반경, sphere) >
-    angle_name(그 방향의 최근접 26-base 퍼터베이션 구름, sphere) > category(면/엣지/코너 또는
-    impact 면) > 미지정(전체: sphere=base별, impact=면별). part_id 미지정 시 케이스별 파트
-    최댓값을 대표값으로 쓴다.
+    각도군 고르기(앞이 이긴다): near_lon + near_lat(그 방향 둘레 tol_deg 콘, sphere) > angle_name(그 각도와 같은 26 정준 방향에 묶인
+    섭동 구름, sphere) > category(sphere 면 · 엣지 · 코너 / impact 면) > 비우면 전체(sphere 는 정준 방향별, 그 밖은 범주별).
+    「이 방향 근처의 평균 · 산포는」 「이 각도군에서 어느 부품이 가장 위험 · 민감한가」 에 쓴다. 개별 값은 report_query, 26 방향 산포만은
+    report_scatter, 캠페인의 런을 모은 각도 통계는 campaign_angle_stats 다.
 
-    모든 그룹이 동일 스키마 — stats{n,mean,std(표본),cov,min,p05,p25,median,p75,p95,max,iqr,
-    range} + worst{value,angle_name,part_id,case_key} + (part_id 미지정 시) parts{top_risk(max),
-    most_sensitive(CoV)}. metric 은 리포트에 실재하는 것만(응답 available_metrics 참고 —
-    현재 낙하/충격 리포트는 peak_stress/peak_strain/peak_g/peak_disp. 소성 스트레인 등은
-    상류 리포트가 넣어야 잡힌다)."""
+    돌려주는 것 — `groups`[group_key · category · representative · stats{n · mean · std(표본) · cov · min · p05 · p25 · median · p75 ·
+    p95 · max · iqr · range} · worst{value · angle_name · part_id · part_name · case_key} · (part_id 를 비웠을 때) parts{top_risk ·
+    most_sensitive}] + selection · n_cases_total · n_groups · available_metrics · note. 작을수록 나쁜 지표(safety_factor · min_*)는
+    worst 가 최솟값이다. sphere 전용 고르기를 다른 리포트에 주면 groups 가 비고 note 가 말한다."""
     params: dict = {"metric": metric, "tol_deg": tol_deg, "top_parts": top_parts}
     for k, v in (("part_id", part_id), ("category", category), ("angle_name", angle_name),
                  ("near_lon", near_lon), ("near_lat", near_lat)):
@@ -2460,63 +2627,105 @@ async def report_angle_stats(
     return await _get(ctx, f"/reports/{_seg(report_id)}/angle-stats", params=params)
 
 
-@mcp.tool()
-async def report_energy_flow(report_id: str, ctx: Context, case_key: str | None = None) -> dict:
-    """에너지/접촉 상세(원본 재파싱). deep=에너지 밸런스(hourglass/energy_ratio)·접촉력(rcforc)·
-    Newton-3 신뢰도, sphere/impact=하중경로 그래프(impactor→parts 전파 · 엣지마다 peak_force·total_work·
-    total_impulse). deep 은 case_key 불필요, sphere/impact 는 case_key 로 특정 방향/위치 지정.
-    ★상세는 생성기가 **상위 각도(위치)에만** 싣는다 — 없는 케이스를 물으면 다른 각도로 떨어지지 않고 null + 까닭
-    (`detail_note`)이다. 실제로 쓴 케이스는 `flow_case_key`. 전 각도의 파트쌍 접촉력은 `report_contact_profile`.
-    HTML 압축본이면 원해상도 피크 등 빠진 칸을 `energy_flow.form_note` 가 말한다."""
+@mcp.tool(annotations=_READ)
+async def report_energy_flow(
+    report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context,
+    case_key: Annotated[str | None, Field(description="케이스 열쇠(sphere 는 각도 폴더 · impact 는 위치 id) — "
+                                                      "report_worst_cases 의 case_key. 비우면(빈 글 포함) 상세가 실린 첫 "
+                                                      "케이스. deep 은 보지 않는다.")] = None,
+) -> ReportEnergyFlowOut:
+    """에너지 · 접촉 상세를 원본 리포트에서 다시 읽어 준다 — deep 은 에너지 밸런스 · 접촉력, sphere · impact 는 한 케이스의 하중경로 그래프다.
+
+    deep — `energy_balance`(energy_ratio 최소 · 최대 · 질량 추가 · 정상 종료) · `energy_series`(t · total · kinetic · internal ·
+    hourglass · energy_ratio) · `contacts`(rcforc 접촉별 최대 힘, 큰 순) · `contact_metrics` · `has_matsum`. case_key 는 보지 않는다.
+    sphere · impact — `energy_flow`(nodes 파트별 에너지 · edges 접촉마다 peak_force · total_work · total_impulse · confidence ·
+    propagation_order) · `flow_case_key`(실제로 쓴 케이스) · `n_flows`. case_key 를 비우면 첫 케이스를 쓰고 flow_case_key 로 알린다.
+    상세는 생성기가 상위 각도(위치)에만 싣는다 — 없는 케이스를 물으면 다른 케이스로 떨어지지 않고 energy_flow:null 과
+    `detail_note` · `available_case_keys`(200 개까지) · `note` 가 온다. HTML 압축본이면 빠진 칸(원해상도 피크 등)을
+    `energy_flow.form_note` 가 말한다.
+
+    전 각도의 파트쌍 접촉력은 report_contact_profile, 파트별 에너지 시간이력은 report_part_energy 다."""
     params = {"case_key": case_key} if case_key else None
     return await _get(ctx, f"/reports/{_seg(report_id)}/energy", params=params)
 
 
-@mcp.tool()
-async def report_geometry(report_id: str, ctx: Context) -> dict:
-    """공간 컨텍스트(부품 위치·시각화용) — impact=디바이스 외곽선(device_outline)+파트별
-    footprint(XY 다각형)+z범위. "부품이 어디 있나"·충격 위치를 좌표로 안다. sphere/deep 은
-    각도 기반이라 부품 형상은 원본 렌더에만 있다(geometry 비어 있음).
+@mcp.tool(annotations=_READ)
+async def report_geometry(report_id: Annotated[str, Field(description=_A_REPORT_ID)], ctx: Context) -> ReportGeometryOut:
+    """부품의 공간 배치를 준다 — impact 리포트의 디바이스 외곽선 · 파트별 XY footprint 다각형 · z 범위다.
 
-    ⚠ **footprint 가 지어낸 것일 수 있다.** 상류 생성기는 실제 형상이 없는 파트에 **파트 id
-    해시로 사각형을 합성**하고 `_synthetic_footprint` 를 단다. 응답의
-    `footprints_are_measured`(bool) · `synthetic_footprints`(개수) · 파트별
-    `synthetic_footprint` 를 **먼저 보라** — 실측으로 유일한 impact 샘플은 **25/25 가 합성**이고
-    `zmin`/`zmax` 도 전부 null 이다. 합성 footprint 를 부품 위치·크기로 쓰면 안 된다."""
+    「부품이 어디 있나」 「충격 위치가 어느 부품 위인가」 를 좌표로 볼 때 쓴다. sphere · deep 은 각도 기반이라 부품 형상이 원본 렌더에만
+    있어 device_outline · device_bbox 가 null 이고 parts 가 빈다. 그림으로 보려면 report_media · report_image, 뜨거운 자리의 좌표는
+    report_hotspots 다.
+
+    ⚠ footprint 가 지어낸 것일 수 있다. 상류 생성기는 실제 형상이 없는 파트에 파트 id 해시로 사각형을 지어내고 표시를 단다. 응답의
+    `footprints_are_measured`(모두 실제 형상이면 true) · `synthetic_footprints`(지어낸 파트 수) · 파트별 `synthetic_footprint` ·
+    `footprint_warning` 을 먼저 보라 — 지어낸 footprint 를 부품 위치 · 크기로 쓰면 안 된다. zmin · zmax 도 비어 있을 수 있다.
+
+    돌려주는 것 — kind · device_outline · device_bbox · parts[part_id · name · group · footprint · synthetic_footprint · zmin · zmax]
+    · 위 요약 칸."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/geometry")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_part_series(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     case_key: Annotated[str, Field(description="케이스 열쇠 — report_worst_cases 의 case_key"
-                                               "(sphere 는 각도 폴더 · impact 는 위치 id).")],
+                                               "(sphere 는 각도 폴더 · impact 는 위치 id · deep 은 그 한 건 — deep 은 "
+                                               "값을 보지 않는다).")],
     part_id: Annotated[int, Field(description="파트 번호(LS-DYNA PID) — report_summary 의 parts[].part_id.")],
     ctx: Context,
-) -> dict:
-    """한 케이스·파트의 시계열(원본 재파싱, 다운샘플) — 응력/변형률/G/변위 시간이력."""
+) -> ReportPartSeriesOut:
+    """한 케이스 · 한 파트의 시간이력을 준다 — 원본 리포트를 다시 읽어, 생성기가 솎아 실은 응력 · 변형률 · G · 변위 시계열이다.
+
+    「최악 케이스에서 이 파트의 응력이 언제 · 어떻게 올라갔나」 를 볼 때 쓴다. case_key 는 report_worst_cases · report_query 에서,
+    part_id 는 report_summary · report_part_risk 에서 얻는다. 피크 값만 필요하면 report_case · report_query, 파트별 에너지 시간이력은
+    report_part_energy 다.
+
+    돌려주는 것(kind 마다 다르다) —
+    - deep: 실린 블록(stress · strain · vm_strain · max_principal · min_principal · max_principal_strain · min_principal_strain)마다
+      {물리량: {t · max · avg · global_max · global_min · time_of_max · unit}}, `series_blocks`(실린 블록 이름),
+      `motion`(t · disp_mag · vel_mag · acc_mag). deep 은 단건이라 case_key 를 보지 않는다.
+    - sphere: stress_ts · strain_ts · g_ts · disp_ts · acc_ts(g_ts · disp_ts 에는 max 별칭을 얹는다).
+    - impact: stress_ts.
+    케이스 · 파트를 못 찾으면 `note` 가 온다(오류가 아니다)."""
     return await _get(ctx, f"/reports/{_seg(report_id)}/cases/{_seg(case_key)}/series", params={"part_id": part_id})
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def report_findings(
     report_id: Annotated[str, Field(description=_A_REPORT_ID)],
     ctx: Context,
     severity: Annotated[str | None, Field(description=f"심각도 — {_one_of(SEVERITIES)} 중 하나. 그 심각도와 **같은** "
                                                       "소견만(대소문자 무시). 비우면 모두.")] = None,
-) -> list:
-    """리포트의 위험 소견(CRITICAL/WARNING/INFO). severity 로 필터 가능.
-    항복 초과·과도 G 등 자동 판정된 항목을 준다(sphere/impact)."""
+) -> list[ReportFindingRow]:
+    """리포트의 위험 소견(자동 판정 — 항복 초과 · 과도한 G 등)을 목록으로 준다. severity 로 그 심각도만 고를 수 있다.
+
+    리포트 하나의 소견을 읽을 때 쓴다(sphere · impact — deep 리포트는 소견이 없어 빈 목록이다). 여러 리포트에서 「CRITICAL 소견이 있는
+    리포트」 를 찾으려면 find_reports 의 severity, 소견이 가리키는 파트 · 케이스의 값은 report_part_risk · report_query, 해석
+    온톨로지(CAE) 꾸러미의 판정은 report_cae 다.
+
+    돌려주는 것 — 행 목록 [severity(CRITICAL · WARNING · INFO) · title · detail · recommendation · peak_provenance]. 생성기가 실은
+    순서 그대로이고 자르지 않는다. 0 건이면 빈 목록이다. 캠페인 런에서 온 리포트면 행마다 peak_provenance 에 피크 출처가 있다."""
     params = {"severity": severity} if severity else None
     return await _get(ctx, f"/reports/{_seg(report_id)}/findings", params=params)
 
 
-@mcp.tool()
-async def compare_reports(report_ids: list, ctx: Context, part_id: int | None = None) -> dict:
-    """여러 리포트(리비전/조건)를 파트별 최악 응력으로 비교한다(federate 식 비교).
+@mcp.tool(annotations=_READ)
+async def compare_reports(
+    report_ids: Annotated[list, Field(description="비교할 리포트 id 목록(둘 이상) — find_reports 의 items[].id. 같은 kind "
+                                                  "끼리라야 뜻이 있다.")],
+    ctx: Context,
+    part_id: Annotated[int | None, Field(description=_A_PART_ID_OPT)] = None,
+) -> CompareReportsOut:
+    """여러 리포트(개정 · 조건)를 파트별 최악 응력 · 최소 안전율로 나란히 놓는다 — 리포트마다 report_part_risk 를 불러 파트 번호로 맞춘다.
 
-    각 리포트의 part_risk 를 모아 파트별로 리포트 간 최악 응력·안전율을 나란히 놓는다.
-    같은 kind 끼리 비교해야 의미가 있다(sphere↔sphere, impact↔impact)."""
+    「개정 A 와 B 에서 같은 파트의 최악 응력이 어떻게 달라졌나」 를 물을 때 쓴다. 같은 kind 끼리라야 뜻이 있다(sphere ↔ sphere,
+    impact ↔ impact) — kind 가 섞이면 `note` 가 경고한다. 한 리포트 안의 케이스를 그림과 함께 견주려면 report_compare, 캠페인끼리는
+    compare_campaigns, 한 과제의 개정끼리는 compare_task_revisions 다.
+
+    돌려주는 것 — `kinds`{리포트 id: kind} · `note` · `parts`[part_id · part_name · by_report{리포트 id: {worst_stress(MPa) ·
+    worst_stress_case · min_safety_factor}}](part_id 글자 순). 어느 리포트에 없는 파트는 그 리포트 칸이 없다. report_ids 는 둘
+    이상이어야 한다 — 상한은 없지만 리포트마다 백엔드를 두 번 부르고 모두 도구 호출 한 번의 시간 한도 안이어야 한다."""
     if not report_ids or len(report_ids) < 2:
         raise RuntimeError("비교하려면 report_ids 가 2개 이상이어야 합니다.")
     rows = {}
@@ -2541,24 +2750,35 @@ async def compare_reports(report_ids: list, ctx: Context, part_id: int | None = 
     return {"kinds": kinds, "note": note, "parts": sorted(rows.values(), key=lambda r: str(r["part_id"]))}
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD_OUT)
 async def publish_report_to_datahub(
-    report_id: str,
-    project: str,
-    stage: str,
+    report_id: Annotated[str, Field(description=_A_REPORT_ID + " 내가 소유한 리포트만.")],
+    project: Annotated[str, Field(description="과제코드(64자까지) — 레코드의 project. 빈 글이면 리포트 메타의 과제"
+                                              "(update_report_meta 로 적은 값)를 쓰고, 그것도 없으면 오류.")],
+    stage: Annotated[Literal[DATAHUB_STAGES], Field(description="개발 단계 코드 — " + _one_of(s for s in DATAHUB_STAGES if s)
+                                                                + " 중 하나(dv · pv 는 차수 1 · 2 · 3 · r 필수, pre · pra · mp "
+                                                                "는 차수 없음). 빈 글이면 리포트 메타의 개발 단계를 쓰고, 그것도 "
+                                                                "없으면 오류.")],
     ctx: Context,
-    variation: str | None = None,
-    doe: str | None = None,
-    unit: str = "mm-t-s",
-    title: str | None = None,
-) -> dict:
-    """리포트를 AI Data Hub 에 범용 sim_report 데이터 레코드로 등재한다.
+    variation: Annotated[str | None, Field(description="설계안 — 비우면 리포트 메타의 설계안.")] = None,
+    doe: Annotated[str | None, Field(description="DOE 참조 — `study` 또는 `study:case`. 비우면 리포트 메타의 DOE.")] = None,
+    unit: Annotated[str, Field(description="단위계 표지(자유 글) — 첨부 설명 · 첨부 extra 의 unit_system 에 그대로 싣는다"
+                                           "(값을 바꾸지 않는다). 기본 mm-t-s.")] = "mm-t-s",
+    title: Annotated[str | None, Field(description="레코드 제목 — 비우면 `<과제> <단계> — <리포트 과제명 또는 kind> <kind> "
+                                                   "리포트`.")] = None,
+) -> PublishReportToDatahubOut:
+    """리포트를 AI Data Hub 에 범용 sim_report 레코드로 등재한다 — DynaForge 밖(DataHub)에 새 레코드를 만든다.
 
-    project=과제코드, stage=개발단계(pre|dv1..dvr|pv1..pvr|pra|mp), variation=설계안,
-    doe=DOE 참조(study[:case]). 리포트 요약·소견·최악케이스·파트를 content 로 싣고 원본
-    HTML 을 첨부한다. 도메인 무관 스키마라 검색·리비전 비교에 그대로 얹힌다.
-    deep·sphere 리포트에 핫스팟이 있으면 그 요약(sphere=포락 상위 10 · deep=군집 상위 10 — report_hotspots 와
-    같은 계산)도 content.outputs.hotspots 에 싣는다(저장만 — 검색 칸은 아니다)."""
+    리포트를 과제 · 개발 단계에 엮어 사내 검색 · 개정 비교에 올릴 때 쓴다. 리포트 소유자만 부를 수 있다(공유로 읽는 리포트는 404).
+    ★부를 때마다 새 레코드 id(SIM-…)를 받는다 — 같은 리포트를 다시 등재하면 덮지 않고 레코드가 하나 더 생긴다. 과제 · 개발 단계를
+    리포트 메타에 먼저 적어 두려면 update_report_meta(그러면 project · stage 를 빈 글로 줘도 그 값을 쓴다).
+
+    싣는 것 — 리포트 요약 · 소견 · 최악 케이스 상위 5 · 파트 · sim_params 를 content 로, 원본 리포트 HTML 을 첨부로. deep · sphere
+    리포트에 핫스팟이 있으면 그 요약(sphere=포락 상위 10 · deep=군집 상위 10 — report_hotspots 와 같은 계산)도
+    content.outputs.hotspots 에 싣는다(저장만 — 검색 칸은 아니다). 원본 HTML 이 없거나 DataHub 주소가 설정되지 않았거나 과제 ·
+    단계를 못 정하면 오류(400), DataHub 가 거절하면 502 다.
+
+    돌려주는 것 — record_id · data_type(SIM) · doc_type(sim_report) · sim_domain · report_kind · view(레코드 주소)."""
     body = {"project": project, "stage": stage, "unit": unit}
     if variation:
         body["variation"] = variation
@@ -2569,9 +2789,18 @@ async def publish_report_to_datahub(
     return await _post(ctx, f"/reports/{_seg(report_id)}/publish-datahub", body)
 
 
-@mcp.tool()
-async def delete_report(report_id: str, ctx: Context) -> dict:
-    """인제스트된 리포트를 삭제한다(원본 HTML 포함). / Delete an ingested report."""
+@mcp.tool(annotations=_DELETE)
+async def delete_report(
+    report_id: Annotated[str, Field(description="지울 리포트 id — find_reports 의 items[].id(내가 소유한 것만).")],
+    ctx: Context,
+) -> DeleteReportOut:
+    """인제스트된 리포트를 지운다 — 되돌릴 수 없다.
+
+    리포트 행과 그 케이스 · 원본 리포트 HTML · 조건(scenario) 파일 · 해석 온톨로지 꾸러미 파일을 함께 지운다. K파일은 모델 자산이라
+    남긴다(다른 리포트가 쓸 수 있다). DataHub 에 등재한 레코드는 지우지 않는다. 리포트 소유자만 지울 수 있다(공유로 읽는 리포트는
+    404). 개정 연결만 끊으려면 unlink_report_revision, 메타만 고치려면 update_report_meta 다.
+
+    돌려주는 것 — message(지웠다는 글). 이미 지운 리포트를 다시 부르면 404 오류다."""
     return await _delete(ctx, f"/reports/{_seg(report_id)}")
 
 
