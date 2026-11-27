@@ -22,12 +22,13 @@ import hashlib
 import os
 import sys
 import time
-from typing import Annotated
+from typing import Annotated, Any, Literal  # noqa: F401 — Literal 은 닫힌 어휘 인자(계약 C3)
 from urllib.parse import quote
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
-from pydantic import Field
+from mcp.types import ToolAnnotations
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_serializer, model_validator
 
 from figure_png import FigurePngError, rasterize
 
@@ -105,6 +106,41 @@ def _bounded_tool(*args, **kwargs):
 
 
 mcp.tool = _bounded_tool
+
+# ── 읽기 · 쓰기 표지(포털 공통 계약 C6) — 도구마다 `@mcp.tool(annotations=…)` 로 하나를 고른다 ─────────────────────────────
+# 바꾸는 도구는 덮는지(destructive) · 같은 호출을 거듭해도 같은지(idempotent)를 함께 말한다. openWorld 는 DynaForge 백엔드 · DB 밖(DataHub ·
+# stcx 클러스터 · StepForge · 이 박스의 세션 밖 파일)에 닿는지다 — 우리 백엔드만 부르면 닫힌 세계다.
+_READ = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
+_READ_OUT = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=True)
+_ADD = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)   # 새 세션 · 잡 · 파일 · 행
+_ADD_OUT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+_SET = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)     # 덮어쓰기 — 같은 값이면 같다
+_SET_OUT = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True)
+_DELETE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+
+
+# ── 결과 꼴(공통 계약 C7) — 반환 타입으로 적으면 FastMCP 가 칸 이름 · 뜻이 든 outputSchema 와 structuredContent 를 낸다 ──────────
+# 칸 형은 Any 로 둔다 — 백엔드 값이 그대로 지나가고 출력 검증이 실제 값에 걸리지 않는다. 적지 않은 칸도 싣고(extra allow), 백엔드가 보내지
+# 않은 칸을 null 로 지어 넣지 않는다(_as_sent). 꼴과 다른 값(목록 · null)이 오면 value 칸에 그대로 싣는다 — 꼴을 잘못 적어도 도구는 산다.
+# 1.x FastMCP 는 구조 결과가 있으면 같은 내용을 글(content)로도 낸다.
+class _Out(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _not_a_dict(cls, v):
+        return v if isinstance(v, dict) else {"value": v}
+
+    @model_serializer(mode="wrap")
+    def _as_sent(self, handler):
+        d = handler(self)
+        keep = self.model_fields_set | set(self.model_extra or {})
+        return {k: v for k, v in d.items() if k in keep}
+
+
+def _shape(name: str, fields: dict[str, str]) -> type[_Out]:
+    """결과 꼴 — `{칸 이름: 뜻}` 만 적는다. 목록을 돌려주는 도구는 `-> list[행 꼴]`(FastMCP 가 `{"result": [...]}` 로 감싼다)."""
+    return create_model(name, __base__=_Out, **{k: (Any, Field(None, description=v)) for k, v in fields.items()})
 
 # ── 인자 설명(포털 arg-descriptions §2-3, 사용자 결정 10-31) — 게이트웨이가 세는 것은 inputSchema 맨 위 인자의 description 이다 ─────
 # 허용값 · 상한 · 단위는 손으로 옮겨 적지 않는다 — 아래 상수에서 만든다. 이 값이 백엔드의 실제 제약(GET /reports 의 Query 패턴 ·
