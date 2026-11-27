@@ -45,10 +45,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def app_version() -> str | None:
+def app_version() -> str:
+    """앱 판 — 비지 않는 글이다(계약 v1.1 §2 · 포털 13c3ac3e — 비거나 null 이면 포털이 결과 봉투를 버린다). 배포된 빌드의 커밋
+    (bin/BUILD_INFO.txt — health 의 revision 과 같다) 앞 8자리, 모르면 "unknown". 런타임에 git 이 없어 그 밖의 빌드 커밋은 없다."""
     from app.shared.buildinfo import build_info
-    commit = (build_info(settings.kooremapper_bin) or {}).get("revision")
-    return str(commit)[:8] if commit else None
+    try:
+        commit = (build_info(settings.kooremapper_bin) or {}).get("revision")
+    except Exception:  # noqa: BLE001 — 판을 못 읽어도 결과를 잃지 않는다
+        commit = None
+    return str(commit).strip()[:8] if commit and str(commit).strip() else "unknown"
 
 
 async def submit_user(db) -> User | None:

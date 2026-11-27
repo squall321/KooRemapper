@@ -317,3 +317,18 @@ async def test_a_finished_stcx_job_without_a_slurm_number_fails_plainly(db, read
     finally:
         await _cleanup([u])
 
+
+@pytest.mark.parametrize("info", [{"revision": None}, {}, None, "raise"])
+async def test_app_version_is_never_empty_even_without_a_binary_revision(info, monkeypatch):
+    """바이너리 판을 모르는 박스에서도 app_version 은 빈 글이 아니다(계약 §2 · §4-4 — 포털이 봉투를 버린다, 13c3ac3e)."""
+    import app.shared.buildinfo as bi
+
+    def fake(_path):
+        if info == "raise":
+            raise OSError("BUILD_INFO 를 못 읽음")
+        return info
+    monkeypatch.setattr(bi, "build_info", fake)
+    assert drop.app_version() == "unknown"
+    monkeypatch.setattr(bi, "build_info", lambda _p: {"revision": "6a90a4166a4e34613d71f6ab11bfc2831fd23973"})
+    assert drop.app_version() == "6a90a416"
+

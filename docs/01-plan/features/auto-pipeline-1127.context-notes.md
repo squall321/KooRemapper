@@ -52,3 +52,10 @@
 - ★깨진 시험 판이 행을 남기면 다른 시험이 조용히 건너뛴다 — 첫 auto_drop 판이 지연 읽기로 깨져 정리를 못 해 running 잡 둘이 scratch DB 에
   남았고, 「running 잡이 이미 있다 — reconcile_orphans 는 전역」 인 시험 다섯이 건너뛰었다(건너뜀 12 → 19). 남은 행을 지우고(시험 사용자 ad_* ·
   ap_* 만) 다시 돌려 14(모두 환경 — MCP venv · mcp.sif · gmsh)로 돌아왔다. 건너뜀 수가 바뀌면 까닭을 본다.
+
+## 6. app_version 은 비지 않는다(2026-11-27 · 포털 계약 13c3ac3e)
+- hwaxportal-71 이 b950bef0 의 답 꼴을 포털 검증기에 그대로 넣어 봤다 — 감지 · 프로파일 · 확인 · 제출 · 상태 · 취소 · 수치 없음 봉투는 받는다.
+  걸린 것 하나 — auto_result 의 app_version 이 None 이면(바이너리 없음 · BUILD_INFO 커밋 없음) 포털이 봉투를 버린다(envelope_invalid). 포털이
+  계약 §2 · §4-4 를 고쳤다(원본 확인).
+- 고침 — app_version 은 배포 빌드 커밋(BUILD_INFO — health revision 과 같다) 앞 8자리, 모르면(읽기 실패 포함) "unknown". 런타임에 git 이 없어
+  「앱 자신의 빌드 커밋」 은 따로 없다. profiles 도 같은 함수라 함께 맞는다. 시험 넷(판 없음 · 빈 사전 · None · 읽기 실패) · 변이 빨강.
