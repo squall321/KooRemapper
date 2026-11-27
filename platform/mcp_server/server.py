@@ -277,82 +277,279 @@ async def _delete(ctx, path, params=None):
 
 
 # ── 오퍼레이션 카탈로그 ──────────────────────────────────────────────
-@mcp.tool()
-async def list_operations(ctx: Context) -> list:
-    """사용 가능한 전체 오퍼레이션 요약(name, category, summary, 입력유형). 무엇을 할 수
-    있는지 먼저 조회. 상세 인자는 describe_operation 으로."""
+# 카탈로그 · 세션 · 파일 · 잡 도구의 인자 설명과 결과 꼴(계약 C2 · C7) — 칸 이름은 백엔드 응답(카탈로그 항목 · UserRead · SessionRead ·
+# FileRead · JobRead · /system/status)에서 그대로 옮겼다. 세션 · 파일 · 잡 칸은 여러 도구가 함께 쓴다.
+_A_CORE_FILE_ID = "세션 파일 id(정수) — get_session 의 files[].id · list_session_files 의 id · get_job_outputs 의 id."
+_A_CORE_JOB_ID = "잡 id — run_operation 응답의 id · list_session_jobs 의 id."
+_CORE_SESSION_FIELDS = {
+    "id": "세션 id — 다른 도구의 session_id.",
+    "name": "세션 이름.",
+    "description": "세션 설명(없으면 null).",
+    "status": "active · archived.",
+    "visibility": "공개 범위 — company · department · team · private(만들 때 private).",
+    "deck_revision_label": "덱 판 라벨(없으면 null).",
+    "linked_cad": "연결된 StepForge 과제 {project_id, revision}(없으면 null).",
+    "created_at": "만든 시각(ISO 8601).",
+    "updated_at": "마지막으로 고친 시각(ISO 8601).",
+    "file_count": "파일 수 — 목록 · 상세에서만 채운다(만들기 · 고치기 응답은 null).",
+    "environment": "이 플랫폼의 환경 — dev · prod · unknown.",
+    "revision_warning": "덱 판 라벨과 연결된 CAD 판이 다르면 경고 글(같거나 한쪽이 없으면 null).",
+}
+_CORE_FILE_FIELDS = {
+    "id": "세션 파일 id — inspect_file · download_result · save_result_to_path · delete_file 의 file_id.",
+    "session_id": "세션 id.",
+    "filename": "세션 안 파일 이름(하위 경로 포함 — 예 sub/part.k).",
+    "kind": "input(올린 것) · output(잡 산출물) · generated(서버가 만든 것).",
+    "origin_job_id": "만든 잡 id(올린 파일은 null).",
+    "size_bytes": "크기(바이트).",
+    "sha256": "내용 지문(16진 64자).",
+    "meta": "업로드 때 잰 메타 — 덱이면 nodes · elements · parts · bbox_min · bbox_max · includes · part_titles(앞 50개) · "
+            "keyword_counts · modelmeta 등, 덱이 아니면 {filename} 만, 재지 않은 파일은 null.",
+    "created_at": "만든 시각(ISO 8601).",
+}
+_CORE_JOB_FIELDS = {
+    "id": "잡 id — get_job · cancel_job · get_job_outputs 의 job_id.",
+    "session_id": "세션 id.",
+    "operation": "오퍼레이션 이름.",
+    "args": "제출한 인자.",
+    "resolved_cmd": "실제로 돈 명령 · 설정(아직 안 돌았으면 null).",
+    "status": "queued · running · succeeded · failed · canceled.",
+    "progress": "진행률 0~100(도는 동안은 출력의 마지막 NN% 표지 · 모르면 null).",
+    "exit_code": "종료 코드(끝나기 전 null).",
+    "input_file_ids": "입력 파일 id 목록(비어 있을 수 있다).",
+    "output_file_ids": "산출 파일 id 목록 — 이름 · meta 는 get_job_outputs.",
+    "error_summary": "실패 까닭 요약(없으면 null).",
+    "warnings": "경고 글 목록 — 덱이 정의되지 않은 세트 · 파트 · 재질 · 절점을 가리킨다 등(없으면 null).",
+    "created_at": "제출 시각(ISO 8601).",
+    "started_at": "시작 시각(ISO 8601 · 대기 중이면 null).",
+    "finished_at": "끝난 시각(ISO 8601 · 끝나기 전 null).",
+    "external": "외부 잡(stcx 제출 · 후처리 예약)의 요약 {kind, cluster_state, ontology: {state, why?}, images?} — 로컬 잡은 null.",
+}
+_CORE_MESSAGE_FIELD = {"message": "백엔드가 돌려준 결과 문구."}
+ListOperationsRow = _shape("ListOperationsRow", {
+    "name": "오퍼레이션 이름 — describe_operation · run_operation 의 operation.",
+    "category": "분류(목록은 분류 · 이름 순).",
+    "summary": "한 줄 요약.",
+    "invocation": "positional · yaml(이 서버의 바이너리) · external(다른 클러스터에서 돈다).",
+    "takes_kfile": "K파일 입력을 받는가.",
+    "requires_gmsh": "gmsh 가 필요한가(서버에 없으면 run_operation 이 422).",
+    "requires_tetgen": "tetgen 이 필요한가.",
+})
+DescribeOperationOut = _shape("DescribeOperationOut", {
+    "name": "오퍼레이션 이름.",
+    "category": "분류.",
+    "summary": "한 줄 요약.",
+    "description": "자세한 설명.",
+    "invocation": "positional · yaml · external.",
+    "config_style": "yaml 설정 꼴 — null · structured · freeform.",
+    "takes_kfile": "K파일 입력을 받는가.",
+    "requires_gmsh": "gmsh 가 필요한가.",
+    "requires_tetgen": "tetgen 이 필요한가.",
+    "params": "인자 정의 목록 [{name, type, role, required, description, enum?, default?, pattern?, group?}].",
+    "args_schema": "run_operation 의 args 가 따를 JSON Schema {type: object, properties, required, additionalProperties}.",
+    "example": "예제 {args, note}.",
+    "notes": "주의 사항(글).",
+    "example_folder": "예제 폴더(없을 수 있다).",
+    "keys": "yaml 설정 칸 목록 [{path, type, required, desc}](yaml 오퍼레이션만).",
+    "presets": "미리 정한 설정(없으면 null).",
+    "alternative_invocations": "다른 호출 꼴(일부 오퍼레이션만).",
+})
+WhoamiOut = _shape("WhoamiOut", {
+    "id": "사용자 번호.",
+    "email": "이메일.",
+    "display_name": "표시 이름(없으면 null).",
+    "is_active": "활성 계정인가.",
+    "is_system_admin": "시스템 관리자인가.",
+    "created_at": "가입 시각(ISO 8601).",
+})
+SystemStatusOut = _shape("SystemStatusOut", {
+    "version": "API 판.",
+    "env": "실행 환경 이름(app_env).",
+    "api": "{ok, port}.",
+    "database": "{ok, port} — ok 가 false 면 DB 에 닿지 못했다(port 는 늘 null).",
+    "worker": "{concurrency, queued, running} — 동시 실행 자리 · 대기 · 실행 중 잡 수(전체 사용자).",
+    "binary": "{present} — KooRemapper 바이너리가 있는가.",
+    "gmsh": "{available, note} — gmsh 를 쓸 수 있는가.",
+    "mcp": "{port, url, url_note} — 공개 주소가 설정에 없으면 url 은 null 이고 url_note 가 까닭을 말한다.",
+    "rate_limit": "{enabled} — 속도 제한이 켜져 있는가.",
+    "signup": "{enabled} — 가입을 받는가.",
+    "operations": "오퍼레이션 수.",
+    "postprocess_versions": "최근 반입 리포트가 실어 온 후처리 판 [{name, adapter, version, n, last_at}](최근 것부터 10줄 · "
+                            "null = 못 셌다 · [] = 그 기간에 없다).",
+    "postprocess_versions_window_days": "postprocess_versions · observed_images 가 보는 기간(일).",
+    "observed_images": "매니페스트가 관측한 SIF {post: [...], manifest_node_pre: [...]}(칸마다 10줄 · null = 못 셌다).",
+})
+ListSessionsRow = _shape("ListSessionsRow", _CORE_SESSION_FIELDS)
+CreateSessionOut = _shape("CreateSessionOut", _CORE_SESSION_FIELDS)
+GetSessionOut = _shape("GetSessionOut", {
+    **_CORE_SESSION_FIELDS,
+    "files": "파일 목록(id 순) [{id, session_id, filename, kind, origin_job_id, size_bytes, sha256, meta, created_at}].",
+})
+CoreSessionFileRow = _shape("CoreSessionFileRow", _CORE_FILE_FIELDS)
+SaveResultToPathOut = _shape("SaveResultToPathOut", {
+    "saved": "쓴 경로(dest_path 그대로).",
+    "bytes": "쓴 바이트 수.",
+})
+SessionIncludesOut = _shape("SessionIncludesOut", {
+    "ok": "빠진 *INCLUDE 가 없으면 true.",
+    "missing_by_file": "{덱 파일명: {missing: [...], satisfied: [...]}} — 빠진 것이 있는 덱만 싣는다.",
+})
+InspectFileOut = _shape("InspectFileOut", {
+    "filename": "세션 안 파일 이름.",
+    "sha256": "내용 지문(덱 판을 가린다).",
+    "meta": "업로드 때 잰 메타(캐시 — 다시 재지 않는다).",
+})
+RunOperationOut = _shape("RunOperationOut", _CORE_JOB_FIELDS)
+GetJobOut = _shape("GetJobOut", {
+    **_CORE_JOB_FIELDS,
+    "logs": "include_logs=true 일 때만 — stdout · stderr 의 마지막 4000자(못 읽으면 까닭 글).",
+    "logs_truncated": "include_logs=true 이고 로그를 읽었을 때만 — 4000자를 넘어 앞이 잘렸으면 true.",
+    "logs_total_chars": "include_logs=true 이고 로그를 읽었을 때만 — 자르기 전 로그 전체 글자 수.",
+})
+CancelJobOut = _shape("CancelJobOut", _CORE_MESSAGE_FIELD)
+UpdateSessionOut = _shape("UpdateSessionOut", _CORE_SESSION_FIELDS)
+DeleteSessionOut = _shape("DeleteSessionOut", _CORE_MESSAGE_FIELD)
+DeleteFileOut = _shape("DeleteFileOut", _CORE_MESSAGE_FIELD)
+
+
+@mcp.tool(annotations=_READ)
+async def list_operations(ctx: Context) -> list[ListOperationsRow]:
+    """사용 가능한 오퍼레이션 전체의 요약 목록을 돌려준다 — 무엇을 할 수 있는지 처음 볼 때 쓴다.
+
+    한 오퍼레이션의 인자 · 예제 · 주의 사항은 describe_operation, 실제 실행은 run_operation 으로 한다. 오퍼레이션은 세션 파일에 거는
+    메쉬 · 덱 작업(map · contact · info 등)과 다른 클러스터와 주고받는 작업(stcx_fullangle_drop · postprocess)이다.
+
+    반환: 행 목록(분류 · 이름 순 · 자르지 않는다) — 행마다 name · category · summary · invocation(positional · yaml 은 이 서버의
+    바이너리, external 은 다른 클러스터) · takes_kfile · requires_gmsh · requires_tetgen. 개수는 카탈로그가 정한다(system_status 의
+    operations 와 같다)."""
     return await _get(ctx, "/operations")
 
 
-@mcp.tool()
-async def describe_operation(operation: str, ctx: Context) -> dict:
-    """한 오퍼레이션의 상세 — 인자 JSON Schema(args_schema), 입출력, 예제 args, 매뉴얼.
-    run_operation 호출 전에 args 를 어떻게 구성할지 여기서 확인하라."""
+@mcp.tool(annotations=_READ)
+async def describe_operation(
+    operation: Annotated[str, Field(description="오퍼레이션 이름 — list_operations 의 name(예 info · map · contact). "
+                                                "없는 이름이면 404 로 실패한다.")],
+    ctx: Context,
+) -> DescribeOperationOut:
+    """오퍼레이션 하나의 상세(설명 · 인자 정의 · args JSON Schema · 예제 · 주의 사항)를 돌려준다 — run_operation 의 args 를 짜기 전에 쓴다.
+
+    전체 목록과 이름은 list_operations 로 본다. 실행은 run_operation(session_id, operation, args) — args 는 여기 args_schema 를
+    따르고, 파일 인자(x-kind session_file)는 그 세션의 파일 이름(get_session 의 files[].filename)이다.
+
+    반환: name · category · summary · description · invocation · config_style · takes_kfile · requires_gmsh · requires_tetgen ·
+    params(인자 정의 — name · type · role · required · description · enum · default · pattern · group) · args_schema(type object ·
+    properties · required · additionalProperties — freeform yaml 오퍼레이션만 모르는 칸을 받는다) · example{args, note} · notes(주의
+    사항) · example_folder · keys(yaml 설정 칸) · presets · alternative_invocations. 덜 쓰는 칸은 오퍼레이션마다 없을 수 있다."""
     return await _get(ctx, f"/operations/{_seg(operation)}")
 
 
 # ── 세션 / 파일 ──────────────────────────────────────────────────────
-@mcp.tool()
-async def whoami(ctx: Context) -> dict:
-    """현재 토큰의 사용자 정보. / The current authenticated user."""
+@mcp.tool(annotations=_READ)
+async def whoami(ctx: Context) -> WhoamiOut:
+    """이 MCP 호출에 실린 토큰의 사용자 정보를 돌려준다 — 누구 권한으로 도는지 확인할 때 쓴다.
+
+    모든 도구는 이 사용자 권한으로 백엔드를 부른다(세션 · 잡은 이 사용자 것만 고치고 지울 수 있다). 플랫폼 상태는 system_status,
+    기능 범위는 system_capabilities.
+
+    반환: id · email · display_name · is_active · is_system_admin · created_at."""
     return await _get(ctx, "/me")
 
 
-@mcp.tool()
-async def system_status(ctx: Context) -> dict:
-    """플랫폼 상태(api/db/worker 큐/gmsh/바이너리/op 수) + `postprocess_versions` — 최근 90일 **7-1 반입** 리포트가 실어 온
-    후처리 판([{name(producer.tool), adapter, version, n, last_at}] — 어댑터가 다르면 다른 줄, 빈 판은 안 센다, 글은 한 줄 80자).
-    stcx 에 닿지 않고도 운영에서 어느 후처리 판이 도는지 본다(None = 못 셌다, [] = 그 기간에 7-1 반입 리포트가 없다).
-    `observed_images` — 같은 기간 7-1 반입 리포트의 매니페스트가 관측한 SIF(칸마다 10줄) `{post: [{sha256, version, n,
-    nodes, last_at}], manifest_node_pre: [{sha256, version, kooremapper_commit, n, nodes, last_at}]}` — post 는 리포트를
-    만든 노드의 후처리 SIF, manifest_node_pre 는 매니페스트를 쓴 노드에 깔려 있던 전처리 SIF(배포 상태 — 전처리가 실제로
-    쓴 판의 증거가 아니다). 같은 칸에 sha256 이 여럿이면 노드마다 SIF 사본이 다르다(None = 못 셌다).
-    / Platform health + worker queue."""
+@mcp.tool(annotations=_READ)
+async def system_status(ctx: Context) -> SystemStatusOut:
+    """플랫폼 상태(API · DB · 워커 큐 · gmsh · 바이너리 · 오퍼레이션 수)와 운영에서 도는 후처리 판 · 이미지를 돌려준다.
+
+    장애를 의심하거나 잡이 큐에서 안 움직일 때 먼저 본다. 웹 · MCP 기능 범위와 스위치는 system_capabilities, 내 정보는 whoami.
+
+    반환: version · env · api{ok, port} · database{ok} · worker{concurrency, queued, running} · binary{present} · gmsh{available,
+    note} · mcp{port, url, url_note} · rate_limit{enabled} · signup{enabled} · operations · postprocess_versions ·
+    postprocess_versions_window_days(90) · observed_images.
+    · postprocess_versions — 최근 90일 외부 잡으로 반입된(external_job_key 가 있는) 리포트가 실어 온 후처리 판
+      [{name(producer.tool), adapter, version, n, last_at}] — 어댑터가 다르면 다른 줄, 빈 판은 안 센다, 글은 한 줄 80자, 최근 것부터
+      10줄까지. stcx 에 닿지 않고도 운영에서 어느 후처리 판이 도는지 본다(None = 못 셌다, [] = 그 기간에 그런 리포트가 없다).
+    · observed_images — 같은 기간 그 리포트들의 매니페스트가 관측한 SIF(칸마다 10줄) `{post: [{sha256, version, n, nodes,
+      last_at}], manifest_node_pre: [{sha256, version, kooremapper_commit, n, nodes, last_at}]}` — post 는 리포트를 만든 노드의
+      후처리 SIF, manifest_node_pre 는 매니페스트를 쓴 노드에 깔려 있던 전처리 SIF(배포 상태 — 전처리가 실제로 쓴 판의 증거가
+      아니다). 같은 칸에 sha256 이 여럿이면 노드마다 SIF 사본이 다르다(None = 못 셌다)."""
     return await _get(ctx, "/system/status")
 
 
-@mcp.tool()
-async def list_sessions(ctx: Context) -> list:
-    """내 세션(프로젝트) 목록 — **user_id 스코프**(이 호출자 계정의 것만). 각 세션은
-    업로드/생성된 K파일 묶음이다. 빈 배열 ≠ 전사에 없음 — 전사 집계는 corpus_summary."""
+@mcp.tool(annotations=_READ)
+async def list_sessions(ctx: Context) -> list[ListSessionsRow]:
+    """내가 볼 수 있는 세션 목록을 돌려준다 — 내 세션과 조직에 공개된(company · department · team) 남의 세션이다.
+
+    기존 작업을 이어갈 때 먼저 찾는다. 새 작업 공간은 create_session, 세션 하나의 파일까지 보려면 get_session. 빈 목록이어도 전사에
+    없다는 뜻은 아니다 — 전사 집계는 corpus_summary.
+
+    반환: 행 목록(최근 수정 순) — 행마다 id · name · description · status(active · archived) · visibility · deck_revision_label ·
+    linked_cad · created_at · updated_at · file_count · environment · revision_warning. 남의 공개 세션은 읽기만 된다(올리기 ·
+    실행 · 고치기 · 지우기는 주인만).
+
+    한계: 최근 수정 순 앞 200개만 온다(백엔드 기본 상한 — 이 도구는 쪽 넘김을 주지 않는다). 200개가 꽉 차 오면 뒤가 잘렸을 수 있다."""
     return await _get(ctx, "/sessions")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def create_session(
     name: Annotated[str, Field(description=f"세션 이름(1~{SESSION_NAME_MAX}자) — 사람이 알아보는 이름.")],
     ctx: Context,
     description: Annotated[str | None, Field(description="세션 설명(선택) — 무엇을 하는 세션인지 한 줄.")] = None,
-) -> dict:
-    """새 세션(작업 공간)을 만든다 — K파일 업로드·오퍼레이션 실행의 컨테이너라 모든 작업의
-    첫 도구다. 기존 작업을 이어가려면 list_sessions 로 먼저 찾는다."""
+) -> CreateSessionOut:
+    """새 세션(작업 공간)을 만든다 — K파일 업로드 · 오퍼레이션 실행을 담는 그릇이라 새 작업의 첫 도구다.
+
+    기존 작업을 이어가려면 list_sessions 로 먼저 찾는다(같은 이름으로 또 만들면 세션이 하나 더 생긴다). 만든 뒤 upload_kfile ·
+    upload_local_path 로 덱을 올리고 run_operation 으로 돌린다. 이름 · 설명은 update_session 으로 바꾼다.
+
+    반환: 만든 세션 — id(이후 도구의 session_id) · name · description · status(active) · visibility(private — 나만 본다) ·
+    deck_revision_label · linked_cad · created_at · updated_at · environment · revision_warning."""
     return await _post(ctx, "/sessions", {"name": name, "description": description})
 
 
-@mcp.tool()
-async def get_session(session_id: str, ctx: Context) -> dict:
-    """세션 상세와 포함 파일 목록(meta 포함)을 반환한다 — "이 세션에 뭐가 들어 있나"의 입구.
-    파일 하나의 깊은 메타는 inspect_file, 잡 이력은 list_session_jobs. 응답에 environment(dev · prod · unknown) ·
-    deck_revision_label(덱 판 라벨) · linked_cad(연결된 StepForge 과제 · 판) · revision_warning(둘이 다르면 경고 글)이 있다(DF-15 —
-    라벨 · 연결은 REST PATCH /sessions/{id} 로 둔다). 파트 제목 바꾸기는 rename_session_part."""
+@mcp.tool(annotations=_READ)
+async def get_session(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+) -> GetSessionOut:
+    """세션 하나의 상세와 그 안의 파일 목록(파일마다 meta)을 돌려준다 — 「이 세션에 무엇이 들어 있나」 의 입구다.
+
+    파일 목록만 필요하면 list_session_files(같은 행), 파일 하나의 meta · sha256 은 inspect_file, 잡 이력은 list_session_jobs,
+    빠진 *INCLUDE 는 session_includes. 파트 제목 바꾸기는 rename_session_part, 이름 · 설명 바꾸기는 update_session. 내 세션과
+    조직에 공개된 남의 세션을 볼 수 있다(없거나 볼 수 없으면 404).
+
+    반환: id · name · description · status · visibility · deck_revision_label(덱 판 라벨) · linked_cad(연결된 StepForge 과제 · 판
+    {project_id, revision}) · revision_warning(둘이 다르면 경고 글) · environment(dev · prod · unknown) · created_at · updated_at ·
+    file_count · files[{id, session_id, filename, kind, origin_job_id, size_bytes, sha256, meta, created_at}](id 순 · 자르지 않는다).
+    라벨 · 연결은 이 MCP 로 바꿀 수 없다 — REST PATCH /sessions/{id} 로 둔다.
+
+    파일이 많고 meta 가 크면 응답이 커진다 — 파일 하나만 볼 때는 inspect_file 이 가볍다."""
     return await _get(ctx, f"/sessions/{_seg(session_id)}")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def upload_kfile(
-    session_id: str, filename: str, content: str, ctx: Context, base64_encoded: bool = False
-) -> dict:
-    """세션에 파일 업로드. `content` 는 파일 내용(LS-DYNA .k 등 텍스트). 바이너리면
-    base64 로 주고 base64_encoded=true. 업로드 즉시 백엔드가 `info` 로 노드/요소/파트/
-    bbox/*INCLUDE 를 파싱해 meta 에 캐시한다.
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    filename: Annotated[str, Field(description="세션 안에 둘 파일 이름 — 하위 경로를 그대로 쓴다(예 sub/part.k · 덱의 *INCLUDE 줄과 "
+                                               "같은 경로). `..` · 절대 경로는 서버가 지운다. 같은 이름이 있으면 `_1` 이 붙는다.")],
+    content: Annotated[str, Field(description="파일 내용 — 글 파일(LS-DYNA .k 등)은 내용 그대로(UTF-8 로 올린다), 바이너리는 base64 "
+                                              "문자열로 주고 base64_encoded=true.")],
+    ctx: Context,
+    base64_encoded: Annotated[bool, Field(description="true 면 content 를 base64 로 풀어 그 바이트를 올린다(바이너리 파일). "
+                                                      "false(기본)면 content 를 UTF-8 글로 올린다.")] = False,
+) -> list[CoreSessionFileRow]:
+    """파일 하나를 세션에 올린다(내용을 인자로 싣는다) — LS-DYNA 덱(.k 등) · 인클루드 · 설정 파일을 넣을 때 쓴다.
 
-    ⚠ `filename` 에 **하위 경로를 그대로 쓸 수 있고, 써야 한다** — 덱이 `*INCLUDE sub/part.k` 를
-    참조하면 그 파일도 `filename="sub/part.k"` 로 올려라. 덱을 고쳐 쓰는 op 은 주 덱만 고치고
-    **출력 덱에 그 줄을 보존**하므로, 경로가 어긋나면 산출물을 LS-DYNA 에 넣을 때 깨진다.
-    올리는 **순서는 상관없다** — meta 는 그때 세션에 있는 인클루드 닫힘까지 재고, 인클루드가 나중에 들어오면
-    그것을 가리키는 덱의 meta 를 다시 잰다(2026-10-17 — 예전에는 마스터를 먼저 올리면 meta 가 절점 0 으로 남았다).
-    큰 마스터면 그 인클루드 업로드가 다시 재는 만큼 더 걸린다. 같은 이름으로 또 올리면 `_1` 이 붙은 새 파일이 된다.
-    올린 뒤 `session_includes` 로 빠진 게 없는지 확인하라(`..`·절대경로는 서버가 제거한다)."""
+    MCP 서버와 같은 머신의 큰 파일은 upload_local_path(내용을 대화로 나르지 않는다)가 낫다. 세션 주인만 올릴 수 있다.
+
+    올리면 백엔드가 덱(.k · .key · .dyn · .dynain · .inc)을 `info` 로 재어 meta(절점 · 요소 · 파트 · bbox · *INCLUDE · 키워드 ·
+    modelmeta)에 둔다. ⚠ `filename` 에 하위 경로를 그대로 써야 한다 — 덱이 `*INCLUDE sub/part.k` 를 가리키면 그 파일도
+    `filename="sub/part.k"` 로 올려라. 덱을 고쳐 쓰는 오퍼레이션은 주 덱만 고치고 출력 덱에 그 줄을 보존하므로, 경로가 어긋나면
+    산출물을 LS-DYNA 에 넣을 때 깨진다. 올리는 순서는 상관없다 — meta 는 그때 세션에 있는 인클루드 닫힘까지 재고, 인클루드가 나중에
+    들어오면 그것을 가리키는 덱의 meta 를 다시 잰다(큰 마스터면 그 인클루드 업로드가 그만큼 더 걸린다). 같은 이름으로 또 올리면 `_1` 이
+    붙은 새 파일이 된다(덮어쓰지 않는다). 올린 뒤 session_includes 로 빠진 것이 없는지 확인하라.
+
+    반환: 올린 파일 행 목록(한 행) — id(이후 file_id) · session_id · filename(실제로 둔 이름) · kind(input) · origin_job_id ·
+    size_bytes · sha256 · meta · created_at. 한계: 파일당 서버 상한(기본 512 MB — 넘으면 413), 속도 제한이 켜져 있으면 분당 업로드
+    횟수 상한(기본 60)."""
     raw = base64.b64decode(content) if base64_encoded else content.encode("utf-8")
     files = {"files": (filename, raw, "application/octet-stream")}
     async with _client() as c:
@@ -363,13 +560,25 @@ async def upload_kfile(
         )
 
 
-@mcp.tool()
-async def upload_local_path(session_id: str, path: str, ctx: Context, filename: str | None = None) -> dict:
-    """로컬 디스크의 파일을 그대로 세션에 업로드한다(대형 메쉬에 적합). MCP 서버가 그 파일을
-    읽을 수 있는 같은 머신에서 돌 때만 동작한다(예: Claude Desktop + 로컬 실행). 대화로
-    내용을 실어나르지 않으므로 수십 MB도 OK. 인클루드는 어느 순서로 올려도 된다(`upload_kfile` 과 같다).
-    Upload a file straight from local disk (best for large meshes). Only works when the
-    MCP server can read `path` (server runs on the same machine, e.g. Claude Desktop local)."""
+@mcp.tool(annotations=_ADD_OUT)
+async def upload_local_path(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    path: Annotated[str, Field(description="MCP 서버가 도는 머신의 파일 경로(절대 경로 권장) — 그 머신에서 읽을 수 있어야 한다.")],
+    ctx: Context,
+    filename: Annotated[str | None, Field(description="세션 안에 둘 이름(하위 경로 가능 — 예 sub/part.k). null(기본)이면 path 의 "
+                                                      "파일 이름.")] = None,
+) -> list[CoreSessionFileRow]:
+    """MCP 서버가 도는 머신의 로컬 파일을 그대로 세션에 올린다 — 수십 MB 가 넘는 큰 메쉬처럼 내용을 대화로 나르기 어려울 때 쓴다.
+
+    MCP 서버가 path 를 읽을 수 있을 때만 된다(같은 머신에서 도는 MCP — 예 Claude Desktop 과 로컬 실행). 원격 MCP 라면 path 는 그
+    서버의 디스크를 가리키므로 보통 쓸 수 없다 — 그때는 upload_kfile 로 내용을 싣는다. 파일이 없으면 실패한다.
+
+    나머지는 upload_kfile 과 같다 — 백엔드가 meta 를 재고, 인클루드는 어느 순서로 올려도 되며, 같은 이름이면 `_1` 이 붙는다. 덱이 하위
+    경로의 *INCLUDE 를 가리키면 filename 에 그 경로(예 sub/part.k)를 준다. 올린 뒤 session_includes 로 확인하라. 세션 주인만 올릴
+    수 있다.
+
+    반환: 올린 파일 행 목록(한 행) — id(이후 file_id) · session_id · filename · kind(input) · origin_job_id · size_bytes · sha256 ·
+    meta · created_at. 한계: 파일당 서버 상한(기본 512 MB — 넘으면 413) · 파일을 통째로 메모리에 읽어 보낸다."""
     import os as _os
     if not _os.path.isfile(path):
         raise RuntimeError(f"file not found on the MCP host: {path}")
@@ -385,11 +594,22 @@ async def upload_local_path(session_id: str, path: str, ctx: Context, filename: 
         )
 
 
-@mcp.tool()
-async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx: Context) -> dict:
-    """세션 파일(산출물)을 로컬 디스크 경로로 저장한다(대형 파일에 적합, 대화로 안 실어나름).
-    MCP 서버가 dest_path 에 쓸 수 있는 같은 머신에서 돌 때만 동작.
-    Save a session file to a local disk path (best for large outputs; same-machine only)."""
+@mcp.tool(annotations=_SET_OUT)
+async def save_result_to_path(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_CORE_FILE_ID)],
+    dest_path: Annotated[str, Field(description="저장할 MCP 서버 머신의 파일 경로 — 없는 상위 폴더는 만들고, 같은 경로에 파일이 "
+                                                "있으면 묻지 않고 덮어쓴다.")],
+    ctx: Context,
+) -> SaveResultToPathOut:
+    """세션 파일(오퍼레이션 산출물 등)을 MCP 서버가 도는 머신의 로컬 경로에 저장한다 — 큰 산출물을 대화로 나르지 않고 받을 때 쓴다.
+
+    MCP 서버가 dest_path 에 쓸 수 있을 때만 쓸모가 있다(같은 머신에서 도는 MCP). 원격 MCP 라면 그 서버의 디스크에 쓰인다. 내용을
+    대화로 보려면 download_result(기본 5 MB 까지), 무엇이 나왔는지는 get_job_outputs · list_session_files.
+
+    ⚠ dest_path 에 파일이 있으면 묻지 않고 덮어쓴다. 없는 상위 폴더는 만든다. 내 세션과 조직에 공개된 세션의 파일을 받을 수 있다.
+
+    반환: saved(쓴 경로) · bytes(쓴 바이트 수)."""
     import os as _os
     async with _client() as c:
         r = await c.get(
@@ -405,114 +625,215 @@ async def save_result_to_path(session_id: str, file_id: int, dest_path: str, ctx
     return {"saved": dest_path, "bytes": len(r.content)}
 
 
-@mcp.tool()
-async def list_session_files(session_id: str, ctx: Context) -> list:
-    """세션 안의 파일 목록 + 각 파일의 meta(노드/요소/파트/bbox/*INCLUDE/키워드).
-    "이 K파일 안에 뭐가 들어있는지" 를 여기서 확인한다."""
+@mcp.tool(annotations=_READ)
+async def list_session_files(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+) -> list[CoreSessionFileRow]:
+    """세션 안의 파일 목록을 파일마다 meta 와 함께 돌려준다 — 「이 K파일 안에 무엇이 들었나」 를 한 번에 볼 때 쓴다.
+
+    세션 정보까지 함께 보려면 get_session(같은 files), 파일 하나의 meta · sha256 은 inspect_file, 잡 하나의 산출물만은
+    get_job_outputs, 내용은 download_result. 내 세션과 조직에 공개된 세션을 볼 수 있다(없거나 볼 수 없으면 404).
+
+    반환: 행 목록(id 순 · 자르지 않는다) — id(file_id) · session_id · filename · kind(input 올린 것 · output 잡 산출물 · generated) ·
+    origin_job_id · size_bytes · sha256 · meta. meta 는 덱이면 nodes · elements · parts · bbox_min · bbox_max · includes ·
+    part_titles(앞 50개) · keyword_counts · modelmeta 이고, 키워드 훑기가 앞 8 MB 에서 멈췄으면 truncated_scan 이 true 다.
+    파일이 많으면 응답이 크다."""
     return await _get(ctx, f"/sessions/{_seg(session_id)}/files")
 
 
-@mcp.tool()
-async def session_includes(session_id: str, ctx: Context) -> dict:
-    """이 세션의 덱들이 참조하는 `*INCLUDE` 가 실제로 올라와 있나 — **op 을 돌리기 전에 확인하라.**
+@mcp.tool(annotations=_READ)
+async def session_includes(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+) -> SessionIncludesOut:
+    """이 세션의 덱들이 참조하는 `*INCLUDE` 가 세션에 다 올라와 있는지 돌려준다 — 오퍼레이션을 돌리기 전에 확인하라.
 
-    덱을 고쳐 쓰는 op 은 주 덱만 고치므로 인클루드가 빠져도 **성공할 수 있다.** 대신 산출물에 그 `*INCLUDE`
-    줄이 그대로 남고, LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다(분석 op — info·modelmeta·
-    그림 셋 — 은 인클루드를 함께 읽고, 빠진 파일은 못 읽었다고 말한다). 빠진 게 있으면 `run_operation`
-    이 422 로 막는다 — 그 파일을 올려라. 대상 파트가 인클루드 안에만 있으면 op 이 rc 1 로 멈추고
-    `flatten_includes` 를 안내한다 — 사용자가 원하면 config 에 `flatten_includes: true` 를 넣어 다시 돌린다
-    (닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다 · 2026-10-17). 넘김값 `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs`
-    본문)에만 있고 **이 MCP 도구로는 줄 수 없다**. 반환: {ok, missing_by_file:{덱:{missing,satisfied}}}."""
+    덱을 고쳐 쓰는 오퍼레이션은 주 덱만 고치므로 인클루드가 빠져도 성공할 수 있다. 대신 산출물에 그 `*INCLUDE` 줄이 그대로 남고,
+    LS-DYNA 는 인클루드를 따라가므로 해석 단계에서 깨진다(분석 오퍼레이션 — info · modelmeta · 그림 셋 — 은 인클루드를 함께 읽고,
+    빠진 파일은 못 읽었다고 말한다). 빠진 게 있으면 run_operation 이 422 로 막는다 — 그 파일을 upload_kfile · upload_local_path 로
+    올려라(하위 폴더면 경로째로). 대상 파트가 인클루드 안에만 있으면 오퍼레이션이 rc 1 로 멈추고 `flatten_includes` 를 안내한다 —
+    사용자가 원하면 config 에 `flatten_includes: true` 를 넣어 다시 돌린다(닫힘을 펼쳐 `*INCLUDE` 없는 한 덱으로 고친다). 넘김값
+    `allow_missing_includes` 는 REST(`POST /sessions/{id}/jobs` 본문)에만 있고 이 MCP 도구로는 줄 수 없다.
+
+    반환: ok(빠진 것이 없으면 true) · missing_by_file{덱 파일명: {missing: [...], satisfied: [...]}} — 빠진 것이 있는 덱만 싣는다.
+    맞춤은 하위 경로째로, 또는 파일 이름만으로 한다(옛 세션은 경로 없이 올라와 있다)."""
     return await _get(ctx, f"/sessions/{_seg(session_id)}/includes")
 
 
-@mcp.tool()
-async def inspect_file(session_id: str, file_id: int, ctx: Context) -> dict:
-    """단일 K파일의 상세 메타(info 결과 + *INCLUDE 내부 파일 목록)를 반환한다 — 업로드한
-    덱의 구조·포함 관계를 확인할 때 쓴다. 파트 단위 정보는 part_info/list_parts."""
+@mcp.tool(annotations=_READ)
+async def inspect_file(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_CORE_FILE_ID)],
+    ctx: Context,
+) -> InspectFileOut:
+    """세션 파일 하나의 캐시된 메타와 sha256 을 돌려준다 — 덱 하나의 구조 · 포함 관계 · 판 지문을 볼 때 쓴다.
+
+    meta 는 업로드 때(또는 그 덱이 가리키는 인클루드가 나중에 들어온 때) 잰 값이고 이 도구가 다시 재지 않는다. 세션의 모든 파일은
+    list_session_files, 내용은 download_result. 파트 메트릭 · 재질 · 접촉 연결은 meta.modelmeta 에 있고, 더 깊은 분석은
+    run_operation(info · modelmeta) 으로 한다. 내 세션과 조직에 공개된 세션의 파일을 볼 수 있다(없으면 404).
+
+    반환: filename · sha256(덱 판 지문) · meta — 덱(.k · .key · .dyn · .dynain · .inc)이면 nodes · elements · parts · bbox_min ·
+    bbox_max · size · valid · ref_dangling · newline · includes · part_titles(앞 50개) · keyword_counts · truncated_scan(키워드
+    훑기가 앞 8 MB 에서 멈췄으면 true) · modelmeta(실패하면 {error}) · info_error(바이너리 실패 때), 덱이 아니면 {filename} 만."""
     return await _get(ctx, f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/inspect")
 
 
 # ── 실행 / 결과 ──────────────────────────────────────────────────────
-@mcp.tool()
+@mcp.tool(annotations=_ADD_OUT)
 async def run_operation(
     session_id: Annotated[str, Field(description=_A_SESSION_ID)],
     operation: Annotated[str, Field(description="오퍼레이션 이름 — list_operations 의 name(예 info · map · contact).")],
     args: Annotated[dict, Field(description="오퍼레이션 인자 — describe_operation(operation) 의 args_schema 를 따르는 객체. "
                                             "파일 인자는 이 세션의 파일 이름(get_session 의 files[].filename).")],
     ctx: Context,
-) -> dict:
-    """세션 파일에 오퍼레이션을 적용(비동기 Job 생성) → job_id 반환. args 는
-    describe_operation 의 args_schema 를 따른다(파일 인자는 세션 내 파일명). 진행상황은
-    get_job 으로 폴링하고, 끝나면 download_result 로 산출물을 가져온다."""
+) -> RunOperationOut:
+    """세션 파일에 오퍼레이션을 거는 비동기 잡을 낸다 — 큐에 넣고 바로 잡 정보를 돌려준다(끝날 때까지 기다리지 않는다).
+
+    먼저 list_operations 로 이름을, describe_operation 으로 args_schema 를 본다. 낸 뒤에는 get_job 으로 상태를 보고(끝날 때까지
+    되풀이), 끝나면 get_job_outputs 로 산출 파일을, download_result · save_result_to_path 로 내용을 받는다. 취소는 cancel_job.
+    세션 주인만 낼 수 있다. invocation 이 external 인 오퍼레이션(stcx_fullangle_drop · postprocess)은 워커가 다른 클러스터
+    (stcx · KooSlurm)에 잡을 내거나 그쪽 결과를 기다린다.
+
+    제출 때 막는 것(도구 오류로 돌아온다): 없는 오퍼레이션(400) · args 검증 실패(422) · gmsh 가 필요한데 서버에 없음(422) · 파일 인자가
+    세션에 없음(422) · 덱이 가리키는 `*INCLUDE` 가 세션에 없음(422 — session_includes 로 미리 본다, 넘김값은 REST 전용). 덱이 정의되지
+    않은 세트 · 파트 · 재질 · 절점을 가리키면 막지 않고 잡의 warnings 에 남긴다.
+
+    반환: 잡 — id(이후 도구의 job_id) · session_id · operation · args · status(queued) · warnings · created_at · external 등
+    get_job 과 같은 칸."""
     return await _post(
         ctx, f"/sessions/{_seg(session_id)}/jobs", {"operation": operation, "args": args}
     )
 
 
-@mcp.tool()
-async def get_job(job_id: str, ctx: Context, include_logs: bool = False) -> dict:
-    """Job 상태/진행/exit_code/산출 파일. include_logs=true 면 stdout/stderr 일부도.
-    외부 잡(stcx 제출 · 후처리 예약)이면 `external` 에 요약이 온다 — `{kind, cluster_state, ontology: {state, why?}}`
-    (경로·토큰은 가린 꼴). 반입된 리포트는 `find_reports(external_job_key='stcx:<Slurm 잡 id>')` 로 찾는다.
-    매니페스트가 이미지 출처를 실어 온 후처리 예약이면 `external.images` 도 온다 — `post`(리포트를 만든 노드의 후처리 SIF
-    `{from, node, present, size, sha256, version}` · 리포트 노드를 모르면 `{from: null, node, why}`) · `manifest_node_pre`
-    (매니페스트를 쓴 노드에 깔려 있던 전처리 SIF `{node, present, size, sha256, version, kooremapper_commit}` — 배포 상태이고
-    전처리가 실제로 쓴 판의 증거가 아니다). 없으면 칸이 없다(모르는 것 ≠ 없음).
-    `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트·파트·섹션·재질·절점을 가리킨다는 경고 등이다
-    (막지 않고 남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다)."""
+@mcp.tool(annotations=_READ)
+async def get_job(
+    job_id: Annotated[str, Field(description=_A_CORE_JOB_ID)],
+    ctx: Context,
+    include_logs: Annotated[bool, Field(description="true 면 잡 로그(stdout · stderr)의 마지막 4000자를 logs 칸에 싣는다. "
+                                                    "false(기본)면 로그를 읽지 않는다.")] = False,
+) -> GetJobOut:
+    """잡 하나의 상태 · 진행률 · 종료 코드 · 산출 파일 id · 경고를 돌려준다 — run_operation 뒤 끝났는지 볼 때 되풀이해 부른다.
+
+    산출 파일의 이름 · meta 는 get_job_outputs, 세션의 잡 이력은 list_session_jobs, 취소는 cancel_job. 내 잡만 볼 수 있다.
+
+    반환: id · session_id · operation · args · resolved_cmd · status(queued · running · succeeded · failed · canceled) ·
+    progress(0~100) · exit_code · input_file_ids · output_file_ids · error_summary · warnings · created_at · started_at ·
+    finished_at · external.
+    · `warnings` 가 있으면 읽어라 — 입력 덱이 정의되지 않은 세트 · 파트 · 섹션 · 재질 · 절점을 가리킨다는 경고 등이다(막지 않고
+      남긴다 · LS-DYNA 는 키워드 단계에서 멈춘다).
+    · `external` — 외부 잡(stcx 제출 · 후처리 예약)의 요약 `{kind, cluster_state, ontology: {state, why?}}`(경로 · 토큰은 가린 꼴),
+      로컬 잡은 null. 반입된 리포트는 `find_reports(external_job_key='stcx:<Slurm 잡 id>')` 로 찾는다. 매니페스트가 이미지 출처를
+      실어 온 후처리 예약이면 `external.images` 도 온다 — `post`(리포트를 만든 노드의 후처리 SIF `{from, node, present, size,
+      sha256, version}` · 리포트 노드를 모르면 `{from: null, node, why}`) · `manifest_node_pre`(매니페스트를 쓴 노드에 깔려 있던
+      전처리 SIF `{node, present, size, sha256, version, kooremapper_commit}` — 배포 상태이고 전처리가 실제로 쓴 판의 증거가
+      아니다). 없으면 칸이 없다(모르는 것 ≠ 없음).
+    · include_logs=true 면 logs(마지막 4000자) · logs_truncated(앞이 잘렸으면 true) · logs_total_chars 가 붙는다."""
     job = await _get(ctx, f"/jobs/{_seg(job_id)}")
     if include_logs and isinstance(job, dict):
         async with _client() as c:
             r = await c.get(f"/jobs/{_seg(job_id)}/logs", headers=_forward_headers(ctx))
             job = {**job, "logs": r.text[-4000:] if r.status_code < 400 else f"(logs unavailable: HTTP {r.status_code})"}
+            if r.status_code < 400:   # 앞을 잘랐는지 말한다(계약 C8)
+                job.update(logs_truncated=len(r.text) > 4000, logs_total_chars=len(r.text))
     return job
 
 
-@mcp.tool()
-async def cancel_job(job_id: str, ctx: Context) -> dict:
-    """실행 중이거나 대기 중인 Job 을 취소한다 — 잘못 낸 잡이나 매달린 잡을 정리할 때.
-    상태 확인은 job_status, 취소 후 재실행은 run_job. / Cancel a queued or running job."""
+@mcp.tool(annotations=_SET)
+async def cancel_job(
+    job_id: Annotated[str, Field(description=_A_CORE_JOB_ID)],
+    ctx: Context,
+) -> CancelJobOut:
+    """대기 중이거나 도는 잡을 취소한다 — 잘못 낸 잡이나 매달린 잡을 멈출 때 쓴다.
+
+    상태는 get_job 으로 보고, 다시 돌리려면 run_operation 으로 새 잡을 낸다(취소한 잡은 되살리지 않는다). 내 잡만 취소할 수 있다.
+    로컬 잡은 프로세스에 멈춤 신호를 보낸다 — 곧바로 canceled 가 되지 않을 수 있으니 get_job 으로 확인한다. 후처리 예약은 기다림만
+    멈추고 클러스터 잡은 그대로 둔다. 다른 클러스터에서 도는 외부 잡(stcx 제출)은 여기서 취소할 수 없다(501 — 제출한 클러스터에서
+    취소한다). 이미 끝난 잡(succeeded · failed · canceled)은 409 로 실패한다.
+
+    반환: message(취소 요청됨 · 취소됨 등 백엔드 문구)."""
     return await _post(ctx, f"/jobs/{_seg(job_id)}/cancel", None)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_SET)
 async def update_session(
-    session_id: str, ctx: Context, name: str | None = None, description: str | None = None
-) -> dict:
-    """세션 이름·설명을 수정한다 — 작업이 진화해 이름이 안 맞을 때 정리용.
-    / Rename or re-describe a session."""
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+    name: Annotated[str | None, Field(description=f"새 세션 이름(1~{SESSION_NAME_MAX}자). null(기본)이면 그대로 둔다.")] = None,
+    description: Annotated[str | None, Field(description="새 설명. null(기본)이면 그대로 둔다 — 빈 문자열을 주면 설명을 비운다.")] = None,
+) -> UpdateSessionOut:
+    """세션의 이름 · 설명을 바꾼다 — 작업이 바뀌어 이름이 안 맞을 때 정리한다.
+
+    준 칸만 바꾸고 null 인 칸은 그대로 둔다. 세션 주인만 바꿀 수 있다(아니면 404). 공개 범위 · 상태 · 덱 판 라벨 · CAD 연결은 이
+    도구로 바꿀 수 없다(REST PATCH /sessions/{id}). 파트 제목은 rename_session_part.
+
+    반환: 바뀐 세션 — id · name · description · status · visibility · deck_revision_label · linked_cad · created_at · updated_at ·
+    environment · revision_warning."""
     body = {k: v for k, v in {"name": name, "description": description}.items() if v is not None}
     async with _client() as c:
         return _unwrap(await c.patch(f"/sessions/{_seg(session_id)}", json=body, headers=_forward_headers(ctx)))
 
 
-@mcp.tool()
-async def delete_session(session_id: str, ctx: Context) -> dict:
-    """세션과 그 안의 모든 파일을 삭제. / Delete a session and all its files (irreversible)."""
+@mcp.tool(annotations=_DELETE)
+async def delete_session(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+) -> DeleteSessionOut:
+    """세션과 그 안의 모든 파일 · 잡 기록을 지운다(되돌릴 수 없다) — 다 쓴 작업 공간을 정리할 때 쓴다.
+
+    파일 하나만 지우려면 delete_file. 세션 주인만 지울 수 있다(아니면 404). 이 세션에서 도는 로컬 잡은 먼저 취소하고 잠깐(약 8초까지)
+    기다린 뒤 지운다. 다른 클러스터에서 도는 외부 잡은 기다리지도 멈추지도 않는다.
+
+    반환: message(백엔드 문구)."""
     return await _delete(ctx, f"/sessions/{_seg(session_id)}")
 
 
-@mcp.tool()
-async def delete_file(session_id: str, file_id: int, ctx: Context) -> dict:
-    """세션에서 파일 1건을 삭제한다(복구 불가) — 잘못 올린 파일 정리용. 어떤 파일이 있는지는
-    get_session 으로 먼저 확인. / Delete a single file from a session."""
+@mcp.tool(annotations=_DELETE)
+async def delete_file(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_CORE_FILE_ID)],
+    ctx: Context,
+) -> DeleteFileOut:
+    """세션에서 파일 하나를 지운다(되돌릴 수 없다) — 잘못 올린 파일이나 필요 없는 산출물을 정리할 때 쓴다.
+
+    어떤 파일이 있는지는 get_session · list_session_files 로 먼저 본다. 세션 전체는 delete_session. 세션 주인만 지울 수 있다(아니면
+    404). 지운 파일을 *INCLUDE 하는 덱이 있으면 그 인클루드가 빠진 상태가 된다 — session_includes 로 본다.
+
+    반환: message(백엔드 문구)."""
     return await _delete(ctx, f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}")
 
 
-@mcp.tool()
-async def get_job_outputs(job_id: str, ctx: Context) -> list:
-    """Job 이 생성한 산출 파일 목록(session_file id/이름/meta)을 반환한다 — 잡이 끝난 뒤
-    "무엇이 나왔나"의 입구. 내려받기는 download_result, 잡 로그는 slurm/job 로그 도구."""
+@mcp.tool(annotations=_READ)
+async def get_job_outputs(
+    job_id: Annotated[str, Field(description=_A_CORE_JOB_ID)],
+    ctx: Context,
+) -> list[CoreSessionFileRow]:
+    """잡이 만든 산출 파일 목록을 파일마다 meta 와 함께 돌려준다 — 잡이 끝난 뒤 「무엇이 나왔나」 를 볼 때 쓴다.
+
+    내용은 download_result(대화로 · 기본 5 MB 까지) · save_result_to_path(같은 머신 디스크로), 잡 상태와 로그는
+    get_job(include_logs=true), 세션 전체 파일은 list_session_files. 내 잡만 볼 수 있다.
+
+    반환: 행 목록(산출이 없으면 빈 목록) — id(file_id) · session_id · filename · kind(output · generated) · origin_job_id ·
+    size_bytes · sha256 · meta · created_at."""
     return await _get(ctx, f"/jobs/{_seg(job_id)}/outputs")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ)
 async def download_result(
-    session_id: str, file_id: int, ctx: Context, as_base64: bool = False
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_CORE_FILE_ID)],
+    ctx: Context,
+    as_base64: Annotated[bool, Field(description="true 면 내용을 base64 로 돌려준다(바이너리). false(기본)면 UTF-8 글로 돌려주고, "
+                                                 "글로 못 풀면 저절로 base64 로 돌려준다.")] = False,
 ) -> dict:
-    """세션 파일 내용을 가져온다(오퍼레이션 산출물 회수). 기본은 텍스트로 반환하고,
-    바이너리거나 큰 파일이면 as_base64=true 로 base64 반환."""
+    """세션 파일 하나의 내용을 대화로 가져온다 — 오퍼레이션 산출물 · 올린 덱을 읽을 때 쓴다.
+
+    큰 파일은 save_result_to_path(MCP 서버와 같은 머신의 디스크로)가 낫다. 무엇이 있는지는 get_job_outputs · list_session_files 로
+    본다. 내 세션과 조직에 공개된 세션의 파일을 받을 수 있다.
+
+    반환: filename_id(받은 file_id) · bytes(크기)와 content(UTF-8 글) 또는 base64. as_base64=false 여도 UTF-8 로 못 풀면 base64 ·
+    note 로 돌려준다. 한계: 서버 상한(기본 5 MB · 손잡이 KOORM_MCP_MAX_DOWNLOAD_BYTES)을 넘으면 내용 대신 error · bytes ·
+    preview(앞 2000바이트를 글로 푼 것)만 온다 — base64 로 받아도 상한은 같다."""
     async with _client() as c:
         r = await c.get(
             f"/sessions/{_seg(session_id)}/files/{_seg(file_id)}/download",
