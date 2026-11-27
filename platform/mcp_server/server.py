@@ -995,43 +995,130 @@ async def _with_png(ctx: Context, session_id: str, svg_id: int | None, res: dict
     return [res, Image(data=data, format=fmt)]
 
 
-@mcp.tool()
+# ── 메시 그림 · 세션 잡 · 시스템 기능 · 전사 코퍼스 도구의 계약 상수 ──────────────────────────────────────────────
+# 허용값 · 하한은 받는 쪽과 같게 둔다 — 축 · 모드는 아래 그림 도구 본문의 검사, 그림 크기 하한은 그림 op 셋(C++ section · surfview ·
+# stackdiagram)이 rc 1 로 거절하는 값, limit 상한은 백엔드 corpus 라우트의 Query(ge · le) 다.
+MESH_SECTION_AXES = ("auto", "x", "y", "z")
+MESH_SECTION_MODES = ("panels", "overlay")
+MESH_STACK_AXES = ("x", "y", "z")
+MESH_FIG_MIN_WIDTH_PX = 430
+MESH_FIG_MIN_HEIGHT_PX = 240
+CORPUS_LIMIT_MAX = 200
+
+_A_MESH_FILE_ID = ("그릴 덱의 세션 파일 id — list_session_files 의 id · get_session 의 files[].id. 이 세션에 없으면 거절한다. "
+                   "마스터 덱이면 *INCLUDE 닫힘까지 읽으므로 인클루드도 같은 세션에 올려 둔다.")
+_A_MESH_WIDTH = f"SVG 폭(px) — {MESH_FIG_MIN_WIDTH_PX} 이상(여백 · 범례 · 그림 자리). 이미지 블록은 이와 별개로 폭 1500px 안팎으로 그린다."
+_A_MESH_HEIGHT = f"SVG 높이(px) — {MESH_FIG_MIN_HEIGHT_PX} 이상."
+_A_MESH_TIMEOUT = (f"잡이 끝나기를 기다릴 최대 초. 이 도구 호출의 기한({API_TIMEOUT_S:g}초 · {API_TIMEOUT_KNOB})보다 길게 줘도 그 기한까지만 "
+                   "기다린다. 그 안에 안 끝나면 잡은 계속 돌고 job_id 가 든 오류가 난다 — get_job 으로 지켜본다.")
+
+_O_SESSION_JOB = _shape("SessionJobRow", {
+    "id": "잡 id — get_job · get_job_outputs · cancel_job 에 준다.",
+    "session_id": "세션 id.",
+    "operation": "오퍼레이션 이름(list_operations 의 name).",
+    "args": "잡에 준 인자 객체.",
+    "resolved_cmd": "백엔드가 풀어 쓴 실행 정보(argv · 쓴 파일 · 외부 잡 표지 · 인자 오류 — 없으면 null).",
+    "status": "queued · running · succeeded · failed · canceled.",
+    "progress": "진행률(%, 모르면 null).",
+    "exit_code": "종료 코드(끝나지 않았으면 null).",
+    "input_file_ids": "입력 세션 파일 id 목록.",
+    "output_file_ids": "산출 세션 파일 id 목록 — 내용은 get_job_outputs · download_result.",
+    "error_summary": "실패 요약 글(없으면 null).",
+    "warnings": "입력 덱 경고 글 목록(정의되지 않은 세트 · 파트 · 섹션 · 재질 · 절점을 가리킴 등 — 없으면 null).",
+    "created_at": "만든 시각(ISO 8601) — 목록은 이것의 내림차순.",
+    "started_at": "시작 시각(없으면 null).",
+    "finished_at": "끝난 시각(없으면 null).",
+    "external": "외부 잡(stcx 제출 · 후처리 예약) 요약 {kind, cluster_state, ontology, images?} — 로컬 잡이면 null.",
+})
+_O_SYSTEM_CAPABILITIES = _shape("SystemCapabilitiesOut", {
+    "operations": "오퍼레이션 수.",
+    "mcp_tools": "MCP 도구 수(서버 소스를 세지 못하면 null).",
+    "ontology": "과제 · 개정 기능 스위치 {enabled, source(option · inferred), reason, missing(빠진 설정 이름 목록)}.",
+    "parity": "기능별 웹 · MCP 지원 표 — [{feature, web, mcp, note?}].",
+    "mcp_url": "MCP 공개 주소(운영자가 설정하지 않았으면 null).",
+    "mcp_add_hint": "붙여넣을 `claude mcp add` 명령 — 주소를 모르면 무엇을 설정할지 알리는 글.",
+    "mcp_desktop_hint": "Claude Desktop 연결 안내 글.",
+    "intake": "외부 적재 규격 {method, path, public_url(모르면 null), mcp_url, token, portal_auth_required, max_upload_mb, "
+              "max_report_mb, batch, reports_per_call, rate_limit_per_min(꺼졌으면 null), campaign{REST 경로들 · form_fields · states}}.",
+})
+_O_CORPUS_SUMMARY = _shape("CorpusSummaryOut", {
+    "sessions": "전사 세션 수.",
+    "files": "전사 세션 파일 수.",
+    "jobs": "전사 잡 수.",
+    "mesh_scale": "{nodes, elements, parts} 마다 {n, min, median, max, total} — 메타에 그 값이 있는 파일만 센다(하나도 없으면 {n: 0}).",
+    "note": "집계 범위 안내 글.",
+})
+_O_MATERIAL_USAGE = _shape("MaterialUsageOut", {
+    "n_files_scanned": "메타가 있는 세션 파일 수(모집단).",
+    "n_files_with_material": "*MAT_ 카드가 하나라도 있는 파일 수.",
+    "materials": "파일 수 상위 limit 개 — [{card, files(그 카드가 나온 파일 수), occurrences(카드 개수 합)}].",
+    "note": "읽는 법 안내 글.",
+})
+_O_OPERATION_USAGE = _shape("OperationUsageOut", {
+    "n_jobs": "전사 잡 수.",
+    "operations": "실행 횟수 순 — [{operation, total, succeeded, failed(canceled 포함), other(끝나지 않은 잡 등)}].",
+    "note": "읽는 법 안내 글.",
+})
+_O_SECTION_CONTACT_USAGE = _shape("SectionContactUsageOut", {
+    "n_files_scanned": "메타가 있는 세션 파일 수(모집단).",
+    "sections": "*SECTION_ 카드의 파일 수 상위 limit 개 — [{card, files}].",
+    "contacts": "*CONTACT_ 카드의 파일 수 상위 limit 개 — [{card, files}].",
+})
+_O_REPORT_CORPUS = _shape("ReportCorpusOut", {
+    "reports": "전사 리포트 수.",
+    "cases": "전사 케이스 수.",
+    "by_kind": "종류별 리포트 수 — [{kind, reports}].",
+    "findings_by_severity": "심각도별 소견 수 {CRITICAL: n, …} — 심각도가 없는 소견은 UNKNOWN.",
+    "frequent_findings": "같은 제목이 많은 소견 상위 10개 — [{title(80자까지), count}].",
+    "note": "리포트가 아직 없는지 알리는 글.",
+})
+_O_REPORT_UPLOAD_INSTRUCTIONS = _shape("ReportUploadInstructionsOut", {
+    "권장(스크립트)": "kr_ PAT 로 REST intake 를 한 호출에 — {방법, 엔드포인트, 명령(curl), 폼필드, 대용량(상한)}.",
+    "캠페인 묶음 적재": "런 수백 ~ 천 개를 캠페인으로 올리는 차례.",
+    "웹 UI": "웹 화면에서 올리는 길.",
+    "토큰 발급": "kr_ PAT 를 받는 길.",
+    "note": "401 까닭 가르기 · 공개 주소를 모를 때의 안내.",
+})
+
+
+@mcp.tool(annotations=_ADD)
 async def mesh_section_figure(
-    session_id: str,
-    file_id: int,
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_MESH_FILE_ID)],
     ctx: Context,
-    axis: str = "auto",
-    at: float | None = None,
-    compare_file_id: int | None = None,
-    mode: str = "panels",
-    isotropic: bool = False,
-    width: int = 1200,
-    height: int = 900,
-    timeout_s: int = 180,
+    axis: Annotated[Literal[MESH_SECTION_AXES], Field(
+        description=f"자르는 평면의 법선 축 — {_one_of(MESH_SECTION_AXES)}. 기본 auto(단면이 선으로 접히는 축을 빼고 파트를 가장 "
+                    "많이 만나는 축 · 동점이면 단면 넓이가 큰 축).")] = "auto",
+    at: Annotated[float | None, Field(
+        description="평면 위치 — 고른 축의 좌표값(덱의 길이 단위 그대로). 비우면 bbox 중심. 절점층에 딱 걸리면 ε 비키고 응답에 "
+                    "그렇다고 적는다.")] = None,
+    compare_file_id: Annotated[int | None, Field(
+        description="같은 그림에 올릴 두 번째 덱의 세션 파일 id(선택) — 이 세션에 없으면 거절한다. 비우면 한 덱만 그린다.")] = None,
+    mode: Annotated[Literal[MESH_SECTION_MODES], Field(
+        description=f"두 덱을 그리는 꼴 — {_one_of(MESH_SECTION_MODES)}. panels 는 칸마다 축 · 축척을 따로(접힘 전/후 비교에 맞다), "
+                    "overlay 는 같은 평면으로 잘라 겹친다(두 번째 덱이 점선). compare_file_id 를 줄 때만 쓰인다. 기본 panels.")] = "panels",
+    isotropic: Annotated[bool, Field(
+        description="true 면 두 축을 같은 축척으로 그린다 — 얇은 층은 보이지 않을 수 있다(최소 피처 1.5px 미만이면 그렇다고 말한다). "
+                    "기본 false(비등방 — 확대 축 · 배율을 그림에 적는다).")] = False,
+    width: Annotated[int, Field(ge=MESH_FIG_MIN_WIDTH_PX, description=_A_MESH_WIDTH + " 기본 1200.")] = 1200,
+    height: Annotated[int, Field(ge=MESH_FIG_MIN_HEIGHT_PX, description=_A_MESH_HEIGHT + " 기본 900.")] = 900,
+    timeout_s: Annotated[int, Field(description=_A_MESH_TIMEOUT + " 기본 180.")] = 180,
 ) -> list:
-    """격자(메시)를 평면으로 잘라 **단면 그림(SVG)** 과 그 매니페스트를 한 번에 돌려준다.
-    적층 덱의 층 경계·두께·재질을 눈으로 보려면 이것을 쓴다.
+    """메시를 평면 하나로 잘라 단면 그림(이미지 + SVG)과 그 요지 숫자를 한 번에 돌려준다.
 
-    그림은 **이미지 블록**(PNG, 크면 JPEG — 폭 1500px 안팎·256KB 이하 목표)으로 함께 온다 —
-    게이트웨이가 그것을 저장해 `figure_to_report` 로 리포트에 넣는다. 꼴·크기는 `figure_png`,
-    못 만들었으면 까닭이 `figure_png_error` 에 있다. 그래도 그림의 요지가 되는 숫자를 **텍스트로**
-    함께 돌려준다 — 자른 축과 **왜 그 축인지**, 맞은 파트 수/전체, 평면이 절점층에 걸려 ε
-    비켰는지, 확대 축과 배율, 최소 피처와 그 픽셀값, 파트별 제목·두께·두께의 출처·E. 벡터 원본은
-    `svg_file_id` 를 `download_result` 로 받으면 텍스트(SVG)로 온다.
+    적층 덱의 층 경계 · 두께 · 재질을 눈으로 확인할 때 쓴다. 겉모습은 `mesh_surface_figure`, 층 순서와 중립축 모식도는
+    `mesh_stack_diagram` 이 답한다. 안에서 `section` op 잡을 내고 끝날 때까지 기다린다(잡 · 산출 파일이 세션에 남는다).
 
-    축: `axis="auto"` 는 ① 단면이 선에 가까운 축을 빼고 ② 파트를 가장 많이 만나는 축 ③ 동점이면
-    단면 넓이가 큰 축을 고른다. **"적층 방향에 수직" 이 규칙이 아니다** — 실측으로 61파트 배터리
-    적층은 z 가 2파트뿐이고 x·y 가 59파트이며, 감긴 덱은 그 반대다. 고른 까닭이 응답에 들어온다.
+    축 — `axis="auto"` 는 ① 단면이 선으로 접히는 축을 빼고 ② 파트를 가장 많이 만나는 축 ③ 동점이면 단면 넓이가 큰 축을 고른다.
+    「적층 방향에 수직」 이 규칙이 아니다 — 고른 까닭이 응답에 온다. 축척 — 기본은 비등방이고 확대 축 · 배율을 그림에 적는다(얇은 층은
+    등축이면 보이지 않는다). 두 덱 — `compare_file_id` 를 주면 `mode` 에 따라 나란히 또는 같은 평면으로 겹쳐 그린다(절점 번호로 짝짓는다).
 
-    축척: 기본은 **비등방**이고 확대 배율을 그림 안에 적는다. 실제 적층은 가로:최박층이 1:9,375
-    라 등축으로 그리면 층이 보이지 않는다(1200px 에서 **0.081px** — 실측). `isotropic=true` 를 주면 등축으로
-    그리고, 최소 피처가 1.5px 미만이면 "보이지 않는다" 고 말한다.
-
-    두 덱: `compare_file_id` 를 주면 한 그림에 둘을 올린다 — `mode="panels"` 는 칸마다 축과
-    축척을 따로(접힘 전/후에 맞다), `mode="overlay"` 는 **같은 평면**으로 잘라 겹친다(B 가 점선).
-    이 리포는 절점 번호 일치를 요구하므로 겹침 짝맞춤 비용이 0 이다.
-
-    단위는 주장하지 않는다 — LS-DYNA 덱은 단위를 담지 않는다.
+    돌려주는 것 — `[결과 dict, 이미지]`. 이미지는 PNG(크면 JPEG · 폭 1500px 안팎 · 256KB 목표)이고 게이트웨이가 저장해
+    `figure_to_report` 로 리포트에 넣는다. 꼴은 `figure_png`, 못 만들면 까닭이 `figure_png_error` 에 온다. dict 칸은 `job_id` · `svg_file_id`(벡터 원본 — `download_result` · `save_result_to_path`) ·
+    `manifest_file_id` · `section`(자른 축과 까닭 · 맞은 파트 수/전체 · ε 비킴 · 최소 피처 · 파트별 pid · 제목 · 두께와 그 출처 · E —
+    다각형은 싣지 않는다) · `compare_section` · `figure_numbers`(확대 배율 · 최소 피처 px — 매니페스트에 없는 숫자) · `read_this_first`.
+    응답이 길면 파트 행을 뒤에서 빼고 `parts_omitted` 로 뺀 수를 말한다 — 전체 표는 매니페스트 파일에 있다. 잡이 실패하면 로그 꼬리가
+    든 오류가 난다. 단위는 주장하지 않는다(LS-DYNA 덱은 단위를 담지 않는다).
     """
     import json as _json
 
@@ -1124,37 +1211,37 @@ async def mesh_section_figure(
     return await _with_png(ctx, session_id, svg_id, res)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def mesh_surface_figure(
-    session_id: str,
-    file_id: int,
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_MESH_FILE_ID)],
     ctx: Context,
-    azimuth: float = 35.0,
-    elevation: float = 25.0,
-    wire: bool = False,
-    width: int = 1200,
-    height: int = 900,
-    timeout_s: int = 300,
+    azimuth: Annotated[float, Field(
+        description="보는 방위각(도) — xy 평면에서 +x 축부터 +y 쪽으로 잰 각. 0 이면 +x 쪽에서, 90 이면 +y 쪽에서 본다. 범위를 "
+                    "거르지 않는다(360 주기). 기본 35.")] = 35.0,
+    elevation: Annotated[float, Field(
+        description="보는 앙각(도) — xy 평면에서 +z 쪽으로 잰 각. 90 이면 위(+z)에서 내려다본다(그때 화면 위쪽은 +y, 아니면 +z). "
+                    "범위를 거르지 않는다(보통 -90 ~ 90). 기본 25.")] = 25.0,
+    wire: Annotated[bool, Field(
+        description="true 면 면 음영 대신 모서리 선만 그린다. 기본 false(음영 면).")] = False,
+    width: Annotated[int, Field(ge=MESH_FIG_MIN_WIDTH_PX, description=_A_MESH_WIDTH + " 기본 1200.")] = 1200,
+    height: Annotated[int, Field(ge=MESH_FIG_MIN_HEIGHT_PX, description=_A_MESH_HEIGHT + " 기본 900.")] = 900,
+    timeout_s: Annotated[int, Field(description=_A_MESH_TIMEOUT + " 기본 300.")] = 300,
 ) -> list:
-    """격자의 **자유면만** 뽑아 직교투영·깊이정렬로 그린 **3D 겉모습 그림(SVG)** 을 돌려준다.
-    "이 덱이 대체 어떻게 생겼나" 를 볼 때 쓴다. 층 두께는 `mesh_section_figure` 가 답한다.
+    """메시의 자유면만 뽑아 직교투영 · 깊이정렬로 그린 3D 겉모습 그림(이미지 + SVG)을 돌려준다.
 
-    그림은 **이미지 블록**(PNG, 크면 JPEG)으로 함께 온다 — 꼴·크기는 `figure_png`, 못 만들었으면
-    까닭이 `figure_png_error`. `mesh_section_figure` 와 달리 이 op 은 JSON 매니페스트를 내지
-    않으므로, 그림의 요지 숫자는 **`report` 에 콘솔 텍스트로** 온다 — 자유면 수/전체 면 수,
-    등진 삼각형 수, ink_ratio, SVG 크기.
+    「이 덱이 어떻게 생겼나」 를 볼 때 쓴다. 층 두께는 `mesh_section_figure`(비등방 · 배율을 적는다) 또는 `mesh_stack_diagram`(모식도)이
+    답한다. 안에서 `surfview` op 잡을 내고 끝날 때까지 기다린다(잡 · SVG 가 세션에 남는다).
 
-    자유면만 그리는 것이 성능 꾀가 아니라 **그림의 요지**다. 실측 286k 요소 덱에서 전체 면
-    855,575 중 자유면이 **57,098(6.7%)** 뿐이고 나머지는 묻혀서 보이지 않는다.
+    자유면만 그리는 것이 그림의 요지다 — 묻힌 면은 보이지 않는다. 이 그림은 등축이다 — 3D 형상을 비등방으로 늘이면 모양이 거짓이
+    되므로 적층이 얇게 보이는 것이 사실이다. 깊이정렬은 삼각형 무게중심 기준이라 서로 관통하는 삼각형은 순서가 틀릴 수 있다.
 
-    **이 그림은 등축이다.** 3D 형상을 비등방으로 늘이면 모양 자체가 거짓이므로, 적층이 얇게
-    보이는 것이 사실이다. 층 두께를 재려면 `mesh_section_figure`(비등방·배율을 적는다) 또는
-    `mesh_stack_diagram`(모식도) 을 쓴다.
-
-    ⚠ **큰 덱에서는 SVG 가 download_result 로 안 나온다** — 삼각형을 솎지 않기 때문이다(솎으면
-    구멍이 뚫려 그림이 거짓이 된다). 실측 286k 요소 덱이 12.2MB 이고 다운로드 상한은 5MB 다.
-    응답의 `svg_bytes` 와 `download_warning` 을 보고, 크면 `save_result_to_path` 로 디스크에
-    저장하거나 `wire=true` 로 좁힌다. 이미지 블록은 이 상한과 무관하게 온다(서버가 그려 줄인다).
+    돌려주는 것 — `[결과 dict, 이미지]`. 이미지는 PNG(크면 JPEG)이고 꼴은 `figure_png`, 못 만들면 까닭이 `figure_png_error` 에 온다.
+    dict 칸은 `job_id` · `svg_file_id` · `svg_bytes` · `report`(콘솔 꼬리 2,500자 — 자유면 수/전체 면 수 · 등진 삼각형 수 · ink_ratio ·
+    SVG 크기, 이 op 은 JSON 매니페스트가 없다) · `read_this_first`. ⚠ 삼각형을 솎지 않으므로(솎으면 구멍이 뚫려 그림이 거짓이 된다) 큰
+    덱의 SVG 는 `download_result` 상한(기본 5MB · KOORM_MCP_MAX_DOWNLOAD_BYTES)을 넘을 수 있다 — 그때 `download_warning` 이 오고,
+    `save_result_to_path` 로 저장하거나 `wire=true` 로 좁힌다. 이미지 블록은 이 상한과 무관하게 온다(서버가 그려 줄인다). 잡이 실패하면
+    로그 꼬리가 든 오류가 난다. 단위는 주장하지 않는다(LS-DYNA 덱).
     """
     files = await _get(ctx, f"/sessions/{_seg(session_id)}/files")
     byid = {int(f["id"]): f for f in files}
@@ -1185,37 +1272,34 @@ async def mesh_surface_figure(
     return await _with_png(ctx, session_id, svg_id, res)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_ADD)
 async def mesh_stack_diagram(
-    session_id: str,
-    file_id: int,
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    file_id: Annotated[int, Field(description=_A_MESH_FILE_ID)],
     ctx: Context,
-    axis: str = "z",
-    force: bool = False,
-    width: int = 900,
-    height: int = 700,
-    timeout_s: int = 180,
+    axis: Annotated[Literal[MESH_STACK_AXES], Field(
+        description=f"층을 재는 적층 축 — {_one_of(MESH_STACK_AXES)}(`neutralaxis` op 과 같은 축). 기본 z.")] = "z",
+    force: Annotated[bool, Field(
+        description="true 면 솔리드 파트의 축 범위가 포개져도 그린다 — 그림에 층 순서를 믿지 말라는 경고가 붙는다. "
+                    "기본 false(포개지면 거절).")] = False,
+    width: Annotated[int, Field(ge=MESH_FIG_MIN_WIDTH_PX, description=_A_MESH_WIDTH + " 기본 900.")] = 900,
+    height: Annotated[int, Field(ge=MESH_FIG_MIN_HEIGHT_PX, description=_A_MESH_HEIGHT + " 기본 700.")] = 700,
+    timeout_s: Annotated[int, Field(description=_A_MESH_TIMEOUT + " 기본 180.")] = 180,
 ) -> list:
-    """적층을 **층 모식도(SVG)** 로 그리고 **중립축·기하 중심면·굽힘강성을 같은 그림에** 긋는다.
-    "층이 몇 개이고 중립축이 어디냐" 를 한 그림으로 볼 때 쓴다.
+    """적층을 층 모식도(이미지 + SVG)로 그리고 중립축 · 기하 중심면 · 굽힘강성을 같은 그림에 긋는다.
 
-    격자를 자르지 않는다 — 파트별 **축 방향 범위**(사실상 AABB)만 쓰는 **모식도**다. 그 거래로
-    평면을 고를 필요가 없고(단면은 축을 잘못 고르면 61파트 중 1개만 만난다) 중립축이 층과 같은
-    그림에 들어온다. 정확한 기하가 필요하면 `mesh_section_figure` 를 쓴다.
+    「층이 몇 개이고 중립축이 어디냐」 를 한 그림으로 볼 때 쓴다. 격자를 자르지 않고 파트별 축 방향 범위(사실상 AABB)만 쓰는 모식도라
+    평면을 고를 필요가 없다. 정확한 기하는 `mesh_section_figure`, 겉모습은 `mesh_surface_figure` 를 쓴다. 안에서 `stackdiagram` op
+    잡을 내고 끝날 때까지 기다린다(잡 · SVG 가 세션에 남는다).
 
-    ⚠ **감긴/접힌 적층에서는 쓸 수 없고, 그 경우 이 도구는 거절한다.** 실측 감긴 덱의 세 파트가
-    z 범위가 전부 `0~1.0` 으로 **세 쌍 모두** 겹쳐 그릴 층 순서가 아예 없다. 포갠 것을 층처럼
-    쌓은 그림은 **완전히 그럴듯해 보이므로** 그것이 가장 나쁜 거짓이다. 거절 메시지에 그 까닭이
-    들어오고, 그때는 `mesh_section_figure` 로 잘라서 봐야 한다. `force=true` 로 넘길 수는 있고
-    그러면 그림에 "믿지 말라" 고 적힌다.
+    ⚠ 감긴 · 접힌 적층은 솔리드 파트의 축 범위가 포개져 층 순서가 없으므로 이 도구가 거절한다 — 포갠 것을 층처럼 쌓은 그림은 그럴듯해
+    보여 가장 나쁜 거짓이다. 거절 오류에 까닭(로그 꼬리)이 붙고, 그때는 `mesh_section_figure` 로 잘라 본다. `force=true` 면 그려 주되
+    그림에 「믿지 말라」 가 적힌다. `*MAT` 을 못 읽으면(인클루드가 세션에 없을 때 등) 층은 그리고 중립축만 생략한다. 중립축 · 굽힘강성은
+    `neutralaxis` op 과 같은 계산이다 — 숫자가 다르면 결함이다.
 
-    `*MAT` 을 못 읽어도(실제 덱은 `*INCLUDE` 안에 있다) 층은 그리고 **중립축만** 생략한다.
-    중립축·굽힘강성은 `neutralaxis` op 과 **같은 계산**이다 — 숫자가 다르면 결함이다.
-
-    그림은 **이미지 블록**(PNG, 크면 JPEG)으로 함께 온다 — 꼴·크기는 `figure_png`, 못 만들었으면
-    까닭이 `figure_png_error`. JSON 매니페스트는 없으므로 요지 숫자는 **`report` 에 콘솔
-    텍스트로** 온다 — 층 수(E 읽음/두께만), 감싸는 파트, 겹침 쌍 수, 바닥 처리한 층 수,
-    중립축·기하 중심면·굽힘강성.
+    돌려주는 것 — `[결과 dict, 이미지]`. 이미지는 PNG(크면 JPEG)이고 꼴은 `figure_png`, 못 만들면 까닭이 `figure_png_error` 에 온다.
+    dict 칸은 `job_id` · `svg_file_id` · `svg_bytes` · `report`(콘솔 꼬리 2,500자 — 층 수(E 읽음/두께만) · 감싸는 파트 · 겹침 쌍 수 ·
+    바닥 처리한 층 수 · 중립축 · 기하 중심면 · 굽힘강성, JSON 매니페스트는 없다) · `read_this_first`. 단위는 주장하지 않는다(LS-DYNA 덱).
     """
     if axis not in ("x", "y", "z"):
         raise RuntimeError("axis 는 x, y, z 중 하나여야 합니다 (받은 값: %s)" % axis)
@@ -1245,19 +1329,38 @@ async def mesh_stack_diagram(
     return await _with_png(ctx, session_id, svg_id, res)
 
 
-@mcp.tool()
-async def list_session_jobs(session_id: str, ctx: Context) -> list:
-    """세션에서 실행된 Job 이력(상태/오퍼레이션/exit_code/생성시각).
-    The job history of a session — status, operation, exit_code, timestamps."""
+@mcp.tool(annotations=_READ)
+async def list_session_jobs(
+    session_id: Annotated[str, Field(description=_A_SESSION_ID)],
+    ctx: Context,
+) -> list[_O_SESSION_JOB]:
+    """세션에서 실행된 잡 이력을 최신순으로 돌려준다.
+
+    「이 세션에서 무엇을 돌렸나 · 어느 잡이 실패했나」 를 볼 때 쓴다. 잡 하나의 자세한 상태 · 로그는 `get_job`(include_logs), 잡의
+    산출 파일은 `get_job_outputs`, 새 잡은 `run_operation`. 내 세션만 보인다(남의 세션 id 면 찾을 수 없다는 오류).
+
+    돌려주는 것 — 잡 행의 목록. 행마다 `id` · `operation` · `args` · `status`(queued · running · succeeded · failed · canceled) ·
+    `progress` · `exit_code` · `error_summary` · `warnings` · `input_file_ids` · `output_file_ids` · `created_at` · `started_at` ·
+    `finished_at` · `external`(외부 잡 요약, 로컬 잡이면 null). ⚠ 최신 100건까지만 온다 — 더 오래된 잡은 빠지고 잘렸다는 표시가 없다
+    (이 도구는 페이지를 넘기지 못한다). 100건이 꽉 차 왔으면 더 있을 수 있다.
+    """
     return await _get(ctx, f"/sessions/{_seg(session_id)}/jobs")
 
 
-@mcp.tool()
-async def system_capabilities(ctx: Context) -> dict:
-    """플랫폼 기능 카탈로그 — 오퍼레이션 수, MCP 도구 수, 웹/MCP 패리티 매트릭스,
-    Claude 연결 방법 힌트, 외부 적재의 공식 답 `intake`(경로 · 메서드 · 토큰 종류 · 크기 상한 · 포털 관문 필요 여부 · 묶음 적재
-    여부 `batch` 와 캠페인 길 `campaign` · 한 호출의 리포트 수 · 분당 한도 · 공개 주소 — 운영자가 KOORM_PUBLIC_BASE 를 넣지 않았으면
-    null). / Capability + web-MCP parity matrix + connect hints + intake."""
+@mcp.tool(annotations=_READ)
+async def system_capabilities(ctx: Context) -> _O_SYSTEM_CAPABILITIES:
+    """플랫폼 기능 카탈로그 — 오퍼레이션 수 · MCP 도구 수 · 웹/MCP 패리티 표 · 연결 방법 · 외부 적재(intake) 규격을 돌려준다.
+
+    「이 플랫폼이 무엇을 할 수 있고 파일을 어디로 올리나」 를 볼 때 쓴다. 건강 상태(DB · 워커 큐 · 바이너리)는 `system_status`,
+    오퍼레이션 목록 · 인자는 `list_operations` · `describe_operation`, 리포트 파일을 올리는 명령은 `report_upload_instructions`.
+
+    돌려주는 칸 — `operations`(오퍼레이션 수) · `mcp_tools`(MCP 도구 수, 못 세면 null) · `ontology`(과제 · 개정 기능 스위치
+    `{enabled, source, reason, missing}` — 꺼짐은 까닭과 함께 온다) · `parity`(기능마다 `{feature, web, mcp, note?}`) · `mcp_url` ·
+    `mcp_add_hint`(붙여넣을 `claude mcp add` 명령 — 공개 주소를 모르면 무엇을 설정할지 알리는 글) · `mcp_desktop_hint` ·
+    `intake`(외부 적재의 공식 답 — `method` · `path` · `public_url`(운영자가 KOORM_PUBLIC_BASE 를 넣지 않았으면 null) · `token`(kr_pat) ·
+    `portal_auth_required` · `max_upload_mb` · `max_report_mb` · `batch`(캠페인 묶음 적재가 있다) · `reports_per_call` ·
+    `rate_limit_per_min`(토큰 하나의 분당 한도, 꺼졌으면 null) · `campaign`(캠페인 REST 경로들 · `form_fields` · `states`)).
+    """
     return await _get(ctx, "/system/capabilities")
 
 
@@ -1266,39 +1369,81 @@ async def system_capabilities(ctx: Context) -> dict:
 # '조직이 무엇을 어떻게 모델링해 왔는가' 라는 분포는 공개해도 된다. 심의(HWAX 시뮬심의·
 # 시험계획)가 "일반적으로" 대신 "우리 조직은 이렇게" 를 말하려면 이 층이 필요하다.
 # 전부 무인자 읽기 전용 — MCP 스모크의 실호출 검사 대상이 된다.
-@mcp.tool()
-async def corpus_summary(ctx: Context) -> dict:
-    """전사 모델 규모 — 세션·파일·잡 수와 메시 규모 분포(개인 식별 없음).
-    Org-wide model scale: counts and mesh-size distribution (no personal data)."""
+@mcp.tool(annotations=_READ)
+async def corpus_summary(ctx: Context) -> _O_CORPUS_SUMMARY:
+    """전사 모델 규모를 돌려준다 — 세션 · 파일 · 잡 수와 메시 규모 분포(개인 식별 없음).
+
+    「우리 조직은 어느 크기의 모델을 얼마나 다루나」 를 근거로 말할 때 쓴다. 모든 사용자의 것을 세지만 소유자 · 세션명 · 파일명은 담지
+    않는다. 내 세션 목록은 `list_sessions`(user_id 스코프 — 빈 배열이 전사에 없다는 뜻이 아니다). 물성 · 요소 정식 · 접촉 · 오퍼레이션 ·
+    해석 결과 분포는 `material_usage` · `section_contact_usage` · `operation_usage` · `report_corpus`.
+
+    돌려주는 칸 — `sessions` · `files` · `jobs`(전사 건수) · `mesh_scale`(`nodes` · `elements` · `parts` 마다 `{n, min, median, max,
+    total}` — 업로드 때 잰 메타에 그 값이 있는 파일만 센다, 하나도 없으면 `{n: 0}`) · `note`. 표본이 적으면 분포가 오해를 부르므로 `n` 을
+    함께 읽는다. 자르지 않는다.
+    """
     return await _get(ctx, "/corpus/summary")
 
 
-@mcp.tool()
-async def material_usage(ctx: Context, limit: int = 30) -> dict:
-    """물성 카드별 사용 모델 수 — 어떤 *MAT_ 가 실제로 몇 개 K파일에 쓰였나.
-    시험 계획의 우선순위를 '민감도 추정' 이 아니라 '실사용 빈도' 로 근거화할 때 쓴다.
-    Material card usage across the corpus — evidence for test prioritization."""
+@mcp.tool(annotations=_READ)
+async def material_usage(
+    ctx: Context,
+    limit: Annotated[int, Field(ge=1, le=CORPUS_LIMIT_MAX, description=f"돌려줄 물성 카드 수 — 파일 수 상위 N개, 1~{CORPUS_LIMIT_MAX}. "
+                                                                     "기본 30.")] = 30,
+) -> _O_MATERIAL_USAGE:
+    """물성 카드(`*MAT_…`)마다 그것을 쓴 K파일 수를 전사로 센다(개인 식별 없음).
+
+    시험 계획의 우선순위를 「민감도 추정」 이 아니라 「실사용 빈도」 로 근거화할 때 쓴다. 요소 정식 · 접촉 카드는 `section_contact_usage`,
+    전사 규모는 `corpus_summary`. 업로드 때 잰 세션 파일 메타의 키워드 수로 센다(모든 사용자의 파일).
+
+    돌려주는 칸 — `n_files_scanned`(메타가 있는 파일 수) · `n_files_with_material`(물성 카드가 하나라도 있는 파일 수) · `materials`(파일
+    수가 많은 순 — 행마다 `{card, files, occurrences}`, files 는 그 카드가 나온 파일 수 · occurrences 는 카드 개수 합) · `note`.
+    ⚠ 상위 `limit` 개만 온다 — 전체 카드 종류 수는 오지 않으므로 목록이 `limit` 개로 꽉 차면 더 있을 수 있다(limit 를 올려 다시 부른다).
+    """
     return await _get(ctx, "/corpus/materials", params={"limit": limit})
 
 
-@mcp.tool()
-async def operation_usage(ctx: Context) -> dict:
-    """오퍼레이션 실행 이력 집계 — 조직이 실제로 쓰는 전처리 관행과 성공률.
-    Which preprocessing operations the org actually runs, and how they fare."""
+@mcp.tool(annotations=_READ)
+async def operation_usage(ctx: Context) -> _O_OPERATION_USAGE:
+    """오퍼레이션마다 전사 실행 횟수와 성공 · 실패 수를 돌려준다(개인 식별 없음).
+
+    조직이 실제로 쓰는 전처리 관행과 성공률을 볼 때 쓴다. 카탈로그 전체는 `list_operations`, 내 세션의 잡 이력은 `list_session_jobs`,
+    물성 · 요소 정식 · 접촉 카드 분포는 `material_usage` · `section_contact_usage`.
+
+    돌려주는 칸 — `n_jobs`(전사 잡 수) · `operations`(실행 횟수가 많은 순 — 행마다 `{operation, total, succeeded, failed, other}`, failed
+    에 canceled 가 들고 other 는 아직 끝나지 않은 잡 등) · `note`. 실행 이력 기준이라 한 번도 안 돌린 오퍼레이션은 목록에 없다. 자르지
+    않는다(실행된 오퍼레이션 전부).
+    """
     return await _get(ctx, "/corpus/operations")
 
 
-@mcp.tool()
-async def section_contact_usage(ctx: Context, limit: int = 20) -> dict:
-    """요소 정식(*SECTION_)·접촉(*CONTACT_) 카드 사용 분포 — 해석 설계 관행의 근거.
-    Element-formulation and contact card usage distribution."""
+@mcp.tool(annotations=_READ)
+async def section_contact_usage(
+    ctx: Context,
+    limit: Annotated[int, Field(ge=1, le=CORPUS_LIMIT_MAX, description=f"목록마다 돌려줄 카드 수 — 파일 수 상위 N개, 1~{CORPUS_LIMIT_MAX}"
+                                                                     "(sections · contacts 에 따로). 기본 20.")] = 20,
+) -> _O_SECTION_CONTACT_USAGE:
+    """요소 정식(`*SECTION_…`) · 접촉(`*CONTACT_…`) 카드마다 그것을 쓴 K파일 수를 전사로 센다(개인 식별 없음).
+
+    해석 설계 관행(어떤 요소 정식 · 접촉을 쓰나)을 근거로 말할 때 쓴다. 물성 카드는 `material_usage`, 전사 규모는 `corpus_summary`,
+    오퍼레이션 관행은 `operation_usage`. 업로드 때 잰 세션 파일 메타의 키워드로 센다(모든 사용자의 파일).
+
+    돌려주는 칸 — `n_files_scanned`(메타가 있는 파일 수) · `sections` · `contacts`(각각 파일 수가 많은 순 — 행마다 `{card, files}`).
+    ⚠ 목록마다 상위 `limit` 개만 온다 — 전체 종류 수는 오지 않으므로 목록이 `limit` 개로 꽉 차면 더 있을 수 있다(limit 를 올려 다시 부른다).
+    """
     return await _get(ctx, "/corpus/sections-contacts", params={"limit": limit})
 
 
-@mcp.tool()
-async def report_corpus(ctx: Context) -> dict:
-    """해석 결과 분포 — 리포트 종류·케이스 수·반복되는 findings(설계 규칙 후보).
-    Simulation-result corpus: report kinds, case counts, recurring findings."""
+@mcp.tool(annotations=_READ)
+async def report_corpus(ctx: Context) -> _O_REPORT_CORPUS:
+    """해석 결과 리포트의 전사 분포 — 리포트 · 케이스 수, 종류별 수, 심각도별 소견 수, 자주 나오는 소견을 돌려준다(개인 식별 없음).
+
+    「우리 조직에서 어떤 실패 모드가 되풀이되나(설계 규칙 후보)」 를 볼 때 쓴다. 내 리포트 찾기는 `find_reports` · `list_reports`
+    (user_id 스코프 — 빈 결과가 전사에 없다는 뜻이 아니다), 리포트 하나의 소견은 `report_findings`, 검색 칸 값은 `report_facets`.
+
+    돌려주는 칸 — `reports` · `cases`(전사 건수) · `by_kind`(`[{kind, reports}]`) · `findings_by_severity`(`{CRITICAL: n, …}`, 심각도가
+    없는 소견은 UNKNOWN) · `frequent_findings`(같은 제목이 많은 순 상위 10개 — `[{title, count}]`, 제목은 80자로 자른다) · `note`.
+    리포트가 없으면 0 을 그대로 낸다 — 「없다」 와 「못 셌다」 는 다르다(못 세면 오류가 난다).
+    """
     return await _get(ctx, "/corpus/reports")
 
 # ── 낙하/충격 리포트 분석 ────────────────────────────────────────────
@@ -1307,15 +1452,23 @@ async def report_corpus(ctx: Context) -> dict:
 _WORST_METRICS = {"max_stress", "max_g", "max_disp", "min_safety_factor"}
 
 
-@mcp.tool()
-async def report_upload_instructions(project: str = "", filename: str = "") -> dict:
-    """**PC/서버의 리포트 파일을 어떻게 올리나** — 그 자리서 쓸 REST intake 명령을 준다.
+@mcp.tool(annotations=_READ)
+async def report_upload_instructions(
+    project: Annotated[str, Field(description="명령에 넣을 과제명(intake 의 project 폼 칸). 비우면 `<과제명>` 자리를 남긴다.")] = "",
+    filename: Annotated[str, Field(description="명령에 넣을 리포트 파일 경로(.html 또는 .html.gz). 비우면 `<리포트.html[.gz]>` "
+                                               "자리를 남긴다.")] = "",
+) -> _O_REPORT_UPLOAD_INSTRUCTIONS:
+    """PC · 서버에 있는 리포트 파일을 올리는 REST intake 명령(curl)과 올리는 길을 돌려준다.
 
-    MCP 로는 파일 본문을 나르지 않는다 — 전각도 낙하 리포트는 압축해도 수십~수백 MB, GB 급도
-    있어 JSON-RPC 페이로드에 못 싣는다. 대신 REST intake 로 **리포트+K파일(+scenario)을 한
-    호출**에 올린다(세션 생성까지 자동). .gz 로 올리면 서버가 풀어 전송을 줄인다.
+    MCP 로는 파일 본문을 나르지 않는다 — 전각도 낙하 리포트는 압축해도 수십 ~ 수백 MB, GB 급도 있어 JSON-RPC 에 못 싣는다. 대신 REST
+    intake 가 리포트 + K파일(+ scenario)을 한 호출로 올린다(세션도 만든다 · .gz 면 서버가 푼다). 작은 HTML 을 이미 대화에 갖고 있으면
+    `ingest_report`, 런 수백 개는 캠페인(`create_campaign` → `ingest_campaign_manifest` → 런마다 intake → `campaign_ingest_status`),
+    intake 규격 값(상한 · 분당 한도)은 `system_capabilities` 의 `intake`. 이 도구는 백엔드를 부르지 않는다.
 
-    ⚠ 토큰을 만들지도 담지도 않는다 — 아래 $KR_PAT 는 당신 환경변수(kr_ PAT)다."""
+    돌려주는 칸 — `권장(스크립트)`(방법 · 엔드포인트 · 명령 · 폼필드 · 대용량 상한) · `캠페인 묶음 적재` · `웹 UI` · `토큰 발급` ·
+    `note`(401 까닭 가르기). 명령의 kind 는 sphere 다 — 다른 종류면 바꿔 쓴다. ⚠ 토큰을 만들지도 담지도 않는다 — 명령의 `$KR_PAT` 는
+    부르는 쪽 환경변수(kr_ PAT)다. 서버가 공개 주소를 모르면(KOORM_PUBLIC_BASE 미설정) `<포탈오리진>` 자리를 남기고 note 가 채우는 법을 말한다.
+    """
     import shlex
     base = os.environ.get("KOORM_PUBLIC_BASE", "").rstrip("/")
     origin = base or "<포탈오리진>"          # 예: https://hwax.sec.samsung.net
