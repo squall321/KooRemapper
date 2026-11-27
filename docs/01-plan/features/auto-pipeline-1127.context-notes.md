@@ -18,3 +18,12 @@
   missing input 에 목록). 포털에 알린다.
 - sphere 리포트의 수치 단위는 생성기가 검출한 단위계에서 읽는다. 단위계를 모르면(검출 안 됨) 그 수치는 싣지 않고 notes 에 까닭 — 계약 §4-4
   「단위가 비지 않는다」 와 「지어내지 않는다」 를 함께 지킨다.
+
+## 3. 포털과 맞춘 것 · refs 결정(2026-11-27)
+- hwaxportal-71 — 포털 검증기(contract.py)에 대 봤고 꼴이 맞다. 맞출 것 셋 — ① ready 키는 `deck_ready`(포털 규칙 `kooremapper_mcp.deck_ready`) ②
+  inputs 의 sha256 은 채운다(포털 입력 지문은 원천 · kind · ref · sha256 — at 은 안 쓴다, sha 가 null 이면 같은 ref 의 새 덱이 새 실행이 안
+  된다) ③ 같은 세션이면 refs 를 늘 같은 꼴로.
+- ③ 은 고른 선택지 문장(「refs 에 세션 id 와 linked_cad 의 StepForge 과제 id 를 함께」)과 부딪혀 다시 물었다 — 사용자 「refs 는 세션 id 만」:
+  refs 는 {dynaforge: 세션 id} 하나로 고정하고 StepForge 과제 id 는 refs 밖 `links.step_forge`(없으면 빠짐)로 따로 싣는다. 같은 세션은 칸을
+  채우거나 CAD 를 잇거나 refs 가 같아 포털이 막힘 줄을 걷는다.
+- 세션 파일의 sha256 은 올릴 때 채운다(`sessions/services.py`). 빈 옛 행은 auto_changes 가 처음 볼 때 한 번 재서 남긴다.

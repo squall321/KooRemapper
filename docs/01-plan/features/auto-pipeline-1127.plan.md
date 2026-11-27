@@ -25,9 +25,11 @@
   과제는 판 확정과 같은 규칙(`resolve_confirm_task` — 못 풀면 400 + 후보, 허브 거울이 빈 박스는 글자 그대로), 개발 단계는 `parse_stage` 꼴.
   비우면 null.
 - **KR-AP1 `auto_changes(since, limit)`** — 「바뀐 때」 = 세션 수정 시각과 마지막 파일 시각 가운데 늦은 것. 차례 (바뀐 때, 세션 id) · 불투명
-  커서(그 둘) · 쪽마다 `complete`. `subject` = `{project: task_key | null, revision: dev_rev | null, refs: {dynaforge: 세션 id, step_forge?:
-  linked_cad.project_id}}` · `inputs` = 세션 입력 파일(kind · ref=파일 id · sha256 · at) · `ready.deck` = 덱 후보가 하나(입력 파일 가운데 덱 꼴
-  하나 — 둘 이상이면 거짓, 무엇을 낼지 모른다).
+  커서(그 둘) · 쪽마다 `complete`. `subject` = `{project: task_key | null, revision: dev_rev | null, refs: {dynaforge: 세션 id}}` — refs 는 세션
+  id 하나로 고정한다(사용자 결정 — 포털이 같은 refs 로 막힘 줄을 걷는다). StepForge 과제 id 는 refs 밖 `links.step_forge`(linked_cad 가 있을
+  때만). `inputs` = 세션 입력 파일(kind · ref=파일 id · sha256 · at) — sha256 이 빈 옛 행은 처음 볼 때 한 번 재서 남긴다(포털 입력 지문은 sha 를
+  쓴다). `ready.deck_ready` = 덱 후보가 하나(입력 파일 가운데 덱 꼴 하나 — 둘 이상이면 거짓, 무엇을 낼지 모른다 · 포털 규칙은
+  `kooremapper_mcp.deck_ready` 로 본다).
 - **KR-AP2 해석 다섯** — 실행 원장 표 `auto_runs`(0028 — run_ref · idem_key 유일 · subject · profile · 세션 · 덱 파일 · stcx 잡 · 후처리 잡 ·
   리포트 · 상태 · 까닭 · 시각).
   - `auto_profiles` — profile 둘 `fullangle_162` · `fullangle_26`(Fibonacci 방향 수 · 높이 · 바닥 · 시간은 stcx op 기본값) · `cost.cores` = 방향
