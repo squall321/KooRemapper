@@ -542,8 +542,9 @@ async def _poll_external_once() -> int:
                     job.finished_at = now
                 elif state == "failed":
                     job.status = "failed"
-                    job.error_summary = (f"클러스터 잡 {rid} 실패 — slurm 상태"
-                                         f" {verdict.get('slurm')}")
+                    job.error_summary = (f"클러스터 잡 {rid} 실패 — 각도 {verdict['runs_failed']} 개 실패(드라이버 잡은 끝났다)"
+                                         if verdict.get("runs_failed") else
+                                         f"클러스터 잡 {rid} 실패 — slurm 상태 {verdict.get('slurm')}")
                     job.finished_at = now
                 else:
                     # **모르면 접지 않는다.** 도구가 고장 난 것과 잡이 끝난 것을 같은 모양으로

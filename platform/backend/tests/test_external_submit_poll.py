@@ -516,6 +516,27 @@ async def test_poll_maps_cluster_state_to_job_status(db, patched, squeue, ids, e
         await _cleanup(u.id)
 
 
+async def test_poll_reads_the_state_word_and_failed_angles(db, patched):
+    """KR-10 — 받는 쪽 state(끝난 잡은 sacct) · runs_summary 로 가른다. 큐가 비어도 실패는 실패이고, 드라이버가 끝나도 각도가 죽었으면
+    실패다(글에 실패 각도 수)."""
+    u, sid, wd = await _mk(db)
+    try:
+        for extra, expect, says in (
+            ({"state": "failed", "slurm_states": {"101": "FAILED"}}, "failed", "FAILED"),
+            ({"state": "completed", "slurm_states": {"101": "COMPLETED"}, "runs_summary": {"completed": 160, "failed": 2}},
+             "failed", "각도 2 개 실패"),
+            ({"state": "completed", "slurm_states": {"101": "COMPLETED"}, "runs_summary": {"completed": 162}}, "succeeded", None),
+        ):
+            env = _status_env({})
+            env["result"].update(extra)
+            job = await _poll_with(db, u.id, sid, wd, _Fake(status={"ok": True, "result": env}), patched)
+            assert job.status == expect, (extra, job.status)
+            if says:
+                assert says in (job.error_summary or ""), job.error_summary
+    finally:
+        await _cleanup(u.id)
+
+
 async def test_poll_asks_both_tools_with_the_registry_id(db, patched):
     """★종료 근거(`slurm_job_ids`)가 상태 응답에 없어서 둘을 합친다."""
     u, sid, wd = await _mk(db)

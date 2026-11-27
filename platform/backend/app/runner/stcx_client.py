@@ -73,6 +73,10 @@ STATES_BAD = frozenset({
     "DEADLINE", "REVOKED", "SPECIAL_EXIT",
 })
 
+# 받는 쪽 job_status 의 `state` — 잡 전체를 낱말 하나로(KooSlurm job_helpers.state_word: 하나라도 돌면 running, 대기만 queued, 다
+# 끝났으면 cancelled > failed > completed, 끝난 잡은 sacct 로 본다 · 못 읽은 잡이 있으면 unknown). 여기 없는 낱말은 이 칸을 안 쓴다.
+STATE_WORDS = frozenset({"queued", "running", "completed", "failed", "cancelled", "unknown"})
+
 
 def _envelope(result: Any) -> dict:
     """응답을 딕트로 본다. 딕트가 아니면 빈 딕트다(사유는 호출부가 붙인다)."""
@@ -463,6 +467,12 @@ def parse_status(status: Any, details: Any) -> dict:
         # 제출은 됐는데 아직 slurm id 가 레지스트리에 안 적혔다 — 끝난 것이 아니다.
         return {"state": "active", "reason": "no_slurm_ids_yet", "raw": raw}
 
+    word = inner_s.get("state")
+    if isinstance(word, str) and word in STATE_WORDS:
+        # ★받는 쪽이 끝난 잡까지 sacct 로 가른 낱말을 준다(KR-10) — 이 칸이 있으면 squeue 를 짐작하지 않는다. 없는 판(운영 노드가
+        #   그 판을 받기 전)은 아래 squeue 규칙 그대로.
+        return _by_state_word(word, inner_s, ids)
+
     states = []
     for v in squeue.values():
         s = str((v or {}).get("state") or "").upper().rstrip("+")   # CANCELLED+ 꼬리표
@@ -479,9 +489,34 @@ def parse_status(status: Any, details: Any) -> dict:
         return {"state": "succeeded", "raw": raw}
     if not states:
         # id 는 있는데 큐에 하나도 없다 — 요청서가 정한 잠정 규칙으로 끝으로 본다.
-        # ⚠ squeue 호출 실패와 구분이 안 된다. 실제 응답 원문을 받으면 여기를 고친다.
+        # ⚠ squeue 호출 실패와 구분이 안 된다. state 칸이 없는 판(운영 노드가 KooSlurm 새 판을 받기 전)에서만 여기에 온다 —
+        #   있으면 위 _by_state_word 가 sacct 로 가른 낱말을 쓴다(KR-10).
         return {"state": "succeeded", "reason": "all_gone_from_squeue", "raw": raw}
     return {"state": "unknown", "reason": f"unmapped_states:{sorted(set(states))}", "raw": raw}
+
+
+def _by_state_word(word: str, inner: Mapping, ids: list) -> dict:
+    """job_status 의 state · slurm_states · runs_summary 로 가른다. 드라이버 잡이 completed 여도 각도가 실패했을 수 있어
+    runs_summary 를 함께 본다 — 하나라도 실패면 실패, 끝나지 않은 각도가 남았으면 모른다(접지 않는다)."""
+    slurm = inner.get("slurm_states") if isinstance(inner.get("slurm_states"), Mapping) else {}
+    runs = inner.get("runs_summary") if isinstance(inner.get("runs_summary"), Mapping) else None
+    raw = json.dumps({"state": word, "slurm_states": slurm, "runs_summary": runs, "slurm_job_ids": ids},
+                     ensure_ascii=False)[:2000]
+    if word in ("queued", "running"):
+        return {"state": "active", "raw": raw}
+    if word in ("failed", "cancelled"):
+        bad = sorted({str(v).upper().rstrip("+") for v in slurm.values()} & STATES_BAD) or [word.upper()]
+        return {"state": "failed", "slurm": bad, "raw": raw}
+    if word == "completed":
+        if runs:
+            failed = int(runs.get("failed") or 0)
+            if failed:
+                return {"state": "failed", "slurm": ["COMPLETED"], "runs_failed": failed, "raw": raw}
+            unfinished = sorted(k for k, v in runs.items() if k != "completed" and v)
+            if unfinished:
+                return {"state": "unknown", "reason": f"driver_completed_runs_unfinished:{unfinished}", "raw": raw}
+        return {"state": "succeeded", "raw": raw}
+    return {"state": "unknown", "reason": "state_unknown", "raw": raw}
 
 
 class McpHttpClient:

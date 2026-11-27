@@ -215,6 +215,64 @@ def test_the_raw_is_kept_for_fixing_the_rule_later():
     assert "101" in got["raw"]
 
 
+# ── 받는 쪽 state 낱말(KR-10 — KooSlurm job_status 의 state · slurm_states · runs_summary) ─────────────
+
+def _status_word(state, *, squeue=None, slurm_states=None, runs_summary=None):
+    env = _status(squeue or {})
+    env["result"]["state"] = state
+    env["result"]["slurm_states"] = slurm_states or {}
+    if runs_summary is not None:
+        env["result"]["runs_summary"] = runs_summary
+    return env
+
+
+@pytest.mark.parametrize("word,expect", [
+    ("queued", "active"), ("running", "active"), ("completed", "succeeded"),
+    ("failed", "failed"), ("cancelled", "failed"), ("unknown", "unknown"),
+])
+def test_the_state_word_maps(word, expect):
+    assert parse_status(_status_word(word), _details(["101"]))["state"] == expect
+
+
+def test_the_state_word_beats_an_empty_squeue():
+    """★KR-10 — 끝난 잡은 squeue 에 없다. 예전 잠정 규칙은 「다 빠졌으면 끝」 이라 실패한 잡도 성공이었다. 받는 쪽이 sacct 로 가른
+    낱말을 주면 그것을 쓴다."""
+    got = parse_status(_status_word("failed", slurm_states={"101": "FAILED", "102": "COMPLETED"}), _details(["101", "102"]))
+    assert got["state"] == "failed" and got["slurm"] == ["FAILED"], got
+    got = parse_status(_status_word("cancelled", slurm_states={"101": "CANCELLED"}), _details(["101"]))
+    assert got["state"] == "failed" and got["slurm"] == ["CANCELLED"], got
+
+
+def test_a_completed_driver_with_failed_angles_is_a_failure():
+    """드라이버 잡이 completed 여도 각도가 실패했을 수 있다 — 하나라도 실패면 실패다."""
+    got = parse_status(_status_word("completed", runs_summary={"completed": 160, "failed": 2}), _details(["101"]))
+    assert got["state"] == "failed" and got["runs_failed"] == 2, got
+    assert parse_status(_status_word("completed", runs_summary={"completed": 162}), _details(["101"]))["state"] == "succeeded"
+
+
+def test_a_completed_driver_with_unfinished_angles_is_not_folded():
+    """끝나지 않은 각도가 남았는데 드라이버가 끝났다 — 모른다(접지 않는다 · 까닭을 남긴다)."""
+    got = parse_status(_status_word("completed", runs_summary={"completed": 150, "pending": 12}), _details(["101"]))
+    assert got["state"] == "unknown" and "pending" in got["reason"], got
+
+
+def test_no_slurm_ids_yet_stays_active_even_with_a_state_word():
+    """제출 직후 — 받는 쪽은 물을 잡이 없어 unknown 을 주지만 아직 끝난 것이 아니다(앞 규칙이 먼저)."""
+    got = parse_status(_status_word("unknown"), _details([]))
+    assert got["state"] == "active" and got["reason"] == "no_slurm_ids_yet"
+
+
+def test_an_unknown_word_falls_back_to_squeue():
+    """모르는 낱말이면 그 칸을 쓰지 않는다 — squeue 규칙 그대로."""
+    got = parse_status(_status_word("weird", squeue=_queued(**{"101": "RUNNING"})), _details(["101"]))
+    assert got["state"] == "active"
+
+
+def test_the_state_raw_keeps_the_word_slurm_states_and_runs():
+    got = parse_status(_status_word("completed", slurm_states={"101": "COMPLETED"}, runs_summary={"completed": 3}), _details(["101"]))
+    assert all(k in got["raw"] for k in ('"state": "completed"', "slurm_states", "runs_summary")), got["raw"]
+
+
 # ── 지목 ───────────────────────────────────────────────────────────────────
 
 def test_registry_id_comes_from_the_job_id_field_of_the_status_reply():
